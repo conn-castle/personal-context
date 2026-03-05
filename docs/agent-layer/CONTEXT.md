@@ -1,0 +1,324 @@
+# Context
+
+Note: This is an agent-layer memory file. It is primarily for agent use.
+
+## Purpose
+Persistent project-specific knowledge that does not belong in ISSUES, BACKLOG, ROADMAP, DECISIONS, or COMMANDS. Read this file before starting work on a task.
+
+Record three categories of information here:
+1. **Project context** — domain concepts, architectural invariants, naming conventions, external dependencies, environment setup notes, team norms, and any other stable facts an agent needs to work effectively in this repository.
+2. **Project-specific nuances** — non-obvious behaviors, implicit conventions, or user-provided clarifications that an agent would not discover from reading the code alone. When a user corrects a misunderstanding or explains how something actually works in this project, record it here.
+3. **Lessons learned** — repeated mistakes, surprising behaviors, non-obvious gotchas, and corrective patterns discovered during development. When an error recurs or a workaround is needed more than once, record it here so future agents avoid the same mistake.
+
+Do not duplicate information that belongs in other memory files:
+- Deferred bugs or tech debt → ISSUES.md
+- Planned features → BACKLOG.md
+- Workflow commands → COMMANDS.md
+- Non-obvious decisions → DECISIONS.md
+- Phased plans → ROADMAP.md
+
+## Format
+- Organize by topic using headings (`##`, `###`).
+- Prefer concise bullet points. State facts directly; omit hedging language.
+- Before adding an entry, search this file for existing coverage. Merge into or update an existing section instead of creating a near-duplicate.
+- Remove or update entries when the underlying facts change.
+- Insert all content below `<!-- ENTRIES START -->`.
+
+<!-- ENTRIES START -->
+
+> **Status:** Pre-implementation. This document describes the target architecture. See ROADMAP.md for current implementation progress.
+
+## Project Overview
+
+Personal Context (`pc`) is a personal engineering notebook system that stores work as individual HTML slides — images, text, tables, code, and data — organized chronologically and by project. Designed for 10+ year lifespan, accumulating 1,000-2,000 slides per year.
+
+Replaces yearly Google Slides decks with a database-backed, agent-friendly, multi-device, browsable system.
+
+## Monorepo Structure
+
+```
+personal-context/          # code repo
+├── cli/                   # Go CLI
+├── web/                   # Next.js app (App Router)
+├── schema/                # schema.sql (DDL source of truth), schema-types.ts
+└── docs/                  # README, example GitHub Action workflow
+```
+
+Separate **data repo**: nightly git export of slide data (metadata.json, slide.html, notes.md, figures via Git LFS). GitHub Action for nightly export lives there.
+
+## Architecture: Three Data States
+
+```
+Local SQLite + local files      <-- CLI writes here (always, every machine)
+     | pc sync (bidirectional, if cloud configured)
+Neon Postgres + S3              <-- cloud source of truth (web UI reads/writes)
+     | nightly export (cloud -> GitHub, via GitHub Action on data repo)
+GitHub + S3                     <-- portable backup (git clone + S3 = full restore)
+```
+
+Any state can be reconstructed from any other (subject to two-tier guarantee):
+- Postgres <-- git export via `pc restore-db` then `pc sync` (Tier 2: data file binaries require S3; soft-deleted slides not in export)
+- Local SQLite <-- Postgres via `pc sync` (Tier 1: fully lossless)
+- Git export <-- Postgres via `pc export` (Tier 2: data file binaries stay in S3; soft-deleted excluded)
+- Postgres <-- local SQLite via `pc sync` push phase (Tier 1: fully lossless)
+
+### Source of Truth
+- **Cloud configured**: Neon Postgres + S3 is cloud source of truth. Web UI reads/writes here.
+- **Local-only mode**: Local SQLite + local files only. No web UI.
+
+## Data Model (5 Tables)
+
+| Table | PK | Purpose |
+|-------|-----|---------|
+| `slides` | `id` TEXT (`YYYYMMDD-8hex`) | HTML content, notes, project_id, git_remote_url, git_hash, date, day_order, soft delete |
+| `slide_figures` | `id` auto-increment | Image refs: filename, s3_key, alt_text. FK -> slides CASCADE |
+| `slide_data_files` | `id` auto-increment | Data file refs: filename, s3_key, size, SHA-256 hash, description. FK -> slides CASCADE |
+| `templates` | `name` TEXT | HTML templates for slide creation. Hardcoded, seeded by `pc setup` |
+| `sync_version` | `id` (always 1) | Single-row version counter, auto-incremented by triggers |
+
+### Key Fields and Invariants
+- **Slide ID**: `{YYYYMMDD}-{8-random-hex}` from `crypto/rand` (e.g., `20250304-a3f2b7e1`). Date from local timezone.
+- **Sort key**: `ORDER BY (date, day_order, id)` — always deterministic.
+- **day_order**: Fractional index string (Figma's algorithm, safe characters only). Lexicographic sort. Reordering updates only the moved slide.
+- **project_id**: Slash-convention string (e.g., `"happy-ai/sleep-staging"`). No project table in MVP.
+- **s3_key**: Canonical relative path (e.g., `figures/20250304-a3f2b7e1/loss-curve.png`). Same value for both S3 and local filesystem, regardless of mode.
+- **git_remote_url**: Optional. Git remote URL (e.g., `https://github.com/org/repo`). Set via `metadata.json` only — no CLI flags. Displayed as clickable link in web UI.
+- **git_hash**: Optional. Full 40-character SHA-1 commit hash. Set via `metadata.json` only. In web UI, linkable to `{git_remote_url}/commit/{git_hash}` when both present.
+- **deleted_at**: NULL = active, non-NULL = soft-deleted. `WHERE deleted_at IS NULL` on all normal queries.
+- **notes**: Full markdown. Empty string normalized to NULL at write time. `has_notes` = `notes IS NOT NULL`.
+- **No title. No tags.** Organization is by project and date only.
+
+### Figure References in HTML
+- `html_content` references figures as `figures/{filename}` (relative path, no slide_id — implicit from context).
+- Each rendering context resolves: web UI iframe rewrites to presigned URLs via `GET /api/files/{slide_id}/figures/{filename}`; git export matches naturally (`./figures/{filename}` relative to slide folder).
+- `pc add`/`pc edit` validate that every `figures/` src in HTML has a matching file in the input folder.
+- External URLs (`https://...`) pass through unchanged. Data files are attachments, not referenced in HTML.
+
+### Schema Portability (Postgres / SQLite)
+- `schema.sql` is the design-level source of truth (Postgres dialect). Executable schemas: `cli/migrations/postgres/`, `cli/migrations/sqlite/`.
+- Separate migration directories: `cli/migrations/postgres/`, `cli/migrations/sqlite/`.
+- `created_at` and `updated_at` are DB-managed via defaults and triggers. `deleted_at` set by application code. See "DB-Managed Timestamps" above.
+- `PRAGMA foreign_keys = ON` required on every SQLite connection (otherwise `ON DELETE CASCADE` silently ignored).
+- SQLite WAL mode enabled for concurrent reads.
+- Triggers reimplemented in SQLite syntax (per-row instead of per-statement).
+- `TIMESTAMPTZ` stored as ISO 8601 text with `Z` suffix in SQLite.
+- Child rows (`slide_figures`, `slide_data_files`) matched by `(slide_id, filename)` during sync, NOT by auto-increment `id`.
+
+## Timezone Rules
+
+- All timestamps (`created_at`, `updated_at`, `deleted_at`) stored as UTC. `TIMESTAMPTZ` in Postgres, ISO 8601 `Z` suffix in SQLite/JSON.
+- `date` field is a local calendar date (`YYYY-MM-DD`) with no time component. "Today" = user's local timezone at creation time.
+
+### DB-Managed Timestamps
+- `created_at`: `DEFAULT NOW()` on INSERT. Never modified by triggers.
+- `updated_at`: `DEFAULT NOW()` on INSERT. BEFORE UPDATE trigger auto-bumps to `NOW()` when value not explicitly changed (`NEW.updated_at = OLD.updated_at`). Any normal UPDATE (edit, delete, restore) automatically bumps `updated_at`.
+- `deleted_at`: Set explicitly by application code. The `updated_at` trigger auto-fires on the same UPDATE.
+- **Sync/import bypass**: Set explicit `updated_at` in the statement → trigger detects `NEW.updated_at != OLD.updated_at` → skips auto-bump, preserving original timestamp.
+- SQLite uses AFTER UPDATE trigger (different syntax, same semantics). SQLite gets millisecond precision; Postgres gets microsecond.
+- **Precision:** Millisecond is the effective minimum. Postgres timestamps are truncated to millisecond when syncing to SQLite. All sync and polling cursors use `>=` (not `>`) to prevent boundary misses. UPSERT makes re-processing safe.
+
+## Sync Mechanism
+
+### CLI (Local-First)
+- CLI always writes to local SQLite + local files.
+- If cloud configured: auto-sync after each mutation (`pc add`, `pc edit`, `pc delete`, `pc restore`, `pc move`). Failure is non-fatal (prints warning, exit code 0). Exception: `pc gc` orchestrates its own cloud-first-then-local deletion directly, not via auto-sync.
+- If no cloud: writes succeed locally, sync silently skipped.
+- `pc sync` (explicit): full bidirectional push-then-pull. Errors if no cloud configured.
+
+### Bidirectional Sync Protocol
+1. Acquire file lock (`.pc/sync.lock`) to prevent concurrent sync.
+2. Capture `last_sync_at` at sync **start** (not end).
+3. **Push**: local slides where `updated_at >= last_sync_at` -> UPSERT into Neon + upload figures to S3. (No `deleted_at` check needed — trigger auto-bumps `updated_at`.)
+4. **Pull**: Neon slides where `updated_at >= last_sync_at` -> UPSERT into local + download figures.
+5. Update `last_sync_at` only after both phases complete fully.
+6. Release lock.
+
+### Conflict Resolution
+- Most-recent-action-wins using wall-clock timestamps.
+- Delete vs edit: compare `deleted_at` vs `updated_at`. Most recent wins. On resurrection (edit wins), clear `deleted_at` to NULL.
+- Timestamp tie: edit wins over delete (deterministic tiebreaker).
+
+### Child Row Sync (Critical Invariants)
+- `slide_figures` and `slide_data_files` auto-increment PKs diverge between Postgres and SQLite. **Sync must match child rows by `(slide_id, filename)`, NOT by `id`.**
+- Child rows are **only modified as part of a parent slide operation** (`pc add`, `pc edit`, sync). Never independently. The parent slide's `updated_at` is the authoritative change signal. The `sync_version` triggers on child tables may cause harmless false positives during sync. If independent child modification commands are ever added, a cross-table trigger to bump parent `updated_at` must be added.
+
+### Web UI Sync (Smart Layered Polling)
+Four layers, 30-second global cooldown. All version checks go through `GET /api/sync/version` (Next.js reads S3 `_version` server-side, NOT Postgres — keeps Neon asleep on free tier).
+- Layer 1: Manual refresh (ignores cooldown)
+- Layer 2: Interaction-driven (clicks/navigation, subject to cooldown)
+- Layer 3: Tab visibility (subject to cooldown)
+- Layer 4: Idle polling (idle < 10 min: every 60s, idle > 10 min: every 5 min, tab hidden: nothing)
+
+S3 `_version` is bumped write-after (only after Postgres commit succeeds, retry up to 3 times). Never write-ahead — prevents race where a client polls, sees the bump, queries Postgres, and gets stale data.
+
+On version change: query Neon for slides with `updated_at >= last_known_timestamp`. If a version bump produces no incremental changes, perform full reconciliation (hard-deleted rows are invisible to incremental queries).
+
+## Directory Structures
+
+### Local
+```
+~/personal-context/
+├── .pc/
+│   ├── config.json           # Neon URL, S3 bucket/region, aws_profile name, active project (0600, no AWS keys). Cloud mode detected by presence of neon_url + aws_profile.
+│   ├── pc.db                 # local SQLite
+│   ├── last_sync             # timestamp of last cloud sync
+│   └── sync.lock             # file lock for concurrent sync prevention
+├── figures/{slide_id}/{filename}
+└── data/{slide_id}/{filename}  # sparse, on demand
+```
+
+### S3
+```
+s3://personal-context-prod/
+├── figures/{slide_id}/{filename}
+├── data/{slide_id}/{filename}
+└── _version                    # sync heartbeat
+```
+
+### Git Export
+```
+personal-context-data/
+├── templates/*.html
+└── slides/{slide_id}/
+    ├── metadata.json           # SlideExport (no HTML, no notes text)
+    ├── slide.html              # html_content
+    ├── notes.md                # only if has_notes
+    └── figures/                # Git LFS
+```
+Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slides excluded from export. Export must be deterministic (consistent JSON key order, sorted arrays) for clean git diffs.
+
+## Technology Stack
+
+| Component | Technology |
+|-----------|-----------|
+| CLI | Go: cobra, pgx (direct, not database/sql), modernc.org/sqlite (pure Go), aws-sdk-go-v2, golang-migrate |
+| Web UI | Next.js App Router, React, sandboxed iframes for slide HTML rendering |
+| Web hosting | AWS Amplify (SSR via Lambda, us-east-1) |
+| DB (cloud) | Neon Postgres (provider-portable). @neondatabase/serverless HTTP driver for Lambda |
+| DB (local) | SQLite via modernc.org/sqlite (pure Go, no CGO) |
+| Storage (cloud) | AWS S3 (Intelligent-Tiering, us-east-1). Presigned URLs for web downloads |
+| Storage (local) | Local filesystem |
+| Backup | GitHub nightly export + Git LFS |
+
+### Go Repository Pattern
+- `Repository` interface with separate SQLite and Postgres implementations.
+- SQL dialects diverge enough that sharing query code via `database/sql` is a false economy.
+- S3 operations wrapped in a thin `s3client` package (`Upload`, `Download`, `Delete`, `Exists`, `HeadVersion`).
+
+## CLI Commands
+
+### Setup & Health
+- `pc setup` — first-time or reconfigure (idempotent, interactive/non-interactive, `--remove-cloud`)
+- `pc doctor` — health checks (local DB, schema version, figures, cloud connectivity, orphaned refs)
+
+### Slide CRUD
+- `pc add <path>` — create slide from folder (`slide.html` required, `metadata.json` for project_id/git_remote_url/git_hash)
+- `pc edit <id> <path>` — full replacement of content, notes, figures, data files, git fields (`updated_at` auto-bumped by trigger)
+- `pc delete <id>` — soft-delete
+- `pc restore <id>` — un-delete
+- `pc move <id>` — change date or position
+- `pc show <id>` — display metadata (including git fields), notes, figures, data files (`--format text|json`)
+
+### Trash
+- `pc trash` — list soft-deleted slides
+- `pc gc` — hard-delete trash > 30 days (cloud first, then local)
+
+### Search & Projects
+- `pc search <query>` — LIKE/ILIKE on html_content, notes, project_id (not git fields)
+- `pc project set|clear|list` — manage active project
+
+### Sync & Data
+- `pc sync` — bidirectional cloud sync (errors if no cloud)
+- `pc fetch` — download data files from S3
+- `pc export` — DB to git folder format
+- `pc import <path>` — merge from git export (update if newer, else skip; full replacement of child rows)
+- `pc restore-db <path>` — rebuild DB from git export (destructive, auto-backup before wipe)
+- `pc verify` — full round-trip data integrity tests
+
+## Web UI (MVP)
+
+- 16:9 slide viewer with sandboxed iframes, `transform: scale()`, white background
+- Virtual date slides injected at render time
+- Filter by project
+- Intra-day drag-and-drop reorder (cross-date deferred to post-MVP)
+- View notes (markdown), figures, data files with sizes and download
+- Edit project_id, notes, git_remote_url, git_hash
+- Soft delete + trash view with restore
+- 4-layer sync polling via `useSyncManager()` hook
+
+### API Routes
+- `GET /api/slides` — list (paginated, filtered)
+- `GET /api/slides/[id]` — single slide with figures and data files
+- `PATCH /api/slides/[id]` — edit project_id, notes, git_remote_url, git_hash
+- `PATCH /api/slides/[id]/order` — reorder (fractional index)
+- `DELETE /api/slides/[id]` — soft delete
+- `POST /api/slides/[id]/restore` — restore
+- `GET /api/sync/version` — reads S3 `_version` (not Postgres)
+- `GET /api/sync/changes?since=<ISO>` — changed slides
+- `GET /api/files/[slide_id]/data/[filename]` — presigned download URL
+- `GET /api/files/[slide_id]/figures/[filename]` — presigned figure URL
+- `GET /api/projects` — distinct project_ids
+- No slide creation endpoint (CLI only)
+
+## Soft Deletes
+
+- Soft-deleted slides sync bidirectionally, excluded from git export.
+- `ON DELETE CASCADE` handles child rows on hard delete.
+- `pc gc` deletes cloud first (Neon + S3), then local. Re-runnable on partial failure. Edge case: another machine that hasn't synced could re-push; run `pc sync` on all machines before/after gc. Tombstones deferred.
+
+## Data Integrity: Two-Tier Guarantee
+
+### Tier 1 — Full Lossless (Local ↔ Cloud Sync)
+All database fields, all figures, all data files byte-for-byte identical.
+- Path A: Local + files -> sync -> Neon + S3 -> sync -> Local + files
+
+### Tier 2 — Narrowed (Git Export Paths)
+All database fields of active (non-deleted) slides and figures lossless. Data file **references** preserved; binary content requires S3. Soft-deleted slides and `deleted_at` excluded from export. Full recovery = git clone + S3.
+- Path B: Neon + S3 -> export -> git -> restore-db -> Neon
+- Path C: Local + files -> export -> git -> restore-db -> Local
+- Path D: Neon -> sync -> Local -> export -> git
+- Path E: git -> import -> Local
+
+## Testing
+
+### Philosophy
+- **Test-first**: Write tests before implementation when possible. Define what correct behavior looks like, then build to pass.
+- **Tests verify correctness, not existence**: Tests must assert meaningful outcomes (data integrity, correct state transitions, proper error handling), not merely confirm that code runs without crashing.
+- **>95% code coverage on all code**: CLI (Go) and web UI (Next.js) both. Enforced in CI — builds fail below threshold.
+
+### Test Layers
+
+**Unit tests** — Pure functions, business logic, data transformations. Fast, no I/O.
+- Go: `go test` with table-driven tests. Foundation libraries (fractional indexing, slide ID, timezone, config).
+- Next.js: Vitest or Jest. Utility functions, data transformation, sync state logic.
+
+**Integration tests** — Real databases, real filesystem, real S3 (or mocked S3 for CI).
+- Go: SQLite repository CRUD, Postgres repository CRUD, S3 client operations, migration runner.
+- Next.js: API route handlers against test Neon database.
+
+**CLI e2e tests** — Run the actual `pc` binary as a subprocess.
+- Set up temp directories, run commands, verify stdout, exit codes, DB state, and filesystem state.
+- Cover full workflows: setup -> add -> show -> edit -> search -> delete -> trash -> gc.
+- Sync e2e: two SQLite databases + one Postgres, simulate multi-machine sync with conflict scenarios.
+- Export/import e2e: all 5 conversion paths with real data, round-trip verification.
+
+**Web UI e2e tests** — Playwright against real Next.js app + test database.
+- Full user workflows: browse slides, filter by project, view details, edit, delete, restore, reorder.
+- Sync detection: CLI creates slide -> web UI detects via sync manager -> slide appears.
+- Error states: network failures, invalid data, empty states.
+
+**Full system e2e** — CLI + cloud + web UI together.
+- CLI creates slide -> syncs to Neon -> web UI sees it -> web UI edits -> CLI syncs and sees the edit.
+- Multi-machine simulation: two local databases syncing through cloud with conflicts.
+
+### Coverage Enforcement
+- Go: `go test -coverprofile` with threshold check in CI. Minimum 95%.
+- Next.js: Coverage reporter (vitest/jest `--coverage`) with threshold in config. Minimum 95%.
+- CI fails if any package drops below 95%.
+
+### Test Data
+- Fixtures for edge cases: minimal slide (no figures/notes/data/project), large slide (20+ figures, 100KB+ HTML), unicode content, special characters in filenames, slides across multiple dates and projects.
+- Test database seeding utilities shared across test suites.
+
+## Cost (Single User, 2 Years)
+Neon free tier $0 + S3 ~$0.15 + Amplify ~$0-$1 = **~$0.16-$1.16/mo**. Local-only: $0.
