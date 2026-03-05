@@ -51,11 +51,11 @@ Incomplete:
 - CI pipeline running tests, builds, and coverage enforcement.
 
 ### Tasks
-- [ ] Create directory structure: `cli/`, `web/`, `schema/`, `docs/`
+- [x] Create directory structure: `cli/`, `web/`, `schema/`, `docs/`
 - [ ] Initialize Go module in `cli/` with cobra, modernc.org/sqlite, pgx, aws-sdk-go-v2, golang-migrate dependencies
 - [ ] Initialize Next.js app in `web/` with App Router, TypeScript, @neondatabase/serverless
-- [ ] Copy `schema.sql` and `schema-types.ts` to `schema/` as canonical files
-- [ ] Create `.gitignore` for Go binaries, node_modules, .pc/, .env
+- [x] Copy `schema.sql` and `schema-types.ts` to `schema/` as canonical files
+- [x] Create `.gitignore` for Go binaries, node_modules, .pc/, .env
 - [ ] Configure Go test coverage: `go test -coverprofile` with 95% threshold enforcement
 - [ ] Configure Next.js test coverage: vitest/jest with 95% threshold in config
 - [ ] Configure Playwright for web e2e tests

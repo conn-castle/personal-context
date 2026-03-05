@@ -25,7 +25,7 @@ Notes: <optional constraints or tips>
 
 <!-- ENTRIES START -->
 
-> **Note:** These commands apply after Phase 1 scaffolding creates the `cli/` and `web/` directories. Until then, the directories do not exist.
+> **Note:** `cli/` and `web/` directories now exist as Phase 1 scaffolds, but most commands below require the pending Phase 1 initialization tasks (Go module setup in `cli/` and Next.js app initialization in `web/`).
 
 ## Go CLI (`cli/`)
 

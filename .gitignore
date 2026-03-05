@@ -31,3 +31,11 @@
 
 tmp/
 .DS_Store
+
+# Phase 1 scaffolding ignores
+.env
+.pc/
+node_modules/
+coverage.out
+*.test
+/cli/pc
