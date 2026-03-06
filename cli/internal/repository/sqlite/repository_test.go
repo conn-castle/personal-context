@@ -456,7 +456,7 @@ func TestRowModelConversionAndScanErrorBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query rows failed: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		t.Fatal("expected rows.Next() to be true")
 	}
@@ -468,7 +468,7 @@ func TestRowModelConversionAndScanErrorBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query rows failed: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		t.Fatal("expected rows.Next() to be true")
 	}
@@ -480,7 +480,7 @@ func TestRowModelConversionAndScanErrorBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query rows failed: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		t.Fatal("expected rows.Next() to be true")
 	}
@@ -492,7 +492,7 @@ func TestRowModelConversionAndScanErrorBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query rows failed: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		t.Fatal("expected rows.Next() to be true")
 	}

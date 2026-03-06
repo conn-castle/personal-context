@@ -150,7 +150,7 @@ func TestGenerateBetweenCoversIntegerEdgeBranches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateBetween(a0, a0V) error = %v", err)
 	}
-	if !(candidate > "a0" && candidate < "a0V") {
+	if candidate <= "a0" || candidate >= "a0V" {
 		t.Fatalf("expected bounded candidate between a0 and a0V, got %q", candidate)
 	}
 }
