@@ -29,8 +29,8 @@ has_reference() {
       --glob '!**/coverage/**' \
       --glob '!**/test-results/**' \
       "$needle" \
-      "$workspace" >/dev/null
-    return $?
+      "$workspace" >/dev/null || return 1
+    return 0
   fi
 
   grep -R \
@@ -40,7 +40,7 @@ has_reference() {
     --exclude-dir='.next' \
     --exclude-dir='coverage' \
     --exclude-dir='test-results' \
-    -- "$needle" "$workspace" >/dev/null
+    -- "$needle" "$workspace" >/dev/null || return 1
 }
 
 for workspace in cli web; do
