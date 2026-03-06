@@ -26,7 +26,7 @@ Do not duplicate information that belongs in other memory files:
 
 <!-- ENTRIES START -->
 
-> **Status:** Phase 1 scaffolding is complete. This document describes the target architecture and operating model; see ROADMAP.md for phase-by-phase implementation progress.
+> **Status:** Phase 2 (Core Data Layer, Local) is complete. This document describes the target architecture and operating model; see ROADMAP.md for phase-by-phase implementation progress.
 
 ## Project Overview
 
@@ -99,7 +99,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 
 ### Schema Portability (Postgres / SQLite)
 - `schema.sql` is the design-level source of truth (Postgres dialect). Executable schemas: `cli/migrations/postgres/`, `cli/migrations/sqlite/`.
-- Separate migration directories: `cli/migrations/postgres/`, `cli/migrations/sqlite/`.
+- Separate migration directories: `cli/migrations/sqlite/` (exists), `cli/migrations/postgres/` (Phase 5).
 - `created_at` and `updated_at` are DB-managed via defaults and triggers. `deleted_at` set by application code. See "DB-Managed Timestamps" below.
 - `PRAGMA foreign_keys = ON` required on every SQLite connection (otherwise `ON DELETE CASCADE` silently ignored).
 - SQLite WAL mode enabled for concurrent reads.
@@ -194,7 +194,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 | Component | Technology |
 |-----------|-----------|
-| CLI | Go: cobra, pgx (direct, not database/sql — Phase 2+), modernc.org/sqlite (pure Go — Phase 2+), aws-sdk-go-v2 (Phase 5+), golang-migrate (Phase 2+) |
+| CLI | Go: cobra, modernc.org/sqlite (pure Go), fracdex (fractional indexing), pgx (direct, not database/sql — Phase 5+), aws-sdk-go-v2 (Phase 5+). Custom migration runner in `cli/internal/sqlite/` (no golang-migrate). |
 | Web UI | Next.js App Router, React, sandboxed iframes for slide HTML rendering |
 | Web hosting | AWS Amplify (SSR via Lambda, us-east-1) |
 | DB (cloud) | Neon Postgres (provider-portable). @neondatabase/serverless HTTP driver for Lambda |

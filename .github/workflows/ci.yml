@@ -39,6 +39,9 @@ jobs:
         with:
           go-version-file: cli/go.mod
 
+      - name: Verify go.mod is tidy
+        run: go mod tidy -diff
+
       - name: Build packages
         run: go build ./...
 
@@ -47,6 +50,9 @@ jobs:
 
       - name: Enforce coverage >= 95%
         run: ./scripts/check_coverage.sh 95
+
+      - name: Enforce per-package coverage >= 95%
+        run: ./scripts/check_coverage_per_package.sh 95
 
       - name: Run linter
         uses: golangci/golangci-lint-action@v8

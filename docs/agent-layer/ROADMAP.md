@@ -51,36 +51,11 @@ Incomplete:
 - Migrated `docs/requirements/` content into canonical sources (`schema/`, `docs/agent-layer/*`, `README.md`), documented migration evidence in `.agent-layer/tmp/phase1-requirements-migration-checklist.md`, and removed `docs/requirements/`.
 - Added nightly export workflow example (`docs/nightly-export-workflow.example.yml`) and rewrote root `README.md` with architecture, setup, command reference, web overview, and contributor workflow.
 
-## Phase 2 — Core Data Layer (Local)
-
-### Goal
-- SQLite database fully operational with all 5 tables.
-- Local filesystem operations for figures and data files.
-- Foundation libraries (config, slide ID generator, fractional indexing, timezone utilities).
-- All code test-first with >95% coverage.
-
-### Tasks
-- [ ] **Tests first**: Write test cases for slide ID generation (format, uniqueness, date extraction, crypto/rand usage) before implementation
-- [ ] **Tests first**: Write test cases for fractional indexing (insert-at-start, insert-at-end, insert-between, lexicographic ordering, repeated insertions between same positions) before implementation
-- [ ] **Tests first**: Write test cases for timezone utilities (local-to-UTC, UTC-to-local, "today" in various timezones, microsecond precision round-trip) before implementation
-- [ ] **Tests first**: Write test cases for config module (read/write, cloud vs local-only detection, missing file, corrupt file) before implementation
-- [ ] **Tests first**: Write test cases for notes normalization (NULL, empty string, whitespace-only, valid markdown) before implementation
-- [ ] Re-enable `go mod tidy -diff` in `.github/workflows/ci.yml` and restore it in `COMMANDS.md` after predeclared CLI dependencies become actively imported in this phase
-- [ ] Implement config module: read/write `~/personal-context/.pc/config.json` (0600 permissions), detect cloud vs local-only
-- [ ] Implement SQLite connection factory: `PRAGMA foreign_keys = ON`, WAL mode, connection wrapping
-- [ ] Create SQLite migrations in `cli/migrations/sqlite/` (all 5 tables + sync_version triggers + auto_update_updated_at trigger + UNIQUE constraints on (slide_id, filename))
-- [ ] Define `Repository` interface: CRUD for all 5 tables, query methods, soft delete
-- [ ] Implement slide ID generator, fractional indexing, timezone utilities, notes normalization
-- [ ] **Tests first**: Write SQLite repository integration tests before implementation — CRUD for all 5 tables, soft delete, cascading delete, sort order `(date, day_order, id)`, UNIQUE constraint violations on `(slide_id, filename)`, foreign key rejection
-- [ ] Implement SQLite repository (all `Repository` interface methods)
-- [ ] **Tests first**: Write filesystem client tests (copy figures, copy data files, delete, path resolution, special characters in filenames, missing directories) before implementation
-- [ ] Implement local filesystem client
-
-### Exit criteria
-- All foundation libraries pass their test-first test suites.
-- SQLite repository passes full integration test suite: CRUD, soft deletes, cascading deletes, sort order, UNIQUE constraints, foreign key enforcement.
-- Filesystem client handles happy paths and error cases.
-- `go test -cover` reports >95% for all packages in this phase.
+## Phase 2 ✅ — Core Data Layer (Local)
+- Implemented foundation libraries with test-first coverage: slide ID generation, fractional indexing, timezone utilities, config read/write + mode detection, and notes normalization.
+- Added SQLite local data layer end-to-end: connection factory (`foreign_keys=ON`, WAL), executable migrations for all 5 tables with sync/timestamp triggers, backend-agnostic repository contract, SQLite repository implementation, and integration tests.
+- Implemented local filesystem client for figures/data with path validation, copy/delete behavior, and error-case coverage.
+- Restored `go mod tidy -diff` in CI and added per-package coverage enforcement (`>=95%`) in CI and CLI workflow commands.
 
 ## Phase 3 — Local CLI Foundation (Setup + CRUD)
 
@@ -126,9 +101,12 @@ Incomplete:
 - [ ] Implement `pc doctor` (local checks)
 - [ ] Write full-workflow e2e test: `pc setup` -> `pc project set` -> `pc add` (x3 different dates/projects) -> `pc search` -> `pc edit` -> `pc move` -> `pc delete` -> `pc trash` -> wait simulation -> `pc gc` -> `pc doctor`
 
+- [ ] **Consolidate schema**: Fold all SQLite migration files into the canonical schema file and remove individual migrations (no deployed users, so no migration history to preserve)
+
 ### Exit criteria
 - All local CLI commands pass e2e tests.
 - Full local-only workflow e2e test passes.
+- Single canonical SQLite schema file (no separate migration files).
 - `go test -cover` reports >95% for all packages.
 
 ## Phase 5 — Cloud Data Layer
@@ -215,12 +193,15 @@ Incomplete:
 - [ ] Implement `pc export`, `pc import`, `pc restore-db`, `pc verify`
 - [ ] Implement LFS pointer detection
 
+- [ ] **Consolidate schema**: Fold all SQLite and Postgres migration files into canonical schema files per backend and remove individual migrations (no deployed users, so no migration history to preserve)
+
 ### Exit criteria
 - All 5 conversion paths pass round-trip tests with full field verification.
 - All edge cases pass.
 - Export is deterministic (identical output for identical data).
 - LFS pointers detected and rejected.
 - `pc restore-db` creates backup before wipe.
+- Single canonical schema file per backend, no separate migration files (SQLite + Postgres).
 - `go test -cover` reports >95% for all packages.
 
 ## Phase 8 — v0.dev UI Design
