@@ -43,35 +43,13 @@ Incomplete:
 
 <!-- PHASES START -->
 
-## Phase 1 — Project Scaffolding
-
-### Goal
-- Monorepo structure in place with Go CLI and Next.js app initialized.
-- Shared schema files in `schema/` directory.
-- CI pipeline running tests, builds, and coverage enforcement.
-
-### Tasks
-- [x] Create directory structure: `cli/`, `web/`, `schema/`, `docs/`
-- [ ] Initialize Go module in `cli/` with cobra, modernc.org/sqlite, pgx, aws-sdk-go-v2, golang-migrate dependencies
-- [ ] Initialize Next.js app in `web/` with App Router, TypeScript, @neondatabase/serverless
-- [x] Copy `schema.sql` and `schema-types.ts` to `schema/` as canonical files
-- [x] Create `.gitignore` for Go binaries, node_modules, .pc/, .env
-- [ ] Configure Go test coverage: `go test -coverprofile` with 95% threshold enforcement
-- [ ] Configure Next.js test coverage: vitest/jest with 95% threshold in config
-- [ ] Configure Playwright for web e2e tests
-- [ ] Set up CI pipeline: Go test + coverage + build + lint, Next.js test + coverage + build + lint, coverage gates that fail the build below 95%
-- [ ] Create example GitHub Action workflow for nightly export (in `docs/`)
-- [ ] Audit `docs/requirements/` (product-spec.md, schema.sql, schema-types.ts) against agent-layer memory files. Known gaps to migrate: nightly backup workflow (GitHub Action details, cron schedule, `--from-cloud` flag), `pc fetch` modes and flags (`--project`, `--recent`, `--output`), `pc setup` interactive flow (cloud path prompts, validation steps, credential writing sequence), API route request/response payload shapes. Ensure 100% of information is captured in agent-layer docs or schema/ files before deletion.
-- [ ] Delete `docs/requirements/` — agent-layer docs and schema/ are now the sole source of truth
-- [ ] Write comprehensive README.md: project overview, architecture, monorepo structure, setup guide (local-only and cloud), CLI command reference, web UI overview, development workflow, contributing guidelines
-
-### Exit criteria
-- `go build ./...` succeeds in `cli/`
-- `npm run build` succeeds in `web/`
-- CI pipeline passes on push with coverage enforcement active
-- Schema files exist in `schema/` and are referenced by both CLI and web
-- `docs/requirements/` deleted; all information preserved in agent-layer docs and schema/
-- README.md is complete and accurate as the human-facing entry point
+## Phase 1 ✅ — Project Scaffolding
+- Initialized runnable Go CLI scaffold in `cli/` with required dependency set, root command, schema contract checks, lint, and hard 95% coverage enforcement.
+- Initialized Next.js App Router + TypeScript scaffold in `web/` with `@neondatabase/serverless`, lint/test/coverage gates (95%), and DB-free Playwright smoke e2e configuration.
+- Added CI workflow (`.github/workflows/ci.yml`) covering schema contract checks, Go build/test/lint/coverage gates, and web lint/test/coverage/build/e2e checks.
+- Added repository-level schema contract guard script (`scripts/check_schema_contract.sh`) enforcing canonical `schema/` usage and preventing workspace-local schema duplicates.
+- Migrated `docs/requirements/` content into canonical sources (`schema/`, `docs/agent-layer/*`, `README.md`), documented migration evidence in `.agent-layer/tmp/phase1-requirements-migration-checklist.md`, and removed `docs/requirements/`.
+- Added nightly export workflow example (`docs/nightly-export-workflow.example.yml`) and rewrote root `README.md` with architecture, setup, command reference, web overview, and contributor workflow.
 
 ## Phase 2 — Core Data Layer (Local)
 
@@ -87,6 +65,7 @@ Incomplete:
 - [ ] **Tests first**: Write test cases for timezone utilities (local-to-UTC, UTC-to-local, "today" in various timezones, microsecond precision round-trip) before implementation
 - [ ] **Tests first**: Write test cases for config module (read/write, cloud vs local-only detection, missing file, corrupt file) before implementation
 - [ ] **Tests first**: Write test cases for notes normalization (NULL, empty string, whitespace-only, valid markdown) before implementation
+- [ ] Re-enable `go mod tidy -diff` in `.github/workflows/ci.yml` and restore it in `COMMANDS.md` after predeclared CLI dependencies become actively imported in this phase
 - [ ] Implement config module: read/write `~/personal-context/.pc/config.json` (0600 permissions), detect cloud vs local-only
 - [ ] Implement SQLite connection factory: `PRAGMA foreign_keys = ON`, WAL mode, connection wrapping
 - [ ] Create SQLite migrations in `cli/migrations/sqlite/` (all 5 tables + sync_version triggers + auto_update_updated_at trigger + UNIQUE constraints on (slide_id, filename))
@@ -110,7 +89,6 @@ Incomplete:
 - CLI e2e tests run the actual `pc` binary as a subprocess.
 
 ### Tasks
-- [ ] Implement cobra root command and version flag
 - [ ] **Tests first**: Write e2e test for `pc setup` (local-only) before implementation — verify directory creation, SQLite initialized, templates seeded, idempotent re-run
 - [ ] Implement `pc setup` (local-only path)
 - [ ] **Tests first**: Write e2e tests for `pc add` before implementation — valid folder, missing slide.html, metadata.json merge with flags, figure/data file copy verified on disk, SHA-256 hash verified, day_order generated correctly, --project flag, --date flag, --position flag

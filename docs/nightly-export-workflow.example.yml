@@ -1,0 +1,60 @@
+name: Nightly Personal Context Export
+
+on:
+  schedule:
+    - cron: '0 4 * * *' # 04:00 UTC nightly
+  workflow_dispatch:
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout data repository
+        uses: actions/checkout@v4
+
+      - name: Install Git LFS
+        run: |
+          git lfs install
+          git lfs pull || true
+
+      - name: Download latest pc binary from code repo release
+        env:
+          PC_RELEASE_URL: ${{ secrets.PC_RELEASE_URL }}
+        run: |
+          test -n "$PC_RELEASE_URL"
+          curl -fsSL "$PC_RELEASE_URL" -o ./pc
+          chmod +x ./pc
+
+      - name: Configure cloud access (non-interactive)
+        env:
+          PC_NEON_URL: ${{ secrets.PC_NEON_URL }}
+          PC_S3_BUCKET: ${{ secrets.PC_S3_BUCKET }}
+          PC_S3_REGION: ${{ secrets.PC_S3_REGION }}
+          PC_AWS_ACCESS_KEY_ID: ${{ secrets.PC_AWS_ACCESS_KEY_ID }}
+          PC_AWS_SECRET_ACCESS_KEY: ${{ secrets.PC_AWS_SECRET_ACCESS_KEY }}
+        run: |
+          ./pc setup \
+            --neon-url="$PC_NEON_URL" \
+            --s3-bucket="$PC_S3_BUCKET" \
+            --s3-region="$PC_S3_REGION" \
+            --aws-key="$PC_AWS_ACCESS_KEY_ID" \
+            --aws-secret="$PC_AWS_SECRET_ACCESS_KEY"
+
+      - name: Export from cloud and push snapshot
+        run: |
+          ./pc export --from-cloud --path . --github-remote origin
+
+      - name: Commit and push if changed
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No snapshot changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "nightly export: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push origin HEAD

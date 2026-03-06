@@ -1,41 +1,178 @@
 # Personal Context (`pc`)
 
-Personal engineering notebook system that stores work as individual HTML slides — images, text, tables, code, and data — organized chronologically and by project.
+Personal Context is a local-first engineering notebook system that stores work as HTML slides, attached figures, and data files, organized by date and project.
 
 ## Status
 
-**Phase 1 scaffolding in progress.** `cli/`, `web/`, and `schema/` directories are now present, and schema/type files are canonicalized under `schema/`. Remaining design documents in `docs/requirements/` are temporary and will be removed once migration tasks in Phase 1 are complete. See the [Roadmap](docs/agent-layer/ROADMAP.md) for current progress.
-
-## Repository Structure
-
-```
-personal-context/              # code repo (this repo)
-├── cli/                       # Go CLI workspace (scaffolded)
-├── web/                       # Next.js workspace (scaffolded)
-├── schema/                    # Canonical schema.sql and schema-types.ts
-├── docs/
-│   ├── requirements/          # Design specification (temporary, deleted after Phase 1)
-│   └── agent-layer/           # Agent memory files (roadmap, decisions, context)
-└── README.md
-```
-
-A separate **data repo** will hold nightly git exports of slide data.
+Phase 1 (Project Scaffolding) is implemented: monorepo workspaces exist (`cli/`, `web/`, `schema/`), coverage/lint/e2e scaffolding is configured, and CI checks are defined. Product features from later phases (full CLI CRUD, sync, import/export workflows, and full web UI) are still in roadmap phases 2+.
 
 ## Architecture
 
 ```
 Local SQLite + local files      <- CLI writes here (always)
-     | pc sync (bidirectional, if cloud configured)
-Neon Postgres + S3              <- cloud source of truth (web UI)
+     | pc sync (optional, cloud configured)
+Neon Postgres + S3              <- cloud source of truth for web UI
      | nightly export
 GitHub + S3                     <- portable backup
 ```
 
+- Local-only mode runs without Neon/S3.
+- Cloud mode enables bidirectional sync and web UI data access.
+- Canonical schema artifacts are stored in:
+  - `schema/schema.sql`
+  - `schema/schema-types.ts`
+
+## Monorepo Layout
+
+```
+personal-context/
+├── cli/                         # Go CLI workspace
+├── web/                         # Next.js App Router workspace
+├── schema/                      # Canonical schema artifacts
+├── docs/
+│   ├── agent-layer/             # Project memory files
+│   └── nightly-export-workflow.example.yml
+├── scripts/
+│   └── check_schema_contract.sh # Canonical schema guard
+└── .github/workflows/ci.yml
+```
+
+## Setup
+
+### Local Development Prerequisites
+
+- Go toolchain compatible with `cli/go.mod`
+- Node.js 22+
+- npm
+
+### Local-Only Setup (Scaffold Verification)
+
+```bash
+# CLI
+cd cli
+go test ./...
+go build ./...
+go build -o pc ./cmd/pc
+./scripts/check_coverage.sh 95
+
+# Web
+cd ../web
+npm install
+npm run lint
+npm test
+npm run test:coverage
+npm run build
+npx playwright install
+npm run test:e2e:smoke
+
+# Repo-level schema contract
+cd ..
+./scripts/check_schema_contract.sh
+```
+
+### Cloud Setup (Planned Runtime Path)
+
+Cloud runtime features are implemented in later roadmap phases. The intended CLI setup path is:
+
+```bash
+pc setup \
+  --neon-url="..." \
+  --s3-bucket="..." \
+  --s3-region="..." \
+  --aws-key="..." \
+  --aws-secret="..."
+```
+
+- AWS credentials are written to `~/.aws/credentials` under `[personal-context]`.
+- Cloud metadata is stored in `~/personal-context/.pc/config.json` (no secret keys in config).
+
+## CLI Command Reference
+
+### Currently Implemented (Phase 1)
+
+- `pc --help`
+- `pc --version`
+
+### Planned Command Surface (Roadmap)
+
+- Setup and health: `pc setup`, `pc doctor`
+- Slide CRUD: `pc add`, `pc edit`, `pc show`, `pc delete`, `pc restore`, `pc move`
+- Search/projects/trash: `pc search`, `pc project`, `pc trash`, `pc gc`
+- Sync/data: `pc sync`, `pc fetch`, `pc export`, `pc import`, `pc restore-db`, `pc verify`
+
+## Web UI Overview
+
+Phase 1 provides a Next.js scaffold with:
+
+- App Router + TypeScript
+- Lint, unit tests, coverage thresholds (95%)
+- Playwright DB-free smoke test
+- Schema-contract module referencing canonical `schema/` artifacts
+
+Full production UI behavior (slides, filters, edit/delete/restore, sync manager) is implemented in later roadmap phases.
+
+## Development Workflow
+
+### CLI (`cli/`)
+
+```bash
+go test ./...
+go build ./...
+go build -o pc ./cmd/pc
+./scripts/check_coverage.sh 95
+golangci-lint run ./...
+```
+
+### Web (`web/`)
+
+```bash
+npm install
+npm run lint
+npm test
+npm run test:coverage
+npm run build
+npx playwright install
+npm run test:e2e:smoke
+```
+
+### Repository (`repo root`)
+
+```bash
+./scripts/check_schema_contract.sh
+```
+
+## CI/CD
+
+GitHub Actions workflow: `.github/workflows/ci.yml`
+
+- Enforces schema contract checks.
+- Runs CLI build/test/lint/coverage with hard fail below 95%.
+- Runs web lint/test/coverage/build and Playwright smoke e2e.
+- Uses pinned `golangci-lint` version via `GOLANGCI_LINT_VERSION`.
+
+## Nightly Export Example
+
+A copy-ready data-repo workflow template is provided at:
+
+- `docs/nightly-export-workflow.example.yml`
+
+It is scheduled for `0 4 * * *` UTC and uses:
+
+- `pc export --from-cloud --path . --github-remote origin`
+
+## Contributing
+
+1. Keep changes scoped to the requested roadmap phase.
+2. Add or update tests with code changes; do not lower coverage bars.
+3. Update docs and memory files when behavior/commands/contracts change.
+4. Run local checks before opening a PR.
+5. Do not commit secrets; use placeholders and local env configuration.
+
 ## Documentation
 
-- [Product Spec](docs/requirements/product-spec.md) — design specification (temporary)
-- [Schema](schema/schema.sql) — canonical database DDL source
-- [Types](schema/schema-types.ts) — canonical TypeScript schema interfaces
-- [Roadmap](docs/agent-layer/ROADMAP.md) — phased implementation plan
-- [Decisions](docs/agent-layer/DECISIONS.md) — architectural decision log
-- [Context](docs/agent-layer/CONTEXT.md) — project context and invariants
+- [Roadmap](docs/agent-layer/ROADMAP.md)
+- [Decisions](docs/agent-layer/DECISIONS.md)
+- [Context](docs/agent-layer/CONTEXT.md)
+- [Commands](docs/agent-layer/COMMANDS.md)
+- [Schema SQL](schema/schema.sql)
+- [Schema Types](schema/schema-types.ts)

@@ -26,7 +26,7 @@ Do not duplicate information that belongs in other memory files:
 
 <!-- ENTRIES START -->
 
-> **Status:** Pre-implementation. This document describes the target architecture. See ROADMAP.md for current implementation progress.
+> **Status:** Phase 1 scaffolding is complete. This document describes the target architecture and operating model; see ROADMAP.md for phase-by-phase implementation progress.
 
 ## Project Overview
 
@@ -45,6 +45,9 @@ personal-context/          # code repo
 ```
 
 Separate **data repo**: nightly git export of slide data (metadata.json, slide.html, notes.md, figures via Git LFS). GitHub Action for nightly export lives there.
+- Scheduled nightly at `0 4 * * *` UTC.
+- Workflow downloads the `pc` binary from code-repo releases, then runs `pc export --from-cloud --path . --github-remote origin`.
+- The code repository stores an example workflow under `docs/` for users to copy into their data repo.
 
 ## Architecture: Three Data States
 
@@ -97,7 +100,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 ### Schema Portability (Postgres / SQLite)
 - `schema.sql` is the design-level source of truth (Postgres dialect). Executable schemas: `cli/migrations/postgres/`, `cli/migrations/sqlite/`.
 - Separate migration directories: `cli/migrations/postgres/`, `cli/migrations/sqlite/`.
-- `created_at` and `updated_at` are DB-managed via defaults and triggers. `deleted_at` set by application code. See "DB-Managed Timestamps" above.
+- `created_at` and `updated_at` are DB-managed via defaults and triggers. `deleted_at` set by application code. See "DB-Managed Timestamps" below.
 - `PRAGMA foreign_keys = ON` required on every SQLite connection (otherwise `ON DELETE CASCADE` silently ignored).
 - SQLite WAL mode enabled for concurrent reads.
 - Triggers reimplemented in SQLite syntax (per-row instead of per-statement).
@@ -191,7 +194,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 | Component | Technology |
 |-----------|-----------|
-| CLI | Go: cobra, pgx (direct, not database/sql), modernc.org/sqlite (pure Go), aws-sdk-go-v2, golang-migrate |
+| CLI | Go: cobra, pgx (direct, not database/sql — Phase 2+), modernc.org/sqlite (pure Go — Phase 2+), aws-sdk-go-v2 (Phase 5+), golang-migrate (Phase 2+) |
 | Web UI | Next.js App Router, React, sandboxed iframes for slide HTML rendering |
 | Web hosting | AWS Amplify (SSR via Lambda, us-east-1) |
 | DB (cloud) | Neon Postgres (provider-portable). @neondatabase/serverless HTTP driver for Lambda |
@@ -235,6 +238,48 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `pc restore-db <path>` — rebuild DB from git export (destructive, auto-backup before wipe)
 - `pc verify` — full round-trip data integrity tests
 
+### `pc fetch` modes and flags
+- Slide mode:
+  - `pc fetch <slide_id>`
+  - Downloads all data files for one slide into `~/personal-context/data/{slide_id}/` by default.
+- Project mode:
+  - `pc fetch --project "org/project"`
+  - Downloads data files for all slides in a project.
+- Recent-window mode:
+  - `pc fetch --recent 3m`
+  - Downloads data files for slides inside a relative time window (`d`, `w`, `m`, `y` suffixes).
+- Output override:
+  - `--output "./target-dir"`
+  - Writes downloads under the provided directory instead of the default data path.
+- Preconditions:
+  - Cloud must be configured. If cloud is not configured, `pc fetch` fails loudly (no silent local fallback).
+
+### `pc export` nightly cloud backup usage
+- Manual/local usage:
+  - `pc export --path ./pc-export --github-remote origin`
+- Nightly data-repo workflow usage:
+  - `pc export --from-cloud --path . --github-remote origin`
+  - Reads slide rows from Neon and file blobs from S3 using repository secrets.
+
+### `pc setup` flow details
+- Non-interactive mode:
+  - `pc setup --neon-url=... --s3-bucket=... --s3-region=... --aws-key=... --aws-secret=...`
+  - Requires all cloud flags together; missing values fail with an explicit missing-flag list.
+  - No merge-preview prompts in non-interactive mode.
+- Remove-cloud mode:
+  - `pc setup --remove-cloud`
+  - Removes cloud config from `~/personal-context/.pc/config.json` and removes `[personal-context]` from `~/.aws/credentials`.
+  - Does not delete local/cloud data.
+- Interactive mode sequence:
+  - Local checks and creation (SQLite + template seeding).
+  - Prompt to configure cloud.
+  - Prompt for Neon URL, S3 bucket, S3 region, AWS access key, AWS secret key.
+  - Validate Neon connectivity and S3 bucket write access in memory first.
+  - Show merge preview (local count, cloud count, post-sync count).
+  - On confirmation: ensure Neon tables exist, write `[personal-context]` AWS profile, write `config.json` with mode metadata (no AWS secret material).
+- No partial-success writes:
+  - If Neon/S3 validation fails, `pc setup` writes nothing and exits with a clear error.
+
 ## Web UI (MVP)
 
 - 16:9 slide viewer with sandboxed iframes, `transform: scale()`, white background
@@ -259,6 +304,175 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `GET /api/files/[slide_id]/figures/[filename]` — presigned figure URL
 - `GET /api/projects` — distinct project_ids
 - No slide creation endpoint (CLI only)
+
+### API payload shapes
+
+```ts
+type ErrorResponse = {
+  error: string;
+  code: string;
+};
+
+type SlideSummary = {
+  id: string;
+  date: string; // YYYY-MM-DD
+  day_order: string;
+  project_id: string | null;
+  updated_at: string; // ISO 8601 UTC
+  deleted_at: string | null;
+  figure_count: number;
+  data_file_count: number;
+};
+
+type SlideFile = {
+  filename: string;
+  s3_key: string;
+  size?: number;
+  hash?: string;
+  alt_text?: string | null;
+  description?: string | null;
+};
+
+type SlideDetail = {
+  id: string;
+  date: string;
+  day_order: string;
+  html_content: string;
+  notes: string | null;
+  project_id: string | null;
+  git_remote_url: string | null;
+  git_hash: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  figures: SlideFile[];
+  data_files: SlideFile[];
+};
+```
+
+- `GET /api/slides`
+  - Query params:
+    - `limit` (number, default 20)
+    - `cursor` (opaque string for forward pagination)
+    - `project` (string filter)
+    - `deleted` (`true|false`, default `false`)
+    - `updated_after` (ISO 8601 UTC cursor)
+  - Response:
+    ```ts
+    {
+      items: SlideSummary[];
+      next_cursor: string | null;
+    }
+    ```
+
+- `GET /api/slides/[id]`
+  - Response:
+    ```ts
+    {
+      slide: SlideDetail;
+    }
+    ```
+  - `404` when slide is absent.
+
+- `PATCH /api/slides/[id]`
+  - Request:
+    ```ts
+    {
+      project_id?: string | null;
+      notes?: string | null;
+      git_remote_url?: string | null;
+      git_hash?: string | null;
+    }
+    ```
+  - Response:
+    ```ts
+    {
+      slide: SlideDetail;
+      sync_version: number;
+    }
+    ```
+
+- `PATCH /api/slides/[id]/order`
+  - Request:
+    ```ts
+    {
+      date?: string; // YYYY-MM-DD
+      position:
+        | { kind: "first" | "last" }
+        | { kind: "before" | "after"; reference_id: string };
+    }
+    ```
+  - Response:
+    ```ts
+    {
+      id: string;
+      date: string;
+      day_order: string;
+      updated_at: string;
+      sync_version: number;
+    }
+    ```
+
+- `DELETE /api/slides/[id]`
+  - Response:
+    ```ts
+    {
+      id: string;
+      deleted_at: string;
+      updated_at: string;
+      sync_version: number;
+    }
+    ```
+
+- `POST /api/slides/[id]/restore`
+  - Response:
+    ```ts
+    {
+      id: string;
+      deleted_at: null;
+      updated_at: string;
+      sync_version: number;
+    }
+    ```
+
+- `GET /api/sync/version`
+  - Response:
+    ```ts
+    {
+      version: number;
+      updated_at: string;
+    }
+    ```
+  - Source is S3 `_version`, not Postgres.
+
+- `GET /api/sync/changes?since=<ISO>`
+  - Response:
+    ```ts
+    {
+      items: SlideSummary[];
+      server_now: string;
+    }
+    ```
+  - Includes soft-deleted slides so delete propagation stays lossless.
+
+- `GET /api/files/[slide_id]/data/[filename]`
+- `GET /api/files/[slide_id]/figures/[filename]`
+  - Response:
+    ```ts
+    {
+      url: string;
+      expires_at: string;
+    }
+    ```
+  - `404` for unknown file/slide pair.
+
+- `GET /api/projects`
+  - Response:
+    ```ts
+    {
+      projects: string[];
+    }
+    ```
 
 ## Soft Deletes
 
