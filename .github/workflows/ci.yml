@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 env:
-  GOLANGCI_LINT_VERSION: v1.64.8
+  GOLANGCI_LINT_VERSION: v2.3
 
 jobs:
   schema-contract:
@@ -49,7 +49,7 @@ jobs:
         run: ./scripts/check_coverage.sh 95
 
       - name: Run linter
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v8
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: cli
