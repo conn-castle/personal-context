@@ -120,7 +120,7 @@ func (c *Client) copyInto(prefix string, slideID string, sourcePath string) (Sto
 	if err != nil {
 		return StoredFile{}, fmt.Errorf("read source file %s: %w", sourcePath, err)
 	}
-	defer sourceFile.Close()
+	defer func() { _ = sourceFile.Close() }()
 
 	tempFile, err := os.CreateTemp(targetDir, ".copy-*.tmp")
 	if err != nil {

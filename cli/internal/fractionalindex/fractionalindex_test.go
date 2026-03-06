@@ -73,7 +73,7 @@ func TestGenerateAtStart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateAtStart() error = %v", err)
 	}
-	if !(candidate < first) {
+	if candidate >= first {
 		t.Fatalf("expected %q < %q", candidate, first)
 	}
 }
@@ -84,7 +84,7 @@ func TestGenerateAtEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateAtEnd() error = %v", err)
 	}
-	if !(candidate > last) {
+	if candidate <= last {
 		t.Fatalf("expected %q > %q", candidate, last)
 	}
 }
@@ -121,7 +121,7 @@ func TestRepeatedInsertionsBetweenSamePositions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GenerateBetween() iteration %d error = %v", i, err)
 		}
-		if !(left < mid && mid < right) {
+		if left >= mid || mid >= right {
 			t.Fatalf("iteration %d expected %q < %q < %q", i, left, mid, right)
 		}
 		right = mid

@@ -502,7 +502,7 @@ func TestConfigureRejectsUnsupportedJournalMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sql.Open() error = %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	err = configure(context.Background(), db)
 	if err == nil {
@@ -666,7 +666,7 @@ func TestForeignKeysEnabledOnAllPoolConnections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first query error = %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Force a second connection from the pool and verify FK pragma.
 	var fk int
@@ -741,7 +741,7 @@ func assertUniqueIndexOnSlideAndFilename(t *testing.T, db *sql.DB, tableName str
 	if err != nil {
 		t.Fatalf("index list query for %q failed: %v", tableName, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	indexNames := make([]string, 0)
 	for rows.Next() {

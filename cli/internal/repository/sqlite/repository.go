@@ -140,7 +140,7 @@ func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlide
 	if err != nil {
 		return nil, mapSQLiteError(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	slides := make([]repository.Slide, 0)
 	for rows.Next() {
@@ -285,7 +285,7 @@ func (r *Repository) ListSlideFiguresBySlideID(ctx context.Context, slideID stri
 	if err != nil {
 		return nil, mapSQLiteError(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	figures := make([]repository.SlideFigure, 0)
 	for rows.Next() {
@@ -412,7 +412,7 @@ func (r *Repository) ListSlideDataFilesBySlideID(ctx context.Context, slideID st
 	if err != nil {
 		return nil, mapSQLiteError(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	files := make([]repository.SlideDataFile, 0)
 	for rows.Next() {
@@ -514,7 +514,7 @@ func (r *Repository) ListTemplates(ctx context.Context) ([]repository.Template, 
 	if err != nil {
 		return nil, mapSQLiteError(err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	templates := make([]repository.Template, 0)
 	for rows.Next() {
