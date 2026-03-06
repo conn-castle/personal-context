@@ -26,3 +26,23 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 ## Open issues
 
 <!-- ENTRIES START -->
+
+- Issue 2026-03-06 a1b2c3: mapSQLiteError uses fragile string matching
+    Priority: Medium. Area: cli/internal/repository/sqlite
+    Description: `mapSQLiteError` classifies UNIQUE/FK constraint errors via `strings.Contains` on error messages. If `modernc.org/sqlite` changes message format, mapping silently breaks.
+    Next step: Investigate `modernc.org/sqlite` structured error types (`*sqlite.Error`, error codes) and replace string matching with type assertions.
+
+- Issue 2026-03-06 b2c3d4: Package-level test function variables unsafe with t.Parallel
+    Priority: Low. Area: cli/internal/sqlite, cli/internal/config, cli/internal/filesystem
+    Description: Tests in sqlite, config, and filesystem packages mutate package-level `var` stubs (syncFileFn, closeFileFn, etc.) and restore via `t.Cleanup`. Safe today (no `t.Parallel`), but adding parallel tests would cause data races.
+    Next step: If the test suite grows or parallel tests are needed, refactor stubs into struct fields or interface-based dependency injection.
+
+- Issue 2026-03-06 c3d4e5: Coverage scripts run all tests twice in CI
+    Priority: Low. Area: cli/scripts
+    Description: `check_coverage.sh` and `check_coverage_per_package.sh` both run `go test` independently. Every test runs at least twice per CI job, doubling test execution time as the package count grows.
+    Next step: Merge the two scripts or have the per-package script reuse the aggregate profile.
+
+- Issue 2026-03-06 d4e5f6: Coverage scripts do not use -race flag
+    Priority: Low. Area: cli/scripts
+    Description: Neither coverage script passes `-race` to `go test`. As concurrency-related code is added (sync engine, Phase 6), race detection becomes more important.
+    Next step: Add `-race` to the coverage script test commands when sync/concurrency code lands.

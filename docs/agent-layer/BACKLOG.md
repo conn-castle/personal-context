@@ -28,6 +28,18 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
 
 <!-- ENTRIES START -->
 
+- Backlog 2026-03-06 g8h8i8: PDF export for slide ranges with optional title page
+    Priority: Medium. Area: web
+    Description: Allow exporting only a selected slide range to PDF and optionally prepend a title page during share/export flows.
+    Acceptance criteria: User can choose start/end slide; PDF contains only selected slides; optional title page toggle adds a first page with presentation title and metadata.
+    Notes: Clarify whether title-page fields are editable and shared between export and share workflows.
+
+- Backlog 2026-03-06 j9k9l9: Expiring share links for slide ranges
+    Priority: Medium. Area: web
+    Description: Create shareable links scoped to a selected slide range with an explicit expiration date.
+    Acceptance criteria: Link grants access only to the selected range until expiration; expired links return a clear access-denied response.
+    Notes: Backend token payload should include range bounds and expiration timestamp in UTC.
+
 - Backlog 2026-03-05 e5f5g5: Tombstone table for durable hard-delete propagation
     Priority: Medium. Area: sync
     Description: Add `gc_tombstones(slide_id, deleted_at)` table. `pc gc` inserts a tombstone before hard-deleting each row. Sync and web UI check tombstones to learn about hard deletes. Periodic cleanup of old tombstones (e.g., 90 days).

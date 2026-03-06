@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -54,5 +55,30 @@ func TestRunVersionFlagUsesInjectedVersion(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected no stderr output, got %q", stderr.String())
+	}
+}
+
+func TestMainUsesExitFunction(t *testing.T) {
+	oldArgs := os.Args
+	oldExit := exitFn
+	oldVersion := version
+	t.Cleanup(func() {
+		os.Args = oldArgs
+		exitFn = oldExit
+		version = oldVersion
+	})
+
+	version = "test-main"
+	os.Args = []string{"pc", "--version"}
+
+	var capturedExitCode int
+	exitFn = func(code int) {
+		capturedExitCode = code
+	}
+
+	main()
+
+	if capturedExitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", capturedExitCode)
 	}
 }

@@ -1,0 +1,569 @@
+package repositorytest
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/conn-castle/personal-context/cli/internal/repository"
+)
+
+// RepositoryFactory creates a fresh repository per test case.
+type RepositoryFactory func(t *testing.T) repository.Repository
+
+// RunContractSuite executes backend-agnostic repository contract tests.
+// Args: t is the parent testing context; factory returns a fresh repository.
+// Returns: none. The test fails on contract violations.
+func RunContractSuite(t *testing.T, factory RepositoryFactory) {
+	t.Helper()
+
+	t.Run("slides CRUD and sort order", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		slideA := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250304-a3f2b7e1",
+			Date:        "2025-03-04",
+			DayOrder:    "b",
+			HTMLContent: "<h1>A</h1>",
+		})
+
+		notes := "updated notes"
+		projectID := "org/project"
+		updated, err := repo.UpdateSlide(ctx, repository.UpdateSlideInput{
+			ID:          slideA.ID,
+			Date:        "2025-03-04",
+			DayOrder:    "c",
+			HTMLContent: "<h1>A2</h1>",
+			Notes:       &notes,
+			ProjectID:   &projectID,
+		})
+		if err != nil {
+			t.Fatalf("UpdateSlide() error = %v", err)
+		}
+		if updated.DayOrder != "c" || updated.HTMLContent != "<h1>A2</h1>" {
+			t.Fatalf("unexpected updated slide DayOrder/HTMLContent: %+v", updated)
+		}
+		if updated.Notes == nil || *updated.Notes != "updated notes" {
+			t.Fatalf("expected Notes=%q after update, got %v", "updated notes", updated.Notes)
+		}
+		if updated.ProjectID == nil || *updated.ProjectID != "org/project" {
+			t.Fatalf("expected ProjectID=%q after update, got %v", "org/project", updated.ProjectID)
+		}
+		if updated.UpdatedAt.IsZero() {
+			t.Fatal("expected non-zero UpdatedAt after update")
+		}
+		if updated.CreatedAt != slideA.CreatedAt {
+			t.Fatalf("expected CreatedAt preserved after update: got %v, want %v", updated.CreatedAt, slideA.CreatedAt)
+		}
+
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250304-b7e1c9d3",
+			Date:        "2025-03-04",
+			DayOrder:    "a",
+			HTMLContent: "<h1>B</h1>",
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250303-c0ffee01",
+			Date:        "2025-03-03",
+			DayOrder:    "z",
+			HTMLContent: "<h1>C</h1>",
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250304-a3f2b700",
+			Date:        "2025-03-04",
+			DayOrder:    "c",
+			HTMLContent: "<h1>D</h1>",
+		})
+
+		slides, err := repo.ListSlides(ctx, repository.ListSlidesFilter{})
+		if err != nil {
+			t.Fatalf("ListSlides() error = %v", err)
+		}
+		ids := slideIDs(slides)
+		expected := []string{
+			"20250303-c0ffee01",
+			"20250304-b7e1c9d3",
+			"20250304-a3f2b700",
+			"20250304-a3f2b7e1",
+		}
+		assertExactOrder(t, ids, expected)
+	})
+
+	t.Run("slides soft delete and restore", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		slide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250305-deadbeef",
+			Date:        "2025-03-05",
+			DayOrder:    "n",
+			HTMLContent: "<h1>Trash me</h1>",
+		})
+
+		if err := repo.SoftDeleteSlide(ctx, slide.ID); err != nil {
+			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		}
+		active, err := repo.ListSlides(ctx, repository.ListSlidesFilter{})
+		if err != nil {
+			t.Fatalf("ListSlides(active) error = %v", err)
+		}
+		if len(active) != 0 {
+			t.Fatalf("expected active list to be empty, got %d rows", len(active))
+		}
+
+		deleted, err := repo.ListSlides(ctx, repository.ListSlidesFilter{IncludeDeleted: true})
+		if err != nil {
+			t.Fatalf("ListSlides(includeDeleted) error = %v", err)
+		}
+		if len(deleted) != 1 || deleted[0].DeletedAt == nil {
+			t.Fatalf("expected one deleted slide with deleted_at, got %+v", deleted)
+		}
+
+		if err := repo.RestoreSlide(ctx, slide.ID); err != nil {
+			t.Fatalf("RestoreSlide() error = %v", err)
+		}
+		restored, err := repo.ListSlides(ctx, repository.ListSlidesFilter{})
+		if err != nil {
+			t.Fatalf("ListSlides(after restore) error = %v", err)
+		}
+		if len(restored) != 1 || restored[0].DeletedAt != nil {
+			t.Fatalf("expected restored active slide, got %+v", restored)
+		}
+	})
+
+	t.Run("slide figures and data files unique constraints", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		slide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250306-1111aaaa",
+			Date:        "2025-03-06",
+			DayOrder:    "n",
+			HTMLContent: "<h1>Assets</h1>",
+		})
+
+		figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
+			SlideID:  slide.ID,
+			Filename: "plot.png",
+			S3Key:    "figures/20250306-1111aaaa/plot.png",
+		})
+		if err != nil {
+			t.Fatalf("CreateSlideFigure() error = %v", err)
+		}
+		_, err = repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
+			SlideID:  slide.ID,
+			Filename: "plot.png",
+			S3Key:    "figures/20250306-1111aaaa/plot.png",
+		})
+		if !errors.Is(err, repository.ErrConflict) {
+			t.Fatalf("expected ErrConflict for duplicate figure filename, got %v", err)
+		}
+
+		dataFile, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
+			SlideID:  slide.ID,
+			Filename: "metrics.csv",
+			S3Key:    "data/20250306-1111aaaa/metrics.csv",
+			Size:     12,
+			Hash:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		})
+		if err != nil {
+			t.Fatalf("CreateSlideDataFile() error = %v", err)
+		}
+		_, err = repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
+			SlideID:  slide.ID,
+			Filename: "metrics.csv",
+			S3Key:    "data/20250306-1111aaaa/metrics.csv",
+			Size:     12,
+			Hash:     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		})
+		if !errors.Is(err, repository.ErrConflict) {
+			t.Fatalf("expected ErrConflict for duplicate data filename, got %v", err)
+		}
+
+		if err := repo.DeleteSlideFigure(ctx, figure.ID); err != nil {
+			t.Fatalf("DeleteSlideFigure() error = %v", err)
+		}
+		if err := repo.DeleteSlideDataFile(ctx, dataFile.ID); err != nil {
+			t.Fatalf("DeleteSlideDataFile() error = %v", err)
+		}
+	})
+
+	t.Run("figure and data-file get/list/update", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		slide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250306-2222bbbb",
+			Date:        "2025-03-06",
+			DayOrder:    "n",
+			HTMLContent: "<h1>Asset updates</h1>",
+		})
+
+		figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
+			SlideID:  slide.ID,
+			Filename: "before.png",
+			S3Key:    "figures/20250306-2222bbbb/before.png",
+			AltText:  strPtr("before"),
+		})
+		if err != nil {
+			t.Fatalf("CreateSlideFigure() error = %v", err)
+		}
+
+		figures, err := repo.ListSlideFiguresBySlideID(ctx, slide.ID)
+		if err != nil {
+			t.Fatalf("ListSlideFiguresBySlideID() error = %v", err)
+		}
+		if len(figures) != 1 || figures[0].ID != figure.ID {
+			t.Fatalf("unexpected figures list: %+v", figures)
+		}
+
+		updatedFigure, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{
+			ID:       figure.ID,
+			Filename: "after.png",
+			S3Key:    "figures/20250306-2222bbbb/after.png",
+			AltText:  strPtr("after"),
+		})
+		if err != nil {
+			t.Fatalf("UpdateSlideFigure() error = %v", err)
+		}
+		if updatedFigure.Filename != "after.png" || updatedFigure.S3Key != "figures/20250306-2222bbbb/after.png" {
+			t.Fatalf("unexpected updated figure Filename/S3Key: %+v", updatedFigure)
+		}
+		if updatedFigure.AltText == nil || *updatedFigure.AltText != "after" {
+			t.Fatalf("expected AltText=%q after figure update, got %v", "after", updatedFigure.AltText)
+		}
+
+		// Verify nil AltText preserves existing value (patch semantics).
+		patchedFigure, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{
+			ID:      figure.ID,
+			AltText: nil,
+		})
+		if err != nil {
+			t.Fatalf("UpdateSlideFigure(nil AltText) error = %v", err)
+		}
+		if patchedFigure.AltText == nil || *patchedFigure.AltText != "after" {
+			t.Fatalf("expected AltText preserved as %q when nil, got %v", "after", patchedFigure.AltText)
+		}
+
+		dataFile, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
+			SlideID:     slide.ID,
+			Filename:    "before.csv",
+			S3Key:       "data/20250306-2222bbbb/before.csv",
+			Size:        7,
+			Hash:        "abababababababababababababababababababababababababababababababab",
+			Description: strPtr("before"),
+		})
+		if err != nil {
+			t.Fatalf("CreateSlideDataFile() error = %v", err)
+		}
+
+		files, err := repo.ListSlideDataFilesBySlideID(ctx, slide.ID)
+		if err != nil {
+			t.Fatalf("ListSlideDataFilesBySlideID() error = %v", err)
+		}
+		if len(files) != 1 || files[0].ID != dataFile.ID {
+			t.Fatalf("unexpected data-file list: %+v", files)
+		}
+
+		updatedDataFile, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+			ID:          dataFile.ID,
+			Filename:    "after.csv",
+			S3Key:       "data/20250306-2222bbbb/after.csv",
+			Size:        int64Ptr(11),
+			Hash:        strPtr("cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"),
+			Description: strPtr("after"),
+		})
+		if err != nil {
+			t.Fatalf("UpdateSlideDataFile() error = %v", err)
+		}
+		if updatedDataFile.Filename != "after.csv" ||
+			updatedDataFile.S3Key != "data/20250306-2222bbbb/after.csv" ||
+			updatedDataFile.Size != 11 ||
+			updatedDataFile.Hash != "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd" {
+			t.Fatalf("unexpected updated data file Filename/S3Key/Size/Hash: %+v", updatedDataFile)
+		}
+		if updatedDataFile.Description == nil || *updatedDataFile.Description != "after" {
+			t.Fatalf("expected Description=%q after data file update, got %v", "after", updatedDataFile.Description)
+		}
+
+		// Verify nil Description preserves existing value (patch semantics).
+		patchedDataFile, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+			ID:          dataFile.ID,
+			Description: nil,
+		})
+		if err != nil {
+			t.Fatalf("UpdateSlideDataFile(nil Description) error = %v", err)
+		}
+		if patchedDataFile.Description == nil || *patchedDataFile.Description != "after" {
+			t.Fatalf("expected Description preserved as %q when nil, got %v", "after", patchedDataFile.Description)
+		}
+	})
+
+	t.Run("list filters and invalid arguments", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250301-aa11aa11",
+			Date:        "2025-03-01",
+			DayOrder:    "a",
+			HTMLContent: "<h1>1</h1>",
+			ProjectID:   strPtr("org/p1"),
+		})
+		second := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250302-bb22bb22",
+			Date:        "2025-03-02",
+			DayOrder:    "a",
+			HTMLContent: "<h1>2</h1>",
+			ProjectID:   strPtr("org/p2"),
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250303-cc33cc33",
+			Date:        "2025-03-03",
+			DayOrder:    "a",
+			HTMLContent: "<h1>3</h1>",
+			ProjectID:   strPtr("org/p2"),
+		})
+
+		if err := repo.SoftDeleteSlide(ctx, second.ID); err != nil {
+			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		}
+
+		projectID := "org/p2"
+		dateFrom := "2025-03-01"
+		dateTo := "2025-03-03"
+		filtered, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+			IncludeDeleted: false,
+			ProjectID:      &projectID,
+			DateFrom:       &dateFrom,
+			DateTo:         &dateTo,
+			Limit:          1,
+		})
+		if err != nil {
+			t.Fatalf("ListSlides(filter) error = %v", err)
+		}
+		if len(filtered) != 1 || filtered[0].ID != "20250303-cc33cc33" {
+			t.Fatalf("unexpected filtered result: %+v", filtered)
+		}
+
+		if _, err := repo.GetSlideByID(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for empty slide id, got %v", err)
+		}
+		if err := repo.DeleteSlide(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for empty delete id, got %v", err)
+		}
+		if err := repo.RestoreSlide(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for empty restore id, got %v", err)
+		}
+		if _, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for invalid figure input, got %v", err)
+		}
+		if _, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for invalid data-file input, got %v", err)
+		}
+		if _, err := repo.CreateTemplate(ctx, repository.CreateTemplateInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for invalid template input, got %v", err)
+		}
+		if _, err := repo.UpdateTemplate(ctx, repository.UpdateTemplateInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for invalid template update, got %v", err)
+		}
+		if _, err := repo.GetTemplateByName(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for empty template name, got %v", err)
+		}
+		if err := repo.DeleteTemplate(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for empty template delete, got %v", err)
+		}
+		if _, err := repo.GetSlideFigureByID(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for invalid figure id, got %v", err)
+		}
+		if _, err := repo.GetSlideDataFileByID(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for invalid data-file id, got %v", err)
+		}
+		if _, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{ID: 0}); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for invalid figure update id, got %v", err)
+		}
+		if _, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{ID: 0}); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for invalid data-file update id, got %v", err)
+		}
+		if err := repo.DeleteSlideFigure(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for invalid figure delete id, got %v", err)
+		}
+		if err := repo.DeleteSlideDataFile(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for invalid data-file delete id, got %v", err)
+		}
+		if err := repo.SoftDeleteSlide(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for empty soft-delete id, got %v", err)
+		}
+
+		if err := repo.DeleteSlide(ctx, "20259999-missing00"); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound for missing slide delete, got %v", err)
+		}
+	})
+
+	t.Run("templates CRUD", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		template, err := repo.CreateTemplate(ctx, repository.CreateTemplateInput{
+			Name:        "text-only",
+			HTMLContent: "<main></main>",
+		})
+		if err != nil {
+			t.Fatalf("CreateTemplate() error = %v", err)
+		}
+
+		updated, err := repo.UpdateTemplate(ctx, repository.UpdateTemplateInput{
+			Name:        template.Name,
+			HTMLContent: "<section></section>",
+		})
+		if err != nil {
+			t.Fatalf("UpdateTemplate() error = %v", err)
+		}
+		if updated.HTMLContent != "<section></section>" {
+			t.Fatalf("unexpected updated template: %+v", updated)
+		}
+
+		listed, err := repo.ListTemplates(ctx)
+		if err != nil {
+			t.Fatalf("ListTemplates() error = %v", err)
+		}
+		if len(listed) != 1 {
+			t.Fatalf("expected one template, got %d", len(listed))
+		}
+
+		if err := repo.DeleteTemplate(ctx, template.Name); err != nil {
+			t.Fatalf("DeleteTemplate() error = %v", err)
+		}
+		_, err = repo.GetTemplateByName(ctx, template.Name)
+		if !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound after template delete, got %v", err)
+		}
+	})
+
+	t.Run("foreign key rejection and cascading delete", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		_, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
+			SlideID:  "20250309-missing0",
+			Filename: "orphan.png",
+			S3Key:    "figures/20250309-missing0/orphan.png",
+		})
+		if !errors.Is(err, repository.ErrForeignKeyViolation) {
+			t.Fatalf("expected ErrForeignKeyViolation for orphan figure, got %v", err)
+		}
+
+		slide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250309-ca5cad01",
+			Date:        "2025-03-09",
+			DayOrder:    "n",
+			HTMLContent: "<h1>Cascade</h1>",
+		})
+		figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
+			SlideID:  slide.ID,
+			Filename: "f.png",
+			S3Key:    "figures/20250309-ca5cad01/f.png",
+		})
+		if err != nil {
+			t.Fatalf("CreateSlideFigure() error = %v", err)
+		}
+		dataFile, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
+			SlideID:  slide.ID,
+			Filename: "d.csv",
+			S3Key:    "data/20250309-ca5cad01/d.csv",
+			Size:     4,
+			Hash:     "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		})
+		if err != nil {
+			t.Fatalf("CreateSlideDataFile() error = %v", err)
+		}
+
+		if err := repo.DeleteSlide(ctx, slide.ID); err != nil {
+			t.Fatalf("DeleteSlide() error = %v", err)
+		}
+		_, err = repo.GetSlideByID(ctx, slide.ID)
+		if !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound for deleted slide, got %v", err)
+		}
+		_, err = repo.GetSlideFigureByID(ctx, figure.ID)
+		if !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound for cascaded figure, got %v", err)
+		}
+		_, err = repo.GetSlideDataFileByID(ctx, dataFile.ID)
+		if !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound for cascaded data file, got %v", err)
+		}
+	})
+
+	t.Run("sync version changes", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		before, err := repo.GetSyncVersion(ctx)
+		if err != nil {
+			t.Fatalf("GetSyncVersion(before) error = %v", err)
+		}
+
+		_, err = repo.CreateTemplate(ctx, repository.CreateTemplateInput{
+			Name:        "sync-version",
+			HTMLContent: "<main>sync</main>",
+		})
+		if err != nil {
+			t.Fatalf("CreateTemplate() error = %v", err)
+		}
+
+		after, err := repo.GetSyncVersion(ctx)
+		if err != nil {
+			t.Fatalf("GetSyncVersion(after) error = %v", err)
+		}
+		if after.Version <= before.Version {
+			t.Fatalf("expected sync version to increase, before=%d after=%d", before.Version, after.Version)
+		}
+	})
+}
+
+func mustCreateSlide(t *testing.T, ctx context.Context, repo repository.Repository, input repository.CreateSlideInput) repository.Slide {
+	t.Helper()
+
+	slide, err := repo.CreateSlide(ctx, input)
+	if err != nil {
+		t.Fatalf("CreateSlide failed: %v", err)
+	}
+	if slide.CreatedAt.IsZero() {
+		t.Fatal("expected non-zero CreatedAt after CreateSlide")
+	}
+	if slide.UpdatedAt.IsZero() {
+		t.Fatal("expected non-zero UpdatedAt after CreateSlide")
+	}
+	return slide
+}
+
+func slideIDs(slides []repository.Slide) []string {
+	ids := make([]string, 0, len(slides))
+	for _, slide := range slides {
+		ids = append(ids, slide.ID)
+	}
+	return ids
+}
+
+func assertExactOrder(t *testing.T, got []string, want []string) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("expected %d rows, got %d (%v)", len(want), len(got), got)
+	}
+	for idx := range got {
+		if got[idx] != want[idx] {
+			t.Fatalf("unexpected ordering at %d: got=%v want=%v", idx, got, want)
+		}
+	}
+}
+
+func strPtr(value string) *string {
+	return &value
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
+}

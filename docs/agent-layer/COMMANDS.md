@@ -33,6 +33,12 @@ go test ./...
 ```
 Run from: `cli/`
 
+- Verify module graph is tidy
+```bash
+go mod tidy -diff
+```
+Run from: `cli/`
+
 - Build CLI binary
 ```bash
 go build -o pc ./cmd/pc
@@ -51,15 +57,21 @@ Run from: `cli/`
 ./scripts/check_coverage.sh 95
 ```
 Run from: `cli/`
-Notes: Enforces the hard 95% threshold and fails loudly below target.
+Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `repositorytest` (contract helper, no `_test.go` files).
+
+- Run per-package Go coverage gate
+```bash
+./scripts/check_coverage_per_package.sh 95
+```
+Run from: `cli/`
+Notes: Fails when any tested package drops below 95%. Excludes `repositorytest` (contract helper, no `_test.go` files).
 
 - Run Go linter
 ```bash
 golangci-lint run ./...
 ```
 Run from: `cli/`
-Prerequisites: Install pinned version from CI workflow value:
-`GOLANGCI_LINT_VERSION="$(awk -F': *' '$1 ~ /GOLANGCI_LINT_VERSION/{print $2; exit}' ../.github/workflows/ci.yml | tr -d '"')" && go install github.com/golangci/golangci-lint/cmd/golangci-lint@"$GOLANGCI_LINT_VERSION" && export PATH="$(go env GOPATH)/bin:$PATH"`
+Prerequisites: `go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.10` and ensure `$(go env GOPATH)/bin` is on `PATH`.
 
 ## Next.js Web UI (`web/`)
 

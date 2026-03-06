@@ -4,7 +4,7 @@ Personal Context is a local-first engineering notebook system that stores work a
 
 ## Status
 
-Phase 1 (Project Scaffolding) is implemented: monorepo workspaces exist (`cli/`, `web/`, `schema/`), coverage/lint/e2e scaffolding is configured, and CI checks are defined. Product features from later phases (full CLI CRUD, sync, import/export workflows, and full web UI) are still in roadmap phases 2+.
+Roadmap Phase 2 (Core Data Layer, Local) is implemented: foundation libraries, local config module, SQLite migrations + repository layer, and local filesystem client are complete with test coverage gates. User-facing CLI workflows (`pc setup/add/show/...`) and cloud/web product features remain in later roadmap phases.
 
 ## Architecture
 
@@ -45,20 +45,23 @@ personal-context/
 - Node.js 22+
 - npm
 
-### Local-Only Setup (Scaffold Verification)
+### Local-Only Setup (Development Verification)
 
 ```bash
 # CLI
 cd cli
+go mod tidy -diff
 go test ./...
 go build ./...
 go build -o pc ./cmd/pc
 ./scripts/check_coverage.sh 95
+./scripts/check_coverage_per_package.sh 95
 
 # Web
 cd ../web
 npm install
 npm run lint
+npm run typecheck
 npm test
 npm run test:coverage
 npm run build
@@ -88,7 +91,7 @@ pc setup \
 
 ## CLI Command Reference
 
-### Currently Implemented (Phase 1)
+### Currently Implemented CLI Surface
 
 - `pc --help`
 - `pc --version`
@@ -116,10 +119,12 @@ Full production UI behavior (slides, filters, edit/delete/restore, sync manager)
 ### CLI (`cli/`)
 
 ```bash
+go mod tidy -diff
 go test ./...
 go build ./...
 go build -o pc ./cmd/pc
 ./scripts/check_coverage.sh 95
+./scripts/check_coverage_per_package.sh 95
 golangci-lint run ./...
 ```
 
@@ -128,6 +133,7 @@ golangci-lint run ./...
 ```bash
 npm install
 npm run lint
+npm run typecheck
 npm test
 npm run test:coverage
 npm run build
@@ -146,7 +152,7 @@ npm run test:e2e:smoke
 GitHub Actions workflow: `.github/workflows/ci.yml`
 
 - Enforces schema contract checks.
-- Runs CLI build/test/lint/coverage with hard fail below 95%.
+- Runs CLI `go mod tidy -diff`, build/test/lint, aggregate coverage gate (`>=95%`), and per-package coverage gate (`>=95%` for each tested package).
 - Runs web lint/test/coverage/build and Playwright smoke e2e.
 - Uses pinned `golangci-lint` version via `GOLANGCI_LINT_VERSION`.
 

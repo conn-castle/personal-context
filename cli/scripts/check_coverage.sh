@@ -9,7 +9,16 @@ if ! [[ "$threshold" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
 	exit 2
 fi
 
-go test -covermode=atomic -coverprofile="$profile" ./...
+packages=()
+while IFS= read -r pkg; do
+	packages+=("$pkg")
+done < <(go list ./... | grep -v '/internal/repository/repositorytest$')
+if [[ "${#packages[@]}" -eq 0 ]]; then
+	echo "no packages selected for coverage" >&2
+	exit 2
+fi
+
+go test -covermode=atomic -coverprofile="$profile" "${packages[@]}"
 
 total_line="$(go tool cover -func="$profile" | awk '/^total:/ { print }')"
 if [[ -z "$total_line" ]]; then
