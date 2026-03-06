@@ -110,3 +110,13 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: `html_content` references figures as `figures/{filename}` (relative, no slide_id). Each rendering context resolves: web UI rewrites to presigned URLs; git export matches naturally (`./figures/{filename}` relative to slide folder). `pc add`/`pc edit` validate that every `figures/` src has a matching file.
     Reason: Standard HTML with relative paths. No custom protocol for agents to learn. Natural fit for git export structure.
     Tradeoffs: Requires per-context resolution logic; trivial (URL rewriting in iframe, validation in CLI).
+
+- Decision 2026-03-05 v2w3x4: Web workspace uses Vitest for unit coverage gates
+    Decision: Use Vitest (not Jest) as the canonical `web/` unit test runner and coverage gate (`npm test`, `npm run test:coverage`).
+    Reason: Roadmap allowed Vitest/Jest. Vitest offered a lean scaffold path with fast run times and simple 95% threshold enforcement.
+    Tradeoffs: Next.js examples more commonly show Jest; contributors must follow the Vitest-specific config and scripts in this repo.
+
+- Decision 2026-03-05 y5z6a7: Phase 1 Playwright gate is DB-free smoke only
+    Decision: Phase 1 Playwright verification runs a DB-free smoke test (`npm run test:e2e:smoke`) against a static app route via `playwright.config` `webServer`.
+    Reason: Full DB-backed e2e setup belongs to later phases; Phase 1 needs reproducible e2e wiring without introducing fake backend logic.
+    Tradeoffs: Phase 1 e2e only proves browser/server wiring, not data workflows; richer e2e scenarios remain required in later roadmap phases.

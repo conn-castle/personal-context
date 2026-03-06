@@ -39,3 +39,8 @@ node_modules/
 coverage.out
 *.test
 /cli/pc
+.next/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo

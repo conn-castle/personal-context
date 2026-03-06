@@ -25,16 +25,7 @@ Notes: <optional constraints or tips>
 
 <!-- ENTRIES START -->
 
-> **Note:** `cli/` and `web/` directories now exist as Phase 1 scaffolds, but most commands below require the pending Phase 1 initialization tasks (Go module setup in `cli/` and Next.js app initialization in `web/`).
-
 ## Go CLI (`cli/`)
-
-- Initialize Go module
-```bash
-go mod init github.com/conn-castle/personal-context/cli
-```
-Run from: `cli/`
-Notes: To be run during Phase 1 scaffolding.
 
 - Run Go tests
 ```bash
@@ -49,19 +40,26 @@ go build -o pc ./cmd/pc
 Run from: `cli/`
 Notes: Binary name is `pc`.
 
-- Run Go tests with coverage
+- Build all Go packages
 ```bash
-go test -coverprofile=coverage.out ./... && go tool cover -func=coverage.out
+go build ./...
 ```
 Run from: `cli/`
-Notes: CI enforces >95% coverage. Use `go tool cover -html=coverage.out` to inspect uncovered lines.
+
+- Run Go tests with coverage
+```bash
+./scripts/check_coverage.sh 95
+```
+Run from: `cli/`
+Notes: Enforces the hard 95% threshold and fails loudly below target.
 
 - Run Go linter
 ```bash
 golangci-lint run ./...
 ```
 Run from: `cli/`
-Prerequisites: `golangci-lint` installed
+Prerequisites: Install pinned version from CI workflow value:
+`GOLANGCI_LINT_VERSION="$(awk -F': *' '$1 ~ /GOLANGCI_LINT_VERSION/{print $2; exit}' ../.github/workflows/ci.yml | tr -d '"')" && go install github.com/golangci/golangci-lint/cmd/golangci-lint@"$GOLANGCI_LINT_VERSION" && export PATH="$(go env GOPATH)/bin:$PATH"`
 
 ## Next.js Web UI (`web/`)
 
@@ -91,14 +89,35 @@ Run from: `web/`
 
 - Run tests with coverage
 ```bash
-npm test -- --coverage
+npm run test:coverage
 ```
 Run from: `web/`
 Notes: CI enforces >95% coverage.
 
-- Run Playwright e2e tests
+- Run linter
 ```bash
-npx playwright test
+npm run lint
 ```
 Run from: `web/`
-Prerequisites: `npx playwright install` for browser binaries. Test database configured.
+
+- Run typecheck
+```bash
+npm run typecheck
+```
+Run from: `web/`
+
+- Run Playwright smoke e2e tests
+```bash
+npm run test:e2e:smoke
+```
+Run from: `web/`
+Prerequisites: `npx playwright install` for browser binaries.
+
+## Repository root
+
+- Verify canonical schema contract for both workspaces
+```bash
+./scripts/check_schema_contract.sh
+```
+Run from: repo root
+Notes: Fails when canonical `schema/` files are missing, when `cli/` or `web/` stop referencing them in executable/config files, or when workspace-local schema duplicates are introduced.
