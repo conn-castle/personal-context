@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
+	sqlite "modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // Repository implements repository.Repository using SQLite.
@@ -241,23 +243,27 @@ func (r *Repository) GetSlideFigureByID(ctx context.Context, id int64) (reposito
 }
 
 // UpdateSlideFigure updates mutable figure fields.
+// Patch semantics: empty Filename/S3Key preserve existing values; nil AltText preserves existing.
 func (r *Repository) UpdateSlideFigure(ctx context.Context, input repository.UpdateSlideFigureInput) (repository.SlideFigure, error) {
 	if input.ID <= 0 {
 		return repository.SlideFigure{}, repository.ErrInvalidArgument
 	}
 
-	result, err := r.db.ExecContext(
-		ctx,
-		`UPDATE slide_figures
-         SET filename = COALESCE(NULLIF(?, ''), filename),
-             s3_key = COALESCE(NULLIF(?, ''), s3_key),
-             alt_text = ?
-         WHERE id = ?;`,
-		input.Filename,
-		input.S3Key,
-		nullableString(input.AltText),
-		input.ID,
-	)
+	setClauses := []string{
+		"filename = COALESCE(NULLIF(?, ''), filename)",
+		"s3_key = COALESCE(NULLIF(?, ''), s3_key)",
+	}
+	args := []any{input.Filename, input.S3Key}
+
+	if input.AltText != nil {
+		setClauses = append(setClauses, "alt_text = ?")
+		args = append(args, nullableString(input.AltText))
+	}
+
+	args = append(args, input.ID)
+	query := fmt.Sprintf(`UPDATE slide_figures SET %s WHERE id = ?;`, strings.Join(setClauses, ", "))
+
+	result, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return repository.SlideFigure{}, mapSQLiteError(err)
 	}
@@ -369,22 +375,23 @@ func (r *Repository) UpdateSlideDataFile(ctx context.Context, input repository.U
 		return repository.SlideDataFile{}, repository.ErrInvalidArgument
 	}
 
-	result, err := r.db.ExecContext(
-		ctx,
-		`UPDATE slide_data_files
-         SET filename = COALESCE(NULLIF(?, ''), filename),
-             s3_key = COALESCE(NULLIF(?, ''), s3_key),
-             size = COALESCE(?, size),
-             hash = COALESCE(NULLIF(?, ''), hash),
-             description = ?
-         WHERE id = ?;`,
-		input.Filename,
-		input.S3Key,
-		nullableInt64(input.Size),
-		nullableString(input.Hash),
-		nullableString(input.Description),
-		input.ID,
-	)
+	setClauses := []string{
+		"filename = COALESCE(NULLIF(?, ''), filename)",
+		"s3_key = COALESCE(NULLIF(?, ''), s3_key)",
+		"size = COALESCE(?, size)",
+		"hash = COALESCE(NULLIF(?, ''), hash)",
+	}
+	args := []any{input.Filename, input.S3Key, nullableInt64(input.Size), nullableString(input.Hash)}
+
+	if input.Description != nil {
+		setClauses = append(setClauses, "description = ?")
+		args = append(args, nullableString(input.Description))
+	}
+
+	args = append(args, input.ID)
+	query := fmt.Sprintf(`UPDATE slide_data_files SET %s WHERE id = ?;`, strings.Join(setClauses, ", "))
+
+	result, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return repository.SlideDataFile{}, mapSQLiteError(err)
 	}
@@ -840,6 +847,16 @@ func mapSQLiteError(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return repository.ErrNotFound
 	}
+	var sqliteErr *sqlite.Error
+	if errors.As(err, &sqliteErr) {
+		switch sqliteErr.Code() {
+		case sqlite3.SQLITE_CONSTRAINT_UNIQUE, sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY:
+			return fmt.Errorf("%w: %s", repository.ErrConflict, err)
+		case sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY:
+			return fmt.Errorf("%w: %s", repository.ErrForeignKeyViolation, err)
+		}
+	}
+	// Fallback to string matching for drivers that don't expose structured errors.
 	message := err.Error()
 	switch {
 	case strings.Contains(message, "UNIQUE constraint failed"):

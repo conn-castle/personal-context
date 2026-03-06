@@ -234,6 +234,18 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			t.Fatalf("expected AltText=%q after figure update, got %v", "after", updatedFigure.AltText)
 		}
 
+		// Verify nil AltText preserves existing value (patch semantics).
+		patchedFigure, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{
+			ID:      figure.ID,
+			AltText: nil,
+		})
+		if err != nil {
+			t.Fatalf("UpdateSlideFigure(nil AltText) error = %v", err)
+		}
+		if patchedFigure.AltText == nil || *patchedFigure.AltText != "after" {
+			t.Fatalf("expected AltText preserved as %q when nil, got %v", "after", patchedFigure.AltText)
+		}
+
 		dataFile, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
 			SlideID:     slide.ID,
 			Filename:    "before.csv",
@@ -273,6 +285,18 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 		if updatedDataFile.Description == nil || *updatedDataFile.Description != "after" {
 			t.Fatalf("expected Description=%q after data file update, got %v", "after", updatedDataFile.Description)
+		}
+
+		// Verify nil Description preserves existing value (patch semantics).
+		patchedDataFile, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+			ID:          dataFile.ID,
+			Description: nil,
+		})
+		if err != nil {
+			t.Fatalf("UpdateSlideDataFile(nil Description) error = %v", err)
+		}
+		if patchedDataFile.Description == nil || *patchedDataFile.Description != "after" {
+			t.Fatalf("expected Description preserved as %q when nil, got %v", "after", patchedDataFile.Description)
 		}
 	})
 

@@ -111,10 +111,6 @@ func TestApplyMigrationsIsIdempotentAndCreatesExpectedSchema(t *testing.T) {
 		t.Fatalf("expected one applied migration, got %d", migrationCount)
 	}
 
-	var updatedAtBefore sql.NullString
-	if err := connection.DB().QueryRow(`SELECT updated_at FROM slides WHERE id = '20250304-a1b2c3d4';`).Scan(&updatedAtBefore); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("unexpected updated_at query error: %v", err)
-	}
 }
 
 func TestApplyMigrationsRejectsInvalidInput(t *testing.T) {

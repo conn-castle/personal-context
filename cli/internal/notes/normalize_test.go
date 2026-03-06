@@ -33,6 +33,39 @@ func TestNormalizeValidMarkdownPreserved(t *testing.T) {
 	}
 }
 
+func TestNormalizeCRLFToLF(t *testing.T) {
+	input := "line one\r\nline two\r\n"
+	got := Normalize(&input)
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if *got != "line one\nline two" {
+		t.Fatalf("expected CRLF converted to LF and trailing trimmed, got %q", *got)
+	}
+}
+
+func TestNormalizeStrayCR(t *testing.T) {
+	input := "line one\rline two"
+	got := Normalize(&input)
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if *got != "line one\nline two" {
+		t.Fatalf("expected stray CR converted to LF, got %q", *got)
+	}
+}
+
+func TestNormalizeTrimsTrailingWhitespacePerLine(t *testing.T) {
+	input := "hello   \nworld\t\t"
+	got := Normalize(&input)
+	if got == nil {
+		t.Fatal("expected non-nil")
+	}
+	if *got != "hello\nworld" {
+		t.Fatalf("expected trailing whitespace trimmed per line, got %q", *got)
+	}
+}
+
 func TestNormalizeStringConvenience(t *testing.T) {
 	got := NormalizeString("hello")
 	if got == nil || *got != "hello" {
