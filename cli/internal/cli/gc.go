@@ -54,16 +54,19 @@ func runGC(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 		return nil
 	}
 
+	removed := 0
 	for _, s := range expired {
 		if err := stack.Repo.DeleteSlide(ctx, s.ID); err != nil {
 			return fmt.Errorf("hard delete slide %s: %w", s.ID, err)
 		}
 		if err := stack.FS.DeleteSlideDir(s.ID); err != nil {
-			return fmt.Errorf("remove files for slide %s: %w", s.ID, err)
+			_, _ = fmt.Fprintf(stdout, "Warning: failed to remove files for slide %s: %v\n", s.ID, err)
+			continue
 		}
+		removed++
 		_, _ = fmt.Fprintf(stdout, "Deleted %s\n", s.ID)
 	}
 
-	_, _ = fmt.Fprintf(stdout, "Removed %d slide(s).\n", len(expired))
+	_, _ = fmt.Fprintf(stdout, "Removed %d slide(s).\n", removed)
 	return nil
 }

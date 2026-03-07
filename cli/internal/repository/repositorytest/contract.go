@@ -744,6 +744,35 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 	})
 
+	t.Run("LIKE backslash escaping in Query", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250405-e5c05ee5",
+			Date:        "2025-04-05",
+			DayOrder:    "e",
+			HTMLContent: `<p>path is C:\Users\docs</p>`,
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250405-e5c06ff6",
+			Date:        "2025-04-05",
+			DayOrder:    "f",
+			HTMLContent: "<p>path is C:Usersdocs</p>",
+		})
+
+		// A query containing backslashes should only match the slide with
+		// literal backslashes, not the one without them.
+		bsQuery := `C:\Users`
+		bsResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &bsQuery})
+		if err != nil {
+			t.Fatalf("ListSlides(Query with backslash) error = %v", err)
+		}
+		if len(bsResults) != 1 || bsResults[0].ID != "20250405-e5c05ee5" {
+			t.Fatalf("expected only the slide with literal backslashes, got %v", slideIDs(bsResults))
+		}
+	})
+
 	t.Run("Whitespace-only Query rejected", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()

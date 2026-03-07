@@ -657,6 +657,36 @@ func TestListSlideIDsOnDisk(t *testing.T) {
 	})
 }
 
+func TestNilReceiverGuards(t *testing.T) {
+	var nilClient *Client
+
+	t.Run("BasePath returns empty string", func(t *testing.T) {
+		if got := nilClient.BasePath(); got != "" {
+			t.Fatalf("BasePath() = %q, want empty string", got)
+		}
+	})
+
+	t.Run("ListSlideIDsOnDisk returns error", func(t *testing.T) {
+		_, _, err := nilClient.ListSlideIDsOnDisk()
+		if err == nil {
+			t.Fatal("expected nil client ListSlideIDsOnDisk to fail")
+		}
+		if !strings.Contains(err.Error(), "filesystem client is required") {
+			t.Fatalf("expected 'filesystem client is required' in error, got %v", err)
+		}
+	})
+
+	t.Run("DeleteSlideDir returns error", func(t *testing.T) {
+		err := nilClient.DeleteSlideDir("slide-1")
+		if err == nil {
+			t.Fatal("expected nil client DeleteSlideDir to fail")
+		}
+		if !strings.Contains(err.Error(), "filesystem client is required") {
+			t.Fatalf("expected 'filesystem client is required' in error, got %v", err)
+		}
+	})
+}
+
 func TestDeleteSlideDir(t *testing.T) {
 	t.Run("removes existing figure and data directories", func(t *testing.T) {
 		root := t.TempDir()

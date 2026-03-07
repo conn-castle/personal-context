@@ -147,7 +147,7 @@ func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlide
 		args = append(args, *filter.DateTo)
 	}
 	if filter.Query != nil {
-		escaped := strings.NewReplacer("%", `\%`, "_", `\_`).Replace(trimmedQuery)
+		escaped := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(trimmedQuery)
 		q := "%" + escaped + "%"
 		builder.WriteString(` AND (html_content LIKE ? ESCAPE '\' OR notes LIKE ? ESCAPE '\' OR project_id LIKE ? ESCAPE '\')`)
 		args = append(args, q, q, q)

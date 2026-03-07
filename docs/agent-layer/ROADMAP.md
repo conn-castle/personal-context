@@ -70,7 +70,7 @@ Incomplete:
 - Active project integration: `pc add` uses active project when no `--project` flag or metadata.json project_id.
 - E2e test suite expanded to 103 tests (from 57): search (14), trash (5), gc (9), project (12), doctor (5), workflow (1), plus existing tests.
 - Full local-only workflow e2e test (`TestFullLocalWorkflow`) exercises all commands end-to-end.
-- Consolidated SQLite schema: removed `cli/migrations/` package, embedded single canonical schema in `internal/sqlite/sqlite_schema.sql`.
+- Consolidated SQLite schema: removed `cli/migrations/` package, embedded single canonical schema in `cli/internal/sqlite/sqlite_schema.sql`.
 - Per-package coverage >=95% enforced. All packages pass. Linter clean.
 
 ## Phase 5 — Cloud Data Layer

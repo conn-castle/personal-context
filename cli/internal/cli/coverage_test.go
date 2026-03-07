@@ -1384,11 +1384,12 @@ func TestGCDeleteSlideDirError(t *testing.T) {
 	gcCmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	gcCmd.SetArgs([]string{"gc"})
 	err := gcCmd.Execute()
-	if err == nil {
-		t.Fatal("expected error when DeleteSlideDir fails")
+	if err != nil {
+		t.Fatalf("expected gc to succeed with a warning, got error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "remove files for slide") {
-		t.Fatalf("expected 'remove files for slide' error, got %v", err)
+	output := stdout.String()
+	if !strings.Contains(output, "Warning: failed to remove files for slide") {
+		t.Fatalf("expected warning about failed file removal in stdout, got %q", output)
 	}
 }
 

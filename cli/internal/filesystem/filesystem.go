@@ -93,7 +93,11 @@ func (c *Client) DeleteDataFile(slideID string, filename string) error {
 }
 
 // BasePath returns the root data directory path.
+// Returns: empty string if receiver is nil.
 func (c *Client) BasePath() string {
+	if c == nil {
+		return ""
+	}
 	return c.basePath
 }
 
@@ -101,6 +105,9 @@ func (c *Client) BasePath() string {
 // Args: none.
 // Returns: figure slide IDs, data slide IDs, and any error.
 func (c *Client) ListSlideIDsOnDisk() (figures []string, data []string, err error) {
+	if c == nil {
+		return nil, nil, fmt.Errorf("filesystem client is required")
+	}
 	figures, err = listSubdirs(filepath.Join(c.basePath, "figures"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("list figure directories: %w", err)
@@ -116,6 +123,9 @@ func (c *Client) ListSlideIDsOnDisk() (figures []string, data []string, err erro
 // Args: slideID identifies the slide.
 // Returns: nil on success; tolerates missing directories.
 func (c *Client) DeleteSlideDir(slideID string) error {
+	if c == nil {
+		return fmt.Errorf("filesystem client is required")
+	}
 	if err := validatePathSegment("slide id", slideID); err != nil {
 		return err
 	}
