@@ -521,6 +521,348 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			t.Fatalf("expected sync version to increase, before=%d after=%d", before.Version, after.Version)
 		}
 	})
+
+	t.Run("OnlyDeleted filter", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250401-aa010101",
+			Date:        "2025-04-01",
+			DayOrder:    "a",
+			HTMLContent: "<h1>Active 1</h1>",
+		})
+		deletedSlide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250401-bb020202",
+			Date:        "2025-04-01",
+			DayOrder:    "b",
+			HTMLContent: "<h1>Will be deleted</h1>",
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250401-cc030303",
+			Date:        "2025-04-01",
+			DayOrder:    "c",
+			HTMLContent: "<h1>Active 2</h1>",
+		})
+
+		if err := repo.SoftDeleteSlide(ctx, deletedSlide.ID); err != nil {
+			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		}
+
+		onlyDeleted, err := repo.ListSlides(ctx, repository.ListSlidesFilter{OnlyDeleted: true})
+		if err != nil {
+			t.Fatalf("ListSlides(OnlyDeleted) error = %v", err)
+		}
+		if len(onlyDeleted) != 1 {
+			t.Fatalf("expected 1 deleted slide, got %d", len(onlyDeleted))
+		}
+		if onlyDeleted[0].ID != deletedSlide.ID {
+			t.Fatalf("expected deleted slide %s, got %s", deletedSlide.ID, onlyDeleted[0].ID)
+		}
+		if onlyDeleted[0].DeletedAt == nil {
+			t.Fatal("expected deleted_at to be set on OnlyDeleted result")
+		}
+	})
+
+	t.Run("Query filter search", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250402-a0a0a0a1",
+			Date:        "2025-04-02",
+			DayOrder:    "a",
+			HTMLContent: "<p>Advances in machine learning</p>",
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250402-b0b0b0b2",
+			Date:        "2025-04-02",
+			DayOrder:    "b",
+			HTMLContent: "<p>Unrelated content</p>",
+			Notes:       strPtr("learning about rust"),
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250402-c0c0c0c3",
+			Date:        "2025-04-02",
+			DayOrder:    "c",
+			HTMLContent: "<p>Some other topic</p>",
+			ProjectID:   strPtr("org/learning-project"),
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250402-d0d0d0d4",
+			Date:        "2025-04-02",
+			DayOrder:    "d",
+			HTMLContent: "<p>unrelated content only</p>",
+		})
+
+		query := "learning"
+		results, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &query})
+		if err != nil {
+			t.Fatalf("ListSlides(Query=learning) error = %v", err)
+		}
+		ids := slideIDs(results)
+		expected := []string{
+			"20250402-a0a0a0a1",
+			"20250402-b0b0b0b2",
+			"20250402-c0c0c0c3",
+		}
+		assertExactOrder(t, ids, expected)
+
+		// Case-insensitive search returns the same results.
+		upperQuery := "LEARNING"
+		upperResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &upperQuery})
+		if err != nil {
+			t.Fatalf("ListSlides(Query=LEARNING) error = %v", err)
+		}
+		assertExactOrder(t, slideIDs(upperResults), expected)
+	})
+
+	t.Run("Query with project filter", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250403-a1a1a1a1",
+			Date:        "2025-04-03",
+			DayOrder:    "a",
+			HTMLContent: "<p>golang concurrency patterns</p>",
+			ProjectID:   strPtr("org/backend"),
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250403-b2b2b2b2",
+			Date:        "2025-04-03",
+			DayOrder:    "b",
+			HTMLContent: "<p>golang generics tutorial</p>",
+			ProjectID:   strPtr("org/frontend"),
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250403-c3c3c3c3",
+			Date:        "2025-04-03",
+			DayOrder:    "c",
+			HTMLContent: "<p>python asyncio</p>",
+			ProjectID:   strPtr("org/backend"),
+		})
+
+		query := "golang"
+		projectID := "org/backend"
+		results, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+			Query:     &query,
+			ProjectID: &projectID,
+		})
+		if err != nil {
+			t.Fatalf("ListSlides(Query+ProjectID) error = %v", err)
+		}
+		if len(results) != 1 || results[0].ID != "20250403-a1a1a1a1" {
+			t.Fatalf("expected only backend golang slide, got %v", slideIDs(results))
+		}
+	})
+
+	t.Run("Query with deleted flag", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		slide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250404-de1e1e01",
+			Date:        "2025-04-04",
+			DayOrder:    "a",
+			HTMLContent: "<p>searchable content</p>",
+		})
+		if err := repo.SoftDeleteSlide(ctx, slide.ID); err != nil {
+			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		}
+
+		query := "searchable"
+
+		// Default search excludes deleted slides.
+		defaultResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &query})
+		if err != nil {
+			t.Fatalf("ListSlides(Query, default) error = %v", err)
+		}
+		if len(defaultResults) != 0 {
+			t.Fatalf("expected no results for deleted slide in default search, got %d", len(defaultResults))
+		}
+
+		// IncludeDeleted=true includes the deleted slide.
+		includeResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &query, IncludeDeleted: true})
+		if err != nil {
+			t.Fatalf("ListSlides(Query, IncludeDeleted) error = %v", err)
+		}
+		if len(includeResults) != 1 || includeResults[0].ID != slide.ID {
+			t.Fatalf("expected deleted slide with IncludeDeleted, got %v", slideIDs(includeResults))
+		}
+	})
+
+	t.Run("LIKE wildcard escaping in Query", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250405-e5c01aa1",
+			Date:        "2025-04-05",
+			DayOrder:    "a",
+			HTMLContent: "<p>100% complete</p>",
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250405-e5c02bb2",
+			Date:        "2025-04-05",
+			DayOrder:    "b",
+			HTMLContent: "<p>1000 items</p>",
+		})
+
+		// "100%" should only match the slide with the literal percent sign,
+		// not "1000" (which would match if % were treated as a wildcard).
+		query := "100%"
+		results, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &query})
+		if err != nil {
+			t.Fatalf("ListSlides(Query=100%%) error = %v", err)
+		}
+		if len(results) != 1 || results[0].ID != "20250405-e5c01aa1" {
+			t.Fatalf("expected only the slide with literal '100%%', got %v", slideIDs(results))
+		}
+
+		// Also test underscore escaping: "_" should not match arbitrary single chars.
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250405-e5c03cc3",
+			Date:        "2025-04-05",
+			DayOrder:    "c",
+			HTMLContent: "<p>item_count is 5</p>",
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250405-e5c04dd4",
+			Date:        "2025-04-05",
+			DayOrder:    "d",
+			HTMLContent: "<p>itemXcount is 9</p>",
+		})
+
+		underscoreQuery := "item_count"
+		underscoreResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &underscoreQuery})
+		if err != nil {
+			t.Fatalf("ListSlides(Query=item_count) error = %v", err)
+		}
+		if len(underscoreResults) != 1 || underscoreResults[0].ID != "20250405-e5c03cc3" {
+			t.Fatalf("expected only the slide with literal 'item_count', got %v", slideIDs(underscoreResults))
+		}
+	})
+
+	t.Run("LIKE backslash escaping in Query", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250405-e5c05ee5",
+			Date:        "2025-04-05",
+			DayOrder:    "e",
+			HTMLContent: `<p>path is C:\Users\docs</p>`,
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250405-e5c06ff6",
+			Date:        "2025-04-05",
+			DayOrder:    "f",
+			HTMLContent: "<p>path is C:Usersdocs</p>",
+		})
+
+		// A query containing backslashes should only match the slide with
+		// literal backslashes, not the one without them.
+		bsQuery := `C:\Users`
+		bsResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &bsQuery})
+		if err != nil {
+			t.Fatalf("ListSlides(Query with backslash) error = %v", err)
+		}
+		if len(bsResults) != 1 || bsResults[0].ID != "20250405-e5c05ee5" {
+			t.Fatalf("expected only the slide with literal backslashes, got %v", slideIDs(bsResults))
+		}
+	})
+
+	t.Run("Whitespace-only Query rejected", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		query := "   "
+		_, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &query})
+		if !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for whitespace-only query, got %v", err)
+		}
+	})
+
+	t.Run("Negative Limit rejected", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		_, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Limit: -1})
+		if !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for negative limit, got %v", err)
+		}
+	})
+
+	t.Run("ListDistinctProjectIDs", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		// Empty DB returns empty slice.
+		ids, err := repo.ListDistinctProjectIDs(ctx)
+		if err != nil {
+			t.Fatalf("ListDistinctProjectIDs(empty) error = %v", err)
+		}
+		if len(ids) != 0 {
+			t.Fatalf("expected empty slice for empty DB, got %v", ids)
+		}
+
+		// Create slides with different project_ids, including duplicates and nil.
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250406-a1d01aa1",
+			Date:        "2025-04-06",
+			DayOrder:    "a",
+			HTMLContent: "<h1>1</h1>",
+			ProjectID:   strPtr("org/zebra"),
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250406-b2d02bb2",
+			Date:        "2025-04-06",
+			DayOrder:    "b",
+			HTMLContent: "<h1>2</h1>",
+			ProjectID:   strPtr("org/alpha"),
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250406-c3d03cc3",
+			Date:        "2025-04-06",
+			DayOrder:    "c",
+			HTMLContent: "<h1>3</h1>",
+			ProjectID:   strPtr("org/alpha"), // duplicate
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250406-d4d04dd4",
+			Date:        "2025-04-06",
+			DayOrder:    "d",
+			HTMLContent: "<h1>4</h1>",
+			// nil ProjectID — should be excluded
+		})
+		deletedSlide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250406-e5d05ee5",
+			Date:        "2025-04-06",
+			DayOrder:    "e",
+			HTMLContent: "<h1>5</h1>",
+			ProjectID:   strPtr("org/deleted-proj"),
+		})
+		if err := repo.SoftDeleteSlide(ctx, deletedSlide.ID); err != nil {
+			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		}
+
+		ids, err = repo.ListDistinctProjectIDs(ctx)
+		if err != nil {
+			t.Fatalf("ListDistinctProjectIDs() error = %v", err)
+		}
+
+		expectedIDs := []string{"org/alpha", "org/zebra"}
+		if len(ids) != len(expectedIDs) {
+			t.Fatalf("expected %d project IDs, got %d: %v", len(expectedIDs), len(ids), ids)
+		}
+		for i, want := range expectedIDs {
+			if ids[i] != want {
+				t.Fatalf("expected project ID at index %d to be %q, got %q (full list: %v)", i, want, ids[i], ids)
+			}
+		}
+	})
+
 }
 
 func mustCreateSlide(t *testing.T, ctx context.Context, repo repository.Repository, input repository.CreateSlideInput) repository.Slide {

@@ -7,12 +7,106 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 
 	_ "modernc.org/sqlite"
 )
+
+// --- stageReplacementFile and backupExistingFileForEdit unit tests ---
+
+func TestStageReplacementFileCreateTempError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a valid source file
+	sourcePath := filepath.Join(dir, "source.txt")
+	if err := os.WriteFile(sourcePath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create target directory and make it read-only (MkdirAll succeeds for
+	// existing dir, Open succeeds on source, CreateTemp fails due to no write)
+	targetDir := filepath.Join(dir, "target")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(targetDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(targetDir, 0o755) })
+
+	finalPath := filepath.Join(targetDir, "dest.txt")
+	_, _, err := stageReplacementFile(finalPath, sourcePath)
+	if err == nil {
+		t.Fatal("expected error for CreateTemp failure")
+	}
+	if !strings.Contains(err.Error(), "staging file") {
+		t.Fatalf("expected staging file error, got %v", err)
+	}
+}
+
+func TestBackupExistingFileStatError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a regular file, then use it as a directory component to trigger
+	// ENOTDIR (not IsNotExist) from stat
+	regular := filepath.Join(dir, "notadir")
+	if err := os.WriteFile(regular, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	badPath := filepath.Join(regular, "child")
+	_, err := backupExistingFileForEdit(badPath)
+	if err == nil {
+		t.Fatal("expected error for stat failure")
+	}
+	if !strings.Contains(err.Error(), "stat destination") {
+		t.Fatalf("expected stat destination error, got %v", err)
+	}
+}
+
+func TestBackupExistingFileCreateTempError(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a file in the directory
+	filePath := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(filePath, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make directory read+execute only (stat works, CreateTemp fails)
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+
+	_, err := backupExistingFileForEdit(filePath)
+	if err == nil {
+		t.Fatal("expected error for CreateTemp failure")
+	}
+	if !strings.Contains(err.Error(), "create backup file") {
+		t.Fatalf("expected create backup file error, got %v", err)
+	}
+}
+
+// --- Add: --after with nonexistent reference on empty date ---
+
+func TestAddAfterNonexistentRef(t *testing.T) {
+	setupEnv(t)
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"add", "--after", "nonexistent-ref", "--date", "2099-01-01", dir})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for --after nonexistent reference")
+	}
+}
 
 // Tests for error paths that are hard to reach through happy-path integration tests.
 
@@ -82,6 +176,26 @@ func TestMoveHomeDirError(t *testing.T) {
 	withBrokenHomeDir(t, func() {
 		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 		cmd.SetArgs([]string{"move", "some-id", "--date", "2025-01-01"})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestTrashHomeDirError(t *testing.T) {
+	withBrokenHomeDir(t, func() {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs([]string{"trash"})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestSearchHomeDirError(t *testing.T) {
+	withBrokenHomeDir(t, func() {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs([]string{"search", "query"})
 		if err := cmd.Execute(); err == nil {
 			t.Fatal("expected error")
 		}
@@ -183,6 +297,28 @@ func TestMoveWithoutSetup(t *testing.T) {
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"move", "some-id", "--date", "2025-01-01"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error without setup")
+	}
+}
+
+func TestTrashWithoutSetup(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"trash"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error without setup")
+	}
+}
+
+func TestSearchWithoutSetup(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"search", "query"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error without setup")
 	}
@@ -1005,5 +1141,120 @@ func TestRestoreTriggerError(t *testing.T) {
 	cmd.SetArgs([]string{"restore", id})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when restore trigger fails")
+	}
+}
+
+// --- Project command: resolveHomeDir errors ---
+
+func TestProjectSetHomeDirError(t *testing.T) {
+	withBrokenHomeDir(t, func() {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs([]string{"project", "set", "some-project"})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestProjectClearHomeDirError(t *testing.T) {
+	withBrokenHomeDir(t, func() {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs([]string{"project", "clear"})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestProjectListHomeDirError(t *testing.T) {
+	withBrokenHomeDir(t, func() {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs([]string{"project", "list"})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestProjectListWithoutSetup(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "list"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error without setup")
+	}
+}
+
+func TestProjectSetWithoutSetup(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "set", "some-project"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error without setup (config does not exist)")
+	}
+}
+
+func TestProjectClearWithoutSetup(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "clear"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error without setup (config does not exist)")
+	}
+}
+
+// --- GC command: resolveHomeDir and without-setup errors ---
+
+func TestGCHomeDirError(t *testing.T) {
+	withBrokenHomeDir(t, func() {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs([]string{"gc"})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestGCWithoutSetup(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"gc"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error without setup")
+	}
+}
+
+// --- Doctor command: resolveHomeDir and without-setup errors ---
+
+func TestDoctorHomeDirError(t *testing.T) {
+	withBrokenHomeDir(t, func() {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs([]string{"doctor"})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestDoctorWithoutSetup(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"doctor"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error without setup")
+	}
+	if !strings.Contains(stdout.String(), "FAIL") {
+		t.Fatalf("expected FAIL in output, got %q", stdout.String())
 	}
 }

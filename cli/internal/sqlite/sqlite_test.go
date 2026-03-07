@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -75,12 +76,11 @@ func TestApplyMigrationsIsIdempotentAndCreatesExpectedSchema(t *testing.T) {
 		_ = connection.Close()
 	})
 
-	migrationsDir := filepath.Clean(filepath.Join("..", "..", "migrations", "sqlite"))
-	if err := connection.ApplyMigrations(context.Background(), migrationsDir); err != nil {
-		t.Fatalf("first ApplyMigrations() error = %v", err)
+	if err := connection.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("first ApplySchema() error = %v", err)
 	}
-	if err := connection.ApplyMigrations(context.Background(), migrationsDir); err != nil {
-		t.Fatalf("second ApplyMigrations() error = %v", err)
+	if err := connection.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("second ApplySchema() error = %v", err)
 	}
 
 	assertTableExists(t, connection.DB(), "slides")
@@ -298,9 +298,8 @@ func TestMigrationTriggersUpdateUpdatedAtAndSyncVersion(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = connection.Close() })
 
-	migrationsDir := filepath.Clean(filepath.Join("..", "..", "migrations", "sqlite"))
-	if err := connection.ApplyMigrations(context.Background(), migrationsDir); err != nil {
-		t.Fatalf("ApplyMigrations() error = %v", err)
+	if err := connection.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("ApplySchema() error = %v", err)
 	}
 
 	if _, err := connection.DB().Exec(`INSERT INTO slides(id, date, day_order, html_content) VALUES(?, ?, ?, ?);`, "20260305-abcddcba", "2026-03-05", "n", "<h1>a</h1>"); err != nil {
@@ -346,9 +345,8 @@ func TestMigrationEnforcesStrictIDAndHashConstraints(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = connection.Close() })
 
-	migrationsDir := filepath.Clean(filepath.Join("..", "..", "migrations", "sqlite"))
-	if err := connection.ApplyMigrations(context.Background(), migrationsDir); err != nil {
-		t.Fatalf("ApplyMigrations() error = %v", err)
+	if err := connection.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("ApplySchema() error = %v", err)
 	}
 
 	if _, err := connection.DB().Exec(
@@ -954,6 +952,270 @@ func TestApplyMigrationsFromFSPropagatesLookupFailure(t *testing.T) {
 	err = ApplyMigrationsFromFS(context.Background(), conn.DB(), fsys)
 	if err == nil {
 		t.Fatal("expected error when isMigrationAppliedFn fails")
+	}
+}
+
+func TestSchemaSQL(t *testing.T) {
+	content := SchemaSQL()
+	if len(content) == 0 {
+		t.Fatal("SchemaSQL() returned empty content")
+	}
+	if !strings.Contains(string(content), "CREATE TABLE IF NOT EXISTS slides") {
+		t.Fatal("SchemaSQL() missing slides table definition")
+	}
+}
+
+func TestSchemaFS(t *testing.T) {
+	fsys, err := SchemaFS()
+	if err != nil {
+		t.Fatalf("SchemaFS() error = %v", err)
+	}
+	if fsys == nil {
+		t.Fatal("SchemaFS() returned nil filesystem")
+	}
+}
+
+func TestApplySchemaIsIdempotent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	if err := conn.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("first ApplySchema() error = %v", err)
+	}
+	if err := conn.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("second ApplySchema() error = %v", err)
+	}
+
+	assertTableExists(t, conn.DB(), "slides")
+	assertTableExists(t, conn.DB(), "slide_figures")
+	assertTableExists(t, conn.DB(), "slide_data_files")
+	assertTableExists(t, conn.DB(), "templates")
+	assertTableExists(t, conn.DB(), "sync_version")
+	assertTableExists(t, conn.DB(), "schema_migrations")
+
+	var count int
+	if err := conn.DB().QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
+		t.Fatalf("query schema_migrations: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 migration record, got %d", count)
+	}
+
+	var version string
+	if err := conn.DB().QueryRow("SELECT version FROM schema_migrations").Scan(&version); err != nil {
+		t.Fatalf("query version: %v", err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("expected version %q, got %q", schemaVersion, version)
+	}
+}
+
+func TestSingleFileFSOpen(t *testing.T) {
+	sfs := &singleFileFS{name: "001_schema.sql", data: []byte("CREATE TABLE t(id INTEGER);")}
+
+	t.Run("open root directory", func(t *testing.T) {
+		f, err := sfs.Open(".")
+		if err != nil {
+			t.Fatalf("Open(.) error = %v", err)
+		}
+		defer func() { _ = f.Close() }()
+
+		info, err := f.Stat()
+		if err != nil {
+			t.Fatalf("Stat() error = %v", err)
+		}
+		if !info.IsDir() {
+			t.Fatal("expected root to be a directory")
+		}
+		if info.Name() != "." {
+			t.Fatalf("expected name '.', got %q", info.Name())
+		}
+	})
+
+	t.Run("open file by name", func(t *testing.T) {
+		f, err := sfs.Open("001_schema.sql")
+		if err != nil {
+			t.Fatalf("Open(file) error = %v", err)
+		}
+		defer func() { _ = f.Close() }()
+
+		info, err := f.Stat()
+		if err != nil {
+			t.Fatalf("Stat() error = %v", err)
+		}
+		if info.IsDir() {
+			t.Fatal("expected file, not directory")
+		}
+		if info.Name() != "001_schema.sql" {
+			t.Fatalf("expected name '001_schema.sql', got %q", info.Name())
+		}
+		if info.Size() != int64(len(sfs.data)) {
+			t.Fatalf("expected size %d, got %d", len(sfs.data), info.Size())
+		}
+		if info.Mode() != 0o444 {
+			t.Fatalf("expected mode 0444, got %v", info.Mode())
+		}
+		if info.Sys() != nil {
+			t.Fatal("expected Sys() to be nil")
+		}
+
+		buf := make([]byte, 100)
+		n, err := f.Read(buf)
+		if err != nil {
+			t.Fatalf("Read() error = %v", err)
+		}
+		if string(buf[:n]) != string(sfs.data) {
+			t.Fatalf("read content mismatch: got %q", buf[:n])
+		}
+	})
+
+	t.Run("open nonexistent file", func(t *testing.T) {
+		_, err := sfs.Open("missing.sql")
+		if err == nil {
+			t.Fatal("expected error for missing file")
+		}
+	})
+
+	t.Run("open invalid path", func(t *testing.T) {
+		_, err := sfs.Open("../escape")
+		if err == nil {
+			t.Fatal("expected error for invalid path")
+		}
+	})
+
+	t.Run("read on directory returns error", func(t *testing.T) {
+		f, err := sfs.Open(".")
+		if err != nil {
+			t.Fatalf("Open(.) error = %v", err)
+		}
+		defer func() { _ = f.Close() }()
+
+		buf := make([]byte, 10)
+		if _, err := f.Read(buf); err == nil {
+			t.Fatal("expected error reading from directory")
+		}
+	})
+}
+
+func TestSingleFileFSReadFile(t *testing.T) {
+	content := []byte("SELECT 1;")
+	sfs := &singleFileFS{name: "test.sql", data: content}
+
+	t.Run("read existing file", func(t *testing.T) {
+		got, err := sfs.ReadFile("test.sql")
+		if err != nil {
+			t.Fatalf("ReadFile() error = %v", err)
+		}
+		if string(got) != string(content) {
+			t.Fatalf("content mismatch: got %q", got)
+		}
+		// Verify it's a copy, not a reference
+		got[0] = 'X'
+		if sfs.data[0] == 'X' {
+			t.Fatal("ReadFile returned a reference instead of a copy")
+		}
+	})
+
+	t.Run("read missing file", func(t *testing.T) {
+		_, err := sfs.ReadFile("missing.sql")
+		if err == nil {
+			t.Fatal("expected error for missing file")
+		}
+	})
+}
+
+func TestSingleFileFSReadDir(t *testing.T) {
+	sfs := &singleFileFS{name: "001.sql", data: []byte("data")}
+
+	t.Run("read root directory", func(t *testing.T) {
+		entries, err := sfs.ReadDir(".")
+		if err != nil {
+			t.Fatalf("ReadDir(.) error = %v", err)
+		}
+		if len(entries) != 1 {
+			t.Fatalf("expected 1 entry, got %d", len(entries))
+		}
+		e := entries[0]
+		if e.Name() != "001.sql" {
+			t.Fatalf("expected name '001.sql', got %q", e.Name())
+		}
+		if e.IsDir() {
+			t.Fatal("expected file entry, not directory")
+		}
+		if e.Type() != 0 {
+			t.Fatalf("expected type 0, got %v", e.Type())
+		}
+		info, err := e.Info()
+		if err != nil {
+			t.Fatalf("Info() error = %v", err)
+		}
+		if info.Size() != int64(len(sfs.data)) {
+			t.Fatalf("expected size %d, got %d", len(sfs.data), info.Size())
+		}
+	})
+
+	t.Run("read non-root directory", func(t *testing.T) {
+		_, err := sfs.ReadDir("subdir")
+		if err == nil {
+			t.Fatal("expected error for non-root directory")
+		}
+	})
+}
+
+func TestSingleDirReadDirPagination(t *testing.T) {
+	d := &singleDir{name: "test.sql", data: []byte("data")}
+
+	// First call with n > 0 should return entries + io.EOF
+	entries, err := d.ReadDir(1)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(entries))
+	}
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("expected io.EOF, got %v", err)
+	}
+
+	// Subsequent call should return empty + io.EOF
+	entries, err = d.ReadDir(1)
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries on second call, got %d", len(entries))
+	}
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("expected io.EOF on second call, got %v", err)
+	}
+
+	// Reset and call with n <= 0 (return all at once, no EOF)
+	d2 := &singleDir{name: "test.sql", data: []byte("data")}
+	entries, err = d2.ReadDir(-1)
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 entry with n=-1, got %d", len(entries))
+	}
+	if err != nil {
+		t.Fatalf("expected nil error with n=-1, got %v", err)
+	}
+
+	// After exhausting, n <= 0 returns nil, nil
+	entries, err = d2.ReadDir(0)
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries after exhaustion, got %d", len(entries))
+	}
+	if err != nil {
+		t.Fatalf("expected nil error after exhaustion with n<=0, got %v", err)
+	}
+}
+
+func TestApplySchemaRejectsNilConnection(t *testing.T) {
+	var nilConn *Connection
+	if err := nilConn.ApplySchema(context.Background()); err == nil {
+		t.Fatal("expected error for nil connection")
+	}
+
+	conn := &Connection{}
+	if err := conn.ApplySchema(context.Background()); err == nil {
+		t.Fatal("expected error for nil db in connection")
 	}
 }
 

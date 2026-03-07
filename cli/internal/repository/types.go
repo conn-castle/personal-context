@@ -87,10 +87,12 @@ type UpdateSlideInput struct {
 // ListSlidesFilter controls slide-list query behavior.
 type ListSlidesFilter struct {
 	IncludeDeleted bool
+	OnlyDeleted    bool
 	ProjectID      *string
 	DateFrom       *string
 	DateTo         *string
 	Limit          int
+	Query          *string
 }
 
 // CreateSlideFigureInput contains required and optional fields for figure inserts.

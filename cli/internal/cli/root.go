@@ -55,6 +55,11 @@ func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 	root.AddCommand(newDeleteCommand(stdout, stderr))
 	root.AddCommand(newRestoreCommand(stdout, stderr))
 	root.AddCommand(newMoveCommand(stdout, stderr))
+	root.AddCommand(newTrashCommand(stdout, stderr))
+	root.AddCommand(newSearchCommand(stdout, stderr))
+	root.AddCommand(newProjectCommand(stdout, stderr))
+	root.AddCommand(newGCCommand(stdout, stderr))
+	root.AddCommand(newDoctorCommand(stdout, stderr))
 
 	return root
 }

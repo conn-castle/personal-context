@@ -113,11 +113,25 @@ func (r *Repository) UpdateSlide(ctx context.Context, input repository.UpdateSli
 
 // ListSlides returns slides sorted by (date, day_order, id).
 func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlidesFilter) ([]repository.Slide, error) {
+	if filter.Limit < 0 {
+		return nil, repository.ErrInvalidArgument
+	}
+
+	trimmedQuery := ""
+	if filter.Query != nil {
+		trimmedQuery = strings.TrimSpace(*filter.Query)
+		if trimmedQuery == "" {
+			return nil, repository.ErrInvalidArgument
+		}
+	}
+
 	builder := strings.Builder{}
 	builder.WriteString(`SELECT id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM slides WHERE 1=1`)
 	args := make([]any, 0, 4)
 
-	if !filter.IncludeDeleted {
+	if filter.OnlyDeleted {
+		builder.WriteString(` AND deleted_at IS NOT NULL`)
+	} else if !filter.IncludeDeleted {
 		builder.WriteString(` AND deleted_at IS NULL`)
 	}
 	if filter.ProjectID != nil {
@@ -131,6 +145,12 @@ func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlide
 	if filter.DateTo != nil {
 		builder.WriteString(` AND date <= ?`)
 		args = append(args, *filter.DateTo)
+	}
+	if filter.Query != nil {
+		escaped := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(trimmedQuery)
+		q := "%" + escaped + "%"
+		builder.WriteString(` AND (html_content LIKE ? ESCAPE '\' OR notes LIKE ? ESCAPE '\' OR project_id LIKE ? ESCAPE '\')`)
+		args = append(args, q, q, q)
 	}
 	builder.WriteString(` ORDER BY date, day_order, id`)
 	if filter.Limit > 0 {
@@ -566,6 +586,31 @@ func (r *Repository) GetSyncVersion(ctx context.Context) (repository.SyncVersion
 	}
 	version.UpdatedAt = updatedAt
 	return version, nil
+}
+
+// ListDistinctProjectIDs returns sorted distinct non-NULL project_id values from active slides.
+func (r *Repository) ListDistinctProjectIDs(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(
+		ctx,
+		`SELECT DISTINCT project_id FROM slides WHERE project_id IS NOT NULL AND deleted_at IS NULL ORDER BY project_id;`,
+	)
+	if err != nil {
+		return nil, mapSQLiteError(err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	projects := make([]string, 0)
+	for rows.Next() {
+		var pid string
+		if err := rows.Scan(&pid); err != nil {
+			return nil, mapSQLiteError(err)
+		}
+		projects = append(projects, pid)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapSQLiteError(err)
+	}
+	return projects, nil
 }
 
 type slideRow struct {

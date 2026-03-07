@@ -452,3 +452,331 @@ func TestDeleteDataFileRejectsInvalidInputOnNilClient(t *testing.T) {
 		t.Fatal("expected nil client delete data file to fail")
 	}
 }
+
+func TestBasePathReturnsConfiguredPath(t *testing.T) {
+	root := t.TempDir()
+	client, err := NewClient(root)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	if got := client.BasePath(); got != root {
+		t.Fatalf("BasePath() = %q, want %q", got, root)
+	}
+}
+
+func TestListSlideIDsOnDisk(t *testing.T) {
+	t.Run("no directories exist", func(t *testing.T) {
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		figures, data, err := client.ListSlideIDsOnDisk()
+		if err != nil {
+			t.Fatalf("ListSlideIDsOnDisk() error = %v", err)
+		}
+		if len(figures) != 0 {
+			t.Fatalf("expected empty figures, got %v", figures)
+		}
+		if len(data) != 0 {
+			t.Fatalf("expected empty data, got %v", data)
+		}
+	})
+
+	t.Run("figures and data dirs with slide ID subdirs", func(t *testing.T) {
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		for _, dir := range []string{
+			filepath.Join(root, "figures", "slide-a"),
+			filepath.Join(root, "figures", "slide-b"),
+			filepath.Join(root, "data", "slide-a"),
+			filepath.Join(root, "data", "slide-c"),
+		} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+			}
+		}
+
+		figures, data, err := client.ListSlideIDsOnDisk()
+		if err != nil {
+			t.Fatalf("ListSlideIDsOnDisk() error = %v", err)
+		}
+		if len(figures) != 2 {
+			t.Fatalf("expected 2 figure dirs, got %v", figures)
+		}
+		if len(data) != 2 {
+			t.Fatalf("expected 2 data dirs, got %v", data)
+		}
+	})
+
+	t.Run("only figures exists", func(t *testing.T) {
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		if err := os.MkdirAll(filepath.Join(root, "figures", "slide-x"), 0o755); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+
+		figures, data, err := client.ListSlideIDsOnDisk()
+		if err != nil {
+			t.Fatalf("ListSlideIDsOnDisk() error = %v", err)
+		}
+		if len(figures) != 1 || figures[0] != "slide-x" {
+			t.Fatalf("expected [slide-x], got %v", figures)
+		}
+		if len(data) != 0 {
+			t.Fatalf("expected empty data, got %v", data)
+		}
+	})
+
+	t.Run("non-directory entries are skipped", func(t *testing.T) {
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		figuresDir := filepath.Join(root, "figures")
+		if err := os.MkdirAll(figuresDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+		// Create a regular file inside figures/ — should be skipped
+		if err := os.WriteFile(filepath.Join(figuresDir, "stray-file.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		// Also create a valid subdir
+		if err := os.MkdirAll(filepath.Join(figuresDir, "slide-valid"), 0o755); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+
+		figures, _, err := client.ListSlideIDsOnDisk()
+		if err != nil {
+			t.Fatalf("ListSlideIDsOnDisk() error = %v", err)
+		}
+		if len(figures) != 1 || figures[0] != "slide-valid" {
+			t.Fatalf("expected [slide-valid], got %v", figures)
+		}
+	})
+
+	t.Run("dot and dotdot entries are skipped", func(t *testing.T) {
+		// The OS never returns . and .. from ReadDir, but validatePathSegment
+		// would reject them. We verify indirectly by creating dirs named "."
+		// or ".." which is not possible on most OS, so we just confirm that
+		// the function doesn't return them and that listing a directory with
+		// only valid subdirs works correctly.
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		dataDir := filepath.Join(root, "data")
+		if err := os.MkdirAll(filepath.Join(dataDir, "valid-slide"), 0o755); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+
+		_, data, err := client.ListSlideIDsOnDisk()
+		if err != nil {
+			t.Fatalf("ListSlideIDsOnDisk() error = %v", err)
+		}
+		if len(data) != 1 || data[0] != "valid-slide" {
+			t.Fatalf("expected [valid-slide], got %v", data)
+		}
+	})
+
+	t.Run("figures dir unreadable returns error", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("permission-based test not reliable on Windows")
+		}
+
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		figuresDir := filepath.Join(root, "figures")
+		if err := os.MkdirAll(figuresDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+		if err := os.Chmod(figuresDir, 0o000); err != nil {
+			t.Fatalf("Chmod() error = %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(figuresDir, 0o755) })
+
+		_, _, err = client.ListSlideIDsOnDisk()
+		if err == nil {
+			t.Fatal("expected error when figures directory is unreadable")
+		}
+		if !strings.Contains(err.Error(), "list figure directories") {
+			t.Fatalf("expected 'list figure directories' in error, got %v", err)
+		}
+	})
+
+	t.Run("data dir unreadable returns error", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("permission-based test not reliable on Windows")
+		}
+
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		// figures must succeed first — create it normally
+		if err := os.MkdirAll(filepath.Join(root, "figures"), 0o755); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+
+		dataDir := filepath.Join(root, "data")
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+		if err := os.Chmod(dataDir, 0o000); err != nil {
+			t.Fatalf("Chmod() error = %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dataDir, 0o755) })
+
+		_, _, err = client.ListSlideIDsOnDisk()
+		if err == nil {
+			t.Fatal("expected error when data directory is unreadable")
+		}
+		if !strings.Contains(err.Error(), "list data directories") {
+			t.Fatalf("expected 'list data directories' in error, got %v", err)
+		}
+	})
+}
+
+func TestNilReceiverGuards(t *testing.T) {
+	var nilClient *Client
+
+	t.Run("BasePath returns empty string", func(t *testing.T) {
+		if got := nilClient.BasePath(); got != "" {
+			t.Fatalf("BasePath() = %q, want empty string", got)
+		}
+	})
+
+	t.Run("ListSlideIDsOnDisk returns error", func(t *testing.T) {
+		_, _, err := nilClient.ListSlideIDsOnDisk()
+		if err == nil {
+			t.Fatal("expected nil client ListSlideIDsOnDisk to fail")
+		}
+		if !strings.Contains(err.Error(), "filesystem client is required") {
+			t.Fatalf("expected 'filesystem client is required' in error, got %v", err)
+		}
+	})
+
+	t.Run("DeleteSlideDir returns error", func(t *testing.T) {
+		err := nilClient.DeleteSlideDir("slide-1")
+		if err == nil {
+			t.Fatal("expected nil client DeleteSlideDir to fail")
+		}
+		if !strings.Contains(err.Error(), "filesystem client is required") {
+			t.Fatalf("expected 'filesystem client is required' in error, got %v", err)
+		}
+	})
+}
+
+func TestDeleteSlideDir(t *testing.T) {
+	t.Run("removes existing figure and data directories", func(t *testing.T) {
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		// Create figure and data directories with files inside
+		figDir := filepath.Join(root, "figures", "slide-1")
+		dataDir := filepath.Join(root, "data", "slide-1")
+		if err := os.MkdirAll(figDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(figDir) error = %v", err)
+		}
+		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(dataDir) error = %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(figDir, "plot.png"), []byte("img"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dataDir, "data.csv"), []byte("1,2"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+
+		if err := client.DeleteSlideDir("slide-1"); err != nil {
+			t.Fatalf("DeleteSlideDir() error = %v", err)
+		}
+
+		if _, err := os.Stat(figDir); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected figure dir to be removed, got err=%v", err)
+		}
+		if _, err := os.Stat(dataDir); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected data dir to be removed, got err=%v", err)
+		}
+	})
+
+	t.Run("tolerates missing directories", func(t *testing.T) {
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		// Neither figures/slide-1 nor data/slide-1 exist
+		if err := client.DeleteSlideDir("slide-1"); err != nil {
+			t.Fatalf("DeleteSlideDir() should tolerate missing dirs, got error = %v", err)
+		}
+	})
+
+	t.Run("rejects empty slideID", func(t *testing.T) {
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		if err := client.DeleteSlideDir(""); err == nil {
+			t.Fatal("expected error for empty slideID")
+		}
+	})
+
+	t.Run("files inside directories are also removed", func(t *testing.T) {
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		figDir := filepath.Join(root, "figures", "slide-2")
+		if err := os.MkdirAll(figDir, 0o755); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+		fileA := filepath.Join(figDir, "a.png")
+		fileB := filepath.Join(figDir, "b.png")
+		if err := os.WriteFile(fileA, []byte("a"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		if err := os.WriteFile(fileB, []byte("b"), 0o644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+
+		if err := client.DeleteSlideDir("slide-2"); err != nil {
+			t.Fatalf("DeleteSlideDir() error = %v", err)
+		}
+
+		if _, err := os.Stat(fileA); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected file a.png to be removed, got err=%v", err)
+		}
+		if _, err := os.Stat(fileB); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected file b.png to be removed, got err=%v", err)
+		}
+	})
+}

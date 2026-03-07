@@ -63,31 +63,15 @@ Incomplete:
 - Extensive in-process unit tests for Go coverage: add_test.go, commands_test.go, coverage_test.go, error_paths_test.go — covering happy paths, error injection via `resolveHomeDirFn`, DB corruption, permission failures, and trigger errors.
 - Per-package coverage >=95% enforced (`internal/cli` at 95.3%). All tests pass, go vet clean.
 
-## Phase 4 — Local CLI Features (Search, Trash, Projects)
-
-### Goal
-- Complete local CLI feature set. Full local-only workflow e2e tested.
-
-### Tasks
-- [ ] **Tests first**: Write e2e tests for `pc search` before implementation — matches in html_content, notes, project_id; --format table/ids/json output verified; --limit; --project filter; --deleted flag includes soft-deleted; no results returns empty; case-insensitive matching
-- [ ] Implement `pc search <query>`
-- [ ] **Tests first**: Write e2e tests for `pc trash` before implementation — lists only soft-deleted slides, shows id/date/deleted_at, empty trash returns clean message
-- [ ] Implement `pc trash`
-- [ ] **Tests first**: Write e2e tests for `pc gc` before implementation — only deletes trash older than 30 days, leaves younger trash alone, cascades child rows, removes figure/data files from disk, verify with `pc trash` after gc
-- [ ] Implement `pc gc`
-- [ ] **Tests first**: Write e2e tests for `pc project` before implementation — set stores in config, clear removes, list returns distinct project_ids from DB, active project used by `pc add` when --project not specified
-- [ ] Implement `pc project set/clear/list`
-- [ ] **Tests first**: Write e2e tests for `pc doctor` before implementation — healthy system passes, missing DB detected, orphaned figures detected
-- [ ] Implement `pc doctor` (local checks)
-- [ ] Write full-workflow e2e test: `pc setup` -> `pc project set` -> `pc add` (x3 different dates/projects) -> `pc search` -> `pc edit` -> `pc move` -> `pc delete` -> `pc trash` -> wait simulation -> `pc gc` -> `pc doctor`
-
-- [ ] **Consolidate schema**: Fold all SQLite migration files into the canonical schema file and remove individual migrations (no deployed users, so no migration history to preserve)
-
-### Exit criteria
-- All local CLI commands pass e2e tests.
-- Full local-only workflow e2e test passes.
-- Single canonical SQLite schema file (no separate migration files).
-- `go test -cover` reports >95% for all packages.
+## Phase 4 ✅ — Local CLI Features (Search, Trash, Projects)
+- Implemented 5 new CLI commands: `pc search`, `pc trash`, `pc gc`, `pc project set/clear/list`, `pc doctor` — all registered in root.go.
+- Extended `ListSlidesFilter` with `OnlyDeleted` and `Query` fields; added `ListDistinctProjectIDs` to Repository interface; extended Config with `ActiveProject`.
+- Added filesystem methods: `BasePath`, `ListSlideIDsOnDisk`, `DeleteSlideDir` for gc and doctor operations.
+- Active project integration: `pc add` uses active project when no `--project` flag or metadata.json project_id.
+- E2e test suite expanded to 103 tests (from 57): search (14), trash (5), gc (9), project (12), doctor (5), workflow (1), plus existing tests.
+- Full local-only workflow e2e test (`TestFullLocalWorkflow`) exercises all commands end-to-end.
+- Consolidated SQLite schema: removed `cli/migrations/` package, embedded single canonical schema in `cli/internal/sqlite/sqlite_schema.sql`.
+- Per-package coverage >=95% enforced. All packages pass. Linter clean.
 
 ## Phase 5 — Cloud Data Layer
 
@@ -102,6 +86,7 @@ Incomplete:
 - [ ] Implement S3 client wrapper
 - [ ] **Tests first**: Write cloud config validation tests — valid Neon URL succeeds, invalid URL fails with clear error, valid S3 bucket succeeds, nonexistent bucket fails with clear error
 - [ ] Implement cloud config validation
+- [ ] Add CI structural equivalence guard: script that parses both `schema/schema.sql` (Postgres) and `cli/internal/sqlite/sqlite_schema.sql` (SQLite), asserts same tables, columns, indexes, and constraints — fails on drift
 
 ### Exit criteria
 - Postgres repository passes identical test suite as SQLite repository.

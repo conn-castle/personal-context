@@ -26,7 +26,7 @@ Do not duplicate information that belongs in other memory files:
 
 <!-- ENTRIES START -->
 
-> **Status:** Phase 3 (Local CLI Foundation) is complete. All 7 local CRUD commands are operational. This document describes the target architecture and operating model; see ROADMAP.md for phase-by-phase implementation progress.
+> **Status:** Phase 4 (Local CLI Features) is complete. All 12 local commands are operational: CRUD (setup, add, show, edit, delete, restore, move) and management (search, trash, gc, project, doctor). SQLite schema consolidated into single embedded file. See ROADMAP.md for phase-by-phase implementation progress.
 
 ## Project Overview
 
@@ -98,8 +98,8 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - External URLs (`https://...`) pass through unchanged. Data files are attachments, not referenced in HTML.
 
 ### Schema Portability (Postgres / SQLite)
-- `schema.sql` is the design-level source of truth (Postgres dialect). Executable schemas: `cli/migrations/postgres/`, `cli/migrations/sqlite/`.
-- Separate migration directories: `cli/migrations/sqlite/` (exists), `cli/migrations/postgres/` (Phase 5).
+- `schema/schema.sql` is the design-level source of truth (Postgres dialect). The canonical SQLite schema is embedded in `cli/internal/sqlite/sqlite_schema.sql` and applied via `Connection.ApplySchema()`.
+- Postgres migrations directory: `cli/migrations/postgres/` (Phase 5).
 - `created_at` and `updated_at` are DB-managed via defaults and triggers. `deleted_at` set by application code. See "DB-Managed Timestamps" below.
 - `PRAGMA foreign_keys = ON` required on every SQLite connection (otherwise `ON DELETE CASCADE` silently ignored).
 - SQLite WAL mode enabled for concurrent reads.
@@ -212,7 +212,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 ### Setup & Health
 - `pc setup` — first-time or reconfigure (idempotent, interactive/non-interactive, `--remove-cloud`)
-- `pc doctor` — health checks (local DB, schema version, figures, cloud connectivity, orphaned refs)
+- `pc doctor` — local health checks (DB readability, orphaned figure/data directories, missing local figure/data files)
 
 ### Slide CRUD
 - `pc add <path>` — create slide from folder (`slide.html` required, `metadata.json` for project_id/git_remote_url/git_hash)
@@ -224,7 +224,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 ### Trash
 - `pc trash` — list soft-deleted slides
-- `pc gc` — hard-delete trash > 30 days (cloud first, then local)
+- `pc gc` — hard-delete local trash > 30 days and remove local figure/data files
 
 ### Search & Projects
 - `pc search <query>` — LIKE/ILIKE on html_content, notes, project_id (not git fields)
@@ -478,7 +478,7 @@ type SlideDetail = {
 
 - Soft-deleted slides sync bidirectionally, excluded from git export.
 - `ON DELETE CASCADE` handles child rows on hard delete.
-- `pc gc` deletes cloud first (Neon + S3), then local. Re-runnable on partial failure. Edge case: another machine that hasn't synced could re-push; run `pc sync` on all machines before/after gc. Tombstones deferred.
+- Phase 6 plans `pc gc` to delete cloud first (Neon + S3), then local, and to remain re-runnable on partial failure. Current Phase 4 `pc gc` is local-only. Edge case once cloud exists: another machine that hasn't synced could re-push; run `pc sync` on all machines before/after gc. Tombstones deferred.
 
 ## Data Integrity: Two-Tier Guarantee
 

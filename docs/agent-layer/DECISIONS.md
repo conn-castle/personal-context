@@ -117,10 +117,10 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Reason: Roadmap allowed Vitest/Jest. Vitest offered a lean scaffold path with fast run times and simple 95% threshold enforcement.
     Tradeoffs: Next.js examples more commonly show Jest; contributors must follow the Vitest-specific config and scripts in this repo.
 
-- Decision 2026-03-05 w4x5y6: Custom migration runner instead of golang-migrate
-    Decision: Build a custom migration runner in `cli/internal/sqlite/` instead of using golang-migrate.
-    Reason: Simpler dependency graph, full control over SQLite-specific PRAGMA and connection hooks, no CGO requirement from golang-migrate's sqlite3 driver.
-    Tradeoffs: Must maintain custom runner; complexity is low (sequential SQL files, idempotent schema_migrations table).
+- Decision 2026-03-05 w4x5y6: Custom migration runner with consolidated embedded schema
+    Decision: Build a custom migration runner in `cli/internal/sqlite/` with a single canonical schema file (`sqlite_schema.sql`) embedded via `//go:embed`. The separate `cli/migrations/` package was removed in Phase 4.
+    Reason: Simpler dependency graph, full control over SQLite-specific PRAGMA and connection hooks, no CGO requirement. Single schema file because there are no deployed users requiring multi-file migration history.
+    Tradeoffs: Must maintain custom runner; complexity is low (single SQL file, idempotent schema_migrations table). Multi-file migrations can be reintroduced if needed for Postgres (Phase 5).
 
 - Decision 2026-03-06 z6a7b8: Package-level function variable for test-only dependency injection
     Decision: Use `var resolveHomeDirFn = defaultResolveHomeDir` pattern in cli package to allow test-only injection of errors for otherwise-untestable paths (e.g., os.UserHomeDir failure).
