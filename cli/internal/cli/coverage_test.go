@@ -160,7 +160,9 @@ func TestComputeDayOrderBefore(t *testing.T) {
 	// Add before id2
 	stdout := &bytes.Buffer{}
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>Before</html>"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>Before</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", "--date", "2025-05-04", "--before", id2, dir})
 	if err := cmd.Execute(); err != nil {
@@ -176,7 +178,9 @@ func TestComputeDayOrderBeforeFirst(t *testing.T) {
 	// Add before the first slide (should use GenerateAtStart)
 	stdout := &bytes.Buffer{}
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>BeforeFirst</html>"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>BeforeFirst</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", "--date", "2025-05-05", "--before", id1, dir})
 	if err := cmd.Execute(); err != nil {
@@ -189,7 +193,9 @@ func TestComputeDayOrderAfterNotFound(t *testing.T) {
 	addSlide(t, "--date", "2025-05-06")
 
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>X</html>"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>X</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", "--date", "2025-05-06", "--after", "nonexistent-id", dir})
 	err := cmd.Execute()
@@ -206,7 +212,9 @@ func TestComputeDayOrderBeforeNotFound(t *testing.T) {
 	addSlide(t, "--date", "2025-05-07")
 
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>X</html>"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>X</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", "--date", "2025-05-07", "--before", "nonexistent-id", dir})
 	err := cmd.Execute()
@@ -363,10 +371,16 @@ func TestEditWithDataFiles(t *testing.T) {
 
 	// Edit with different data files
 	newDir := t.TempDir()
-	os.WriteFile(filepath.Join(newDir, "slide.html"), []byte("<html>edited</html>"), 0o644)
+	if err := os.WriteFile(filepath.Join(newDir, "slide.html"), []byte("<html>edited</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	dataDir := filepath.Join(newDir, "data")
-	os.MkdirAll(dataDir, 0o755)
-	os.WriteFile(filepath.Join(dataDir, "new.csv"), []byte("new data"), 0o644)
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "new.csv"), []byte("new data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -393,14 +407,26 @@ func TestEditReplacesFiguresAndDataFiles(t *testing.T) {
 
 	// Edit with new figures and data
 	newDir := t.TempDir()
-	os.WriteFile(filepath.Join(newDir, "slide.html"), []byte(`<html><img src="figures/new.png">new</html>`), 0o644)
-	os.WriteFile(filepath.Join(newDir, "notes.md"), []byte("new notes"), 0o644)
+	if err := os.WriteFile(filepath.Join(newDir, "slide.html"), []byte(`<html><img src="figures/new.png">new</html>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(newDir, "notes.md"), []byte("new notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	figDir := filepath.Join(newDir, "figures")
-	os.MkdirAll(figDir, 0o755)
-	os.WriteFile(filepath.Join(figDir, "new.png"), []byte("new-fig"), 0o644)
+	if err := os.MkdirAll(figDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(figDir, "new.png"), []byte("new-fig"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	dataDir := filepath.Join(newDir, "data")
-	os.MkdirAll(dataDir, 0o755)
-	os.WriteFile(filepath.Join(dataDir, "new-data.csv"), []byte("y\n2\n"), 0o644)
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "new-data.csv"), []byte("y\n2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})

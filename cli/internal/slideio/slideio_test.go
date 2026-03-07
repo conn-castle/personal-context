@@ -170,7 +170,9 @@ func TestParseInputFolderMultipleFigureRefs(t *testing.T) {
 	writeFile(t, dir, "slide.html", `<img src="figures/a.png"><img src='figures/b.jpg'>`)
 
 	figDir := filepath.Join(dir, "figures")
-	os.MkdirAll(figDir, 0o755)
+	if err := os.MkdirAll(figDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, figDir, "a.png", "data")
 	// Missing b.jpg
 
@@ -185,7 +187,9 @@ func TestParseInputFolderFigureDirSkipsSubdirs(t *testing.T) {
 	writeFile(t, dir, "slide.html", "<h1>Test</h1>")
 
 	figDir := filepath.Join(dir, "figures")
-	os.MkdirAll(filepath.Join(figDir, "subdir"), 0o755)
+	if err := os.MkdirAll(filepath.Join(figDir, "subdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, figDir, "plot.png", "data")
 
 	input, err := ParseInputFolder(dir)
@@ -202,7 +206,9 @@ func TestParseInputFolderDataDirSkipsSubdirs(t *testing.T) {
 	writeFile(t, dir, "slide.html", "<h1>Test</h1>")
 
 	dataDir := filepath.Join(dir, "data")
-	os.MkdirAll(filepath.Join(dataDir, "subdir"), 0o755)
+	if err := os.MkdirAll(filepath.Join(dataDir, "subdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, dataDir, "metrics.csv", "col\n1\n")
 
 	input, err := ParseInputFolder(dir)

@@ -660,7 +660,7 @@ func TestSetupEnsureConfigWriteError(t *testing.T) {
 	if err := os.Chmod(pcDir, 0o555); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(pcDir, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(pcDir, 0o755) })
 
 	// Re-run setup — should fail on ensureConfig write
 	cmd2 := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
