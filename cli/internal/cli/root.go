@@ -48,5 +48,13 @@ func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 	root.Version = version
 	root.SetVersionTemplate("pc version {{.Version}}\n")
 
+	root.AddCommand(newSetupCommand(stdout, stderr))
+	root.AddCommand(newAddCommand(stdout, stderr))
+	root.AddCommand(newShowCommand(stdout, stderr))
+	root.AddCommand(newEditCommand(stdout, stderr))
+	root.AddCommand(newDeleteCommand(stdout, stderr))
+	root.AddCommand(newRestoreCommand(stdout, stderr))
+	root.AddCommand(newMoveCommand(stdout, stderr))
+
 	return root
 }

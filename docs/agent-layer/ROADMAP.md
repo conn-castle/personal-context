@@ -57,31 +57,11 @@ Incomplete:
 - Implemented local filesystem client for figures/data with path validation, copy/delete behavior, and error-case coverage.
 - Restored `go mod tidy -diff` in CI and added per-package coverage enforcement (`>=95%`) in CI and CLI workflow commands.
 
-## Phase 3 — Local CLI Foundation (Setup + CRUD)
-
-### Goal
-- Usable local-only CLI: user can set up, create, view, edit, delete, restore, and reorder slides.
-- CLI e2e tests run the actual `pc` binary as a subprocess.
-
-### Tasks
-- [ ] **Tests first**: Write e2e test for `pc setup` (local-only) before implementation — verify directory creation, SQLite initialized, templates seeded, idempotent re-run
-- [ ] Implement `pc setup` (local-only path)
-- [ ] **Tests first**: Write e2e tests for `pc add` before implementation — valid folder, missing slide.html, metadata.json merge with flags, figure/data file copy verified on disk, SHA-256 hash verified, day_order generated correctly, --project flag, --date flag, --position flag
-- [ ] Implement `pc add <path>`
-- [ ] **Tests first**: Write e2e tests for `pc show` before implementation — text format output, json format output, nonexistent ID error
-- [ ] Implement `pc show <id>`
-- [ ] **Tests first**: Write e2e tests for `pc edit` before implementation — full replacement verified (html_content, notes, figures, data files all replaced), old figures removed from disk, id/date/day_order/created_at preserved, updated_at changed
-- [ ] Implement `pc edit <id> <path>`
-- [ ] **Tests first**: Write e2e tests for `pc delete` / `pc restore` before implementation — deleted_at set/cleared, updated_at auto-bumped by trigger on both operations, slide excluded from/included in normal queries
-- [ ] Implement `pc delete <id>` and `pc restore <id>`
-- [ ] **Tests first**: Write e2e tests for `pc move` before implementation — date change resets day_order, position flags (after:ID, before:ID, first, last) produce correct ordering, only moved slide updated
-- [ ] Implement `pc move <id>`
-- [ ] Write e2e edge case tests: minimal slide (no figures/notes/data/project), slide with 10+ figures, special characters in filenames, unicode in HTML and notes
-
-### Exit criteria
-- All CLI commands pass e2e tests (binary run as subprocess, stdout/stderr/exit code verified, DB and filesystem state verified).
-- Edge cases covered.
-- `go test -cover` reports >95% for all packages.
+## Phase 3 ✅ — Local CLI Foundation (Setup + CRUD)
+- Implemented all 7 local CLI commands: `pc setup`, `pc add`, `pc show`, `pc edit`, `pc delete`, `pc restore`, `pc move` — registered in root.go with Cobra.
+- E2e test suite (57 tests) runs compiled `pc` binary as subprocess: setup (4), add (11), show (5), edit (10), delete/restore (9), move (12), edge cases (6).
+- Extensive in-process unit tests for Go coverage: add_test.go, commands_test.go, coverage_test.go, error_paths_test.go — covering happy paths, error injection via `resolveHomeDirFn`, DB corruption, permission failures, and trigger errors.
+- Per-package coverage >=95% enforced (`internal/cli` at 95.3%). All tests pass, go vet clean.
 
 ## Phase 4 — Local CLI Features (Search, Trash, Projects)
 

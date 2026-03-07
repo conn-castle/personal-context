@@ -57,14 +57,21 @@ Run from: `cli/`
 ./scripts/check_coverage.sh 95
 ```
 Run from: `cli/`
-Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `repositorytest` (contract helper, no `_test.go` files).
+Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `internal/repository/repositorytest` (contract helper, no `_test.go` files), `internal/e2e`, and `migrations`. CLI e2e tests run separately in CI via `go test ./internal/e2e`.
 
 - Run per-package Go coverage gate
 ```bash
 ./scripts/check_coverage_per_package.sh 95
 ```
 Run from: `cli/`
-Notes: Fails when any tested package drops below 95%. Excludes `repositorytest` (contract helper, no `_test.go` files).
+Notes: Fails when any tested package drops below 95%. Excludes `internal/repository/repositorytest` (contract helper, no `_test.go` files), `internal/e2e`, and `migrations`. CLI e2e tests run separately in CI via `go test ./internal/e2e`.
+
+- Run CLI e2e tests
+```bash
+go test ./internal/e2e
+```
+Run from: `cli/`
+Notes: Executed explicitly in CI because coverage scripts intentionally exclude `internal/e2e`.
 
 - Run Go linter
 ```bash

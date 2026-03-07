@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -138,6 +139,85 @@ func ApplyMigrations(ctx context.Context, db *sql.DB, migrationsDir string) erro
 		}
 
 		content, err := readFileFn(filepath.Join(migrationsDir, migration))
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", migration, err)
+		}
+
+		tx, err := beginTxFn(db, ctx)
+		if err != nil {
+			return fmt.Errorf("begin migration transaction: %w", err)
+		}
+
+		if _, err := tx.ExecContext(ctx, string(content)); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("apply migration %s: %w", migration, err)
+		}
+		if _, err := tx.ExecContext(
+			ctx,
+			`INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)`,
+			migration,
+			time.Now().UTC().Format(migrationTimestampFormat),
+		); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("record migration %s: %w", migration, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %s: %w", migration, err)
+		}
+	}
+
+	return nil
+}
+
+// ApplyMigrationsFS applies migration SQL files from an fs.FS in lexical order.
+// Args: ctx controls cancellation; fsys contains .sql files at the root or under subDir.
+// Returns: nil when all pending migrations are applied and recorded.
+func (c *Connection) ApplyMigrationsFS(ctx context.Context, fsys fs.FS) error {
+	if c == nil || c.db == nil {
+		return fmt.Errorf("connection is required")
+	}
+	return ApplyMigrationsFromFS(ctx, c.db, fsys)
+}
+
+// ApplyMigrationsFromFS applies migration SQL files from an fs.FS in lexical order.
+// Args: ctx controls cancellation; db is the target sqlite handle; fsys contains .sql files.
+// Returns: nil when all pending migrations are applied and recorded.
+func ApplyMigrationsFromFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
+	if db == nil {
+		return fmt.Errorf("db is required")
+	}
+	if fsys == nil {
+		return fmt.Errorf("filesystem is required")
+	}
+
+	if err := ensureMigrationTableFn(ctx, db); err != nil {
+		return err
+	}
+
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		return fmt.Errorf("read migrations filesystem: %w", err)
+	}
+
+	migrations := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		migrations = append(migrations, entry.Name())
+	}
+	sort.Strings(migrations)
+
+	for _, migration := range migrations {
+		applied, err := isMigrationAppliedFn(ctx, db, migration)
+		if err != nil {
+			return err
+		}
+		if applied {
+			continue
+		}
+
+		content, err := fs.ReadFile(fsys, migration)
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", migration, err)
 		}

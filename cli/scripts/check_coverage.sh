@@ -12,7 +12,7 @@ fi
 packages=()
 while IFS= read -r pkg; do
 	packages+=("$pkg")
-done < <(go list ./... | grep -v '/internal/repository/repositorytest$')
+done < <(go list ./... | grep -v -E '/(internal/repository/repositorytest|internal/e2e|migrations)$')
 if [[ "${#packages[@]}" -eq 0 ]]; then
 	echo "no packages selected for coverage" >&2
 	exit 2

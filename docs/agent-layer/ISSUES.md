@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-03-06 e5f6a7: edit/add commands use manual rollback instead of DB transactions
+    Priority: Medium. Area: cli/internal/cli
+    Description: `runEdit` and `runAdd` track mutation state with boolean flags and deferred rollback closures instead of wrapping multi-step DB operations in a transaction. This is fragile — a crash between DB writes and file operations leaves inconsistent state. The repository interface lacks transaction support by design (Phase 2 decision).
+    Next step: When transaction support is added to the repository interface (Phase 6 sync or earlier), refactor edit/add to use proper DB transactions for the multi-step write sequences.
+
 - Issue 2026-03-06 a1b2c3: mapSQLiteError uses fragile string matching
     Priority: Medium. Area: cli/internal/repository/sqlite
     Description: `mapSQLiteError` classifies UNIQUE/FK constraint errors via `strings.Contains` on error messages. If `modernc.org/sqlite` changes message format, mapping silently breaks.

@@ -121,6 +121,11 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Reason: Simpler dependency graph, full control over SQLite-specific PRAGMA and connection hooks, no CGO requirement from golang-migrate's sqlite3 driver.
     Tradeoffs: Must maintain custom runner; complexity is low (sequential SQL files, idempotent schema_migrations table).
 
+- Decision 2026-03-06 z6a7b8: Package-level function variable for test-only dependency injection
+    Decision: Use `var resolveHomeDirFn = defaultResolveHomeDir` pattern in cli package to allow test-only injection of errors for otherwise-untestable paths (e.g., os.UserHomeDir failure).
+    Reason: Covers 7 error paths (one per command) that cannot be reached via environment manipulation. Alternative (interface-based DI) would require threading a dependency through every command function for a single test concern.
+    Tradeoffs: Unsafe with t.Parallel (tests must restore original via t.Cleanup). Acceptable since cli package tests are not parallel. See ISSUES.md b2c3d4.
+
 - Decision 2026-03-05 y5z6a7: Phase 1 Playwright gate is DB-free smoke only
     Decision: Phase 1 Playwright verification runs a DB-free smoke test (`npm run test:e2e:smoke`) against a static app route via `playwright.config` `webServer`.
     Reason: Full DB-backed e2e setup belongs to later phases; Phase 1 needs reproducible e2e wiring without introducing fake backend logic.
