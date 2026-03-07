@@ -506,7 +506,7 @@ func TestAddFigureCopyError(t *testing.T) {
 	if err := os.Chmod(figuresDir, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(figuresDir, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(figuresDir, 0o755) })
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte(`<html><img src="figures/fig.png">x</html>`), 0o644); err != nil {
@@ -540,7 +540,7 @@ func TestAddDataFileCopyError(t *testing.T) {
 	if err := os.Chmod(dataDir, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(dataDir, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(dataDir, 0o755) })
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
@@ -575,7 +575,7 @@ func TestEditFigureCopyError(t *testing.T) {
 	if err := os.Chmod(figuresDir, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(figuresDir, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(figuresDir, 0o755) })
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte(`<html><img src="figures/new.png">x</html>`), 0o644); err != nil {
@@ -610,7 +610,7 @@ func TestEditDataFileCopyError(t *testing.T) {
 	if err := os.Chmod(dataDir, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(dataDir, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(dataDir, 0o755) })
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {

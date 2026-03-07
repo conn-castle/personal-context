@@ -95,7 +95,7 @@ func TestSetupIsIdempotent(t *testing.T) {
 	db := openTestDB(t, homeDir)
 	firstTemplateCount := queryRowCount(t, db, "templates")
 	firstMigrationCount := queryRowCount(t, db, "schema_migrations")
-	db.Close()
+	_ = db.Close()
 
 	// Second run
 	stdout := runPCSuccess(t, homeDir, "setup")

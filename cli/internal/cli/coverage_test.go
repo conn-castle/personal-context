@@ -105,7 +105,9 @@ func TestComputeDayOrderFirst(t *testing.T) {
 	// Now add a third with --first
 	stdout := &bytes.Buffer{}
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>First</html>"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>First</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", "--date", "2025-05-01", "--first", dir})
 	if err := cmd.Execute(); err != nil {
@@ -122,7 +124,9 @@ func TestComputeDayOrderAfter(t *testing.T) {
 	// Add a third after id1
 	stdout := &bytes.Buffer{}
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>After</html>"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>After</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", "--date", "2025-05-02", "--after", id1, dir})
 	if err := cmd.Execute(); err != nil {
@@ -138,7 +142,9 @@ func TestComputeDayOrderAfterLast(t *testing.T) {
 	// Add after the last slide (should use GenerateAtEnd)
 	stdout := &bytes.Buffer{}
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>AfterLast</html>"), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>AfterLast</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", "--date", "2025-05-03", "--after", id2, dir})
 	if err := cmd.Execute(); err != nil {

@@ -143,7 +143,7 @@ func TestMovePositionAfter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query slides: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var order []string
 	for rows.Next() {
@@ -193,7 +193,7 @@ func TestMovePositionBefore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query slides: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var order []string
 	for rows.Next() {

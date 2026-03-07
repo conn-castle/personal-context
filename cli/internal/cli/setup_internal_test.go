@@ -292,7 +292,7 @@ func TestRunSetupSeedTemplatesError(t *testing.T) {
 	if _, err := db.Exec("DROP TABLE templates"); err != nil {
 		t.Fatalf("drop templates: %v", err)
 	}
-	db.Close()
+	_ = db.Close()
 
 	// Re-run setup — should fail on seed
 	stdout.Reset()

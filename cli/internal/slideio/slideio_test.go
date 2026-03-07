@@ -41,11 +41,15 @@ func TestParseInputFolderFull(t *testing.T) {
 	writeFile(t, dir, "metadata.json", `{"project_id":"my-project","git_remote_url":"https://github.com/org/repo","git_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
 
 	figDir := filepath.Join(dir, "figures")
-	os.MkdirAll(figDir, 0o755)
+	if err := os.MkdirAll(figDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, figDir, "plot.png", "fake-png-data")
 
 	dataDir := filepath.Join(dir, "data")
-	os.MkdirAll(dataDir, 0o755)
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, dataDir, "metrics.csv", "col1,col2\n1,2\n")
 
 	input, err := ParseInputFolder(dir)
@@ -150,7 +154,9 @@ func TestParseInputFolderFigureRefValid(t *testing.T) {
 	writeFile(t, dir, "slide.html", `<img src="figures/plot.png">`)
 
 	figDir := filepath.Join(dir, "figures")
-	os.MkdirAll(figDir, 0o755)
+	if err := os.MkdirAll(figDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, figDir, "plot.png", "data")
 
 	_, err := ParseInputFolder(dir)
