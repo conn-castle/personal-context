@@ -4,7 +4,7 @@ Personal Context is a local-first engineering notebook system that stores work a
 
 ## Status
 
-Roadmap Phase 2 (Core Data Layer, Local) is implemented: foundation libraries, local config module, SQLite migrations + repository layer, and local filesystem client are complete with test coverage gates. User-facing CLI workflows (`pc setup/add/show/...`) and cloud/web product features remain in later roadmap phases.
+Roadmap Phase 3 (Local CLI Foundation) is implemented: all local CRUD commands (`pc setup`, `pc add`, `pc show`, `pc edit`, `pc delete`, `pc restore`, `pc move`) are operational with e2e and unit test coverage. Cloud/web product features remain in later roadmap phases.
 
 ## Architecture
 
@@ -93,13 +93,18 @@ pc setup \
 
 ### Currently Implemented CLI Surface
 
-- `pc --help`
-- `pc --version`
+- `pc --help`, `pc --version`
+- `pc setup` — initialize local environment (directories, SQLite, templates)
+- `pc add <path>` — create slide from folder (slide.html required, metadata.json for project/git fields)
+- `pc show <id>` — display slide metadata, notes, figures, data files (`--format text|json`)
+- `pc edit <id> <path>` — full replacement of content, notes, figures, data files
+- `pc delete <id>` — soft-delete a slide
+- `pc restore <id>` — un-delete a slide
+- `pc move <id>` — change date and/or position (`--date`, `--first`, `--last`, `--after`, `--before`)
 
 ### Planned Command Surface (Roadmap)
 
-- Setup and health: `pc setup`, `pc doctor`
-- Slide CRUD: `pc add`, `pc edit`, `pc show`, `pc delete`, `pc restore`, `pc move`
+- Health: `pc doctor`
 - Search/projects/trash: `pc search`, `pc project`, `pc trash`, `pc gc`
 - Sync/data: `pc sync`, `pc fetch`, `pc export`, `pc import`, `pc restore-db`, `pc verify`
 

@@ -14,7 +14,7 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 while IFS= read -r pkg; do
 	profile_path="${tmp_dir}/$(echo "$pkg" | tr '/.' '__').out"
-	test_output="$(go test -coverprofile="$profile_path" "$pkg" 2>&1)" || {
+	test_output="$(go test -covermode=atomic -coverprofile="$profile_path" "$pkg" 2>&1)" || {
 		echo "$test_output"
 		exit 1
 	}
@@ -36,7 +36,7 @@ while IFS= read -r pkg; do
 		status=1
 	fi
 
-done < <(go list ./... | grep -v '/internal/repository/repositorytest$')
+done < <(go list ./... | grep -v -E '/(internal/repository/repositorytest|internal/e2e|migrations)$')
 
 if [[ "$status" -ne 0 ]]; then
 	exit "$status"

@@ -1,0 +1,470 @@
+package cli
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// ---------------------------------------------------------------------------
+// Edit tests
+// ---------------------------------------------------------------------------
+
+func TestEditCommandSuccess(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	// Add a slide
+	inputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>original</html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	addOut := &bytes.Buffer{}
+	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
+	addCmd.SetArgs([]string{"add", inputDir})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	slideID := strings.TrimSpace(addOut.String())
+
+	// Edit with new content
+	editDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html>updated</html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	editOut := &bytes.Buffer{}
+	editCmd := NewRootCommand(RootCommandOptions{Stdout: editOut, Stderr: &bytes.Buffer{}})
+	editCmd.SetArgs([]string{"edit", slideID, editDir})
+	if err := editCmd.Execute(); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+
+	if !strings.Contains(editOut.String(), "updated") {
+		t.Fatalf("expected stdout to contain 'updated', got %q", editOut.String())
+	}
+}
+
+func TestEditCommandNotFound(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	editDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	editCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	editCmd.SetArgs([]string{"edit", "nonexistent-id", editDir})
+	if err := editCmd.Execute(); err == nil {
+		t.Fatal("expected error for nonexistent slide ID")
+	}
+}
+
+func TestEditCommandNoArgs(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"edit"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error when no args provided")
+	}
+}
+
+func TestEditCommandWithFigures(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	// Add a slide with a figure
+	inputDir := t.TempDir()
+	figDir := filepath.Join(inputDir, "figures")
+	if err := os.MkdirAll(figDir, 0o755); err != nil {
+		t.Fatalf("mkdir figures: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(figDir, "original.png"), []byte("png-data"), 0o644); err != nil {
+		t.Fatalf("write original.png: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte(`<html><img src="figures/original.png"></html>`), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	addOut := &bytes.Buffer{}
+	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
+	addCmd.SetArgs([]string{"add", inputDir})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	slideID := strings.TrimSpace(addOut.String())
+
+	// Edit with different figures
+	editDir := t.TempDir()
+	editFigDir := filepath.Join(editDir, "figures")
+	if err := os.MkdirAll(editFigDir, 0o755); err != nil {
+		t.Fatalf("mkdir figures: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(editFigDir, "new.png"), []byte("new-png-data"), 0o644); err != nil {
+		t.Fatalf("write new.png: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><img src="figures/new.png"></html>`), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	editOut := &bytes.Buffer{}
+	editCmd := NewRootCommand(RootCommandOptions{Stdout: editOut, Stderr: &bytes.Buffer{}})
+	editCmd.SetArgs([]string{"edit", slideID, editDir})
+	if err := editCmd.Execute(); err != nil {
+		t.Fatalf("edit with figures: %v", err)
+	}
+
+	if !strings.Contains(editOut.String(), "updated") {
+		t.Fatalf("expected stdout to contain 'updated', got %q", editOut.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Delete tests
+// ---------------------------------------------------------------------------
+
+func TestDeleteCommandSuccess(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	inputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	addOut := &bytes.Buffer{}
+	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
+	addCmd.SetArgs([]string{"add", inputDir})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	slideID := strings.TrimSpace(addOut.String())
+
+	delOut := &bytes.Buffer{}
+	delCmd := NewRootCommand(RootCommandOptions{Stdout: delOut, Stderr: &bytes.Buffer{}})
+	delCmd.SetArgs([]string{"delete", slideID})
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	if !strings.Contains(delOut.String(), "deleted") {
+		t.Fatalf("expected stdout to contain 'deleted', got %q", delOut.String())
+	}
+}
+
+func TestDeleteCommandNotFound(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	delCmd.SetArgs([]string{"delete", "nonexistent-id"})
+	if err := delCmd.Execute(); err == nil {
+		t.Fatal("expected error for nonexistent slide ID")
+	}
+}
+
+func TestDeleteCommandNoArgs(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"delete"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error when no args provided")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Restore tests
+// ---------------------------------------------------------------------------
+
+func TestRestoreCommandSuccess(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	inputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	addOut := &bytes.Buffer{}
+	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
+	addCmd.SetArgs([]string{"add", inputDir})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	slideID := strings.TrimSpace(addOut.String())
+
+	// Delete the slide first
+	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	delCmd.SetArgs([]string{"delete", slideID})
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// Restore it
+	restoreOut := &bytes.Buffer{}
+	restoreCmd := NewRootCommand(RootCommandOptions{Stdout: restoreOut, Stderr: &bytes.Buffer{}})
+	restoreCmd.SetArgs([]string{"restore", slideID})
+	if err := restoreCmd.Execute(); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+
+	if !strings.Contains(restoreOut.String(), "restored") {
+		t.Fatalf("expected stdout to contain 'restored', got %q", restoreOut.String())
+	}
+}
+
+func TestRestoreCommandNotFound(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	restoreCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	restoreCmd.SetArgs([]string{"restore", "nonexistent-id"})
+	if err := restoreCmd.Execute(); err == nil {
+		t.Fatal("expected error for nonexistent slide ID")
+	}
+}
+
+func TestRestoreCommandNoArgs(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"restore"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error when no args provided")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Move tests
+// ---------------------------------------------------------------------------
+
+func TestMoveCommandChangesDate(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	inputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	addOut := &bytes.Buffer{}
+	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
+	addCmd.SetArgs([]string{"add", inputDir, "--date", "2025-06-01"})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	slideID := strings.TrimSpace(addOut.String())
+
+	moveOut := &bytes.Buffer{}
+	moveCmd := NewRootCommand(RootCommandOptions{Stdout: moveOut, Stderr: &bytes.Buffer{}})
+	moveCmd.SetArgs([]string{"move", slideID, "--date", "2025-07-15"})
+	if err := moveCmd.Execute(); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+
+	if !strings.Contains(moveOut.String(), "moved") {
+		t.Fatalf("expected stdout to contain 'moved', got %q", moveOut.String())
+	}
+}
+
+func TestMoveCommandPositionFirst(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	// Add two slides on the same date
+	inputDir1 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(inputDir1, "slide.html"), []byte("<html>first</html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	addOut1 := &bytes.Buffer{}
+	addCmd1 := NewRootCommand(RootCommandOptions{Stdout: addOut1, Stderr: &bytes.Buffer{}})
+	addCmd1.SetArgs([]string{"add", inputDir1, "--date", "2025-06-01"})
+	if err := addCmd1.Execute(); err != nil {
+		t.Fatalf("add first: %v", err)
+	}
+
+	inputDir2 := t.TempDir()
+	if err := os.WriteFile(filepath.Join(inputDir2, "slide.html"), []byte("<html>second</html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	addOut2 := &bytes.Buffer{}
+	addCmd2 := NewRootCommand(RootCommandOptions{Stdout: addOut2, Stderr: &bytes.Buffer{}})
+	addCmd2.SetArgs([]string{"add", inputDir2, "--date", "2025-06-01"})
+	if err := addCmd2.Execute(); err != nil {
+		t.Fatalf("add second: %v", err)
+	}
+	slideID2 := strings.TrimSpace(addOut2.String())
+
+	// Move second slide to --first
+	moveOut := &bytes.Buffer{}
+	moveCmd := NewRootCommand(RootCommandOptions{Stdout: moveOut, Stderr: &bytes.Buffer{}})
+	moveCmd.SetArgs([]string{"move", slideID2, "--first"})
+	if err := moveCmd.Execute(); err != nil {
+		t.Fatalf("move --first: %v", err)
+	}
+
+	if !strings.Contains(moveOut.String(), "moved") {
+		t.Fatalf("expected stdout to contain 'moved', got %q", moveOut.String())
+	}
+}
+
+func TestMoveCommandNoFlags(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	inputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	addOut := &bytes.Buffer{}
+	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
+	addCmd.SetArgs([]string{"add", inputDir})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	slideID := strings.TrimSpace(addOut.String())
+
+	moveCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	moveCmd.SetArgs([]string{"move", slideID})
+	err := moveCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when no flags provided")
+	}
+	if !strings.Contains(err.Error(), "at least one") {
+		t.Fatalf("expected error to contain 'at least one', got %q", err.Error())
+	}
+}
+
+func TestMoveCommandNotFound(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	moveCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	moveCmd.SetArgs([]string{"move", "nonexistent-id", "--date", "2025-07-15"})
+	if err := moveCmd.Execute(); err == nil {
+		t.Fatal("expected error for nonexistent slide ID")
+	}
+}
+
+func TestMoveCommandNoArgs(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"move"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error when no args provided")
+	}
+}
+
+func TestMoveCommandInvalidDate(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	inputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+
+	addOut := &bytes.Buffer{}
+	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
+	addCmd.SetArgs([]string{"add", inputDir})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	slideID := strings.TrimSpace(addOut.String())
+
+	moveCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	moveCmd.SetArgs([]string{"move", slideID, "--date", "bad"})
+	err := moveCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for invalid date")
+	}
+	if !strings.Contains(err.Error(), "invalid date") {
+		t.Fatalf("expected error to contain 'invalid date', got %q", err.Error())
+	}
+}

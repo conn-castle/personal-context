@@ -54,6 +54,9 @@ jobs:
       - name: Enforce per-package coverage >= 95%
         run: ./scripts/check_coverage_per_package.sh 95
 
+      - name: Run CLI e2e tests
+        run: go test ./internal/e2e
+
       - name: Run linter
         uses: golangci/golangci-lint-action@v8
         with:

@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 )
 
@@ -727,6 +728,232 @@ func assertTriggerExists(t *testing.T, db *sql.DB, name string) {
 	}
 	if exists != 1 {
 		t.Fatalf("expected trigger %q to exist", name)
+	}
+}
+
+func TestApplyMigrationsFromFSSuccess(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	fsys := fstest.MapFS{
+		"001_demo.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE demo(id INTEGER PRIMARY KEY);`)},
+	}
+
+	if err := conn.ApplyMigrationsFS(context.Background(), fsys); err != nil {
+		t.Fatalf("ApplyMigrationsFS() error = %v", err)
+	}
+
+	assertTableExists(t, conn.DB(), "demo")
+
+	var count int
+	if err := conn.DB().QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
+		t.Fatalf("query schema_migrations: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 migration, got %d", count)
+	}
+}
+
+func TestApplyMigrationsFromFSIdempotent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	fsys := fstest.MapFS{
+		"001_demo.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE demo(id INTEGER PRIMARY KEY);`)},
+	}
+
+	if err := conn.ApplyMigrationsFS(context.Background(), fsys); err != nil {
+		t.Fatalf("first ApplyMigrationsFS() error = %v", err)
+	}
+	if err := conn.ApplyMigrationsFS(context.Background(), fsys); err != nil {
+		t.Fatalf("second ApplyMigrationsFS() error = %v", err)
+	}
+}
+
+func TestApplyMigrationsFromFSRejectsNilDB(t *testing.T) {
+	fsys := fstest.MapFS{}
+	if err := ApplyMigrationsFromFS(context.Background(), nil, fsys); err == nil {
+		t.Fatal("expected error for nil db")
+	}
+}
+
+func TestApplyMigrationsFromFSRejectsNilFS(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	if err := ApplyMigrationsFromFS(context.Background(), conn.DB(), nil); err == nil {
+		t.Fatal("expected error for nil fs")
+	}
+}
+
+func TestConnectionApplyMigrationsFSRejectsNilReceiver(t *testing.T) {
+	var nilConn *Connection
+	if err := nilConn.ApplyMigrationsFS(context.Background(), fstest.MapFS{}); err == nil {
+		t.Fatal("expected error for nil connection")
+	}
+
+	conn := &Connection{}
+	if err := conn.ApplyMigrationsFS(context.Background(), fstest.MapFS{}); err == nil {
+		t.Fatal("expected error for nil db in connection")
+	}
+}
+
+func TestApplyMigrationsFromFSSkipsNonSQL(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	fsys := fstest.MapFS{
+		"README.txt":   &fstest.MapFile{Data: []byte("ignore")},
+		"001_demo.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE demo(id INTEGER PRIMARY KEY);`)},
+	}
+
+	if err := conn.ApplyMigrationsFS(context.Background(), fsys); err != nil {
+		t.Fatalf("ApplyMigrationsFS() error = %v", err)
+	}
+
+	var count int
+	if err := conn.DB().QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
+		t.Fatalf("query schema_migrations: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 migration (non-SQL skipped), got %d", count)
+	}
+}
+
+func TestApplyMigrationsFromFSFailsOnInvalidSQL(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	fsys := fstest.MapFS{
+		"001_bad.sql": &fstest.MapFile{Data: []byte("CREATE TABL broken;")},
+	}
+
+	if err := conn.ApplyMigrationsFS(context.Background(), fsys); err == nil {
+		t.Fatal("expected error for invalid SQL")
+	}
+}
+
+func TestApplyMigrationsFromFSPropagatesBeginTxFailure(t *testing.T) {
+	original := beginTxFn
+	t.Cleanup(func() { beginTxFn = original })
+
+	beginTxFn = func(db *sql.DB, ctx context.Context) (*sql.Tx, error) {
+		return nil, errors.New("begin fs boom")
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	fsys := fstest.MapFS{
+		"001_demo.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE demo(id INTEGER PRIMARY KEY);`)},
+	}
+
+	err = ApplyMigrationsFromFS(context.Background(), conn.DB(), fsys)
+	if err == nil {
+		t.Fatal("expected error when beginTxFn fails")
+	}
+	if !strings.Contains(err.Error(), "begin migration transaction") {
+		t.Fatalf("expected begin migration error, got %v", err)
+	}
+}
+
+func TestApplyMigrationsFromFSPropagatesRecordFailure(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	// Migration that creates a trigger blocking schema_migrations inserts
+	fsys := fstest.MapFS{
+		"001_block.sql": &fstest.MapFile{Data: []byte(`
+CREATE TABLE demo(id INTEGER PRIMARY KEY);
+CREATE TRIGGER block_schema_migrations_insert_fs
+BEFORE INSERT ON schema_migrations
+BEGIN
+    SELECT RAISE(ABORT, 'blocked');
+END;
+`)},
+	}
+
+	err = ApplyMigrationsFromFS(context.Background(), conn.DB(), fsys)
+	if err == nil {
+		t.Fatal("expected error when record migration is blocked")
+	}
+	if !strings.Contains(err.Error(), "record migration") {
+		t.Fatalf("expected record migration error, got %v", err)
+	}
+}
+
+func TestApplyMigrationsFromFSPropagatesEnsureTableFailure(t *testing.T) {
+	original := ensureMigrationTableFn
+	t.Cleanup(func() { ensureMigrationTableFn = original })
+
+	ensureMigrationTableFn = func(ctx context.Context, db *sql.DB) error {
+		return errors.New("ensure fs boom")
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	fsys := fstest.MapFS{}
+	err = ApplyMigrationsFromFS(context.Background(), conn.DB(), fsys)
+	if err == nil {
+		t.Fatal("expected error when ensureMigrationTableFn fails")
+	}
+}
+
+func TestApplyMigrationsFromFSPropagatesLookupFailure(t *testing.T) {
+	original := isMigrationAppliedFn
+	t.Cleanup(func() { isMigrationAppliedFn = original })
+
+	isMigrationAppliedFn = func(ctx context.Context, db *sql.DB, version string) (bool, error) {
+		return false, errors.New("lookup fs boom")
+	}
+
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	fsys := fstest.MapFS{
+		"001_demo.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE demo(id INTEGER PRIMARY KEY);`)},
+	}
+
+	err = ApplyMigrationsFromFS(context.Background(), conn.DB(), fsys)
+	if err == nil {
+		t.Fatal("expected error when isMigrationAppliedFn fails")
 	}
 }
 

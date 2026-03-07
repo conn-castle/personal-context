@@ -27,6 +27,16 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-03-07 f6a7b8: pc move with --date matching current date silently reorders to end
+    Priority: Low. Area: cli/internal/cli
+    Description: `pc move <id> --date <same-date>` with no position flags defaults to `last`, reordering the slide to the end of the day instead of preserving its position. Can cause unexpected ordering changes in scripted or repeated runs.
+    Next step: When the slide's date doesn't change and no explicit position flag is given, preserve the existing day_order instead of recomputing.
+
+- Issue 2026-03-06 e5f6a7: edit/add commands use manual rollback instead of DB transactions
+    Priority: Medium. Area: cli/internal/cli
+    Description: `runEdit` and `runAdd` track mutation state with boolean flags and deferred rollback closures instead of wrapping multi-step DB operations in a transaction. This is fragile — a crash between DB writes and file operations leaves inconsistent state. The repository interface lacks transaction support by design (Phase 2 decision).
+    Next step: When transaction support is added to the repository interface (Phase 6 sync or earlier), refactor edit/add to use proper DB transactions for the multi-step write sequences.
+
 - Issue 2026-03-06 a1b2c3: mapSQLiteError uses fragile string matching
     Priority: Medium. Area: cli/internal/repository/sqlite
     Description: `mapSQLiteError` classifies UNIQUE/FK constraint errors via `strings.Contains` on error messages. If `modernc.org/sqlite` changes message format, mapping silently breaks.
