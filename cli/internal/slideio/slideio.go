@@ -37,7 +37,7 @@ var figSrcPattern = regexp.MustCompile(`(?i)src\s*=\s*["']figures/([^"']+)["']`)
 
 // ParseInputFolder reads and validates a slide input folder.
 // The folder must contain slide.html; metadata.json, notes.md, figures/, data/ are optional.
-// Args: dir is the absolute path to the input folder.
+// Args: dir is the path to the input folder (absolute or relative).
 // Returns: parsed slide input or an error for missing/invalid content.
 func ParseInputFolder(dir string) (SlideInput, error) {
 	if strings.TrimSpace(dir) == "" {

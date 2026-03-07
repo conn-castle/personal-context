@@ -80,7 +80,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 | `sync_version` | `id` (always 1) | Single-row version counter, auto-incremented by triggers |
 
 ### Key Fields and Invariants
-- **Slide ID**: `{YYYYMMDD}-{8-random-hex}` from `crypto/rand` (e.g., `20250304-a3f2b7e1`). Date prefix is UTC-normalized from the generation timestamp.
+- **Slide ID**: `{YYYYMMDD}-{8-random-hex}` from `crypto/rand` (e.g., `20250304-a3f2b7e1`). Date prefix matches the slide's `date` field (UTC-normalized).
 - **Sort key**: `ORDER BY (date, day_order, id)` — always deterministic.
 - **day_order**: Fractional index string (Figma's algorithm, safe characters only). Lexicographic sort. Reordering updates only the moved slide.
 - **project_id**: Slash-convention string (e.g., `"happy-ai/sleep-staging"`). No project table in MVP.

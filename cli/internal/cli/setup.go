@@ -37,7 +37,7 @@ func runSetup(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 	pcDir := filepath.Join(base, ".pc")
 
 	if err := os.MkdirAll(pcDir, 0o700); err != nil {
-		return fmt.Errorf("create data directory: %w", err)
+		return fmt.Errorf("create .pc directory %q: %w", pcDir, err)
 	}
 
 	conn, err := openSQLiteFn(dbPath(homeDir))

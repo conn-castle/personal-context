@@ -135,8 +135,8 @@ func runAdd(ctx context.Context, stdout io.Writer, _ io.Writer, inputPath string
 		slideDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	}
 
-	// Generate slide ID using UTC time
-	id, err := slideid.GenerateForDate(now)
+	// Generate slide ID — date prefix must match the slide's date field
+	id, err := slideid.GenerateForDate(slideDate)
 	if err != nil {
 		return fmt.Errorf("generate slide ID: %w", err)
 	}
@@ -226,6 +226,9 @@ func computeDayOrder(ctx context.Context, repo repository.Repository, date strin
 	}
 
 	if len(filtered) == 0 {
+		if pos.kind == "after" || pos.kind == "before" {
+			return "", fmt.Errorf("reference slide %q not found on date %s", pos.referenceID, date)
+		}
 		return fractionalindex.GenerateAtEnd("")
 	}
 

@@ -170,7 +170,7 @@ func ApplyMigrations(ctx context.Context, db *sql.DB, migrationsDir string) erro
 }
 
 // ApplyMigrationsFS applies migration SQL files from an fs.FS in lexical order.
-// Args: ctx controls cancellation; fsys contains .sql files at the root or under subDir.
+// Args: ctx controls cancellation; fsys contains .sql files at the root.
 // Returns: nil when all pending migrations are applied and recorded.
 func (c *Connection) ApplyMigrationsFS(ctx context.Context, fsys fs.FS) error {
 	if c == nil || c.db == nil {
