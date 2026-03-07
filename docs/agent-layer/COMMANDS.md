@@ -18,8 +18,8 @@ Canonical, repeatable **development workflow** commands for this repository (set
 ```bash
 <command>
 ```
-Run from: <repo root or path>  
-Prerequisites: <only if critical>  
+Run from: <repo root or path>
+Prerequisites: <only if critical>
 Notes: <optional constraints or tips>
 ````
 
@@ -65,6 +65,13 @@ Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `
 ```
 Run from: `cli/`
 Notes: Fails when any tested package drops below 95%. Excludes `internal/repository/repositorytest` (contract helper, no `_test.go` files), `internal/e2e`, and `migrations`. CLI e2e tests run separately in CI via `go test ./internal/e2e`.
+
+- Run full Phase 3 manual verification flow (opens slide preview in browser)
+```bash
+./scripts/verify_phase3_manual.sh
+```
+Run from: `cli/`
+Notes: Use `--no-open` in non-interactive environments. Prints artifact paths and cleanup command.
 
 - Run CLI e2e tests
 ```bash
@@ -131,6 +138,14 @@ npm run test:e2e:smoke
 ```
 Run from: `web/`
 Prerequisites: `npx playwright install` for browser binaries.
+
+- Run Playwright e2e for standalone CLI slide preview flow
+```bash
+npm run test:e2e:cli-slide
+```
+Run from: `web/`
+Prerequisites: Go toolchain and `npx playwright install` for browser binaries.
+Notes: Executes `cli/scripts/verify_phase3_manual.sh --no-open`, then loads the generated `slide.html` in Chromium.
 
 ## Repository root
 

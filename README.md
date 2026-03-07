@@ -56,6 +56,7 @@ go build ./...
 go build -o pc ./cmd/pc
 ./scripts/check_coverage.sh 95
 ./scripts/check_coverage_per_package.sh 95
+./scripts/verify_phase3_manual.sh
 
 # Web
 cd ../web
@@ -67,6 +68,7 @@ npm run test:coverage
 npm run build
 npx playwright install
 npm run test:e2e:smoke
+npm run test:e2e:cli-slide
 
 # Repo-level schema contract
 cd ..
@@ -130,8 +132,11 @@ go build ./...
 go build -o pc ./cmd/pc
 ./scripts/check_coverage.sh 95
 ./scripts/check_coverage_per_package.sh 95
+./scripts/verify_phase3_manual.sh
 golangci-lint run ./...
 ```
+
+`./scripts/verify_phase3_manual.sh` runs the full Phase 3 local flow (`setup/add/show/edit/move/delete/restore`), creates a standalone slide preview, and opens it in your default browser. Use `--no-open` for headless runs.
 
 ### Web (`web/`)
 
@@ -144,7 +149,10 @@ npm run test:coverage
 npm run build
 npx playwright install
 npm run test:e2e:smoke
+npm run test:e2e:cli-slide
 ```
+
+`npm run test:e2e:cli-slide` requires Go on `PATH` because it executes `cli/scripts/verify_phase3_manual.sh --no-open`.
 
 ### Repository (`repo root`)
 
@@ -158,7 +166,7 @@ GitHub Actions workflow: `.github/workflows/ci.yml`
 
 - Enforces schema contract checks.
 - Runs CLI `go mod tidy -diff`, build/test/lint, aggregate coverage gate (`>=95%`), and per-package coverage gate (`>=95%` for each tested package).
-- Runs web lint/test/coverage/build and Playwright smoke e2e.
+- Runs web lint/test/coverage/build, Playwright smoke e2e, and Playwright standalone CLI-slide e2e.
 - Uses pinned `golangci-lint` version via `GOLANGCI_LINT_VERSION`.
 
 ## Nightly Export Example
