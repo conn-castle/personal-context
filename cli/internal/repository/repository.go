@@ -36,4 +36,7 @@ type Repository interface {
 	DeleteTemplate(ctx context.Context, name string) error
 
 	GetSyncVersion(ctx context.Context) (SyncVersion, error)
+
+	// ListDistinctProjectIDs returns sorted distinct non-NULL project_id values from active slides.
+	ListDistinctProjectIDs(ctx context.Context) ([]string, error)
 }

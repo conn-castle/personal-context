@@ -57,14 +57,14 @@ Run from: `cli/`
 ./scripts/check_coverage.sh 95
 ```
 Run from: `cli/`
-Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `internal/repository/repositorytest` (contract helper, no `_test.go` files), `internal/e2e`, and `migrations`. CLI e2e tests run separately in CI via `go test ./internal/e2e`.
+Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `internal/repository/repositorytest` (contract helper, no `_test.go` files) and `internal/e2e`. CLI e2e tests run separately in CI via `go test ./internal/e2e`.
 
 - Run per-package Go coverage gate
 ```bash
 ./scripts/check_coverage_per_package.sh 95
 ```
 Run from: `cli/`
-Notes: Fails when any tested package drops below 95%. Excludes `internal/repository/repositorytest` (contract helper, no `_test.go` files), `internal/e2e`, and `migrations`. CLI e2e tests run separately in CI via `go test ./internal/e2e`.
+Notes: Fails when any tested package drops below 95%. Excludes `internal/repository/repositorytest` (contract helper, no `_test.go` files) and `internal/e2e`. CLI e2e tests run separately in CI via `go test ./internal/e2e`.
 
 - Run full Phase 3 manual verification flow (opens slide preview in browser)
 ```bash
@@ -85,7 +85,7 @@ Notes: Executed explicitly in CI because coverage scripts intentionally exclude 
 golangci-lint run ./...
 ```
 Run from: `cli/`
-Prerequisites: `go install github.com/golangci/golangci-lint/cmd/golangci-lint@v2.10` and ensure `$(go env GOPATH)/bin` is on `PATH`.
+Prerequisites: `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.2` and ensure `$(go env GOPATH)/bin` is on `PATH`.
 
 ## Next.js Web UI (`web/`)
 

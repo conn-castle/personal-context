@@ -85,6 +85,9 @@ func (m *mockRepo) DeleteTemplate(context.Context, string) error                
 func (m *mockRepo) GetSyncVersion(context.Context) (repository.SyncVersion, error) {
 	return repository.SyncVersion{}, nil
 }
+func (m *mockRepo) ListDistinctProjectIDs(context.Context) ([]string, error) {
+	return nil, nil
+}
 
 func TestSeedTemplatesAllNew(t *testing.T) {
 	created := make(map[string]bool)

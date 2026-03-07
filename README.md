@@ -4,7 +4,7 @@ Personal Context is a local-first engineering notebook system that stores work a
 
 ## Status
 
-Roadmap Phase 3 (Local CLI Foundation) is implemented: all local CRUD commands (`pc setup`, `pc add`, `pc show`, `pc edit`, `pc delete`, `pc restore`, `pc move`) are operational with e2e and unit test coverage. Cloud/web product features remain in later roadmap phases.
+Roadmap Phase 4 (Local CLI Features) is implemented: all local commands are operational including CRUD (`pc setup`, `pc add`, `pc show`, `pc edit`, `pc delete`, `pc restore`, `pc move`) and search/management (`pc search`, `pc trash`, `pc gc`, `pc project`, `pc doctor`). 103 e2e tests and per-package >=95% coverage. Cloud/web product features remain in later roadmap phases.
 
 ## Architecture
 
@@ -103,11 +103,14 @@ pc setup \
 - `pc delete <id>` — soft-delete a slide
 - `pc restore <id>` — un-delete a slide
 - `pc move <id>` — change date and/or position (`--date`, `--first`, `--last`, `--after`, `--before`)
+- `pc search <query>` — search slides by content, notes, or project (`--format table|ids|json`, `--limit`, `--project`, `--deleted`)
+- `pc trash` — list soft-deleted slides
+- `pc gc` — hard-delete trash older than 30 days (cascades child rows, removes files)
+- `pc project set|clear|list` — manage active project (active project used by `pc add` when no `--project` flag)
+- `pc doctor` — check local system health (DB, orphans, missing files)
 
 ### Planned Command Surface (Roadmap)
 
-- Health: `pc doctor`
-- Search/projects/trash: `pc search`, `pc project`, `pc trash`, `pc gc`
 - Sync/data: `pc sync`, `pc fetch`, `pc export`, `pc import`, `pc restore-db`, `pc verify`
 
 ## Web UI Overview

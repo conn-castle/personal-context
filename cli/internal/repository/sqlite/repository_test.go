@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,15 +13,6 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/repository/repositorytest"
 	sqlitebootstrap "github.com/conn-castle/personal-context/cli/internal/sqlite"
 )
-
-func testMigrationsDir(t *testing.T) string {
-	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("failed to resolve caller path")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "..", "migrations", "sqlite"))
-}
 
 func newSQLiteRepo(t *testing.T) repository.Repository {
 	t.Helper()
@@ -42,8 +32,8 @@ func newConcreteRepo(t *testing.T) (*Repository, *sql.DB) {
 		_ = connection.Close()
 	})
 
-	if err := connection.ApplyMigrations(context.Background(), testMigrationsDir(t)); err != nil {
-		t.Fatalf("ApplyMigrations() error = %v", err)
+	if err := connection.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("ApplySchema() error = %v", err)
 	}
 
 	repo, err := New(connection.DB())
@@ -704,6 +694,7 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 		{name: "ListTemplates", run: func() error { _, err := repo.ListTemplates(ctx); return err }},
 		{name: "DeleteTemplate", run: func() error { return repo.DeleteTemplate(ctx, "tmpl") }},
 		{name: "GetSyncVersion", run: func() error { _, err := repo.GetSyncVersion(ctx); return err }},
+		{name: "ListDistinctProjectIDs", run: func() error { _, err := repo.ListDistinctProjectIDs(ctx); return err }},
 	}
 
 	for _, method := range methods {

@@ -75,12 +75,11 @@ func TestApplyMigrationsIsIdempotentAndCreatesExpectedSchema(t *testing.T) {
 		_ = connection.Close()
 	})
 
-	migrationsDir := filepath.Clean(filepath.Join("..", "..", "migrations", "sqlite"))
-	if err := connection.ApplyMigrations(context.Background(), migrationsDir); err != nil {
-		t.Fatalf("first ApplyMigrations() error = %v", err)
+	if err := connection.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("first ApplySchema() error = %v", err)
 	}
-	if err := connection.ApplyMigrations(context.Background(), migrationsDir); err != nil {
-		t.Fatalf("second ApplyMigrations() error = %v", err)
+	if err := connection.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("second ApplySchema() error = %v", err)
 	}
 
 	assertTableExists(t, connection.DB(), "slides")
@@ -298,9 +297,8 @@ func TestMigrationTriggersUpdateUpdatedAtAndSyncVersion(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = connection.Close() })
 
-	migrationsDir := filepath.Clean(filepath.Join("..", "..", "migrations", "sqlite"))
-	if err := connection.ApplyMigrations(context.Background(), migrationsDir); err != nil {
-		t.Fatalf("ApplyMigrations() error = %v", err)
+	if err := connection.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("ApplySchema() error = %v", err)
 	}
 
 	if _, err := connection.DB().Exec(`INSERT INTO slides(id, date, day_order, html_content) VALUES(?, ?, ?, ?);`, "20260305-abcddcba", "2026-03-05", "n", "<h1>a</h1>"); err != nil {
@@ -346,9 +344,8 @@ func TestMigrationEnforcesStrictIDAndHashConstraints(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = connection.Close() })
 
-	migrationsDir := filepath.Clean(filepath.Join("..", "..", "migrations", "sqlite"))
-	if err := connection.ApplyMigrations(context.Background(), migrationsDir); err != nil {
-		t.Fatalf("ApplyMigrations() error = %v", err)
+	if err := connection.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("ApplySchema() error = %v", err)
 	}
 
 	if _, err := connection.DB().Exec(
@@ -954,6 +951,77 @@ func TestApplyMigrationsFromFSPropagatesLookupFailure(t *testing.T) {
 	err = ApplyMigrationsFromFS(context.Background(), conn.DB(), fsys)
 	if err == nil {
 		t.Fatal("expected error when isMigrationAppliedFn fails")
+	}
+}
+
+func TestSchemaSQL(t *testing.T) {
+	content := SchemaSQL()
+	if len(content) == 0 {
+		t.Fatal("SchemaSQL() returned empty content")
+	}
+	if !strings.Contains(string(content), "CREATE TABLE IF NOT EXISTS slides") {
+		t.Fatal("SchemaSQL() missing slides table definition")
+	}
+}
+
+func TestSchemaFS(t *testing.T) {
+	fsys, err := SchemaFS()
+	if err != nil {
+		t.Fatalf("SchemaFS() error = %v", err)
+	}
+	if fsys == nil {
+		t.Fatal("SchemaFS() returned nil filesystem")
+	}
+}
+
+func TestApplySchemaIsIdempotent(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "pc.db")
+	conn, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	if err := conn.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("first ApplySchema() error = %v", err)
+	}
+	if err := conn.ApplySchema(context.Background()); err != nil {
+		t.Fatalf("second ApplySchema() error = %v", err)
+	}
+
+	assertTableExists(t, conn.DB(), "slides")
+	assertTableExists(t, conn.DB(), "slide_figures")
+	assertTableExists(t, conn.DB(), "slide_data_files")
+	assertTableExists(t, conn.DB(), "templates")
+	assertTableExists(t, conn.DB(), "sync_version")
+	assertTableExists(t, conn.DB(), "schema_migrations")
+
+	var count int
+	if err := conn.DB().QueryRow("SELECT COUNT(*) FROM schema_migrations").Scan(&count); err != nil {
+		t.Fatalf("query schema_migrations: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 migration record, got %d", count)
+	}
+
+	var version string
+	if err := conn.DB().QueryRow("SELECT version FROM schema_migrations").Scan(&version); err != nil {
+		t.Fatalf("query version: %v", err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("expected version %q, got %q", schemaVersion, version)
+	}
+}
+
+func TestApplySchemaRejectsNilConnection(t *testing.T) {
+	var nilConn *Connection
+	if err := nilConn.ApplySchema(context.Background()); err == nil {
+		t.Fatal("expected error for nil connection")
+	}
+
+	conn := &Connection{}
+	if err := conn.ApplySchema(context.Background()); err == nil {
+		t.Fatal("expected error for nil db in connection")
 	}
 }
 

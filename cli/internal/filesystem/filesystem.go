@@ -92,6 +92,59 @@ func (c *Client) DeleteDataFile(slideID string, filename string) error {
 	return nil
 }
 
+// BasePath returns the root data directory path.
+func (c *Client) BasePath() string {
+	return c.basePath
+}
+
+// ListSlideIDsOnDisk returns slide IDs that have figure or data directories on disk.
+// Args: none.
+// Returns: figure slide IDs, data slide IDs, and any error.
+func (c *Client) ListSlideIDsOnDisk() (figures []string, data []string, err error) {
+	figures, err = listSubdirs(filepath.Join(c.basePath, "figures"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("list figure directories: %w", err)
+	}
+	data, err = listSubdirs(filepath.Join(c.basePath, "data"))
+	if err != nil {
+		return nil, nil, fmt.Errorf("list data directories: %w", err)
+	}
+	return figures, data, nil
+}
+
+// DeleteSlideDir removes the entire figure and data directories for a slide.
+// Args: slideID identifies the slide.
+// Returns: nil on success; tolerates missing directories.
+func (c *Client) DeleteSlideDir(slideID string) error {
+	if err := validatePathSegment("slide id", slideID); err != nil {
+		return err
+	}
+	for _, prefix := range []string{"figures", "data"} {
+		dir := filepath.Join(c.basePath, prefix, slideID)
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("remove %s/%s: %w", prefix, slideID, err)
+		}
+	}
+	return nil
+}
+
+func listSubdirs(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	result := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() && validatePathSegment("entry", e.Name()) == nil {
+			result = append(result, e.Name())
+		}
+	}
+	return result, nil
+}
+
 func (c *Client) copyInto(prefix string, slideID string, sourcePath string) (StoredFile, error) {
 	if strings.TrimSpace(sourcePath) == "" {
 		return StoredFile{}, fmt.Errorf("source path is required")

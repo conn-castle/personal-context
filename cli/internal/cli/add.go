@@ -117,9 +117,12 @@ func runAdd(ctx context.Context, stdout io.Writer, _ io.Writer, inputPath string
 		return err
 	}
 
-	// Resolve project_id: --project flag overrides metadata.json
+	// Resolve project_id: --project flag > metadata.json > active project
 	if projectOverride != "" {
 		input.ProjectID = &projectOverride
+	} else if input.ProjectID == nil && stack.Config.ActiveProject != "" {
+		ap := stack.Config.ActiveProject
+		input.ProjectID = &ap
 	}
 
 	// Resolve date

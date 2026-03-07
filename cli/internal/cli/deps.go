@@ -13,7 +13,6 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 	sqliterepo "github.com/conn-castle/personal-context/cli/internal/repository/sqlite"
 	"github.com/conn-castle/personal-context/cli/internal/sqlite"
-	"github.com/conn-castle/personal-context/cli/migrations"
 )
 
 const pcHomeEnvVar = "PC_HOME"
@@ -31,7 +30,7 @@ var (
 	userHomeDirFn         = os.UserHomeDir
 	newConfigStoreFn      = config.NewStore
 	openSQLiteFn          = sqlite.Open
-	sqliteMigrationsFSFn  = migrations.SQLiteFS
+	sqliteMigrationsFSFn  = sqlite.SchemaFS
 	newSQLiteRepoFn       = func(db *sql.DB) (repository.Repository, error) { return sqliterepo.New(db) }
 	newFilesystemClientFn = filesystem.NewClient
 )
