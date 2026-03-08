@@ -14,7 +14,7 @@ import (
 )
 
 // newSetupCommand creates the `pc setup` subcommand.
-func newSetupCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+func newSetupCommand(stdout io.Writer, stderr io.Writer, stdin io.Reader) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Initialize local Personal Context environment",
@@ -23,6 +23,7 @@ func newSetupCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 			return runSetup(cmd.Context(), stdout, stderr)
 		},
 	}
+	cmd.SetIn(stdin)
 	return cmd
 }
 

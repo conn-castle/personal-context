@@ -52,6 +52,15 @@ func resolveHomeDir() (string, error) {
 	return resolveHomeDirFn()
 }
 
+// resolveUserHomeDir returns the OS user home directory without honoring PC_HOME.
+func resolveUserHomeDir() (string, error) {
+	home, err := userHomeDirFn()
+	if err != nil {
+		return "", fmt.Errorf("resolve user home directory: %w", err)
+	}
+	return home, nil
+}
+
 // defaultResolveHomeDir checks PC_HOME env var first, then falls back to os.UserHomeDir.
 func defaultResolveHomeDir() (string, error) {
 	if home := os.Getenv(pcHomeEnvVar); strings.TrimSpace(home) != "" {

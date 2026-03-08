@@ -43,7 +43,7 @@ func newMoveCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-func runMove(ctx context.Context, stdout io.Writer, _ io.Writer, id string, dateStr string, pos position, posExplicit bool) error {
+func runMove(ctx context.Context, stdout io.Writer, stderr io.Writer, id string, dateStr string, pos position, posExplicit bool) error {
 	if dateStr == "" && !posExplicit {
 		return fmt.Errorf("at least one of --date or a position flag (--first, --last, --after, --before) is required")
 	}
@@ -98,6 +98,7 @@ func runMove(ctx context.Context, stdout io.Writer, _ io.Writer, id string, date
 		return fmt.Errorf("update slide: %w", err)
 	}
 
+	_ = runAutoSyncFn(ctx, stderr)
 	_, _ = fmt.Fprintf(stdout, "Slide %s moved\n", id)
 	return nil
 }

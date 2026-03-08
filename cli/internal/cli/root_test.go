@@ -95,3 +95,19 @@ func TestNewRootCommandRejectsUnexpectedArgs(t *testing.T) {
 		t.Fatal("expected error for unexpected args, got nil")
 	}
 }
+
+func TestNewRootCommandUsesProvidedStdin(t *testing.T) {
+	stdout := bytes.NewBuffer(nil)
+	stderr := bytes.NewBuffer(nil)
+	stdin := strings.NewReader("interactive input")
+
+	command := NewRootCommand(RootCommandOptions{
+		Stdout: stdout,
+		Stderr: stderr,
+		Stdin:  stdin,
+	})
+
+	if command.InOrStdin() != stdin {
+		t.Fatal("expected root command to use provided stdin")
+	}
+}

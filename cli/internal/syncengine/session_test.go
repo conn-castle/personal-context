@@ -1,0 +1,823 @@
+package syncengine
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestCursorStoreReadWriteRoundTrip(t *testing.T) {
+	store, err := NewCursorStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	want := time.Date(2026, 3, 8, 14, 15, 16, 987654321, time.FixedZone("EST", -5*60*60))
+	if err := store.Write(want); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	got, exists, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if !exists {
+		t.Fatal("Read() exists = false, want true")
+	}
+
+	want = want.UTC().Truncate(time.Millisecond)
+	if !got.Equal(want) {
+		t.Fatalf("Read() = %s, want %s", got.Format(time.RFC3339Nano), want.Format(time.RFC3339Nano))
+	}
+}
+
+func TestCursorStoreReadMissingReturnsExistsFalse(t *testing.T) {
+	store, err := NewCursorStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	got, exists, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if exists {
+		t.Fatal("Read() exists = true, want false")
+	}
+	if !got.IsZero() {
+		t.Fatalf("Read() = %s, want zero time", got.Format(time.RFC3339Nano))
+	}
+}
+
+func TestCursorStoreReadRejectsMalformedTimestamp(t *testing.T) {
+	store, err := NewCursorStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	if err := os.WriteFile(store.Path(), []byte("not-a-timestamp\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if _, _, err := store.Read(); err == nil {
+		t.Fatal("Read() error = nil, want parse failure")
+	}
+}
+
+func TestManagerBeginCapturesStartAndCompleteWritesIt(t *testing.T) {
+	manager, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	lastSync := time.Date(2026, 3, 8, 9, 0, 0, 999999999, time.UTC)
+	if err := manager.store.Write(lastSync); err != nil {
+		t.Fatalf("store.Write() error = %v", err)
+	}
+
+	startedAt := time.Date(2026, 3, 8, 9, 30, 0, 123456789, time.FixedZone("EDT", -4*60*60))
+	manager.nowFn = func() time.Time { return startedAt }
+
+	window, lock, err := manager.Begin()
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer func() {
+		if releaseErr := lock.Release(); releaseErr != nil {
+			t.Fatalf("Release() error = %v", releaseErr)
+		}
+	}()
+
+	wantLastSync := lastSync.Truncate(time.Millisecond)
+	if !window.LastSync.Equal(wantLastSync) {
+		t.Fatalf("window.LastSync = %s, want %s", window.LastSync.Format(time.RFC3339Nano), wantLastSync.Format(time.RFC3339Nano))
+	}
+
+	wantStartedAt := startedAt.UTC().Truncate(time.Millisecond)
+	if !window.StartedAt.Equal(wantStartedAt) {
+		t.Fatalf("window.StartedAt = %s, want %s", window.StartedAt.Format(time.RFC3339Nano), wantStartedAt.Format(time.RFC3339Nano))
+	}
+
+	if err := manager.Complete(window); err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+
+	got, exists, err := manager.store.Read()
+	if err != nil {
+		t.Fatalf("store.Read() error = %v", err)
+	}
+	if !exists {
+		t.Fatal("store.Read() exists = false, want true")
+	}
+	if !got.Equal(wantStartedAt) {
+		t.Fatalf("store.Read() = %s, want %s", got.Format(time.RFC3339Nano), wantStartedAt.Format(time.RFC3339Nano))
+	}
+}
+
+func TestManagerBeginPreventsConcurrentSync(t *testing.T) {
+	managerOne, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	managerTwo, err := NewManager(filepathDir(managerOne.lockPath))
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	_, lock, err := managerOne.Begin()
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+
+	_, _, err = managerTwo.Begin()
+	if !errors.Is(err, ErrSyncLocked) {
+		t.Fatalf("Begin() error = %v, want %v", err, ErrSyncLocked)
+	}
+
+	if err := lock.Release(); err != nil {
+		t.Fatalf("Release() error = %v", err)
+	}
+
+	_, secondLock, err := managerTwo.Begin()
+	if err != nil {
+		t.Fatalf("Begin() after release error = %v", err)
+	}
+	if err := secondLock.Release(); err != nil {
+		t.Fatalf("Release() error = %v", err)
+	}
+}
+
+func TestManagerBeginReleasesLockWhenCursorReadFails(t *testing.T) {
+	manager, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	if err := os.WriteFile(manager.store.Path(), []byte("bad\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if _, _, err := manager.Begin(); err == nil {
+		t.Fatal("Begin() error = nil, want parse failure")
+	}
+
+	if _, err := os.Stat(manager.lockPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("lock file stat error = %v, want not-exist", err)
+	}
+}
+
+func TestNewCursorStoreRejectsEmptyDir(t *testing.T) {
+	for _, input := range []string{"", "  ", "\t"} {
+		store, err := NewCursorStore(input)
+		if err == nil {
+			t.Fatalf("NewCursorStore(%q) error = nil, want validation failure", input)
+		}
+		if store != nil {
+			t.Fatalf("NewCursorStore(%q) returned non-nil store on error", input)
+		}
+	}
+}
+
+func TestCursorStorePathNilReceiver(t *testing.T) {
+	var store *CursorStore
+	got := store.Path()
+	if got != "" {
+		t.Fatalf("Path() = %q, want empty string for nil receiver", got)
+	}
+}
+
+func TestCursorStoreReadNilReceiver(t *testing.T) {
+	var store *CursorStore
+	_, _, err := store.Read()
+	if err == nil {
+		t.Fatal("Read() on nil receiver: error = nil, want validation failure")
+	}
+}
+
+func TestCursorStoreReadEmptyFileContent(t *testing.T) {
+	store, err := NewCursorStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	// Write an empty file (just whitespace).
+	if err := os.WriteFile(store.Path(), []byte("   \n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, _, err = store.Read()
+	if err == nil {
+		t.Fatal("Read() with empty content: error = nil, want empty-timestamp failure")
+	}
+}
+
+func TestCursorStoreWriteNilReceiver(t *testing.T) {
+	var store *CursorStore
+	err := store.Write(time.Now())
+	if err == nil {
+		t.Fatal("Write() on nil receiver: error = nil, want validation failure")
+	}
+}
+
+func TestCursorStoreWriteZeroTimestamp(t *testing.T) {
+	store, err := NewCursorStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	err = store.Write(time.Time{})
+	if err == nil {
+		t.Fatal("Write(zero) error = nil, want validation failure")
+	}
+}
+
+func TestNewManagerRejectsEmptyDir(t *testing.T) {
+	mgr, err := NewManager("")
+	if err == nil {
+		t.Fatal("NewManager(\"\") error = nil, want validation failure")
+	}
+	if mgr != nil {
+		t.Fatal("NewManager(\"\") returned non-nil manager on error")
+	}
+}
+
+func TestManagerCompleteNilManager(t *testing.T) {
+	var mgr *Manager
+	err := mgr.Complete(SyncWindow{StartedAt: time.Now()})
+	if err == nil {
+		t.Fatal("Complete() on nil manager: error = nil, want validation failure")
+	}
+}
+
+func TestManagerCompleteZeroStartedAt(t *testing.T) {
+	mgr, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	err = mgr.Complete(SyncWindow{StartedAt: time.Time{}})
+	if err == nil {
+		t.Fatal("Complete(zero StartedAt) error = nil, want validation failure")
+	}
+}
+
+func TestManagerBeginNilManager(t *testing.T) {
+	var mgr *Manager
+	_, _, err := mgr.Begin()
+	if err == nil {
+		t.Fatal("Begin() on nil manager: error = nil, want validation failure")
+	}
+}
+
+func TestAcquireFileLockRejectsEmptyPath(t *testing.T) {
+	lock, err := AcquireFileLock("")
+	if err == nil {
+		t.Fatal("AcquireFileLock(\"\") error = nil, want validation failure")
+	}
+	if lock != nil {
+		t.Fatal("AcquireFileLock(\"\") returned non-nil lock on error")
+	}
+}
+
+func TestFileLockReleaseNilLock(t *testing.T) {
+	var lock *FileLock
+	err := lock.Release()
+	if err == nil {
+		t.Fatal("Release() on nil lock: error = nil, want validation failure")
+	}
+}
+
+func TestFileLockReleaseAlreadyReleased(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+
+	lock, err := AcquireFileLock(lockPath)
+	if err != nil {
+		t.Fatalf("AcquireFileLock() error = %v", err)
+	}
+
+	if err := lock.Release(); err != nil {
+		t.Fatalf("first Release() error = %v", err)
+	}
+
+	err = lock.Release()
+	if err == nil {
+		t.Fatal("second Release() error = nil, want already-released failure")
+	}
+}
+
+func TestAcquireFileLockCreatesDirAndWritesContent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nested", "dir")
+	lockPath := filepath.Join(dir, "test.lock")
+
+	lock, err := AcquireFileLock(lockPath)
+	if err != nil {
+		t.Fatalf("AcquireFileLock() error = %v", err)
+	}
+	defer func() { _ = lock.Release() }()
+
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "locked\n" {
+		t.Fatalf("lock file content = %q, want %q", string(data), "locked\n")
+	}
+}
+
+func TestCursorStoreWriteCreatesNestedDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nested", "pc")
+	store, err := NewCursorStore(dir)
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	ts := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
+	if err := store.Write(ts); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	got, exists, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if !exists {
+		t.Fatal("Read() exists = false, want true")
+	}
+	if !got.Equal(ts) {
+		t.Fatalf("Read() = %s, want %s", got.Format(time.RFC3339Nano), ts.Format(time.RFC3339Nano))
+	}
+}
+
+func TestManagerBeginFirstSyncNoExistingCursor(t *testing.T) {
+	mgr, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	fixedNow := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
+	mgr.nowFn = func() time.Time { return fixedNow }
+
+	window, lock, err := mgr.Begin()
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	defer func() { _ = lock.Release() }()
+
+	if !window.LastSync.IsZero() {
+		t.Fatalf("window.LastSync = %s, want zero (first sync)", window.LastSync.Format(time.RFC3339Nano))
+	}
+	if !window.StartedAt.Equal(fixedNow) {
+		t.Fatalf("window.StartedAt = %s, want %s", window.StartedAt.Format(time.RFC3339Nano), fixedNow.Format(time.RFC3339Nano))
+	}
+}
+
+func TestCursorStoreReadWithEmptyPathField(t *testing.T) {
+	store := &CursorStore{path: "   "}
+	_, _, err := store.Read()
+	if err == nil {
+		t.Fatal("Read() with blank path: error = nil, want validation failure")
+	}
+}
+
+func TestCursorStoreWriteWithEmptyPathField(t *testing.T) {
+	store := &CursorStore{path: "   "}
+	err := store.Write(time.Now())
+	if err == nil {
+		t.Fatal("Write() with blank path: error = nil, want validation failure")
+	}
+}
+
+func TestCursorStoreReadNonNotExistError(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewCursorStore(dir)
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	// Place a directory at the file path so os.ReadFile returns a non-IsNotExist error.
+	if err := os.MkdirAll(store.Path(), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	_, _, err = store.Read()
+	if err == nil {
+		t.Fatal("Read() with directory at path: error = nil, want read failure")
+	}
+}
+
+func TestCursorStoreWriteAtomicRenameSucceeds(t *testing.T) {
+	// Write twice to confirm the atomic rename path works when overwriting.
+	store, err := NewCursorStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	ts1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	ts2 := time.Date(2026, 6, 15, 12, 30, 0, 0, time.UTC)
+
+	if err := store.Write(ts1); err != nil {
+		t.Fatalf("Write(ts1) error = %v", err)
+	}
+	if err := store.Write(ts2); err != nil {
+		t.Fatalf("Write(ts2) error = %v", err)
+	}
+
+	got, exists, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if !exists {
+		t.Fatal("Read() exists = false, want true")
+	}
+	if !got.Equal(ts2) {
+		t.Fatalf("Read() = %s, want %s", got.Format(time.RFC3339Nano), ts2.Format(time.RFC3339Nano))
+	}
+}
+
+func TestCursorStoreWriteReadonlyDirFails(t *testing.T) {
+	dir := t.TempDir()
+	readonlyDir := filepath.Join(dir, "readonly")
+	if err := os.MkdirAll(readonlyDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	store, err := NewCursorStore(readonlyDir)
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	// Make the directory readonly so temp file creation fails.
+	if err := os.Chmod(readonlyDir, 0o500); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(readonlyDir, 0o700) })
+
+	err = store.Write(time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatal("Write() to readonly dir: error = nil, want failure")
+	}
+}
+
+func TestAcquireFileLockExistingLockReturnsErrSyncLocked(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+
+	lock1, err := AcquireFileLock(lockPath)
+	if err != nil {
+		t.Fatalf("first AcquireFileLock() error = %v", err)
+	}
+
+	_, err = AcquireFileLock(lockPath)
+	if !errors.Is(err, ErrSyncLocked) {
+		t.Fatalf("second AcquireFileLock() error = %v, want %v", err, ErrSyncLocked)
+	}
+
+	if err := lock1.Release(); err != nil {
+		t.Fatalf("Release() error = %v", err)
+	}
+}
+
+func TestAcquireFileLockReadonlyDirFails(t *testing.T) {
+	dir := t.TempDir()
+	lockDir := filepath.Join(dir, "lockdir")
+	if err := os.MkdirAll(lockDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	// Make the directory readonly so file creation fails with a permission error.
+	if err := os.Chmod(lockDir, 0o500); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(lockDir, 0o700) })
+
+	lockPath := filepath.Join(lockDir, "test.lock")
+	_, err := AcquireFileLock(lockPath)
+	if err == nil {
+		t.Fatal("AcquireFileLock() to readonly dir: error = nil, want failure")
+	}
+	// The error should NOT be ErrSyncLocked since the file doesn't exist.
+	if errors.Is(err, ErrSyncLocked) {
+		t.Fatal("AcquireFileLock() error is ErrSyncLocked, want permission error")
+	}
+}
+
+func TestFileLockReleaseAfterRemove(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+
+	lock, err := AcquireFileLock(lockPath)
+	if err != nil {
+		t.Fatalf("AcquireFileLock() error = %v", err)
+	}
+
+	// Externally remove the lock file before releasing. The close should succeed,
+	// but remove will fail.
+	if err := os.Remove(lockPath); err != nil {
+		t.Fatalf("os.Remove() error = %v", err)
+	}
+
+	err = lock.Release()
+	if err == nil {
+		t.Fatal("Release() after external remove: error = nil, want remove failure")
+	}
+}
+
+func TestManagerBeginCompleteFullCycle(t *testing.T) {
+	dir := t.TempDir()
+	mgr, err := NewManager(dir)
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	now := time.Date(2026, 3, 8, 16, 0, 0, 0, time.UTC)
+	mgr.nowFn = func() time.Time { return now }
+
+	window, lock, err := mgr.Begin()
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+	if err := mgr.Complete(window); err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if err := lock.Release(); err != nil {
+		t.Fatalf("Release() error = %v", err)
+	}
+
+	// Second sync should see the previous cursor.
+	later := time.Date(2026, 3, 8, 17, 0, 0, 0, time.UTC)
+	mgr.nowFn = func() time.Time { return later }
+
+	window2, lock2, err := mgr.Begin()
+	if err != nil {
+		t.Fatalf("second Begin() error = %v", err)
+	}
+	defer func() { _ = lock2.Release() }()
+
+	if !window2.LastSync.Equal(now) {
+		t.Fatalf("window2.LastSync = %s, want %s", window2.LastSync.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	}
+	if !window2.StartedAt.Equal(later) {
+		t.Fatalf("window2.StartedAt = %s, want %s", window2.StartedAt.Format(time.RFC3339Nano), later.Format(time.RFC3339Nano))
+	}
+}
+
+func TestCursorStoreWriteTruncatesSubMillisecondPrecision(t *testing.T) {
+	store, err := NewCursorStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	// Write a timestamp with sub-millisecond precision.
+	ts := time.Date(2026, 3, 8, 12, 0, 0, 123456789, time.UTC)
+	if err := store.Write(ts); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	got, _, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+
+	want := time.Date(2026, 3, 8, 12, 0, 0, 123000000, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("Read() = %s, want %s (truncated)", got.Format(time.RFC3339Nano), want.Format(time.RFC3339Nano))
+	}
+}
+
+func TestManagerBeginZeroNowFnReleasesLock(t *testing.T) {
+	mgr, err := NewManager(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+
+	// Return a zero time from nowFn to trigger the startedAt.IsZero() branch.
+	mgr.nowFn = func() time.Time { return time.Time{} }
+
+	_, _, err = mgr.Begin()
+	if err == nil {
+		t.Fatal("Begin() with zero nowFn: error = nil, want validation failure")
+	}
+
+	// Verify the lock was released (we should be able to acquire it again).
+	lock, err := AcquireFileLock(mgr.lockPath)
+	if err != nil {
+		t.Fatalf("AcquireFileLock() after failed Begin: error = %v (lock was not released)", err)
+	}
+	_ = lock.Release()
+}
+
+func TestCursorStoreWriteMkdirAllFails(t *testing.T) {
+	dir := t.TempDir()
+	// Create a regular file where the directory should be, so MkdirAll fails.
+	parentPath := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(parentPath, []byte("not-a-dir"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	store, err := NewCursorStore(filepath.Join(parentPath, "sub"))
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	err = store.Write(time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatal("Write() with blocked MkdirAll: error = nil, want failure")
+	}
+}
+
+func TestCursorStoreWriteRenameFails(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewCursorStore(dir)
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	// Place a directory at the last_sync path so os.Rename fails
+	// (can't rename a regular file over a directory on most systems).
+	if err := os.MkdirAll(store.Path(), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	err = store.Write(time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatal("Write() with directory at target path: error = nil, want rename failure")
+	}
+}
+
+func TestAcquireFileLockMkdirAllFails(t *testing.T) {
+	dir := t.TempDir()
+	// Create a regular file where the lock directory should be.
+	blockerPath := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blockerPath, []byte("not-a-dir"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	lockPath := filepath.Join(blockerPath, "sub", "test.lock")
+	_, err := AcquireFileLock(lockPath)
+	if err == nil {
+		t.Fatal("AcquireFileLock() with blocked MkdirAll: error = nil, want failure")
+	}
+	if errors.Is(err, ErrSyncLocked) {
+		t.Fatal("AcquireFileLock() error should not be ErrSyncLocked for MkdirAll failure")
+	}
+}
+
+func TestFileLockReleaseCloseError(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+
+	origClose := osFileClose
+	defer func() { osFileClose = origClose }()
+
+	lock, err := AcquireFileLock(lockPath)
+	if err != nil {
+		t.Fatalf("AcquireFileLock() error = %v", err)
+	}
+
+	// Inject a close error for the Release call.
+	osFileClose = func(f *os.File) error {
+		_ = f.Close() // actually close to avoid leaking fd
+		return fmt.Errorf("injected close error")
+	}
+
+	err = lock.Release()
+	if err == nil {
+		t.Fatal("Release() with injected close error: error = nil, want failure")
+	}
+}
+
+func TestCursorStoreWriteChmodError(t *testing.T) {
+	origChmod := osFileChmod
+	defer func() { osFileChmod = origChmod }()
+
+	store, err := NewCursorStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	osFileChmod = func(f *os.File, mode os.FileMode) error {
+		return fmt.Errorf("injected chmod error")
+	}
+
+	err = store.Write(time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatal("Write() with injected Chmod error: error = nil, want failure")
+	}
+}
+
+func TestCursorStoreWriteWriteStringError(t *testing.T) {
+	origWriteString := osFileWriteString
+	defer func() { osFileWriteString = origWriteString }()
+
+	store, err := NewCursorStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	osFileWriteString = func(f *os.File, s string) (int, error) {
+		return 0, fmt.Errorf("injected write error")
+	}
+
+	err = store.Write(time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatal("Write() with injected WriteString error: error = nil, want failure")
+	}
+}
+
+func TestCursorStoreWriteSyncError(t *testing.T) {
+	origSync := osFileSync
+	defer func() { osFileSync = origSync }()
+
+	store, err := NewCursorStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	osFileSync = func(f *os.File) error {
+		return fmt.Errorf("injected sync error")
+	}
+
+	err = store.Write(time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatal("Write() with injected Sync error: error = nil, want failure")
+	}
+}
+
+func TestCursorStoreWriteCloseError(t *testing.T) {
+	origClose := osFileClose
+	defer func() { osFileClose = origClose }()
+
+	store, err := NewCursorStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCursorStore() error = %v", err)
+	}
+
+	osFileClose = func(f *os.File) error {
+		_ = f.Close() // actually close to avoid leaking fd
+		return fmt.Errorf("injected close error")
+	}
+
+	err = store.Write(time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC))
+	if err == nil {
+		t.Fatal("Write() with injected Close error: error = nil, want failure")
+	}
+}
+
+func TestAcquireFileLockWriteStringError(t *testing.T) {
+	origWriteString := osFileWriteString
+	defer func() { osFileWriteString = origWriteString }()
+
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+
+	osFileWriteString = func(f *os.File, s string) (int, error) {
+		return 0, fmt.Errorf("injected write error")
+	}
+
+	_, err := AcquireFileLock(lockPath)
+	if err == nil {
+		t.Fatal("AcquireFileLock() with injected WriteString error: error = nil, want failure")
+	}
+	if errors.Is(err, ErrSyncLocked) {
+		t.Fatal("error should not be ErrSyncLocked for WriteString failure")
+	}
+
+	// Verify lock file was cleaned up.
+	if _, statErr := os.Stat(lockPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("lock file still exists after WriteString failure (stat error = %v)", statErr)
+	}
+}
+
+func TestAcquireFileLockSyncError(t *testing.T) {
+	origSync := osFileSync
+	defer func() { osFileSync = origSync }()
+
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+
+	osFileSync = func(f *os.File) error {
+		return fmt.Errorf("injected sync error")
+	}
+
+	_, err := AcquireFileLock(lockPath)
+	if err == nil {
+		t.Fatal("AcquireFileLock() with injected Sync error: error = nil, want failure")
+	}
+	if errors.Is(err, ErrSyncLocked) {
+		t.Fatal("error should not be ErrSyncLocked for Sync failure")
+	}
+
+	// Verify lock file was cleaned up.
+	if _, statErr := os.Stat(lockPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("lock file still exists after Sync failure (stat error = %v)", statErr)
+	}
+}
+
+func filepathDir(path string) string {
+	return filepath.Dir(path)
+}

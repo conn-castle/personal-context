@@ -3,6 +3,7 @@ package e2e_test
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,12 +43,23 @@ type runResult struct {
 	ExitCode int
 }
 
+type runOptions struct {
+	Stdin io.Reader
+}
+
 // runPC executes the pc binary with the given args and PC_HOME set to homeDir.
 func runPC(t *testing.T, homeDir string, args ...string) runResult {
+	t.Helper()
+	return runPCWithOptions(t, homeDir, runOptions{}, args...)
+}
+
+// runPCWithOptions executes the pc binary with the provided options and PC_HOME set to homeDir.
+func runPCWithOptions(t *testing.T, homeDir string, opts runOptions, args ...string) runResult {
 	t.Helper()
 
 	cmd := exec.Command(binaryPath, args...)
 	cmd.Env = append(os.Environ(), "PC_HOME="+homeDir)
+	cmd.Stdin = opts.Stdin
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
