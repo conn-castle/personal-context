@@ -225,6 +225,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 ### Schema Equivalence Guard
 - `scripts/check_schema_equivalence.sh` — CI script comparing Postgres (`schema/schema.sql`) and SQLite (`cli/internal/sqlite/sqlite_schema.sql`) schemas for structural equivalence: tables, columns, indexes, UNIQUE constraints. Does not compare types, CHECK expressions, or triggers (intentionally dialect-specific).
+- `scripts/verify_phase5_demo.sh` — repository-level Phase 5 demo runner: executes schema contract/equivalence checks, cloud config validation tests, and Docker-backed Postgres/S3 integration suites.
 
 ## CLI Commands
 

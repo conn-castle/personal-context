@@ -37,6 +37,7 @@ tmp/
 .pc/
 node_modules/
 coverage.out
+coverage.html
 *.test
 /cli/pc
 .next/

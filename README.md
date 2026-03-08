@@ -33,7 +33,9 @@ personal-context/
 │   ├── agent-layer/             # Project memory files
 │   └── nightly-export-workflow.example.yml
 ├── scripts/
-│   └── check_schema_contract.sh # Canonical schema guard
+│   ├── check_schema_contract.sh    # Canonical schema guard
+│   ├── check_schema_equivalence.sh # Postgres/SQLite schema parity guard
+│   └── verify_phase5_demo.sh       # Phase 5 cloud data-layer demo runner
 └── .github/workflows/ci.yml
 ```
 
@@ -79,6 +81,7 @@ npm run test:e2e:cli-demo
 cd ..
 ./scripts/check_schema_contract.sh
 ./scripts/check_schema_equivalence.sh
+./scripts/verify_phase5_demo.sh
 ```
 
 ### Cloud Setup (Planned Runtime Path)
@@ -178,7 +181,10 @@ npm run test:e2e:cli-demo
 ```bash
 ./scripts/check_schema_contract.sh
 ./scripts/check_schema_equivalence.sh
+./scripts/verify_phase5_demo.sh
 ```
+
+`./scripts/verify_phase5_demo.sh` runs a Phase 5 cloud data-layer demo flow: schema contract guard, schema equivalence guard, cloud config validation tests, Postgres integration tests, and S3 integration tests. Use `--skip-integration` to skip Docker-backed integration checks.
 
 ## CI/CD
 
