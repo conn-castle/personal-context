@@ -25,7 +25,7 @@ func newEditCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-func runEdit(ctx context.Context, stdout io.Writer, _ io.Writer, id string, inputPath string) (err error) {
+func runEdit(ctx context.Context, stdout io.Writer, stderr io.Writer, id string, inputPath string) (err error) {
 	homeDir, err := resolveHomeDir()
 	if err != nil {
 		return err
@@ -348,6 +348,7 @@ func runEdit(ctx context.Context, stdout io.Writer, _ io.Writer, id string, inpu
 		_ = stack.FS.DeleteDataFile(id, filename) // best-effort cleanup
 	}
 
+	_ = runAutoSyncFn(ctx, stderr)
 	_, _ = fmt.Fprintf(stdout, "Slide %s updated\n", id)
 	return nil
 }

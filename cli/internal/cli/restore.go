@@ -22,7 +22,7 @@ func newRestoreCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-func runRestore(ctx context.Context, stdout io.Writer, _ io.Writer, id string) error {
+func runRestore(ctx context.Context, stdout io.Writer, stderr io.Writer, id string) error {
 	homeDir, err := resolveHomeDir()
 	if err != nil {
 		return err
@@ -41,6 +41,7 @@ func runRestore(ctx context.Context, stdout io.Writer, _ io.Writer, id string) e
 		return fmt.Errorf("restore slide: %w", err)
 	}
 
+	_ = runAutoSyncFn(ctx, stderr)
 	_, _ = fmt.Fprintf(stdout, "Slide %s restored\n", id)
 	return nil
 }

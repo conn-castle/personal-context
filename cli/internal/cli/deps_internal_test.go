@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -15,6 +16,22 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/filesystem"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
+
+func TestResolveUserHomeDirError(t *testing.T) {
+	original := userHomeDirFn
+	t.Cleanup(func() { userHomeDirFn = original })
+	userHomeDirFn = func() (string, error) {
+		return "", errors.New("no home")
+	}
+
+	_, err := resolveUserHomeDir()
+	if err == nil {
+		t.Fatal("expected error when userHomeDirFn fails")
+	}
+	if !strings.Contains(err.Error(), "resolve user home directory") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+}
 
 func TestDefaultResolveHomeDirUserHomeError(t *testing.T) {
 	t.Setenv(pcHomeEnvVar, "")
@@ -98,6 +115,23 @@ func TestOpenLocalStackFilesystemClientFactoryError(t *testing.T) {
 
 	if _, err := openLocalStack(homeDir); err == nil {
 		t.Fatal("expected openLocalStack to fail when filesystem client creation fails")
+	}
+}
+
+func TestRunSetupApplyMigrationsError(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	original := sqliteMigrationsFSFn
+	t.Cleanup(func() { sqliteMigrationsFSFn = original })
+	sqliteMigrationsFSFn = func() (fs.FS, error) {
+		return fstest.MapFS{
+			"001_bad.sql": {Data: []byte("THIS IS INVALID SQL;")},
+		}, nil
+	}
+
+	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected runSetup to fail when migrations cannot be applied")
 	}
 }
 

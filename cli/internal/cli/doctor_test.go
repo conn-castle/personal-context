@@ -9,8 +9,255 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/conn-castle/personal-context/cli/internal/config"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
+
+func TestDoctorResolveHomeDirError(t *testing.T) {
+	original := resolveHomeDirFn
+	t.Cleanup(func() { resolveHomeDirFn = original })
+	resolveHomeDirFn = func() (string, error) {
+		return "", errors.New("home dir error")
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error from resolveHomeDirFn")
+	}
+}
+
+func TestDoctorOpenLocalStackFail(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	// Write a config that is parseable but make DB path unusable by blocking it with a file
+	store, err := config.NewStore(homeDir)
+	if err != nil {
+		t.Fatalf("NewStore error = %v", err)
+	}
+	if err := store.Write(config.Config{}); err != nil {
+		t.Fatalf("Write config error = %v", err)
+	}
+
+	// Block the DB path by creating a directory named "pc.db"
+	dbFile := filepath.Join(homeDir, "personal-context", ".pc", "pc.db")
+	if err := os.MkdirAll(dbFile, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	err = runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when openLocalStack fails")
+	}
+	if !strings.Contains(stdout.String(), "Database:           FAIL") {
+		t.Fatalf("expected Database FAIL in output, got %q", stdout.String())
+	}
+}
+
+func TestDoctorListSlidesFail(t *testing.T) {
+	homeDir := setupEnv(t)
+
+	// Drop the slides table to make ListSlides fail
+	corruptTable(t, homeDir, "slides")
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"doctor"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when ListSlides fails")
+	}
+}
+
+// failAfterWriter fails after n successful writes.
+type failAfterWriter struct {
+	remaining int
+}
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.remaining <= 0 {
+		return 0, errors.New("write limit reached")
+	}
+	w.remaining--
+	return len(p), nil
+}
+
+func TestDoctorDatabaseSuccessWriteError(t *testing.T) {
+	setupEnv(t)
+
+	// Fail on the first write (Database: OK line).
+	stdout := &failAfterWriter{remaining: 0}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails")
+	}
+}
+
+func TestDoctorOrphanedFiguresSuccessWriteError(t *testing.T) {
+	setupEnv(t)
+
+	// "Database: OK" is the first write. Fail on the second write (Orphaned figures: OK).
+	stdout := &failAfterWriter{remaining: 1}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails")
+	}
+}
+
+func TestDoctorOrphanedDataSuccessWriteError(t *testing.T) {
+	setupEnv(t)
+
+	// "Database: OK", "Orphaned figures: OK". Fail on 3rd (Orphaned data: OK).
+	stdout := &failAfterWriter{remaining: 2}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails")
+	}
+}
+
+func TestDoctorMissingFiguresSuccessWriteError(t *testing.T) {
+	setupEnv(t)
+
+	// 4th write is "Missing figures: OK".
+	stdout := &failAfterWriter{remaining: 3}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails")
+	}
+}
+
+func TestDoctorMissingDataFilesSuccessWriteError(t *testing.T) {
+	setupEnv(t)
+
+	// 5th write is "Missing data files: OK".
+	stdout := &failAfterWriter{remaining: 4}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails")
+	}
+}
+
+func TestDoctorAllPassedWriteError(t *testing.T) {
+	setupEnv(t)
+
+	// 6th write is "All checks passed.".
+	stdout := &failAfterWriter{remaining: 5}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails")
+	}
+}
+
+func TestDoctorDatabaseFailWriteError(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	// Write config but block DB path so openLocalStack fails
+	store, err := config.NewStore(homeDir)
+	if err != nil {
+		t.Fatalf("NewStore error = %v", err)
+	}
+	if err := store.Write(config.Config{}); err != nil {
+		t.Fatalf("Write config error = %v", err)
+	}
+	dbFile := filepath.Join(homeDir, "personal-context", ".pc", "pc.db")
+	if err := os.MkdirAll(dbFile, 0o755); err != nil {
+		t.Fatalf("MkdirAll error = %v", err)
+	}
+
+	// Use a failing writer so writeDoctorf for the FAIL line also errors
+	stdout := &failAfterWriter{remaining: 0}
+	err = runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails on FAIL path")
+	}
+}
+
+func TestDoctorDatabaseReadFailWriteError(t *testing.T) {
+	homeDir := setupEnv(t)
+
+	// Corrupt sync_version so GetSyncVersion fails
+	corruptTable(t, homeDir, "sync_version")
+
+	// Fail on the first write (Database: FAIL line)
+	stdout := &failAfterWriter{remaining: 0}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails")
+	}
+}
+
+func TestDoctorOrphanedFiguresWarnWriteError(t *testing.T) {
+	homeDir := setupEnv(t)
+
+	id := addSlideWithContent(t,
+		`<html><img src="figures/fig.png">body</html>`, "", "",
+		map[string][]byte{"fig.png": []byte("data")}, nil,
+	)
+
+	// Hard-delete the slide, leaving orphan figure dir
+	db := openErrorPathsDB(t, homeDir)
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
+	}
+	if _, err := db.Exec("DELETE FROM slides WHERE id = ?", id); err != nil {
+		t.Fatalf("hard delete slide: %v", err)
+	}
+
+	// Fail on 2nd write (Orphaned figures: WARN); 1st is "Database: OK"
+	stdout := &failAfterWriter{remaining: 1}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails")
+	}
+}
+
+func TestDoctorMissingFiguresWarnWriteError(t *testing.T) {
+	homeDir := setupEnv(t)
+
+	id := addSlideWithContent(t,
+		`<html><img src="figures/fig.png">body</html>`, "", "",
+		map[string][]byte{"fig.png": []byte("data")}, nil,
+	)
+
+	// Remove figure file
+	figurePath := filepath.Join(homeDir, "personal-context", "figures", id, "fig.png")
+	if err := os.Remove(figurePath); err != nil {
+		t.Fatalf("remove figure: %v", err)
+	}
+
+	// Writes: "Database: OK", "Orphaned figures: OK", "Orphaned data: OK", "Missing figures: WARN"
+	// Fail on 4th write
+	stdout := &failAfterWriter{remaining: 3}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails on Missing figures WARN")
+	}
+}
+
+func TestDoctorMissingFiguresWarnPathWriteError(t *testing.T) {
+	homeDir := setupEnv(t)
+
+	id := addSlideWithContent(t,
+		`<html><img src="figures/fig.png">body</html>`, "", "",
+		map[string][]byte{"fig.png": []byte("data")}, nil,
+	)
+
+	// Remove figure file
+	figurePath := filepath.Join(homeDir, "personal-context", "figures", id, "fig.png")
+	if err := os.Remove(figurePath); err != nil {
+		t.Fatalf("remove figure: %v", err)
+	}
+
+	// Fail on 5th write (the "  slideID/fig.png" path line after "Missing figures: WARN")
+	stdout := &failAfterWriter{remaining: 4}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails on missing figure path line")
+	}
+}
 
 func TestDoctorHealthyNoSlides(t *testing.T) {
 	setupEnv(t)

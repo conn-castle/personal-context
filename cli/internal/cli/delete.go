@@ -22,7 +22,7 @@ func newDeleteCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-func runDelete(ctx context.Context, stdout io.Writer, _ io.Writer, id string) error {
+func runDelete(ctx context.Context, stdout io.Writer, stderr io.Writer, id string) error {
 	homeDir, err := resolveHomeDir()
 	if err != nil {
 		return err
@@ -41,6 +41,7 @@ func runDelete(ctx context.Context, stdout io.Writer, _ io.Writer, id string) er
 		return fmt.Errorf("delete slide: %w", err)
 	}
 
+	_ = runAutoSyncFn(ctx, stderr)
 	_, _ = fmt.Fprintf(stdout, "Slide %s deleted\n", id)
 	return nil
 }

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"io"
+	"os"
 
 	"github.com/spf13/cobra"
 )
@@ -11,6 +12,7 @@ const DefaultVersion = "dev"
 type RootCommandOptions struct {
 	Stdout  io.Writer
 	Stderr  io.Writer
+	Stdin   io.Reader
 	Version string
 }
 
@@ -20,6 +22,7 @@ type RootCommandOptions struct {
 func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 	stdout := opts.Stdout
 	stderr := opts.Stderr
+	stdin := opts.Stdin
 	version := opts.Version
 
 	if stdout == nil {
@@ -27,6 +30,9 @@ func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 	}
 	if stderr == nil {
 		stderr = io.Discard
+	}
+	if stdin == nil {
+		stdin = os.Stdin
 	}
 	if version == "" {
 		version = DefaultVersion
@@ -45,10 +51,11 @@ func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 
 	root.SetOut(stdout)
 	root.SetErr(stderr)
+	root.SetIn(stdin)
 	root.Version = version
 	root.SetVersionTemplate("pc version {{.Version}}\n")
 
-	root.AddCommand(newSetupCommand(stdout, stderr))
+	root.AddCommand(newSetupCommand(stdout, stderr, stdin))
 	root.AddCommand(newAddCommand(stdout, stderr))
 	root.AddCommand(newShowCommand(stdout, stderr))
 	root.AddCommand(newEditCommand(stdout, stderr))
@@ -60,6 +67,7 @@ func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 	root.AddCommand(newProjectCommand(stdout, stderr))
 	root.AddCommand(newGCCommand(stdout, stderr))
 	root.AddCommand(newDoctorCommand(stdout, stderr))
+	root.AddCommand(newSyncCommand(stdout, stderr))
 
 	return root
 }

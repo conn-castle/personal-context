@@ -83,7 +83,7 @@ func resolvePositionFlags(first, last bool, after, before string) (position, err
 	}
 }
 
-func runAdd(ctx context.Context, stdout io.Writer, _ io.Writer, inputPath string, dateStr string, projectOverride string, pos position) (err error) {
+func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath string, dateStr string, projectOverride string, pos position) (err error) {
 	homeDir, err := resolveHomeDir()
 	if err != nil {
 		return err
@@ -206,6 +206,7 @@ func runAdd(ctx context.Context, stdout io.Writer, _ io.Writer, inputPath string
 		}
 	}
 
+	_ = runAutoSyncFn(ctx, stderr)
 	_, _ = fmt.Fprintln(stdout, slide.ID)
 	return nil
 }
