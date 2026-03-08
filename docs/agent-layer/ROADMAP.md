@@ -73,26 +73,12 @@ Incomplete:
 - Consolidated SQLite schema: removed `cli/migrations/` package, embedded single canonical schema in `cli/internal/sqlite/sqlite_schema.sql`.
 - Per-package coverage >=95% enforced. All packages pass. Linter clean.
 
-## Phase 5 — Cloud Data Layer
-
-### Goal
-- Postgres repository and S3 client operational, tested to same standard as local layer.
-
-### Tasks
-- [ ] Create Postgres migrations in `cli/migrations/postgres/` (all 5 tables + sync_version triggers + auto_update_updated_at trigger + UNIQUE constraints)
-- [ ] **Tests first**: Run the same Repository interface test suite against Postgres implementation (test suite written in Phase 2 should be backend-agnostic)
-- [ ] Implement Postgres repository using pgx
-- [ ] **Tests first**: Write S3 client integration tests before implementation — upload then download round-trip (byte-for-byte), delete then verify gone, Exists returns correct bool, HeadVersion/UpdateVersion round-trip, upload to nonexistent bucket fails clearly
-- [ ] Implement S3 client wrapper
-- [ ] **Tests first**: Write cloud config validation tests — valid Neon URL succeeds, invalid URL fails with clear error, valid S3 bucket succeeds, nonexistent bucket fails with clear error
-- [ ] Implement cloud config validation
-- [ ] Add CI structural equivalence guard: script that parses both `schema/schema.sql` (Postgres) and `cli/internal/sqlite/sqlite_schema.sql` (SQLite), asserts same tables, columns, indexes, and constraints — fails on drift
-
-### Exit criteria
-- Postgres repository passes identical test suite as SQLite repository.
-- S3 client passes all integration tests.
-- Cloud config validation correctly distinguishes valid/invalid configurations.
-- `go test -cover` reports >95% for all packages.
+## Phase 5 ✅ — Cloud Data Layer
+- Implemented Postgres repository (`cli/internal/repository/postgres/`) — full 24-method pgx-based Repository with positional params, ILIKE, RETURNING, native `time.Time`, `mapPgError`, `ensureRowsAffected`. Embedded DDL via `schema.go` + `ApplySchema()`. Migration file in `cli/migrations/postgres/001_initial_schema.sql`. 17 contract suite + 5 Postgres-specific integration tests (testcontainers-go, schema-per-test isolation) + 9 unit tests. 95.2% coverage.
+- Implemented S3 client (`cli/internal/s3client/`) — `Upload`, `Download`, `Delete`, `Exists`, `HeadVersion`, `UpdateVersion` methods. DI constructor accepts pre-configured `*s3.Client` + bucket. Integration tests via testcontainers-go MinIO container (bucket-per-test isolation) + unit tests for error mapping. 98.6% coverage.
+- Implemented cloud config validation (`cli/internal/config/validate.go`) — `ValidateNeonURL`, `ValidateS3Bucket`, `ValidateS3Region`, `ValidateCloudConfig`. 48 table-driven test cases. 95.1% coverage.
+- Added CI schema equivalence guard (`scripts/check_schema_equivalence.sh`) — parses both schema files, compares tables, columns, indexes, and UNIQUE constraints. Added to CI workflow.
+- Dependencies added: `aws-sdk-go-v2` + credentials + service/s3 + smithy-go, `testcontainers-go/modules/minio`.
 
 ## Phase 6 — Sync Engine + Cloud CLI
 

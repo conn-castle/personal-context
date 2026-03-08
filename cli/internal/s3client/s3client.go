@@ -1,0 +1,205 @@
+package s3client
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"strconv"
+	"strings"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+)
+
+const versionKey = "_version"
+
+// Client wraps the AWS S3 SDK for figure and data file operations.
+type Client struct {
+	s3     *s3.Client
+	bucket string
+}
+
+// New creates an S3 client for the given bucket.
+// Args: s3Client is an initialized AWS S3 client; bucket is the S3 bucket name.
+// Returns: a configured client or an error when arguments are invalid.
+func New(s3Client *s3.Client, bucket string) (*Client, error) {
+	if s3Client == nil {
+		return nil, fmt.Errorf("s3 client is required")
+	}
+	if strings.TrimSpace(bucket) == "" {
+		return nil, fmt.Errorf("bucket name is required")
+	}
+	return &Client{s3: s3Client, bucket: bucket}, nil
+}
+
+// Upload writes an object to S3.
+// Args: key is the full S3 key; body provides the object content.
+// Returns: nil on success or a descriptive error.
+func (c *Client) Upload(ctx context.Context, key string, body io.Reader) error {
+	if strings.TrimSpace(key) == "" {
+		return fmt.Errorf("key is required")
+	}
+	if body == nil {
+		return fmt.Errorf("body is required")
+	}
+
+	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+		Body:   body,
+	})
+	if err != nil {
+		return fmt.Errorf("upload %s: %w", key, mapS3Error(err))
+	}
+	return nil
+}
+
+// Download retrieves an object from S3.
+// Args: key is the full S3 key.
+// Returns: the object body (caller must close) or an error.
+func (c *Client) Download(ctx context.Context, key string) (io.ReadCloser, error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, fmt.Errorf("key is required")
+	}
+
+	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("download %s: %w", key, mapS3Error(err))
+	}
+	return out.Body, nil
+}
+
+// Delete removes an object from S3.
+// Args: key is the full S3 key.
+// Returns: nil on success or a descriptive error.
+func (c *Client) Delete(ctx context.Context, key string) error {
+	if strings.TrimSpace(key) == "" {
+		return fmt.Errorf("key is required")
+	}
+
+	_, err := c.s3.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("delete %s: %w", key, mapS3Error(err))
+	}
+	return nil
+}
+
+// Exists checks whether an object exists in S3.
+// Args: key is the full S3 key.
+// Returns: true if the object exists, false if not, or an error for other failures.
+func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
+	if strings.TrimSpace(key) == "" {
+		return false, fmt.Errorf("key is required")
+	}
+
+	_, err := c.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		if isNotFoundError(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("exists %s: %w", key, mapS3Error(err))
+	}
+	return true, nil
+}
+
+// HeadVersion reads the _version object as an int64.
+// Returns 0 when the _version key does not exist (new/empty bucket).
+func (c *Client) HeadVersion(ctx context.Context) (int64, error) {
+	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(versionKey),
+	})
+	if err != nil {
+		if isNotFoundError(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("head version: %w", mapS3Error(err))
+	}
+	defer func() { _ = out.Body.Close() }()
+
+	data, err := io.ReadAll(out.Body)
+	if err != nil {
+		return 0, fmt.Errorf("read version body: %w", err)
+	}
+
+	v, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse version %q: %w", string(data), err)
+	}
+	return v, nil
+}
+
+// UpdateVersion writes the given version number to the _version object.
+// Args: version must be non-negative.
+// Returns: nil on success or a descriptive error.
+func (c *Client) UpdateVersion(ctx context.Context, version int64) error {
+	if version < 0 {
+		return fmt.Errorf("version must be non-negative, got %d", version)
+	}
+
+	body := strings.NewReader(strconv.FormatInt(version, 10))
+	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      aws.String(c.bucket),
+		Key:         aws.String(versionKey),
+		Body:        body,
+		ContentType: aws.String("text/plain"),
+	})
+	if err != nil {
+		return fmt.Errorf("update version: %w", mapS3Error(err))
+	}
+	return nil
+}
+
+// mapS3Error converts AWS S3 errors to more descriptive wrapped errors.
+func mapS3Error(err error) error {
+	if err == nil {
+		return nil
+	}
+	var nsk *types.NoSuchKey
+	if errors.As(err, &nsk) {
+		return fmt.Errorf("not found: %w", err)
+	}
+	var nsb *types.NoSuchBucket
+	if errors.As(err, &nsb) {
+		return fmt.Errorf("bucket not found: %w", err)
+	}
+	return err
+}
+
+// isNotFoundError checks if the error indicates the object does not exist.
+// It returns false for NoSuchBucket errors so that misconfigured buckets
+// propagate as real errors instead of being silently treated as "key not found".
+func isNotFoundError(err error) bool {
+	// Reject bucket-level 404s first — a missing bucket is not "key not found".
+	var nsb *types.NoSuchBucket
+	if errors.As(err, &nsb) {
+		return false
+	}
+
+	var nsk *types.NoSuchKey
+	if errors.As(err, &nsk) {
+		return true
+	}
+	// HeadObject returns a generic NotFound (HTTP 404) rather than NoSuchKey.
+	var nf *types.NotFound
+	if errors.As(err, &nf) {
+		return true
+	}
+	// Some S3-compatible services return a generic API error with 404 status.
+	var re interface{ HTTPStatusCode() int }
+	if errors.As(err, &re) && re.HTTPStatusCode() == 404 {
+		return true
+	}
+	return false
+}

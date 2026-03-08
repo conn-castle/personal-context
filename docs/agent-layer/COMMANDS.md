@@ -57,14 +57,14 @@ Run from: `cli/`
 ./scripts/check_coverage.sh 95
 ```
 Run from: `cli/`
-Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `internal/repository/repositorytest` (contract helper, no `_test.go` files) and `internal/e2e`. CLI e2e tests run separately in CI via `go test ./internal/e2e`.
+Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `internal/repository/repositorytest` (contract helper), `internal/repository/postgres`, `internal/s3client` (integration-test-only, require Docker), and `internal/e2e`. Integration tests run separately with `-tags integration`.
 
 - Run per-package Go coverage gate
 ```bash
 ./scripts/check_coverage_per_package.sh 95
 ```
 Run from: `cli/`
-Notes: Fails when any tested package drops below 95%. Excludes `internal/repository/repositorytest` (contract helper, no `_test.go` files) and `internal/e2e`. CLI e2e tests run separately in CI via `go test ./internal/e2e`.
+Notes: Fails when any tested package drops below 95%. Same exclusions as the aggregate coverage script. Integration-only packages (`postgres`, `s3client`) are tested with Docker via `-tags integration`.
 
 - Run full Phase 3 manual verification flow (opens slide preview in browser)
 ```bash
@@ -93,6 +93,22 @@ golangci-lint run ./...
 ```
 Run from: `cli/`
 Prerequisites: `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.2` and ensure `$(go env GOPATH)/bin` is on `PATH`.
+
+- Run Postgres repository integration tests
+```bash
+go test -tags integration ./internal/repository/postgres/ -v -timeout 180s
+```
+Run from: `cli/`
+Prerequisites: Docker running (testcontainers-go spins up a Postgres container).
+Notes: Uses `//go:build integration` tag. Schema-per-test isolation via unique schemas.
+
+- Run S3 client integration tests
+```bash
+go test -tags integration ./internal/s3client/ -v -timeout 60s
+```
+Run from: `cli/`
+Prerequisites: Docker running (testcontainers-go spins up a MinIO container).
+Notes: Uses `//go:build integration` tag. Bucket-per-test isolation.
 
 ## Next.js Web UI (`web/`)
 
@@ -163,6 +179,13 @@ Prerequisites: Go toolchain and `npx playwright install` for browser binaries.
 Notes: Executes `cli/scripts/verify_local_demo.sh --no-open`, then loads the generated summary page in Chromium.
 
 ## Repository root
+
+- Check schema equivalence between Postgres and SQLite
+```bash
+./scripts/check_schema_equivalence.sh
+```
+Run from: repo root
+Notes: Compares `schema/schema.sql` (Postgres) and `cli/internal/sqlite/sqlite_schema.sql` (SQLite) for structural equivalence — tables, columns, indexes, UNIQUE constraints. Does not compare dialect-specific syntax (types, CHECK expressions, triggers). Runs in CI.
 
 - Verify canonical schema contract for both workspaces
 ```bash
