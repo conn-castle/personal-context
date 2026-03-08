@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/conn-castle/personal-context/cli/internal/filesystem"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
@@ -34,7 +35,7 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 
 	stack, err := openLocalStack(homeDir)
 	if err != nil {
-		if err := writeDoctorf(stdout, "write database failure", "Database:           FAIL -- %v\n", err); err != nil {
+		if err := reportDoctorFailure(stdout, "write database failure", "Database", err); err != nil {
 			return err
 		}
 		return fmt.Errorf("doctor: database check failed: %w", err)
@@ -43,13 +44,13 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 
 	// Database readable check
 	if _, err := stack.Repo.GetSyncVersion(ctx); err != nil {
-		if err := writeDoctorf(stdout, "write database read failure", "Database:           FAIL -- %v\n", err); err != nil {
+		if err := reportDoctorFailure(stdout, "write database read failure", "Database", err); err != nil {
 			return err
 		}
 		return fmt.Errorf("doctor: database read failed: %w", err)
 	}
 
-	if err := writeDoctorln(stdout, "write database success", "Database:           OK"); err != nil {
+	if err := reportDoctorSuccess(stdout, "write database success", "Database"); err != nil {
 		return err
 	}
 
@@ -63,39 +64,29 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 
 	orphanFigs, err := findOrphans(ctx, stack.Repo, figDirs)
 	if err != nil {
-		if err := writeDoctorf(stdout, "write orphaned figures failure", "Orphaned figures:   FAIL -- %v\n", err); err != nil {
+		if err := reportDoctorFailure(stdout, "write orphaned figures failure", "Orphaned figures", err); err != nil {
 			return err
 		}
 		return fmt.Errorf("doctor: orphaned figures check failed: %w", err)
 	}
-	if len(orphanFigs) > 0 {
-		if err := writeDoctorf(stdout, "write orphaned figures warning", "Orphaned figures:   WARN -- %d orphaned figure directories: %v\n", len(orphanFigs), orphanFigs); err != nil {
-			return err
-		}
-		hasWarnings = true
-	} else {
-		if err := writeDoctorln(stdout, "write orphaned figures success", "Orphaned figures:   OK"); err != nil {
-			return err
-		}
+	warned, err := reportDoctorOrphans(stdout, "Orphaned figures", "figure directories", orphanFigs)
+	if err != nil {
+		return err
 	}
+	hasWarnings = hasWarnings || warned
 
 	orphanData, err := findOrphans(ctx, stack.Repo, dataDirs)
 	if err != nil {
-		if err := writeDoctorf(stdout, "write orphaned data failure", "Orphaned data:      FAIL -- %v\n", err); err != nil {
+		if err := reportDoctorFailure(stdout, "write orphaned data failure", "Orphaned data", err); err != nil {
 			return err
 		}
 		return fmt.Errorf("doctor: orphaned data check failed: %w", err)
 	}
-	if len(orphanData) > 0 {
-		if err := writeDoctorf(stdout, "write orphaned data warning", "Orphaned data:      WARN -- %d orphaned data directories: %v\n", len(orphanData), orphanData); err != nil {
-			return err
-		}
-		hasWarnings = true
-	} else {
-		if err := writeDoctorln(stdout, "write orphaned data success", "Orphaned data:      OK"); err != nil {
-			return err
-		}
+	warned, err = reportDoctorOrphans(stdout, "Orphaned data", "data directories", orphanData)
+	if err != nil {
+		return err
 	}
+	hasWarnings = hasWarnings || warned
 
 	// Check missing files for all tracked slides, including items currently in trash.
 	slides, err := stack.Repo.ListSlides(ctx, repository.ListSlidesFilter{IncludeDeleted: true})
@@ -105,51 +96,29 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 
 	missingFigs, err := checkMissingFigures(ctx, stack.Repo, stack.FS, slides)
 	if err != nil {
-		if err := writeDoctorf(stdout, "write missing figures failure", "Missing figures:    FAIL -- %v\n", err); err != nil {
+		if err := reportDoctorFailure(stdout, "write missing figures failure", "Missing figures", err); err != nil {
 			return err
 		}
 		return fmt.Errorf("doctor: missing figures check failed: %w", err)
 	}
-
-	if len(missingFigs) > 0 {
-		if err := writeDoctorf(stdout, "write missing figures warning", "Missing figures:    WARN -- %d missing figure files\n", len(missingFigs)); err != nil {
-			return err
-		}
-		for _, path := range missingFigs {
-			if err := writeDoctorf(stdout, "write missing figure path", "  %s\n", path); err != nil {
-				return err
-			}
-		}
-		hasWarnings = true
-	} else {
-		if err := writeDoctorln(stdout, "write missing figures success", "Missing figures:    OK"); err != nil {
-			return err
-		}
+	warned, err = reportDoctorMissingPaths(stdout, "Missing figures", "figure files", missingFigs)
+	if err != nil {
+		return err
 	}
+	hasWarnings = hasWarnings || warned
 
 	missingDataFiles, err := checkMissingDataFiles(ctx, stack.Repo, stack.FS, slides)
 	if err != nil {
-		if err := writeDoctorf(stdout, "write missing data files failure", "Missing data files: FAIL -- %v\n", err); err != nil {
+		if err := reportDoctorFailure(stdout, "write missing data files failure", "Missing data files", err); err != nil {
 			return err
 		}
 		return fmt.Errorf("doctor: missing data files check failed: %w", err)
 	}
-
-	if len(missingDataFiles) > 0 {
-		if err := writeDoctorf(stdout, "write missing data files warning", "Missing data files: WARN -- %d missing data files\n", len(missingDataFiles)); err != nil {
-			return err
-		}
-		for _, path := range missingDataFiles {
-			if err := writeDoctorf(stdout, "write missing data file path", "  %s\n", path); err != nil {
-				return err
-			}
-		}
-		hasWarnings = true
-	} else {
-		if err := writeDoctorln(stdout, "write missing data files success", "Missing data files: OK"); err != nil {
-			return err
-		}
+	warned, err = reportDoctorMissingPaths(stdout, "Missing data files", "data files", missingDataFiles)
+	if err != nil {
+		return err
 	}
+	hasWarnings = hasWarnings || warned
 
 	if hasWarnings {
 		return fmt.Errorf("doctor: warnings found")
@@ -159,6 +128,64 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 		return err
 	}
 	return nil
+}
+
+func doctorStatusPrefix(label string) string {
+	return fmt.Sprintf("%-20s", label+":")
+}
+
+// reportDoctorSuccess emits an OK line for a completed health check.
+func reportDoctorSuccess(w io.Writer, context string, label string) error {
+	return writeDoctorln(w, context, doctorStatusPrefix(label)+"OK")
+}
+
+// reportDoctorFailure emits a FAIL line that includes the check error.
+func reportDoctorFailure(w io.Writer, context string, label string, checkErr error) error {
+	return writeDoctorf(w, context, "%sFAIL -- %v\n", doctorStatusPrefix(label), checkErr)
+}
+
+// reportDoctorOrphans emits either an OK line or a WARN line for orphaned
+// directories and returns whether the check produced warnings.
+func reportDoctorOrphans(w io.Writer, label string, noun string, paths []string) (bool, error) {
+	if len(paths) == 0 {
+		return false, reportDoctorSuccess(w, "write "+strings.ToLower(label)+" success", label)
+	}
+	if err := writeDoctorf(
+		w,
+		"write "+strings.ToLower(label)+" warning",
+		"%sWARN -- %d orphaned %s: %v\n",
+		doctorStatusPrefix(label),
+		len(paths),
+		noun,
+		paths,
+	); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// reportDoctorMissingPaths emits either an OK line or a WARN line plus the
+// missing path list for figure/data-file checks.
+func reportDoctorMissingPaths(w io.Writer, label string, noun string, paths []string) (bool, error) {
+	if len(paths) == 0 {
+		return false, reportDoctorSuccess(w, "write "+strings.ToLower(label)+" success", label)
+	}
+	if err := writeDoctorf(
+		w,
+		"write "+strings.ToLower(label)+" warning",
+		"%sWARN -- %d missing %s\n",
+		doctorStatusPrefix(label),
+		len(paths),
+		noun,
+	); err != nil {
+		return false, err
+	}
+	for _, path := range paths {
+		if err := writeDoctorf(w, "write "+strings.ToLower(label[:len(label)-1])+" path", "  %s\n", path); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 func writeDoctorf(w io.Writer, context string, format string, args ...any) error {
