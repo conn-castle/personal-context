@@ -4,7 +4,7 @@ Personal Context is a local-first engineering notebook system that stores work a
 
 ## Status
 
-Roadmap Phase 6 (Sync Engine & Cloud CLI) is in progress: the bidirectional sync engine, conflict resolution, file locking, auto-sync in mutation commands, and `pc sync` are operational. Phase 5 deliverables (Postgres repository, S3 client, cloud config validation, schema-equivalence CI guard) remain operational. All 13 local + cloud CLI commands work. Cloud setup wizard, `pc fetch`, and cloud-aware `doctor`/`gc` are not yet implemented.
+Roadmap Phase 6 (Sync Engine & Cloud CLI) is complete: bidirectional sync engine with conflict resolution, file locking, auto-sync in all mutation commands, cloud setup wizard, `pc sync`, `pc fetch`, and cloud-aware `doctor`/`gc` are operational. Phase 5 deliverables (Postgres repository, S3 client, cloud config validation, schema-equivalence CI guard) remain operational. All 15 CLI commands are implemented; `pc sync` and `pc fetch` require cloud configuration.
 
 ## Architecture
 
@@ -82,21 +82,28 @@ cd ..
 ./scripts/check_schema_equivalence.sh
 ```
 
-### Cloud Setup (Planned Runtime Path)
-
-Cloud runtime features are implemented in later roadmap phases. The intended CLI setup path is:
+### Cloud Setup
 
 ```bash
+# Interactive (prompts whether to configure cloud, then asks for each value):
+pc setup
+
+# Non-interactive:
 pc setup \
   --neon-url="..." \
   --s3-bucket="..." \
   --s3-region="..." \
   --aws-key="..." \
   --aws-secret="..."
+
+# Remove cloud configuration:
+pc setup --remove-cloud
 ```
 
 - AWS credentials are written to `~/.aws/credentials` under `[personal-context]`.
 - Cloud metadata is stored in `~/personal-context/.pc/config.json` (no secret keys in config).
+- Validates Neon connectivity and S3 access before persisting configuration.
+- Creates Postgres schema tables on first cloud setup.
 
 ## CLI Command Reference
 
@@ -112,14 +119,15 @@ pc setup \
 - `pc move <id>` — change date and/or position (`--date`, `--first`, `--last`, `--after`, `--before`)
 - `pc search <query>` — search slides by content, notes, or project (`--format table|ids|json`, `--limit`, `--project`, `--deleted`)
 - `pc trash` — list soft-deleted slides
-- `pc gc` — hard-delete trash older than 30 days (cascades child rows, removes files)
+- `pc gc` — hard-delete trash older than 30 days (cascades child rows, removes files; cloud-aware: deletes from cloud first to prevent sync re-creation)
 - `pc project set|clear|list` — manage active project (active project used by `pc add` when no `--project` flag)
-- `pc doctor` — check local system health (DB, orphans, missing files)
+- `pc doctor` — check system health (DB, orphans, missing files; cloud connectivity if configured)
 - `pc sync` — bidirectional sync between local SQLite and cloud Postgres/S3 (requires cloud configuration)
+- `pc fetch <slide_id>` — download data files from cloud S3 (`--project`, `--recent 3d/2w/1m/1y`, `--output`)
 
 ### Planned Command Surface (Roadmap)
 
-- Sync/data: `pc fetch`, `pc export`, `pc import`, `pc restore-db`, `pc verify`
+- Export/import: `pc export`, `pc import`, `pc restore-db`, `pc verify`
 
 ## Web UI Overview
 

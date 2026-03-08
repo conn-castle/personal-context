@@ -808,3 +808,112 @@ func TestFindOrphansUnexpectedRepoError(t *testing.T) {
 		t.Fatalf("expected slide id in error, got %v", err)
 	}
 }
+
+// --- Cloud connectivity check tests ---
+
+func TestDoctorCloudOK(t *testing.T) {
+	setupEnv(t)
+
+	origCloud := openCloudStackFn
+	t.Cleanup(func() { openCloudStackFn = origCloud })
+	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+		return &cloudStack{}, nil
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Cloud:              OK") {
+		t.Fatalf("expected 'Cloud:              OK', got %q", out)
+	}
+	if !strings.Contains(out, "All checks passed.") {
+		t.Fatalf("expected all checks passed, got %q", out)
+	}
+}
+
+func TestDoctorCloudNotConfiguredSkipsCheck(t *testing.T) {
+	setupEnv(t)
+
+	origCloud := openCloudStackFn
+	t.Cleanup(func() { openCloudStackFn = origCloud })
+	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+		return nil, errCloudNotConfigured
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	out := stdout.String()
+	if strings.Contains(out, "Cloud") {
+		t.Fatalf("expected no Cloud line when not configured, got %q", out)
+	}
+	if !strings.Contains(out, "All checks passed.") {
+		t.Fatalf("expected all checks passed, got %q", out)
+	}
+}
+
+func TestDoctorCloudUnreachableShowsWarn(t *testing.T) {
+	setupEnv(t)
+
+	origCloud := openCloudStackFn
+	t.Cleanup(func() { openCloudStackFn = origCloud })
+	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+		return nil, errors.New("connection refused")
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error for cloud WARN")
+	}
+	if !strings.Contains(err.Error(), "doctor: warnings found") {
+		t.Fatalf("expected 'doctor: warnings found', got %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Cloud:              WARN") {
+		t.Fatalf("expected 'Cloud:              WARN', got %q", out)
+	}
+	if !strings.Contains(out, "connection refused") {
+		t.Fatalf("expected error detail in Cloud WARN, got %q", out)
+	}
+}
+
+func TestDoctorCloudOKWriteError(t *testing.T) {
+	setupEnv(t)
+
+	origCloud := openCloudStackFn
+	t.Cleanup(func() { openCloudStackFn = origCloud })
+	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+		return &cloudStack{}, nil
+	}
+
+	// 5 local checks succeed (Database, Orphaned figures, Orphaned data, Missing figures, Missing data files).
+	// 6th write is Cloud: OK — fail there.
+	stdout := &failAfterWriter{remaining: 5}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails on Cloud: OK")
+	}
+}
+
+func TestDoctorCloudWarnWriteError(t *testing.T) {
+	setupEnv(t)
+
+	origCloud := openCloudStackFn
+	t.Cleanup(func() { openCloudStackFn = origCloud })
+	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+		return nil, errors.New("connection refused")
+	}
+
+	// 5 local checks succeed. 6th write is Cloud: WARN — fail there.
+	stdout := &failAfterWriter{remaining: 5}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("expected error when stdout write fails on Cloud: WARN")
+	}
+}

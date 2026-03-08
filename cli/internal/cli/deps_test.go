@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -67,7 +68,7 @@ func TestOpenLocalStackAfterSetup(t *testing.T) {
 	// Run setup first to create the environment
 	stdout := &discardWriter{}
 	stderr := &discardWriter{}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr, Stdin: strings.NewReader("n\n")})
 	cmd.SetArgs([]string{"setup"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("setup failed: %v", err)

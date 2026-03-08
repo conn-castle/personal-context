@@ -26,7 +26,7 @@ Do not duplicate information that belongs in other memory files:
 
 <!-- ENTRIES START -->
 
-> **Status:** Phase 5 (Cloud Data Layer) is complete. Postgres repository, S3 client, cloud config validation, and CI schema equivalence guard are operational. All 12 local commands remain operational. See ROADMAP.md for phase-by-phase implementation progress.
+> **Status:** Phase 6 (Sync Engine & Cloud CLI) is complete. Bidirectional sync engine, cloud setup wizard, all 15 CLI commands are implemented, auto-sync in mutation commands is operational, and cloud-aware gc/doctor are in place. `pc sync` and `pc fetch` require cloud configuration. See ROADMAP.md for phase-by-phase implementation progress.
 
 ## Project Overview
 
@@ -231,7 +231,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 ### Setup & Health
 - `pc setup` — first-time or reconfigure (idempotent, interactive/non-interactive, `--remove-cloud`)
-- `pc doctor` — local health checks (DB readability, orphaned figure/data directories, missing local figure/data files)
+- `pc doctor` — health checks (DB readability, orphaned figure/data directories, missing local figure/data files; cloud connectivity WARN if configured but unreachable)
 
 ### Slide CRUD
 - `pc add <path>` — create slide from folder (`slide.html` required, `metadata.json` for project_id/git_remote_url/git_hash)
@@ -243,7 +243,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 ### Trash
 - `pc trash` — list soft-deleted slides
-- `pc gc` — hard-delete local trash > 30 days and remove local figure/data files
+- `pc gc` — hard-delete trash > 30 days (cloud-first if configured: deletes from Neon before local to prevent sync re-creation, warns if cloud unreachable, removes local figure/data files, runs auto-sync)
 
 ### Search & Projects
 - `pc search <query>` — LIKE/ILIKE on html_content, notes, project_id (not git fields)
@@ -497,7 +497,7 @@ type SlideDetail = {
 
 - Soft-deleted slides sync bidirectionally, excluded from git export.
 - `ON DELETE CASCADE` handles child rows on hard delete.
-- Phase 6 plans `pc gc` to delete cloud first (Neon + S3), then local, and to remain re-runnable on partial failure. Current Phase 4 `pc gc` is local-only. Edge case once cloud exists: another machine that hasn't synced could re-push; run `pc sync` on all machines before/after gc. Tombstones deferred.
+- `pc gc` deletes from cloud first (Neon), then local, to prevent sync re-creation. If cloud is unreachable, warns on stderr and proceeds with local-only deletion. If cloud `DeleteSlide` fails (non-ErrNotFound), skips that slide with a warning. Runs auto-sync afterward. Edge case: another machine that hasn't synced could re-push; run `pc sync` on all machines before/after gc. Tombstones deferred.
 
 ## Data Integrity: Two-Tier Guarantee
 

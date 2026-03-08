@@ -120,6 +120,23 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 	}
 	hasWarnings = hasWarnings || warned
 
+	// Cloud connectivity check (only when cloud is configured).
+	cloud, cloudErr := openCloudStackFn(ctx, homeDir)
+	switch {
+	case cloudErr == nil:
+		_ = cloud.Close()
+		if err := reportDoctorSuccess(stdout, "write cloud success", "Cloud"); err != nil {
+			return err
+		}
+	case errors.Is(cloudErr, errCloudNotConfigured):
+		// Not configured — skip cloud check.
+	default:
+		if err := writeDoctorf(stdout, "write cloud warning", "%sWARN -- %v\n", doctorStatusPrefix("Cloud"), cloudErr); err != nil {
+			return err
+		}
+		hasWarnings = true
+	}
+
 	if hasWarnings {
 		return fmt.Errorf("doctor: warnings found")
 	}

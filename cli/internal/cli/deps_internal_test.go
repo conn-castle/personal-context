@@ -17,6 +17,11 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
+// defaultSetupOpts returns setupOptions with no cloud flags for local-only tests.
+func defaultSetupOpts() setupOptions {
+	return setupOptions{}
+}
+
 func TestResolveUserHomeDirError(t *testing.T) {
 	original := userHomeDirFn
 	t.Cleanup(func() { userHomeDirFn = original })
@@ -130,7 +135,7 @@ func TestRunSetupApplyMigrationsError(t *testing.T) {
 		}, nil
 	}
 
-	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err == nil {
 		t.Fatal("expected runSetup to fail when migrations cannot be applied")
 	}
 }
@@ -145,7 +150,7 @@ func TestRunSetupLoadMigrationsError(t *testing.T) {
 		return nil, errors.New("migration fs failed")
 	}
 
-	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err == nil {
 		t.Fatal("expected runSetup to fail when migrations load fails")
 	}
 }
@@ -160,7 +165,7 @@ func TestRunSetupRepositoryFactoryError(t *testing.T) {
 		return nil, errors.New("repo factory failed")
 	}
 
-	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err == nil {
 		t.Fatal("expected runSetup to fail when repository creation fails")
 	}
 }
@@ -175,7 +180,7 @@ func TestRunSetupConfigStoreFactoryError(t *testing.T) {
 		return config.Store{}, errors.New("store factory failed")
 	}
 
-	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}); err == nil {
+	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err == nil {
 		t.Fatal("expected runSetup to fail when config store creation fails")
 	}
 }

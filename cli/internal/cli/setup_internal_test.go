@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/conn-castle/personal-context/cli/internal/config"
@@ -235,7 +236,7 @@ func TestRunSetupWithBlockedDirectory(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	err := runSetup(context.Background(), stdout, stderr)
+	err := runSetup(context.Background(), stdout, stderr, strings.NewReader("n\n"), defaultSetupOpts())
 	if err == nil {
 		t.Fatal("expected error when directory creation blocked")
 	}
@@ -273,7 +274,7 @@ func TestRunSetupDatabaseOpenFails(t *testing.T) {
 		t.Fatalf("MkdirAll error = %v", err)
 	}
 
-	err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{})
+	err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts())
 	if err == nil {
 		t.Fatal("expected error when database open fails")
 	}
@@ -285,7 +286,7 @@ func TestRunSetupSeedTemplatesError(t *testing.T) {
 
 	// Do a clean setup first
 	stdout := &bytes.Buffer{}
-	err := runSetup(context.Background(), stdout, &bytes.Buffer{})
+	err := runSetup(context.Background(), stdout, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts())
 	if err != nil {
 		t.Fatalf("initial setup failed: %v", err)
 	}
@@ -299,7 +300,7 @@ func TestRunSetupSeedTemplatesError(t *testing.T) {
 
 	// Re-run setup — should fail on seed
 	stdout.Reset()
-	err = runSetup(context.Background(), stdout, &bytes.Buffer{})
+	err = runSetup(context.Background(), stdout, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts())
 	if err == nil {
 		t.Fatal("expected error when templates table is missing")
 	}
@@ -311,7 +312,7 @@ func TestRunSetupConfigStoreWriteCoversPath(t *testing.T) {
 
 	// Do a full setup — this covers the config creation path
 	stdout := &bytes.Buffer{}
-	if err := runSetup(context.Background(), stdout, &bytes.Buffer{}); err != nil {
+	if err := runSetup(context.Background(), stdout, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err != nil {
 		t.Fatalf("runSetup() error = %v", err)
 	}
 
@@ -323,7 +324,7 @@ func TestRunSetupConfigStoreWriteCoversPath(t *testing.T) {
 
 	// Run again — config exists, should skip write
 	stdout.Reset()
-	if err := runSetup(context.Background(), stdout, &bytes.Buffer{}); err != nil {
+	if err := runSetup(context.Background(), stdout, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err != nil {
 		t.Fatalf("re-runSetup() error = %v", err)
 	}
 }

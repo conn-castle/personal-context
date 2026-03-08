@@ -100,7 +100,7 @@ func openSyncRunner(ctx context.Context) (syncRunner, func() error, error) {
 		return nil, nil, err
 	}
 
-	cloudStack, err := openCloudStack(ctx, homeDir)
+	cloudStack, err := openCloudStackFn(ctx, homeDir)
 	if err != nil {
 		_ = localStack.Close()
 		return nil, nil, err

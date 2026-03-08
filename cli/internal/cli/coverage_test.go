@@ -1381,15 +1381,16 @@ func TestGCDeleteSlideDirError(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(figureSlideDir, 0o755) })
 
 	stdout := &bytes.Buffer{}
-	gcCmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	stderr := &bytes.Buffer{}
+	gcCmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
 	gcCmd.SetArgs([]string{"gc"})
 	err := gcCmd.Execute()
 	if err != nil {
 		t.Fatalf("expected gc to succeed with a warning, got error: %v", err)
 	}
-	output := stdout.String()
+	output := stderr.String()
 	if !strings.Contains(output, "Warning: failed to remove files for slide") {
-		t.Fatalf("expected warning about failed file removal in stdout, got %q", output)
+		t.Fatalf("expected warning about failed file removal in stderr, got %q", output)
 	}
 }
 
