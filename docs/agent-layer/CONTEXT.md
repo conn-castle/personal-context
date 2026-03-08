@@ -26,7 +26,7 @@ Do not duplicate information that belongs in other memory files:
 
 <!-- ENTRIES START -->
 
-> **Status:** Phase 4 (Local CLI Features) is complete. All 12 local commands are operational: CRUD (setup, add, show, edit, delete, restore, move) and management (search, trash, gc, project, doctor). SQLite schema consolidated into single embedded file. See ROADMAP.md for phase-by-phase implementation progress.
+> **Status:** Phase 5 (Cloud Data Layer) is complete. Postgres repository, S3 client, cloud config validation, and CI schema equivalence guard are operational. All 12 local commands remain operational. See ROADMAP.md for phase-by-phase implementation progress.
 
 ## Project Overview
 
@@ -99,7 +99,8 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 
 ### Schema Portability (Postgres / SQLite)
 - `schema/schema.sql` is the design-level source of truth (Postgres dialect). The canonical SQLite schema is embedded in `cli/internal/sqlite/sqlite_schema.sql` and applied via `Connection.ApplySchema()`.
-- Postgres migrations directory: `cli/migrations/postgres/` (Phase 5).
+- Postgres schema embedded in `cli/internal/repository/postgres/postgres_schema.sql` and applied via `ApplySchema()`. Migration file: `cli/migrations/postgres/001_initial_schema.sql`.
+- CI schema equivalence guard (`scripts/check_schema_equivalence.sh`) prevents structural drift between the two schemas.
 - `created_at` and `updated_at` are DB-managed via defaults and triggers. `deleted_at` set by application code. See "DB-Managed Timestamps" below.
 - `PRAGMA foreign_keys = ON` required on every SQLite connection (otherwise `ON DELETE CASCADE` silently ignored).
 - SQLite WAL mode enabled for concurrent reads.
@@ -194,7 +195,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 | Component | Technology |
 |-----------|-----------|
-| CLI | Go: cobra, modernc.org/sqlite (pure Go), fracdex (fractional indexing), pgx (direct, not database/sql — Phase 5+), aws-sdk-go-v2 (Phase 5+). Custom migration runner in `cli/internal/sqlite/` (no golang-migrate). |
+| CLI | Go: cobra, modernc.org/sqlite (pure Go), fracdex (fractional indexing), pgx (direct, not database/sql), aws-sdk-go-v2 (+credentials, +service/s3, +smithy-go), testcontainers-go (integration tests). Custom migration runner in `cli/internal/sqlite/` (no golang-migrate). |
 | Web UI | Next.js App Router, React, sandboxed iframes for slide HTML rendering |
 | Web hosting | AWS Amplify (SSR via Lambda, us-east-1) |
 | DB (cloud) | Neon Postgres (provider-portable). @neondatabase/serverless HTTP driver for Lambda |
@@ -206,7 +207,24 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 ### Go Repository Pattern
 - `Repository` interface with separate SQLite and Postgres implementations.
 - SQL dialects diverge enough that sharing query code via `database/sql` is a false economy.
-- S3 operations wrapped in a thin `s3client` package (`Upload`, `Download`, `Delete`, `Exists`, `HeadVersion`).
+- **SQLite** (`cli/internal/sqlite/`): modernc.org/sqlite (pure Go), `?` positional params, `LIKE` for search, text timestamps. Custom migration runner with single embedded `sqlite_schema.sql`.
+- **Postgres** (`cli/internal/repository/postgres/`): pgx (direct, not database/sql), `$N` positional params, `ILIKE` for case-insensitive search, `RETURNING` clauses, native `time.Time`. Embedded DDL via `postgres_schema.sql` + `ApplySchema()`. Migration file in `cli/migrations/postgres/001_initial_schema.sql`.
+- **Contract tests** (`cli/internal/repository/repositorytest/`): backend-agnostic test suite run against both SQLite and Postgres implementations.
+- **Integration tests**: testcontainers-go for both backends — Postgres uses schema-per-test isolation, SQLite uses temp files.
+
+### S3 Client
+- `cli/internal/s3client/` — thin wrapper over AWS SDK v2 `*s3.Client`.
+- Methods: `Upload`, `Download`, `Delete`, `Exists`, `HeadVersion`, `UpdateVersion`.
+- Constructor accepts pre-configured `*s3.Client` + bucket (DI pattern — no credential logic in the package).
+- `HeadVersion` returns 0 for missing `_version` key (simplifies sync bootstrap).
+- `mapS3Error` and `isNotFoundError` helpers for consistent error handling.
+- Integration tests use testcontainers-go with MinIO container (bucket-per-test isolation).
+
+### Cloud Config Validation
+- `cli/internal/config/validate.go` — `ValidateNeonURL` (postgres:// scheme + host), `ValidateS3Bucket` (S3 naming rules), `ValidateS3Region` (AWS region format), `ValidateCloudConfig` (composite).
+
+### Schema Equivalence Guard
+- `scripts/check_schema_equivalence.sh` — CI script comparing Postgres (`schema/schema.sql`) and SQLite (`cli/internal/sqlite/sqlite_schema.sql`) schemas for structural equivalence: tables, columns, indexes, UNIQUE constraints. Does not compare types, CHECK expressions, or triggers (intentionally dialect-specific).
 
 ## CLI Commands
 

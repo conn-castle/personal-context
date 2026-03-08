@@ -131,3 +131,18 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: Phase 1 Playwright verification runs a DB-free smoke test (`npm run test:e2e:smoke`) against a static app route via `playwright.config` `webServer`.
     Reason: Full DB-backed e2e setup belongs to later phases; Phase 1 needs reproducible e2e wiring without introducing fake backend logic.
     Tradeoffs: Phase 1 e2e only proves browser/server wiring, not data workflows; richer e2e scenarios remain required in later roadmap phases.
+
+- Decision 2026-03-07 a1b2c3: S3 client constructor accepts pre-configured *s3.Client
+    Decision: `s3client.New()` accepts a pre-configured `*s3.Client` and bucket name (same DI pattern as Postgres repo accepting `*pgxpool.Pool`).
+    Reason: Keeps credential resolution, endpoint override, and region config out of the s3client package. Callers own their AWS configuration. Enables MinIO injection for integration tests without conditional logic.
+    Tradeoffs: Caller must construct the `*s3.Client` themselves; acceptable since credential setup is a one-time concern in `pc setup` / test harness.
+
+- Decision 2026-03-07 b3c4d5p: HeadVersion returns 0 for missing _version key
+    Decision: `HeadVersion` returns version `0` (not an error) when the `_version` key does not exist in S3.
+    Reason: Simplifies sync bootstrap: version 0 means "never synced." Callers do not need to distinguish "key missing" from "version is zero." First `UpdateVersion` creates the key.
+    Tradeoffs: Cannot distinguish "bucket exists but no _version" from "version is literally 0"; not meaningful in practice since UpdateVersion always increments.
+
+- Decision 2026-03-07 c5d6e7p: Schema equivalence guard compares structure not dialect
+    Decision: `scripts/check_schema_equivalence.sh` compares tables, columns, indexes, and UNIQUE constraints between Postgres and SQLite schemas but does NOT compare types, CHECK expressions, or triggers.
+    Reason: Type names (`TIMESTAMPTZ` vs `TEXT`), CHECK syntax, and trigger syntax are intentionally different between dialects. Structural equivalence (same tables with same columns and same indexes) is the meaningful invariant.
+    Tradeoffs: A column type mismatch (e.g., wrong SQLite type) would not be caught; mitigated by integration tests exercising both backends against the same contract suite.

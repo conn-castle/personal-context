@@ -4,7 +4,7 @@ Personal Context is a local-first engineering notebook system that stores work a
 
 ## Status
 
-Roadmap Phase 4 (Local CLI Features) is implemented: all local commands are operational including CRUD (`pc setup`, `pc add`, `pc show`, `pc edit`, `pc delete`, `pc restore`, `pc move`) and search/management (`pc search`, `pc trash`, `pc gc`, `pc project`, `pc doctor`). 103 e2e tests and per-package >=95% coverage. Cloud/web product features remain in later roadmap phases.
+Roadmap Phase 5 (Cloud Data Layer) is implemented: the Postgres repository, S3 client, cloud config validation, and schema-equivalence CI guard are operational. All 12 local CLI commands remain operational, while sync/cloud CLI and full web product features remain in later roadmap phases.
 
 ## Architecture
 
@@ -44,6 +44,7 @@ personal-context/
 - Go toolchain compatible with `cli/go.mod`
 - Node.js 22+
 - npm
+- Docker running for the Postgres and S3 integration suites (`testcontainers-go`)
 
 ### Local-Only Setup (Development Verification)
 
@@ -56,6 +57,8 @@ go build ./...
 go build -o pc ./cmd/pc
 ./scripts/check_coverage.sh 95
 ./scripts/check_coverage_per_package.sh 95
+go test -tags integration ./internal/repository/postgres/ -v -timeout 180s
+go test -tags integration ./internal/s3client/ -v -timeout 60s
 ./scripts/verify_phase3_manual.sh
 ./scripts/verify_local_demo.sh
 
@@ -75,6 +78,7 @@ npm run test:e2e:cli-demo
 # Repo-level schema contract
 cd ..
 ./scripts/check_schema_contract.sh
+./scripts/check_schema_equivalence.sh
 ```
 
 ### Cloud Setup (Planned Runtime Path)
@@ -137,10 +141,14 @@ go build ./...
 go build -o pc ./cmd/pc
 ./scripts/check_coverage.sh 95
 ./scripts/check_coverage_per_package.sh 95
+go test -tags integration ./internal/repository/postgres/ -v -timeout 180s
+go test -tags integration ./internal/s3client/ -v -timeout 60s
 ./scripts/verify_phase3_manual.sh
 ./scripts/verify_local_demo.sh
 golangci-lint run ./...
 ```
+
+The two `-tags integration` commands require Docker because testcontainers-go starts Postgres and MinIO containers for the cloud data-layer packages.
 
 `./scripts/verify_phase3_manual.sh` runs the full Phase 3 local flow (`setup/add/show/edit/move/delete/restore`), creates a standalone slide preview, and opens it in your default browser. Use `--no-open` for headless runs.
 
@@ -169,14 +177,15 @@ npm run test:e2e:cli-demo
 
 ```bash
 ./scripts/check_schema_contract.sh
+./scripts/check_schema_equivalence.sh
 ```
 
 ## CI/CD
 
 GitHub Actions workflow: `.github/workflows/ci.yml`
 
-- Enforces schema contract checks.
-- Runs CLI `go mod tidy -diff`, build/test/lint, aggregate coverage gate (`>=95%`), and per-package coverage gate (`>=95%` for each tested package).
+- Enforces schema contract and schema-equivalence checks.
+- Runs CLI `go mod tidy -diff`, build/test/lint, aggregate coverage gate (`>=95%`), per-package coverage gate (`>=95%` for each tested package), CLI e2e, and the Docker-backed Postgres/S3 integration suites.
 - Runs web lint/test/coverage/build, Playwright smoke e2e, and Playwright standalone CLI-slide e2e.
 - Uses pinned `golangci-lint` version via `GOLANGCI_LINT_VERSION`.
 

@@ -1,41 +1,15 @@
--- =============================================================================
--- Personal Context — Database Schema (v7)
--- =============================================================================
---
--- Design-level source of truth (Postgres dialect). The executable SQLite schema
--- is embedded in cli/internal/sqlite/sqlite_schema.sql. Postgres migrations will
--- live in cli/migrations/postgres/ (Phase 5). This file documents the intended
--- schema structure.
---
--- Sort key: (date, day_order, id) — id is the universal tiebreaker.
--- Slide ID format: {YYYYMMDD}-{8-random-hex} (e.g., 20250304-a3f2b7e1).
--- Soft deletes: deleted_at column on slides (for sync and trash/restore).
--- No title column. No tags column. Project is a plain string with slash convention.
---
--- TIMEZONE RULE: All timestamps stored as UTC (TIMESTAMPTZ in Postgres,
--- ISO 8601 with Z suffix in SQLite). Date fields (slide date) are stored
--- as DATE (no time component). "Today" is determined by local time at the
--- point of creation, then stored as a date. All reads convert to local
--- timezone for display.
---
--- TIMESTAMP MANAGEMENT: created_at and updated_at are DB-managed via defaults
--- and triggers. Application code does NOT set these for normal operations.
--- The auto_update_updated_at trigger bumps updated_at on any UPDATE unless
--- the UPDATE explicitly sets updated_at (for sync/import to preserve original
--- timestamps). Sync/import bypasses the trigger by providing explicit values.
-
 CREATE TABLE slides (
     id              TEXT PRIMARY KEY CHECK (id ~ '^\d{8}-[0-9a-f]{8}$'),
-    date            DATE NOT NULL,                  -- local date when slide was created/assigned
+    date            DATE NOT NULL,
     day_order       TEXT NOT NULL DEFAULT 'n',
     html_content    TEXT NOT NULL,
     notes           TEXT,
-    project_id      TEXT,                           -- e.g. 'happy-ai/sleep-staging'
-    git_remote_url  TEXT,                           -- e.g. 'https://github.com/org/repo'
-    git_hash        TEXT CHECK (git_hash ~ '^[0-9a-f]{40}$'),  -- full SHA-1 commit hash (40 hex chars)
+    project_id      TEXT,
+    git_remote_url  TEXT,
+    git_hash        TEXT CHECK (git_hash ~ '^[0-9a-f]{40}$'),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at      TIMESTAMPTZ                     -- NULL = active, non-NULL = soft deleted
+    deleted_at      TIMESTAMPTZ
 );
 
 CREATE INDEX idx_slides_date ON slides (date, day_order, id);
@@ -54,14 +28,6 @@ CREATE TABLE slide_figures (
 );
 
 CREATE INDEX idx_figures_slide ON slide_figures (slide_id);
-
--- INVARIANT: Child rows (slide_figures, slide_data_files) are only modified as
--- part of a parent slide operation (pc add, pc edit, sync). Never independently.
--- The parent slide's updated_at is the authoritative change signal for sync.
--- The sync_version triggers on child tables may cause harmless false positives
--- (version bump without discoverable slide changes) during sync operations.
--- If independent child modification commands are ever added, a cross-table
--- trigger to bump parent slide updated_at should be added at that time.
 
 CREATE TABLE slide_data_files (
     id              SERIAL PRIMARY KEY,
@@ -182,14 +148,6 @@ CREATE TRIGGER templates_sync_bump_after_update
 CREATE TRIGGER templates_sync_bump_after_delete
     AFTER DELETE ON templates
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
-
--- ---------------------------------------------------------------------------
--- Auto-update updated_at on row modification.
--- When a normal UPDATE does not explicitly set updated_at, the trigger bumps
--- it to NOW(). When sync/import explicitly sets updated_at to a different
--- value (NEW.updated_at != OLD.updated_at), the trigger skips.
--- SQLite equivalent uses AFTER UPDATE trigger (see cli/internal/sqlite/sqlite_schema.sql).
--- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION auto_update_updated_at()
 RETURNS TRIGGER AS $$
