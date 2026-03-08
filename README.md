@@ -4,7 +4,7 @@ Personal Context is a local-first engineering notebook system that stores work a
 
 ## Status
 
-Roadmap Phase 5 (Cloud Data Layer) is implemented: the Postgres repository, S3 client, cloud config validation, and schema-equivalence CI guard are operational. All 12 local CLI commands remain operational, while sync/cloud CLI and full web product features remain in later roadmap phases.
+Roadmap Phase 6 (Sync Engine & Cloud CLI) is in progress: the bidirectional sync engine, conflict resolution, file locking, auto-sync in mutation commands, and `pc sync` are operational. Phase 5 deliverables (Postgres repository, S3 client, cloud config validation, schema-equivalence CI guard) remain operational. All 13 local + cloud CLI commands work. Cloud setup wizard, `pc fetch`, and cloud-aware `doctor`/`gc` are not yet implemented.
 
 ## Architecture
 
@@ -34,8 +34,7 @@ personal-context/
 │   └── nightly-export-workflow.example.yml
 ├── scripts/
 │   ├── check_schema_contract.sh    # Canonical schema guard
-│   ├── check_schema_equivalence.sh # Postgres/SQLite schema parity guard
-│   └── verify_phase5_demo.sh       # Phase 5 cloud data-layer demo runner
+│   └── check_schema_equivalence.sh # Postgres/SQLite schema parity guard
 └── .github/workflows/ci.yml
 ```
 
@@ -81,7 +80,6 @@ npm run test:e2e:cli-demo
 cd ..
 ./scripts/check_schema_contract.sh
 ./scripts/check_schema_equivalence.sh
-./scripts/verify_phase5_demo.sh
 ```
 
 ### Cloud Setup (Planned Runtime Path)
@@ -117,10 +115,11 @@ pc setup \
 - `pc gc` — hard-delete trash older than 30 days (cascades child rows, removes files)
 - `pc project set|clear|list` — manage active project (active project used by `pc add` when no `--project` flag)
 - `pc doctor` — check local system health (DB, orphans, missing files)
+- `pc sync` — bidirectional sync between local SQLite and cloud Postgres/S3 (requires cloud configuration)
 
 ### Planned Command Surface (Roadmap)
 
-- Sync/data: `pc sync`, `pc fetch`, `pc export`, `pc import`, `pc restore-db`, `pc verify`
+- Sync/data: `pc fetch`, `pc export`, `pc import`, `pc restore-db`, `pc verify`
 
 ## Web UI Overview
 
@@ -181,10 +180,7 @@ npm run test:e2e:cli-demo
 ```bash
 ./scripts/check_schema_contract.sh
 ./scripts/check_schema_equivalence.sh
-./scripts/verify_phase5_demo.sh
 ```
-
-`./scripts/verify_phase5_demo.sh` runs a Phase 5 cloud data-layer demo flow: schema contract guard, schema equivalence guard, cloud config validation tests, Postgres integration tests, and S3 integration tests. Use `--skip-integration` to skip Docker-backed integration checks.
 
 ## CI/CD
 

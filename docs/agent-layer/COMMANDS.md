@@ -194,10 +194,3 @@ Notes: Compares `schema/schema.sql` (Postgres) and `cli/internal/sqlite/sqlite_s
 Run from: repo root
 Notes: Fails when canonical `schema/` files are missing, when `cli/` or `web/` stop referencing them in executable/config files, or when workspace-local schema duplicates are introduced.
 
-- Run Phase 5 cloud data-layer demo verification flow
-```bash
-./scripts/verify_phase5_demo.sh
-```
-Run from: repo root
-Prerequisites: Go toolchain on `PATH`; Docker running for integration tests.
-Notes: Runs schema guards, cloud config validation tests, Postgres repository integration tests, and S3 client integration tests. Use `--skip-integration` to skip Docker-backed checks.
