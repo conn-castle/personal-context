@@ -16,6 +16,8 @@ const (
 	WinnerLocal Winner = "local"
 	// WinnerCloud means the cloud bundle won.
 	WinnerCloud Winner = "cloud"
+	// WinnerNone means both sides are equal; neither should overwrite the other.
+	WinnerNone Winner = "none"
 )
 
 // SlideBundle is the sync unit for a slide and its child rows.
@@ -69,8 +71,9 @@ func ResolveBundle(local SlideBundle, cloud SlideBundle) (SlideBundle, Winner, e
 	case syncengine.OutcomeRemote:
 		return cloud, WinnerCloud, nil
 	default:
-		// Exact same action timestamp and action type: prefer cloud for deterministic convergence.
-		return cloud, WinnerCloud, nil
+		// Equal state: skip both push and pull. This prevents a partial push/pull failure
+		// from overwriting the complete side with the incomplete side on the next sync.
+		return SlideBundle{}, WinnerNone, nil
 	}
 }
 

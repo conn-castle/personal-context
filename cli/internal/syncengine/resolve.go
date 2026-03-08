@@ -36,18 +36,16 @@ func ResolveSlideWinner(local *repository.Slide, remote *repository.Slide) (Outc
 	case remoteAction.when.After(localAction.when):
 		return OutcomeRemote, nil
 	case localAction.deleted != remoteAction.deleted:
+		// Edit wins over delete at the same timestamp.
 		if !localAction.deleted {
 			return OutcomeLocal, nil
 		}
 		return OutcomeRemote, nil
 	case slideIsMoreActive(*local, *remote):
+		// Both classified as edits (tie rule), but one still has DeletedAt set.
+		// Prefer the truly active slide.
 		return OutcomeLocal, nil
 	case slideIsMoreActive(*remote, *local):
-		return OutcomeRemote, nil
-	case localAction.active != remoteAction.active:
-		if localAction.active {
-			return OutcomeLocal, nil
-		}
 		return OutcomeRemote, nil
 	default:
 		return OutcomeEqual, nil
@@ -99,24 +97,26 @@ func DataFileMapByFilename(files []repository.SlideDataFile) (map[string]reposit
 type slideAction struct {
 	when    time.Time
 	deleted bool
-	active  bool
 }
 
 func latestSlideAction(slide repository.Slide) slideAction {
 	updatedAt := truncateToMillisecond(slide.UpdatedAt)
 	if slide.DeletedAt == nil {
-		return slideAction{when: updatedAt, deleted: false, active: true}
+		return slideAction{when: updatedAt, deleted: false}
 	}
 
 	deletedAt := truncateToMillisecond(slide.DeletedAt.UTC())
 	if deletedAt.After(updatedAt) {
-		return slideAction{when: deletedAt, deleted: true, active: false}
+		return slideAction{when: deletedAt, deleted: true}
 	}
 
 	// Timestamp ties are resolved in favor of edits, not deletes.
-	return slideAction{when: updatedAt, deleted: false, active: true}
+	return slideAction{when: updatedAt, deleted: false}
 }
 
+// slideIsMoreActive returns true when left is active and right has a DeletedAt set.
+// This handles the case where latestSlideAction classifies both as "edits" (tie rule)
+// but their raw slide states differ.
 func slideIsMoreActive(left repository.Slide, right repository.Slide) bool {
 	return left.DeletedAt == nil && right.DeletedAt != nil
 }

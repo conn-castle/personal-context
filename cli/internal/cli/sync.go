@@ -42,7 +42,7 @@ func newSyncCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-func runSync(ctx context.Context, stdout io.Writer, _ io.Writer) error {
+func runSync(ctx context.Context, stdout io.Writer, _ io.Writer) (returnErr error) {
 	runner, cleanup, err := openSyncRunner(ctx)
 	if err != nil {
 		if errors.Is(err, errCloudNotConfigured) {
@@ -50,7 +50,15 @@ func runSync(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 		}
 		return err
 	}
-	defer func() { _ = cleanup() }()
+	defer func() {
+		if cleanupErr := cleanup(); cleanupErr != nil {
+			if returnErr == nil {
+				returnErr = cleanupErr
+			} else {
+				returnErr = errors.Join(returnErr, cleanupErr)
+			}
+		}
+	}()
 
 	if err := runner.Sync(ctx); err != nil {
 		return fmt.Errorf("run sync: %w", err)

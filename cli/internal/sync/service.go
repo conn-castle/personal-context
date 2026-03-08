@@ -86,8 +86,12 @@ func (s *Service) Sync(ctx context.Context) (err error) {
 	}
 	defer func() {
 		releaseErr := lock.Release()
-		if err == nil && releaseErr != nil {
-			err = releaseErr
+		if releaseErr != nil {
+			if err == nil {
+				err = releaseErr
+			} else {
+				err = errors.Join(err, releaseErr)
+			}
 		}
 	}()
 
@@ -473,16 +477,6 @@ func (s *Service) applyFiguresToLocal(
 		if _, err := s.localRepo.UpdateSlideFigure(ctx, update); err != nil {
 			return err
 		}
-		old := existingByID[update.ID]
-		if old.Filename != update.Filename {
-			oldPath, err := s.localFS.ResolveFigurePath(slideID, old.Filename)
-			if err != nil {
-				return err
-			}
-			if err := removeFileIfPresent(oldPath); err != nil {
-				return err
-			}
-		}
 	}
 
 	for _, deleteID := range plan.DeleteIDs {
@@ -541,16 +535,6 @@ func (s *Service) applyDataFilesToLocal(
 		}
 		if err := removeFileIfPresent(path); err != nil {
 			return err
-		}
-		old := existingByID[update.ID]
-		if old.Filename != update.Filename {
-			oldPath, err := s.localFS.ResolveDataFilePath(slideID, old.Filename)
-			if err != nil {
-				return err
-			}
-			if err := removeFileIfPresent(oldPath); err != nil {
-				return err
-			}
 		}
 	}
 

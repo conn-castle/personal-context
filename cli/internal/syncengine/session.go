@@ -31,7 +31,7 @@ type SyncWindow struct {
 	StartedAt time.Time
 }
 
-// CursorStore persists the canonical last-sync timestamp under ~/.pc/last_sync.
+// CursorStore persists the canonical last-sync timestamp under {pcDir}/last_sync.
 type CursorStore struct {
 	path string
 }
@@ -58,7 +58,7 @@ func NewCursorStore(pcDir string) (*CursorStore, error) {
 	return &CursorStore{path: filepath.Join(pcDir, lastSyncFilename)}, nil
 }
 
-// Path returns the absolute last-sync file path.
+// Path returns the last-sync file path.
 func (s *CursorStore) Path() string {
 	if s == nil {
 		return ""
@@ -242,13 +242,17 @@ func (l *FileLock) Release() error {
 	if l.released {
 		return fmt.Errorf("sync lock %s already released", l.path)
 	}
-	if err := osFileClose(l.file); err != nil {
-		return fmt.Errorf("close sync lock %s: %w", l.path, err)
-	}
-	if err := os.Remove(l.path); err != nil {
-		return fmt.Errorf("remove sync lock %s: %w", l.path, err)
-	}
 	l.released = true
+
+	closeErr := osFileClose(l.file)
+	removeErr := os.Remove(l.path)
+
+	if closeErr != nil {
+		return fmt.Errorf("close sync lock %s: %w", l.path, closeErr)
+	}
+	if removeErr != nil {
+		return fmt.Errorf("remove sync lock %s: %w", l.path, removeErr)
+	}
 	return nil
 }
 

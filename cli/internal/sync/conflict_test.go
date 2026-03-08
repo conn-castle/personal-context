@@ -80,7 +80,7 @@ func TestResolveBundleEditWinsOnDeleteTie(t *testing.T) {
 	}
 }
 
-func TestResolveBundleCloudWinsExactEditTie(t *testing.T) {
+func TestResolveBundleExactEditTieReturnsNone(t *testing.T) {
 	base := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
 
 	local := newBundle("20260308-a1b2c3d4", base, nil)
@@ -91,8 +91,8 @@ func TestResolveBundleCloudWinsExactEditTie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveBundle() error = %v", err)
 	}
-	if winner != WinnerCloud {
-		t.Fatalf("winner = %q, want %q", winner, WinnerCloud)
+	if winner != WinnerNone {
+		t.Fatalf("winner = %q, want %q", winner, WinnerNone)
 	}
 }
 

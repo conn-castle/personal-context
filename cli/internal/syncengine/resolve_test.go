@@ -228,11 +228,6 @@ func TestResolveSlideWinnerMoreActiveRemoteTiebreaker(t *testing.T) {
 	}
 }
 
-// Note: lines 47-51 in resolve.go (localAction.active != remoteAction.active)
-// are unreachable through latestSlideAction because active is always the inverse
-// of deleted. When deleted values are equal, active values are always equal too.
-// This is defensive code that cannot be covered without modifying the source.
-
 func TestFilterSlidesUpdatedSinceZeroSinceReturnsCopy(t *testing.T) {
 	slides := []repository.Slide{
 		slideAt("a", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil),
