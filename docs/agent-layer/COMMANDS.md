@@ -73,6 +73,13 @@ Notes: Fails when any tested package drops below 95%. Excludes `internal/reposit
 Run from: `cli/`
 Notes: Use `--no-open` in non-interactive environments. Prints artifact paths and cleanup command.
 
+- Run generalized local demo verification flow (opens summary + persisted slide previews in browser)
+```bash
+./scripts/verify_local_demo.sh
+```
+Run from: `cli/`
+Notes: Use `--no-open` in non-interactive environments. Verifies create/delete/restore/move flow and emits a summary artifact for human inspection.
+
 - Run CLI e2e tests
 ```bash
 go test ./internal/e2e
@@ -146,6 +153,14 @@ npm run test:e2e:cli-slide
 Run from: `web/`
 Prerequisites: Go toolchain and `npx playwright install` for browser binaries.
 Notes: Executes `cli/scripts/verify_phase3_manual.sh --no-open`, then loads the generated `slide.html` in Chromium.
+
+- Run Playwright e2e for the generalized local demo artifact
+```bash
+npm run test:e2e:cli-demo
+```
+Run from: `web/`
+Prerequisites: Go toolchain and `npx playwright install` for browser binaries.
+Notes: Executes `cli/scripts/verify_local_demo.sh --no-open`, then loads the generated summary page in Chromium.
 
 ## Repository root
 

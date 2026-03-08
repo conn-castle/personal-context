@@ -57,6 +57,7 @@ go build -o pc ./cmd/pc
 ./scripts/check_coverage.sh 95
 ./scripts/check_coverage_per_package.sh 95
 ./scripts/verify_phase3_manual.sh
+./scripts/verify_local_demo.sh
 
 # Web
 cd ../web
@@ -69,6 +70,7 @@ npm run build
 npx playwright install
 npm run test:e2e:smoke
 npm run test:e2e:cli-slide
+npm run test:e2e:cli-demo
 
 # Repo-level schema contract
 cd ..
@@ -136,10 +138,13 @@ go build -o pc ./cmd/pc
 ./scripts/check_coverage.sh 95
 ./scripts/check_coverage_per_package.sh 95
 ./scripts/verify_phase3_manual.sh
+./scripts/verify_local_demo.sh
 golangci-lint run ./...
 ```
 
 `./scripts/verify_phase3_manual.sh` runs the full Phase 3 local flow (`setup/add/show/edit/move/delete/restore`), creates a standalone slide preview, and opens it in your default browser. Use `--no-open` for headless runs.
+
+`./scripts/verify_local_demo.sh` runs a generalized local demo flow: it creates 10 numbered slides, deletes 5, restores 1, moves 1, verifies the final state through the real CLI, and opens a generated summary page with persisted previews for the first and last active slides. Use `--no-open` for headless runs.
 
 ### Web (`web/`)
 
@@ -153,9 +158,12 @@ npm run build
 npx playwright install
 npm run test:e2e:smoke
 npm run test:e2e:cli-slide
+npm run test:e2e:cli-demo
 ```
 
 `npm run test:e2e:cli-slide` requires Go on `PATH` because it executes `cli/scripts/verify_phase3_manual.sh --no-open`.
+
+`npm run test:e2e:cli-demo` requires Go on `PATH` because it executes `cli/scripts/verify_local_demo.sh --no-open`.
 
 ### Repository (`repo root`)
 

@@ -114,3 +114,6 @@ jobs:
 
       - name: Run Playwright standalone CLI slide e2e
         run: npm run test:e2e:cli-slide
+
+      - name: Run Playwright local demo e2e
+        run: npm run test:e2e:cli-demo
