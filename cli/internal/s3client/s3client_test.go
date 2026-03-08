@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(fmt.Sprintf("start minio container: %v", err))
 	}
+	defer func() { _ = container.Terminate(ctx) }()
 
 	endpoint, err := container.ConnectionString(ctx)
 	if err != nil {
@@ -52,12 +54,7 @@ func TestMain(m *testing.M) {
 	sharedMinio.username = container.Username
 	sharedMinio.password = container.Password
 
-	exitCode := m.Run()
-
-	_ = container.Terminate(ctx)
-	if exitCode != 0 {
-		panic("tests failed")
-	}
+	os.Exit(m.Run())
 }
 
 var bucketCounter int

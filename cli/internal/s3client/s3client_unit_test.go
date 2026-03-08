@@ -72,6 +72,13 @@ func TestIsNotFoundErrorHTTP404(t *testing.T) {
 	}
 }
 
+func TestIsNotFoundErrorNoSuchBucket(t *testing.T) {
+	nsb := &types.NoSuchBucket{Message: strPtr("bucket gone")}
+	if isNotFoundError(nsb) {
+		t.Fatal("expected false for NoSuchBucket — missing bucket is not 'key not found'")
+	}
+}
+
 func TestIsNotFoundErrorOtherError(t *testing.T) {
 	err := errors.New("some error")
 	if isNotFoundError(err) {

@@ -21,6 +21,12 @@ type Repository struct {
 
 var _ repository.Repository = (*Repository)(nil)
 
+// rowScanner is satisfied by both pgx.Row and *pgx.Rows, allowing scan
+// helpers to be used for single-row and multi-row queries alike.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
 // New constructs a Postgres repository implementation.
 // Args: pool is an initialized pgx connection pool.
 // Returns: repository implementation or an error when pool is nil.
@@ -163,7 +169,7 @@ func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlide
 
 	slides := make([]repository.Slide, 0)
 	for rows.Next() {
-		slide, err := scanSlideRows(rows)
+		slide, err := scanSlide(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -306,7 +312,7 @@ func (r *Repository) ListSlideFiguresBySlideID(ctx context.Context, slideID stri
 
 	figures := make([]repository.SlideFigure, 0)
 	for rows.Next() {
-		figure, err := scanFigureRows(rows)
+		figure, err := scanFigure(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -430,7 +436,7 @@ func (r *Repository) ListSlideDataFilesBySlideID(ctx context.Context, slideID st
 
 	files := make([]repository.SlideDataFile, 0)
 	for rows.Next() {
-		file, err := scanDataFileRows(rows)
+		file, err := scanDataFile(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -523,7 +529,7 @@ func (r *Repository) ListTemplates(ctx context.Context) ([]repository.Template, 
 
 	templates := make([]repository.Template, 0)
 	for rows.Next() {
-		template, err := scanTemplateRows(rows)
+		template, err := scanTemplate(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -586,11 +592,11 @@ func (r *Repository) ListDistinctProjectIDs(ctx context.Context) ([]string, erro
 	return projects, nil
 }
 
-// scanSlide scans a single slide row from pgx.Row.
-func scanSlide(row pgx.Row) (repository.Slide, error) {
+// scanSlide scans a single slide from any row scanner (pgx.Row or pgx.Rows).
+func scanSlide(rs rowScanner) (repository.Slide, error) {
 	var s repository.Slide
 	var date time.Time
-	err := row.Scan(
+	err := rs.Scan(
 		&s.ID,
 		&date,
 		&s.DayOrder,
@@ -616,40 +622,10 @@ func scanSlide(row pgx.Row) (repository.Slide, error) {
 	return s, nil
 }
 
-// scanSlideRows scans a single slide from pgx.Rows.
-func scanSlideRows(rows pgx.Rows) (repository.Slide, error) {
-	var s repository.Slide
-	var date time.Time
-	err := rows.Scan(
-		&s.ID,
-		&date,
-		&s.DayOrder,
-		&s.HTMLContent,
-		&s.Notes,
-		&s.ProjectID,
-		&s.GitRemoteURL,
-		&s.GitHash,
-		&s.CreatedAt,
-		&s.UpdatedAt,
-		&s.DeletedAt,
-	)
-	if err != nil {
-		return repository.Slide{}, mapPgError(err)
-	}
-	s.Date = date.Format("2006-01-02")
-	s.CreatedAt = s.CreatedAt.UTC()
-	s.UpdatedAt = s.UpdatedAt.UTC()
-	if s.DeletedAt != nil {
-		utc := s.DeletedAt.UTC()
-		s.DeletedAt = &utc
-	}
-	return s, nil
-}
-
-// scanFigure scans a single figure from pgx.Row.
-func scanFigure(row pgx.Row) (repository.SlideFigure, error) {
+// scanFigure scans a single figure from any row scanner (pgx.Row or pgx.Rows).
+func scanFigure(rs rowScanner) (repository.SlideFigure, error) {
 	var f repository.SlideFigure
-	err := row.Scan(&f.ID, &f.SlideID, &f.Filename, &f.S3Key, &f.AltText, &f.CreatedAt)
+	err := rs.Scan(&f.ID, &f.SlideID, &f.Filename, &f.S3Key, &f.AltText, &f.CreatedAt)
 	if err != nil {
 		return repository.SlideFigure{}, mapPgError(err)
 	}
@@ -657,21 +633,10 @@ func scanFigure(row pgx.Row) (repository.SlideFigure, error) {
 	return f, nil
 }
 
-// scanFigureRows scans a single figure from pgx.Rows.
-func scanFigureRows(rows pgx.Rows) (repository.SlideFigure, error) {
-	var f repository.SlideFigure
-	err := rows.Scan(&f.ID, &f.SlideID, &f.Filename, &f.S3Key, &f.AltText, &f.CreatedAt)
-	if err != nil {
-		return repository.SlideFigure{}, mapPgError(err)
-	}
-	f.CreatedAt = f.CreatedAt.UTC()
-	return f, nil
-}
-
-// scanDataFile scans a single data file from pgx.Row.
-func scanDataFile(row pgx.Row) (repository.SlideDataFile, error) {
+// scanDataFile scans a single data file from any row scanner (pgx.Row or pgx.Rows).
+func scanDataFile(rs rowScanner) (repository.SlideDataFile, error) {
 	var d repository.SlideDataFile
-	err := row.Scan(&d.ID, &d.SlideID, &d.Filename, &d.S3Key, &d.Size, &d.Hash, &d.Description, &d.CreatedAt)
+	err := rs.Scan(&d.ID, &d.SlideID, &d.Filename, &d.S3Key, &d.Size, &d.Hash, &d.Description, &d.CreatedAt)
 	if err != nil {
 		return repository.SlideDataFile{}, mapPgError(err)
 	}
@@ -679,33 +644,10 @@ func scanDataFile(row pgx.Row) (repository.SlideDataFile, error) {
 	return d, nil
 }
 
-// scanDataFileRows scans a single data file from pgx.Rows.
-func scanDataFileRows(rows pgx.Rows) (repository.SlideDataFile, error) {
-	var d repository.SlideDataFile
-	err := rows.Scan(&d.ID, &d.SlideID, &d.Filename, &d.S3Key, &d.Size, &d.Hash, &d.Description, &d.CreatedAt)
-	if err != nil {
-		return repository.SlideDataFile{}, mapPgError(err)
-	}
-	d.CreatedAt = d.CreatedAt.UTC()
-	return d, nil
-}
-
-// scanTemplate scans a single template from pgx.Row.
-func scanTemplate(row pgx.Row) (repository.Template, error) {
+// scanTemplate scans a single template from any row scanner (pgx.Row or pgx.Rows).
+func scanTemplate(rs rowScanner) (repository.Template, error) {
 	var t repository.Template
-	err := row.Scan(&t.Name, &t.HTMLContent, &t.Description, &t.CreatedAt, &t.UpdatedAt)
-	if err != nil {
-		return repository.Template{}, mapPgError(err)
-	}
-	t.CreatedAt = t.CreatedAt.UTC()
-	t.UpdatedAt = t.UpdatedAt.UTC()
-	return t, nil
-}
-
-// scanTemplateRows scans a single template from pgx.Rows.
-func scanTemplateRows(rows pgx.Rows) (repository.Template, error) {
-	var t repository.Template
-	err := rows.Scan(&t.Name, &t.HTMLContent, &t.Description, &t.CreatedAt, &t.UpdatedAt)
+	err := rs.Scan(&t.Name, &t.HTMLContent, &t.Description, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return repository.Template{}, mapPgError(err)
 	}

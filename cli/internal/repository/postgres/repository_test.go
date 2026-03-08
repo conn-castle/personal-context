@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -41,21 +42,19 @@ func TestMain(m *testing.M) {
 		),
 	)
 	if err != nil {
-		panic(fmt.Sprintf("start postgres container: %v", err))
+		fmt.Fprintf(os.Stderr, "start postgres container: %v\n", err)
+		os.Exit(1)
 	}
+	defer func() { _ = container.Terminate(ctx) }()
 
 	connStr, err := container.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		panic(fmt.Sprintf("get connection string: %v", err))
+		fmt.Fprintf(os.Stderr, "get connection string: %v\n", err)
+		os.Exit(1)
 	}
 	sharedContainer.connStr = connStr
 
-	exitCode := m.Run()
-
-	_ = container.Terminate(ctx)
-	if exitCode != 0 {
-		panic("tests failed")
-	}
+	os.Exit(m.Run())
 }
 
 // schemaCounter provides unique schema names across tests.

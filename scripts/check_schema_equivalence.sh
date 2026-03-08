@@ -48,7 +48,8 @@ fi
 # ─── Extract columns per table ────────────────────────────────────────────────
 # For each table, find the CREATE TABLE block and extract column names.
 # A column line is one that starts (after leading whitespace) with an identifier
-# followed by a type keyword (TEXT, INTEGER, SERIAL, BIGINT, DATE, TIMESTAMPTZ).
+# followed by a space and more tokens, and does NOT start with a constraint
+# keyword (UNIQUE, CHECK, PRIMARY, CONSTRAINT, FOREIGN).
 extract_columns() {
   local file="$1"
   local table="$2"
@@ -80,17 +81,18 @@ extract_columns() {
         if (chars[i] == "(") paren_depth++
         if (chars[i] == ")") paren_depth--
       }
-      # We are at paren_depth 1 for column definitions
-      # Column lines start with whitespace + identifier + type
-      trimmed = line
-      gsub(/^[[:space:]]+/, "", trimmed)
-      # Skip constraint-only lines (UNIQUE, CHECK, PRIMARY KEY as standalone)
-      if (match(trimmed, /^(UNIQUE|CHECK|PRIMARY[[:space:]]+KEY)[[:space:]]*\(/)) next
-      # Column: starts with a lowercase identifier followed by space + type
-      if (match(trimmed, /^[a-z_]+[[:space:]]+(TEXT|INTEGER|SERIAL|BIGINT|DATE|TIMESTAMPTZ)/)) {
-        col = trimmed
-        sub(/[[:space:]].*/, "", col)
-        print col
+      # Column definitions only appear at paren_depth 1 (top level of CREATE TABLE body)
+      if (paren_depth == 1) {
+        trimmed = line
+        gsub(/^[[:space:]]+/, "", trimmed)
+        # Skip constraint-only lines (UNIQUE, CHECK, PRIMARY KEY, CONSTRAINT, FOREIGN KEY)
+        if (match(trimmed, /^(UNIQUE|CHECK|PRIMARY[[:space:]]+KEY|CONSTRAINT|FOREIGN[[:space:]]+KEY)[[:space:]]*[\(]/)) { next }
+        # Column: starts with an identifier (letters/digits/underscores) followed by space + more tokens
+        if (match(trimmed, /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]+/)) {
+          col = trimmed
+          sub(/[[:space:]].*/, "", col)
+          print col
+        }
       }
       # Exit when we close the CREATE TABLE paren
       if (paren_depth <= 0) {
@@ -117,10 +119,10 @@ for table in $pg_tables; do
 done
 
 # ─── Extract index names ──────────────────────────────────────────────────────
-# Matches: CREATE INDEX [IF NOT EXISTS] <name> ON ...
+# Matches: CREATE [UNIQUE] INDEX [IF NOT EXISTS] <name> ON ...
 extract_indexes() {
-  grep -iE '^CREATE\s+INDEX' "$1" \
-    | sed -E 's/^CREATE[[:space:]]+INDEX[[:space:]]+(IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+)?//' \
+  grep -iE '^CREATE\s+(UNIQUE\s+)?INDEX' "$1" \
+    | sed -E 's/^CREATE[[:space:]]+(UNIQUE[[:space:]]+)?INDEX[[:space:]]+(IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+)?//' \
     | sed -E 's/[[:space:]]+ON.*//' \
     | sort
 }

@@ -51,7 +51,7 @@ func (c *Client) Upload(ctx context.Context, key string, body io.Reader) error {
 		Body:   body,
 	})
 	if err != nil {
-		return fmt.Errorf("upload %s: %w", key, err)
+		return fmt.Errorf("upload %s: %w", key, mapS3Error(err))
 	}
 	return nil
 }
@@ -108,7 +108,7 @@ func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 		if isNotFoundError(err) {
 			return false, nil
 		}
-		return false, fmt.Errorf("exists %s: %w", key, err)
+		return false, fmt.Errorf("exists %s: %w", key, mapS3Error(err))
 	}
 	return true, nil
 }
@@ -124,7 +124,7 @@ func (c *Client) HeadVersion(ctx context.Context) (int64, error) {
 		if isNotFoundError(err) {
 			return 0, nil
 		}
-		return 0, fmt.Errorf("head version: %w", err)
+		return 0, fmt.Errorf("head version: %w", mapS3Error(err))
 	}
 	defer func() { _ = out.Body.Close() }()
 
@@ -156,7 +156,7 @@ func (c *Client) UpdateVersion(ctx context.Context, version int64) error {
 		ContentType: aws.String("text/plain"),
 	})
 	if err != nil {
-		return fmt.Errorf("update version: %w", err)
+		return fmt.Errorf("update version: %w", mapS3Error(err))
 	}
 	return nil
 }
@@ -178,7 +178,15 @@ func mapS3Error(err error) error {
 }
 
 // isNotFoundError checks if the error indicates the object does not exist.
+// It returns false for NoSuchBucket errors so that misconfigured buckets
+// propagate as real errors instead of being silently treated as "key not found".
 func isNotFoundError(err error) bool {
+	// Reject bucket-level 404s first — a missing bucket is not "key not found".
+	var nsb *types.NoSuchBucket
+	if errors.As(err, &nsb) {
+		return false
+	}
+
 	var nsk *types.NoSuchKey
 	if errors.As(err, &nsk) {
 		return true
