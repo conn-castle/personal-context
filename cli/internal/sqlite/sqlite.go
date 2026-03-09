@@ -56,7 +56,7 @@ func Open(path string) (*Connection, error) {
 		return nil, fmt.Errorf("sqlite path is required")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create sqlite parent directory: %w", err)
 	}
 

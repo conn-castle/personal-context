@@ -27,6 +27,26 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-03-08 m7n8o9: UpdateSlide silently clears deleted_at when input.DeletedAt is nil
+    Priority: Medium. Area: cli/internal/repository
+    Description: `UpdateSlide` sets `deleted_at = ?` unconditionally. A caller that constructs `UpdateSlideInput` without copying the existing `DeletedAt` silently restores a soft-deleted slide. All current callers are safe (they copy `existing.DeletedAt`), but the API is a footgun for future callers.
+    Next step: Add `SetDeletedAt bool` flag to `UpdateSlideInput` or change SQL to `COALESCE(?, deleted_at)` with a separate explicit-clear mechanism for sync/restore.
+
+- Issue 2026-03-08 n9o0p1: Duplicate filenames silently overwritten in sync reconciliation plans
+    Priority: Medium. Area: cli/internal/sync
+    Description: `PlanFigureReconciliation` and `PlanDataFileReconciliation` build maps keyed by filename without duplicate detection. If existing or desired slices contain duplicate filenames (from corruption or bugs), one entry is silently lost. The `syncengine` package has `FigureMapByFilename`/`DataFileMapByFilename` with duplicate detection but they are not used here.
+    Next step: Either use `syncengine` map helpers or add explicit duplicate detection in `conflict.go`.
+
+- Issue 2026-03-08 o1p2q3: GitHub Actions pinned to mutable version tags
+    Priority: Medium. Area: .github/workflows/ci.yml
+    Description: All GitHub Actions use major version tags (`@v4`, `@v5`, `@v8`) rather than full commit SHAs. Third-party actions like `golangci/golangci-lint-action@v8` carry supply-chain risk.
+    Next step: Pin all actions to full commit SHAs with version comments.
+
+- Issue 2026-03-08 p3q4r5: CI web job runs tests twice (npm test then npm run test:coverage)
+    Priority: Low. Area: .github/workflows/ci.yml
+    Description: The `web` CI job runs `npm test` (vitest run) and then `npm run test:coverage` (vitest run --coverage), executing the identical test suite twice. The coverage run already validates test passage.
+    Next step: Remove the redundant `npm test` step from the web CI job.
+
 - Issue 2026-03-08 k4l5m6: Repository adapters and sync suites are oversized
     Priority: Low. Area: cli/internal/repository, cli/internal/sync
     Description: `repository.go` adapters, `service.go`, and their largest companion test files now concentrate CRUD/reconciliation helpers and long scenario suites in 600-3900 LOC files, which raises review and change risk.

@@ -301,10 +301,7 @@ func applySlide(
 			UpdatedAt:    &slide.UpdatedAt,
 			DeletedAt:    slide.DeletedAt,
 		})
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	}
 
 	_, err := repo.CreateSlide(ctx, repository.CreateSlideInput{
@@ -329,30 +326,41 @@ func (s *Service) applyFiguresToCloud(
 	desired []repository.SlideFigure,
 	existing []repository.SlideFigure,
 ) error {
-	for _, figure := range desired {
-		path, err := s.localFS.ResolveFigurePath(slideID, figure.Filename)
-		if err != nil {
-			return err
-		}
-		if err := s.uploadFile(ctx, figure.S3Key, path); err != nil {
-			return err
-		}
-	}
-
 	plan, err := PlanFigureReconciliation(slideID, existing, desired)
 	if err != nil {
 		return err
 	}
 
+	// Build a lookup by filename so we can resolve local file paths for creates/updates.
+	desiredByFilename := make(map[string]repository.SlideFigure, len(desired))
+	for _, fig := range desired {
+		desiredByFilename[fig.Filename] = fig
+	}
+
 	existingByID := indexFiguresByID(existing)
 
 	for _, create := range plan.Creates {
+		path, err := s.localFS.ResolveFigurePath(slideID, create.Filename)
+		if err != nil {
+			return err
+		}
+		if err := s.uploadFile(ctx, create.S3Key, path); err != nil {
+			return err
+		}
 		if _, err := s.cloudRepo.CreateSlideFigure(ctx, create); err != nil {
 			return err
 		}
 	}
 
 	for _, update := range plan.Updates {
+		fig := desiredByFilename[update.Filename]
+		path, err := s.localFS.ResolveFigurePath(slideID, fig.Filename)
+		if err != nil {
+			return err
+		}
+		if err := s.uploadFile(ctx, update.S3Key, path); err != nil {
+			return err
+		}
 		old := existingByID[update.ID]
 		if _, err := s.cloudRepo.UpdateSlideFigure(ctx, update); err != nil {
 			return err
@@ -441,6 +449,8 @@ func (s *Service) applyFiguresToLocal(
 	desired []repository.SlideFigure,
 	existing []repository.SlideFigure,
 ) error {
+	// Download all desired figures to ensure local file consistency when cloud wins.
+	// Even if figure metadata is unchanged, the local file may be outdated.
 	for _, figure := range desired {
 		path, err := s.localFS.ResolveFigurePath(slideID, figure.Filename)
 		if err != nil {
@@ -555,7 +565,7 @@ func (s *Service) downloadFile(ctx context.Context, key string, path string) err
 
 func writeReaderToPath(path string, body io.Reader) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create directory %s: %w", dir, err)
 	}
 

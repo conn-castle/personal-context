@@ -32,7 +32,7 @@ type cloudStack struct {
 
 var (
 	validateCloudConfigFn = pcconfig.ValidateCloudConfig
-	loadAWSConfigFn       = loadAWSConfig
+	loadAWSConfigFn = loadAWSConfig
 	newPGXPoolFn          = func(ctx context.Context, connectionString string) (*pgxpool.Pool, error) {
 		return pgxpool.New(ctx, connectionString)
 	}
@@ -91,7 +91,7 @@ func openCloudStack(ctx context.Context, homeDir string) (*cloudStack, error) {
 		return nil, fmt.Errorf("validate cloud config: %w", err)
 	}
 
-	awsCfg, err := loadAWSConfigFn(ctx, homeDir, cfg.AWSProfile)
+	awsCfg, err := loadAWSConfigFn(ctx, cfg.AWSProfile)
 	if err != nil {
 		return nil, fmt.Errorf("load aws config: %w", err)
 	}
@@ -124,7 +124,7 @@ func openCloudStack(ctx context.Context, homeDir string) (*cloudStack, error) {
 }
 
 // loadAWSConfig loads AWS SDK configuration for the named shared-credentials profile.
-func loadAWSConfig(ctx context.Context, _ string, profile string) (aws.Config, error) {
+func loadAWSConfig(ctx context.Context, profile string) (aws.Config, error) {
 	if strings.TrimSpace(profile) == "" {
 		return aws.Config{}, fmt.Errorf("profile is required")
 	}

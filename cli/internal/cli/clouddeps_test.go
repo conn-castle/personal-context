@@ -19,7 +19,7 @@ import (
 )
 
 func TestLoadAWSConfigEmptyProfile(t *testing.T) {
-	_, err := loadAWSConfig(context.Background(), t.TempDir(), "")
+	_, err := loadAWSConfig(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected error for empty profile")
 	}
@@ -29,7 +29,7 @@ func TestLoadAWSConfigEmptyProfile(t *testing.T) {
 }
 
 func TestLoadAWSConfigWhitespaceOnlyProfile(t *testing.T) {
-	_, err := loadAWSConfig(context.Background(), t.TempDir(), "   ")
+	_, err := loadAWSConfig(context.Background(), "   ")
 	if err == nil {
 		t.Fatal("expected error for whitespace-only profile")
 	}
@@ -50,7 +50,7 @@ func TestOpenCloudStackS3ClientFactoryError(t *testing.T) {
 
 	originalLoad := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
-	loadAWSConfigFn = func(context.Context, string, string) (aws.Config, error) {
+	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
 		return aws.Config{}, nil
 	}
 
@@ -180,7 +180,7 @@ func TestOpenCloudStackAWSConfigLoadError(t *testing.T) {
 
 	original := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = original })
-	loadAWSConfigFn = func(context.Context, string, string) (aws.Config, error) {
+	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
 		return aws.Config{}, errors.New("aws config failed")
 	}
 
@@ -195,7 +195,7 @@ func TestOpenCloudStackPGPoolFactoryError(t *testing.T) {
 
 	originalLoad := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
-	loadAWSConfigFn = func(context.Context, string, string) (aws.Config, error) {
+	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
 		return aws.Config{}, nil
 	}
 
@@ -216,7 +216,7 @@ func TestOpenCloudStackPostgresRepoFactoryError(t *testing.T) {
 
 	originalLoad := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
-	loadAWSConfigFn = func(context.Context, string, string) (aws.Config, error) {
+	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
 		return aws.Config{}, nil
 	}
 
@@ -257,7 +257,7 @@ func TestOpenCloudStackSuccess(t *testing.T) {
 
 	originalLoad := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
-	loadAWSConfigFn = func(_ context.Context, _ string, profile string) (aws.Config, error) {
+	loadAWSConfigFn = func(_ context.Context, profile string) (aws.Config, error) {
 		if profile != "personal-context" {
 			t.Fatalf("expected profile personal-context, got %q", profile)
 		}
@@ -337,7 +337,7 @@ func TestLoadAWSConfigCredentialsPathError(t *testing.T) {
 		return "", fmt.Errorf("user home unavailable")
 	}
 
-	_, err := loadAWSConfig(context.Background(), t.TempDir(), "my-profile")
+	_, err := loadAWSConfig(context.Background(), "my-profile")
 	if err == nil {
 		t.Fatal("expected error when credentials path resolution fails")
 	}
@@ -361,7 +361,7 @@ func TestLoadAWSConfigSuccessfulLoad(t *testing.T) {
 	t.Cleanup(func() { userHomeDirFn = original })
 	userHomeDirFn = func() (string, error) { return homeDir, nil }
 
-	cfg, err := loadAWSConfig(context.Background(), homeDir, "test-profile")
+	cfg, err := loadAWSConfig(context.Background(), "test-profile")
 	if err != nil {
 		t.Fatalf("loadAWSConfig() error = %v", err)
 	}
