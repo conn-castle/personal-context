@@ -68,6 +68,7 @@ func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 	root.AddCommand(newGCCommand(stdout, stderr))
 	root.AddCommand(newDoctorCommand(stdout, stderr))
 	root.AddCommand(newSyncCommand(stdout, stderr))
+	root.AddCommand(newFetchCommand(stdout, stderr))
 
 	return root
 }

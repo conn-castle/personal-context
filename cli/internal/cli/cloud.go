@@ -17,7 +17,10 @@ import (
 	pcs3 "github.com/conn-castle/personal-context/cli/internal/s3client"
 )
 
-var errCloudNotConfigured = errors.New("cloud is not configured")
+var (
+	errCloudNotConfigured = errors.New("cloud is not configured")
+	openCloudStackFn      = openCloudStack
+)
 
 type cloudStack struct {
 	Config pcconfig.Config
