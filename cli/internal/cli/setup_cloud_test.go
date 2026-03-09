@@ -353,9 +353,14 @@ func TestRunSetupRemoveCloudSuccess(t *testing.T) {
 		t.Fatalf("Write cloud config: %v", err)
 	}
 
-	// Write a fake AWS credentials file.
-	userHome, _ := resolveUserHomeDir()
-	awsDir := filepath.Join(userHome, ".aws")
+	// Override userHomeDirFn so we never touch the real ~/.aws/credentials.
+	fakeUserHome := t.TempDir()
+	origUserHome := userHomeDirFn
+	t.Cleanup(func() { userHomeDirFn = origUserHome })
+	userHomeDirFn = func() (string, error) { return fakeUserHome, nil }
+
+	// Write a fake AWS credentials file under the temp home.
+	awsDir := filepath.Join(fakeUserHome, ".aws")
 	if err := os.MkdirAll(awsDir, 0o700); err != nil {
 		t.Fatalf("mkdir .aws: %v", err)
 	}
@@ -838,6 +843,12 @@ func TestRunSetupCloudConfigWriteRollsBackAWSProfile(t *testing.T) {
 	store, _ := config.NewStore(homeDir)
 
 	mockAllCloudDeps(t)
+
+	// Mock userHomeDirFn to a temp dir without existing credentials.
+	fakeUserHome := t.TempDir()
+	origUserHome := userHomeDirFn
+	t.Cleanup(func() { userHomeDirFn = origUserHome })
+	userHomeDirFn = func() (string, error) { return fakeUserHome, nil }
 
 	awsWritten := false
 	origWrite := writeAWSProfileFn

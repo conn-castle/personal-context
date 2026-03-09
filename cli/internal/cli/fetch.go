@@ -17,6 +17,7 @@ import (
 )
 
 // downloadS3FileFn downloads a file from S3 and writes it to the local path.
+// Uses atomic write (temp file + rename) to avoid leaving partial files on failure.
 var downloadS3FileFn = func(ctx context.Context, s3Client *pcs3.Client, key string, destPath string) error {
 	body, err := s3Client.Download(ctx, key)
 	if err != nil {
@@ -24,21 +25,43 @@ var downloadS3FileFn = func(ctx context.Context, s3Client *pcs3.Client, key stri
 	}
 	defer func() { _ = body.Close() }()
 
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
+	destDir := filepath.Dir(destPath)
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return fmt.Errorf("create directory: %w", err)
 	}
 
-	f, err := os.Create(destPath)
+	tmpFile, err := os.CreateTemp(destDir, ".pc-fetch-*.tmp")
 	if err != nil {
-		return fmt.Errorf("create file: %w", err)
+		return fmt.Errorf("create temp file: %w", err)
 	}
-	defer func() { _ = f.Close() }()
+	tmpPath := tmpFile.Name()
 
-	if _, err := io.Copy(f, body); err != nil {
+	success := false
+	defer func() {
+		_ = tmpFile.Close()
+		if !success {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := io.Copy(tmpFile, body); err != nil {
 		return fmt.Errorf("write file: %w", err)
 	}
 
-	return f.Sync()
+	if err := tmpFile.Sync(); err != nil {
+		return fmt.Errorf("sync file: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+
+	success = true
+	return nil
 }
 
 // fetchOptions holds the flags for the fetch command.
@@ -133,7 +156,13 @@ func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, slideID string
 	// Download each file from S3.
 	downloaded := 0
 	for _, df := range dataFiles {
-		destPath := filepath.Join(outputBase, df.SlideID, df.Filename)
+		// Sanitize path components to prevent directory traversal from cloud metadata.
+		slideDir := filepath.Base(df.SlideID)
+		fileName := filepath.Base(df.Filename)
+		if slideDir == "." || slideDir == ".." || fileName == "." || fileName == ".." {
+			return fmt.Errorf("invalid path component in slide %s file %s", df.SlideID, df.Filename)
+		}
+		destPath := filepath.Join(outputBase, slideDir, fileName)
 		if err := downloadS3FileFn(ctx, cloud.S3, df.S3Key, destPath); err != nil {
 			return fmt.Errorf("download %s: %w", df.S3Key, err)
 		}

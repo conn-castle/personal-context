@@ -116,6 +116,10 @@ func runSetupCloud(
 	localRepo repository.Repository,
 	interactive bool,
 ) error {
+	if interactive && localRepo == nil {
+		return errors.New("localRepo is required for interactive cloud setup")
+	}
+
 	// 1. Validate formats.
 	if err := pcconfig.ValidateNeonURL(neonURL); err != nil {
 		return fmt.Errorf("invalid neon URL: %w", err)
@@ -192,11 +196,15 @@ func runSetupCloud(
 		return fmt.Errorf("read config: %w", readErr)
 	}
 
-	// 6. Write AWS credentials profile.
+	// 6. Write AWS credentials profile (snapshot existing file for rollback).
 	userHome, err := resolveUserHomeDir()
 	if err != nil {
 		return err
 	}
+	credsPath := awsCredentialsPath(userHome)
+	prevCreds, prevErr := os.ReadFile(credsPath)
+	hadPrevCreds := prevErr == nil
+
 	if err := writeAWSProfileFn(userHome, awsProfileName, awsKey, awsSecret); err != nil {
 		return fmt.Errorf("write AWS credentials profile: %w", err)
 	}
@@ -210,8 +218,12 @@ func runSetupCloud(
 		ActiveProject: existing.ActiveProject,
 	}
 	if err := store.Write(cfg); err != nil {
-		// Rollback AWS profile on config write failure.
-		_ = removeAWSProfileFn(userHome, awsProfileName)
+		// Rollback AWS credentials to previous state on config write failure.
+		if hadPrevCreds {
+			_ = os.WriteFile(credsPath, prevCreds, awsProfileFilePermission)
+		} else {
+			_ = removeAWSProfileFn(userHome, awsProfileName)
+		}
 		return fmt.Errorf("write config: %w", err)
 	}
 

@@ -122,9 +122,15 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 
 	// Cloud connectivity check (only when cloud is configured).
 	cloud, cloudErr := openCloudStackFn(ctx, homeDir)
+	if cloudErr == nil {
+		// Verify the Postgres connection is actually alive.
+		if _, pingErr := cloud.Repo.GetSyncVersion(ctx); pingErr != nil {
+			cloudErr = fmt.Errorf("cloud DB unreachable: %w", pingErr)
+		}
+		_ = cloud.Close()
+	}
 	switch {
 	case cloudErr == nil:
-		_ = cloud.Close()
 		if err := reportDoctorSuccess(stdout, "write cloud success", "Cloud"); err != nil {
 			return err
 		}

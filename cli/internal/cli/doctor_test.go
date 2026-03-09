@@ -809,6 +809,15 @@ func TestFindOrphansUnexpectedRepoError(t *testing.T) {
 	}
 }
 
+// cloudRepoStub is a minimal stub satisfying the cloud connectivity Ping in runDoctor.
+type cloudRepoStub struct {
+	repository.Repository
+}
+
+func (cloudRepoStub) GetSyncVersion(context.Context) (repository.SyncVersion, error) {
+	return repository.SyncVersion{}, nil
+}
+
 // --- Cloud connectivity check tests ---
 
 func TestDoctorCloudOK(t *testing.T) {
@@ -817,7 +826,7 @@ func TestDoctorCloudOK(t *testing.T) {
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
 	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
-		return &cloudStack{}, nil
+		return &cloudStack{Repo: cloudRepoStub{}}, nil
 	}
 
 	stdout := &bytes.Buffer{}
@@ -889,7 +898,7 @@ func TestDoctorCloudOKWriteError(t *testing.T) {
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
 	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
-		return &cloudStack{}, nil
+		return &cloudStack{Repo: cloudRepoStub{}}, nil
 	}
 
 	// 5 local checks succeed (Database, Orphaned figures, Orphaned data, Missing figures, Missing data files).

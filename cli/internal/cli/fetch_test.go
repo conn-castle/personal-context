@@ -448,6 +448,63 @@ func TestRunFetchProjectCollectDataFilesError(t *testing.T) {
 	}
 }
 
+func TestRunFetchPathTraversalSanitized(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	outputDir := t.TempDir()
+	mockCloudStackForFetch(t, &fetchMockConfig{
+		slides: map[string]repository.Slide{
+			"s1": {ID: "s1", Date: "2025-01-01"},
+		},
+		dataFiles: map[string][]repository.SlideDataFile{
+			"s1": {{SlideID: "../../etc", Filename: "../passwd", S3Key: "k"}},
+		},
+		s3Data: map[string]string{"k": "data"},
+	})
+
+	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "s1", fetchOptions{Output: outputDir})
+	if err != nil {
+		t.Fatalf("unexpected error = %v", err)
+	}
+
+	// Verify the file was written safely inside outputDir (traversal stripped).
+	safePath := filepath.Join(outputDir, "etc", "passwd")
+	if _, statErr := os.Stat(safePath); statErr != nil {
+		t.Fatalf("expected file at sanitized path %s, got error: %v", safePath, statErr)
+	}
+
+	// Verify no file was written outside outputDir.
+	unsafePath := filepath.Join(outputDir, "..", "..", "etc", "passwd")
+	if _, statErr := os.Stat(unsafePath); statErr == nil {
+		t.Fatal("traversal was NOT sanitized — file written outside output directory")
+	}
+}
+
+func TestRunFetchPathTraversalEmptyComponentRejected(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	// filepath.Base("") returns ".", which is rejected.
+	mockCloudStackForFetch(t, &fetchMockConfig{
+		slides: map[string]repository.Slide{
+			"s1": {ID: "s1", Date: "2025-01-01"},
+		},
+		dataFiles: map[string][]repository.SlideDataFile{
+			"s1": {{SlideID: "s1", Filename: "", S3Key: "k"}},
+		},
+		s3Data: map[string]string{"k": "data"},
+	})
+
+	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "s1", fetchOptions{Output: t.TempDir()})
+	if err == nil {
+		t.Fatal("expected error for empty filename")
+	}
+	if !strings.Contains(err.Error(), "invalid path component") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+}
+
 // --- Test helpers ---
 
 // fetchMockConfig configures the mock cloud stack for fetch tests.
