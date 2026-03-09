@@ -93,30 +93,15 @@ Incomplete:
 - Added local and cloud verification coverage for all five conversion paths plus the Phase 7 edge matrix: deterministic exports, large/unicode payloads, soft-delete exclusion, overlap semantics, cloud-rooted round trips, and restore-db -> sync into a fresh cloud while preserving data-file metadata.
 - Consolidated Postgres schema delivery into the embedded canonical schema file, removed the standalone Postgres migration artifact, and kept coverage gates above 95% for all tracked CLI packages.
 
-## Phase 8 — v0.dev UI Design
+## Phase 8 ✅ — v0.dev UI Design
+- Designed full front-end UI with v0.dev, iterating on the design until all UI features were covered.
+- Received final v0.dev reference project as zip file, extracted into the repository.
+
+## Phase 9 — Web UI Integration (API, Logic, and v0.dev UI Adoption)
 
 ### Goal
-- Complete front-end UI designed by v0.dev with mocked API calls. All UI work happens in this phase.
-- Produce an API spec document that gives v0.dev full context for every UI interaction.
-
-### Tasks
-- [ ] Write API spec document for v0.dev: all endpoints, request/response TypeScript types, mock data examples, behavioral descriptions for every UI interaction
-- [ ] Include in spec: slide viewer (16:9, sandboxed iframes, scaling), virtual date slides, project filter, slide detail panel (notes markdown, figures, data files with download, git_remote_url as clickable link, git_hash linkable to commit), editing (project_id, notes, git_remote_url, git_hash), intra-day drag-and-drop reorder, soft delete, trash view with restore, sync indicator/manual refresh, loading states, error handling, responsive layout
-- [ ] Include in spec: mock data covering edge cases (slides with/without figures, notes, data files, multiple projects, different dates)
-- [ ] Provide spec to v0.dev and iterate on the design
-- [ ] Review v0.dev output for completeness against all UI requirements
-- [ ] Receive final zip file from v0.dev
-
-### Exit criteria
-- API spec document covers every endpoint and UI interaction.
-- v0.dev has produced a complete Next.js reference project with 100% of UI features.
-- All UI components render correctly with mocked data.
-- Reference project received as zip file.
-
-## Phase 9 — Web UI Implementation (from v0.dev reference)
-
-### Goal
-- Production web UI rebuilt from v0.dev reference, wired to real backend, with >95% coverage and Playwright e2e tests.
+- Production web UI with real API routes and business logic, wired to Neon and S3, with >95% coverage and Playwright e2e tests.
+- **v0.dev constraint:** The v0.dev reference project is used *solely* as a visual/UI reference. Copy specific UI elements (components, layouts, styles) for visual parity. Do NOT copy or replicate any backend code, API routes, business logic, data fetching, or state management from v0.dev. All backend and logic are designed and implemented from scratch in this phase.
 
 ### Tasks
 - [ ] Set up Neon serverless driver in Next.js
@@ -141,7 +126,7 @@ Incomplete:
     - Version change triggers data fetch
     - Self-inflicted sync prevention: own mutations don't trigger unnecessary fetch
 - [ ] Implement `useSyncManager()` hook
-- [ ] Rebuild UI components from v0.dev reference (visual/interaction reference, not verbatim code)
+- [ ] Adopt UI components from v0.dev reference (visual/interaction parity only — no v0.dev backend, logic, or data layer code)
 - [ ] Wire UI components to real API routes
 - [ ] **Tests first**: Write component unit tests — virtual date slide injection logic (on date change, after 10+ consecutive), fractional index computation for drag-and-drop, markdown rendering output
 - [ ] Write Playwright e2e tests:
