@@ -344,10 +344,7 @@ func (s *Service) applyFiguresToCloud(
 		return err
 	}
 
-	existingByID := make(map[int64]repository.SlideFigure, len(existing))
-	for _, figure := range existing {
-		existingByID[figure.ID] = figure
-	}
+	existingByID := indexFiguresByID(existing)
 
 	for _, create := range plan.Creates {
 		if _, err := s.cloudRepo.CreateSlideFigure(ctx, create); err != nil {
@@ -391,10 +388,7 @@ func (s *Service) applyDataFilesToCloud(
 		return err
 	}
 
-	existingByID := make(map[int64]repository.SlideDataFile, len(existing))
-	for _, dataFile := range existing {
-		existingByID[dataFile.ID] = dataFile
-	}
+	existingByID := indexDataFilesByID(existing)
 
 	for _, create := range plan.Creates {
 		path, err := s.localFS.ResolveDataFilePath(slideID, create.Filename)
@@ -462,10 +456,7 @@ func (s *Service) applyFiguresToLocal(
 		return err
 	}
 
-	existingByID := make(map[int64]repository.SlideFigure, len(existing))
-	for _, figure := range existing {
-		existingByID[figure.ID] = figure
-	}
+	existingByID := indexFiguresByID(existing)
 
 	for _, create := range plan.Creates {
 		if _, err := s.localRepo.CreateSlideFigure(ctx, create); err != nil {
@@ -484,11 +475,7 @@ func (s *Service) applyFiguresToLocal(
 		if err := s.localRepo.DeleteSlideFigure(ctx, deleteID); err != nil {
 			return err
 		}
-		path, err := s.localFS.ResolveFigurePath(slideID, old.Filename)
-		if err != nil {
-			return err
-		}
-		if err := removeFileIfPresent(path); err != nil {
+		if err := s.removeLocalFigureFileIfPresent(slideID, old.Filename); err != nil {
 			return err
 		}
 	}
@@ -507,20 +494,13 @@ func (s *Service) applyDataFilesToLocal(
 		return err
 	}
 
-	existingByID := make(map[int64]repository.SlideDataFile, len(existing))
-	for _, dataFile := range existing {
-		existingByID[dataFile.ID] = dataFile
-	}
+	existingByID := indexDataFilesByID(existing)
 
 	for _, create := range plan.Creates {
 		if _, err := s.localRepo.CreateSlideDataFile(ctx, create); err != nil {
 			return err
 		}
-		path, err := s.localFS.ResolveDataFilePath(slideID, create.Filename)
-		if err != nil {
-			return err
-		}
-		if err := removeFileIfPresent(path); err != nil {
+		if err := s.removeLocalDataFileIfPresent(slideID, create.Filename); err != nil {
 			return err
 		}
 	}
@@ -529,11 +509,7 @@ func (s *Service) applyDataFilesToLocal(
 		if _, err := s.localRepo.UpdateSlideDataFile(ctx, update); err != nil {
 			return err
 		}
-		path, err := s.localFS.ResolveDataFilePath(slideID, update.Filename)
-		if err != nil {
-			return err
-		}
-		if err := removeFileIfPresent(path); err != nil {
+		if err := s.removeLocalDataFileIfPresent(slideID, update.Filename); err != nil {
 			return err
 		}
 	}
@@ -543,11 +519,7 @@ func (s *Service) applyDataFilesToLocal(
 		if err := s.localRepo.DeleteSlideDataFile(ctx, deleteID); err != nil {
 			return err
 		}
-		path, err := s.localFS.ResolveDataFilePath(slideID, old.Filename)
-		if err != nil {
-			return err
-		}
-		if err := removeFileIfPresent(path); err != nil {
+		if err := s.removeLocalDataFileIfPresent(slideID, old.Filename); err != nil {
 			return err
 		}
 	}
@@ -626,6 +598,38 @@ func removeFileIfPresent(path string) error {
 		return fmt.Errorf("remove %s: %w", path, err)
 	}
 	return nil
+}
+
+func indexFiguresByID(figures []repository.SlideFigure) map[int64]repository.SlideFigure {
+	byID := make(map[int64]repository.SlideFigure, len(figures))
+	for _, figure := range figures {
+		byID[figure.ID] = figure
+	}
+	return byID
+}
+
+func indexDataFilesByID(dataFiles []repository.SlideDataFile) map[int64]repository.SlideDataFile {
+	byID := make(map[int64]repository.SlideDataFile, len(dataFiles))
+	for _, dataFile := range dataFiles {
+		byID[dataFile.ID] = dataFile
+	}
+	return byID
+}
+
+func (s *Service) removeLocalFigureFileIfPresent(slideID string, filename string) error {
+	path, err := s.localFS.ResolveFigurePath(slideID, filename)
+	if err != nil {
+		return err
+	}
+	return removeFileIfPresent(path)
+}
+
+func (s *Service) removeLocalDataFileIfPresent(slideID string, filename string) error {
+	path, err := s.localFS.ResolveDataFilePath(slideID, filename)
+	if err != nil {
+		return err
+	}
+	return removeFileIfPresent(path)
 }
 
 func figuresOf(bundle *SlideBundle) []repository.SlideFigure {

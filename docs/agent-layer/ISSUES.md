@@ -27,6 +27,16 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-03-08 k4l5m6: Repository adapters and sync suites are oversized
+    Priority: Low. Area: cli/internal/repository, cli/internal/sync
+    Description: `repository.go` adapters, `service.go`, and their largest companion test files now concentrate CRUD/reconciliation helpers and long scenario suites in 600-3900 LOC files, which raises review and change risk.
+    Next step: When these areas are next touched for feature work, split scan/helper logic and test scenarios into themed files without changing repository contracts.
+
+- Issue 2026-03-08 h1i2j3: doctor missing-file checks duplicate scan logic
+    Priority: Low. Area: cli/internal/cli
+    Description: `checkMissingFigures` and `checkMissingDataFiles` in `doctor.go` duplicate the same traversal/stat/error plumbing with only repository and path-resolver differences.
+    Next step: Introduce a shared internal helper that parameterizes list and path resolution while preserving existing error labels/output text.
+
 - Issue 2026-03-07 f6a7b8: pc move with --date matching current date silently reorders to end
     Priority: Low. Area: cli/internal/cli
     Description: `pc move <id> --date <same-date>` with no position flags defaults to `last`, reordering the slide to the end of the day instead of preserving its position. Can cause unexpected ordering changes in scripted or repeated runs.

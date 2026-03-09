@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -831,6 +833,27 @@ func TestApplyMigrationsFromFSSkipsNonSQL(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected 1 migration (non-SQL skipped), got %d", count)
+	}
+}
+
+func TestSQLMigrationFilenamesFiltersAndSorts(t *testing.T) {
+	fsys := fstest.MapFS{
+		"003_third.sql":  &fstest.MapFile{Data: []byte("SELECT 3;")},
+		"README.txt":     &fstest.MapFile{Data: []byte("ignore")},
+		"001_first.sql":  &fstest.MapFile{Data: []byte("SELECT 1;")},
+		"002_second.sql": &fstest.MapFile{Data: []byte("SELECT 2;")},
+		"nested":         &fstest.MapFile{Mode: fs.ModeDir},
+	}
+
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		t.Fatalf("ReadDir(.) error = %v", err)
+	}
+
+	got := sqlMigrationFilenames(entries)
+	want := []string{"001_first.sql", "002_second.sql", "003_third.sql"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("sqlMigrationFilenames() = %v, want %v", got, want)
 	}
 }
 
