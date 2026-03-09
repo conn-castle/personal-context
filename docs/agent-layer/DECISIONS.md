@@ -151,3 +151,13 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: Added `s3_endpoint` and `s3_force_path_style` to Config. These are optional — empty/false means standard AWS S3. `Mode()` does not require them for cloud mode. Exposed as `--s3-endpoint` and `--s3-force-path-style` CLI flags (non-interactive only). Threaded through `openCloudStack`, `validateS3AccessFn`, and `runSetupCloud`.
     Reason: Enables MinIO and other S3-compatible services for integration testing without env var hacks. Also supports users who self-host S3-compatible storage.
     Tradeoffs: Two new config fields that most users won't need; `omitempty` keeps them invisible in default configs.
+
+- Decision 2026-03-09 p7q8r9: Cloud-rooted exports use local seeded templates
+    Decision: `pc export --from-cloud` and `pc verify --from-cloud` read slides/figures from Postgres + S3, but template files from the local seeded template set.
+    Reason: Templates are not part of the current cloud sync contract, yet cloud-rooted exports and round-trip verification still need deterministic `templates/*.html` output for the git snapshot format.
+    Tradeoffs: Cloud-rooted export assumes the local setup has the canonical builtin templates. If templates become user-editable later, template sync/export semantics must be revisited.
+
+- Decision 2026-03-09 r1s2t3: Metadata-only cloud sync for git-restored data files
+    Decision: When a local slide has a data-file row but no local binary, `pc sync` still creates or updates the cloud metadata row if the S3 key is unchanged (or the row is new). Changing the S3 key without a local binary still fails.
+    Reason: `pc restore-db` and `pc import` intentionally preserve data-file references without binaries. The Tier 2 restore paths need a later sync to recreate database state in a fresh cloud without inventing fake file content.
+    Tradeoffs: Cloud metadata can temporarily reference an object that is absent from the bucket until the binary is restored from the original S3 source or re-uploaded from disk. Sync remains strict for S3 key changes because there is no safe object to point at.

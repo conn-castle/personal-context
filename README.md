@@ -4,7 +4,7 @@ Personal Context is a local-first engineering notebook system that stores work a
 
 ## Status
 
-Roadmap Phase 6 (Sync Engine & Cloud CLI) is complete: bidirectional sync engine with conflict resolution, file locking, auto-sync in all mutation commands, cloud setup wizard, `pc sync`, `pc fetch`, and cloud-aware `doctor`/`gc` are operational. Phase 5 deliverables (Postgres repository, S3 client, cloud config validation, schema-equivalence CI guard) remain operational. All 15 CLI commands are implemented; `pc sync` and `pc fetch` require cloud configuration.
+Roadmap Phase 7 (Export/Import System) is complete: deterministic git snapshots, `pc export`, `pc import`, `pc restore-db`, and `pc verify` are operational alongside the Phase 6 sync/cloud workflow. All planned CLI surfaces through Phase 7 are implemented; `pc sync`, `pc fetch`, `pc export --from-cloud`, and `pc verify --from-cloud` require cloud configuration.
 
 ## Architecture
 
@@ -125,10 +125,10 @@ pc setup --remove-cloud
 - `pc doctor` — check system health (DB, orphans, missing files; cloud connectivity if configured)
 - `pc sync` — bidirectional sync between local SQLite and cloud Postgres/S3 (requires cloud configuration)
 - `pc fetch <slide_id>` — download data files from cloud S3 (`--project`, `--recent 3d/2w/1m/1y`, `--output`)
-
-### Planned Command Surface (Roadmap)
-
-- Export/import: `pc export`, `pc import`, `pc restore-db`, `pc verify`
+- `pc export --path <dir>` — write deterministic git snapshot folders (`templates/`, `slides/`); `--from-cloud` reads slides/assets from Postgres/S3
+- `pc import <path>` — merge a git snapshot into local SQLite using `updated_at` rules (`same/older -> skip`, `newer -> replace`)
+- `pc restore-db <path>` — replace local SQLite state from a git snapshot and create an auto-backup snapshot first under `~/personal-context/.pc/backups/`
+- `pc verify` — run a local Tier 2 round-trip verification; `pc verify --from-cloud` verifies the cloud-rooted round-trip path
 
 ## Web UI Overview
 

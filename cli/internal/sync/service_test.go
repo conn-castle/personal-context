@@ -441,7 +441,7 @@ func TestSyncErrorsOnLoadBundleNonNotFoundError(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
@@ -466,7 +466,7 @@ func TestSyncErrorsOnBundleForSlideListFiguresError(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
@@ -490,7 +490,7 @@ func TestSyncErrorsOnBundleForSlideListDataFilesError(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
@@ -514,7 +514,7 @@ func TestSyncErrorsOnUploadFileOpenFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID:  slideID,
@@ -541,7 +541,7 @@ func TestSyncErrorsOnDownloadFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID:  slideID,
@@ -572,14 +572,14 @@ func TestSyncPushSkipsWhenCloudWins(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud later</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
@@ -605,14 +605,14 @@ func TestSyncPullSkipsWhenLocalWins(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local later</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
 
@@ -639,7 +639,7 @@ func TestSyncPushFigureCreateUpdateDeleteOnCloud(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{
 			{SlideID: slideID, Filename: "new.png", S3Key: "figures/" + slideID + "/new.png"},
@@ -651,7 +651,7 @@ func TestSyncPushFigureCreateUpdateDeleteOnCloud(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
 			{ID: 10, SlideID: slideID, Filename: "updated.png", S3Key: "figures/" + slideID + "/updated-v1.png"},
@@ -700,7 +700,7 @@ func TestSyncPushDataFileCreateUpdateDeleteOnCloud(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{
 			{SlideID: slideID, Filename: "new.csv", S3Key: "data/" + slideID + "/new.csv",
@@ -713,7 +713,7 @@ func TestSyncPushDataFileCreateUpdateDeleteOnCloud(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
 			{ID: 20, SlideID: slideID, Filename: "updated.csv", S3Key: "data/" + slideID + "/updated-v1.csv",
@@ -761,7 +761,7 @@ func TestSyncPullDeletesLocalFiguresAndDataFiles(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
 			{ID: 1, SlideID: slideID, Filename: "obsolete.png", S3Key: "figures/" + slideID + "/obsolete.png"},
@@ -776,7 +776,7 @@ func TestSyncPullDeletesLocalFiguresAndDataFiles(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud wins</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
@@ -817,7 +817,7 @@ func TestSyncPullWithDataFileFilenameChange(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
 			{ID: 1, SlideID: slideID, Filename: "old-name.csv", S3Key: "data/" + slideID + "/old-name.csv",
@@ -828,7 +828,7 @@ func TestSyncPullWithDataFileFilenameChange(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{
 			{SlideID: slideID, Filename: "new-name.csv", S3Key: "data/" + slideID + "/new-name.csv",
@@ -868,7 +868,7 @@ func TestSyncPushLocalWinsUpdatesCloud(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local wins</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot.png",
@@ -878,7 +878,7 @@ func TestSyncPushLocalWinsUpdatesCloud(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud loses</html>",
-			CreatedAt: base, UpdatedAt: base.Add(1 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(1 * time.Minute),
 		},
 	}
 
@@ -942,7 +942,7 @@ func TestSyncPullNewCloudSlideWithDataFiles(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud new</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -980,7 +980,7 @@ func TestSyncPullUpdatesLocalDataFilesAndFigures(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
 			{ID: 1, SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot.png",
@@ -995,7 +995,7 @@ func TestSyncPullUpdatesLocalDataFilesAndFigures(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud wins</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{
 			{SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v2.png",
@@ -1041,14 +1041,14 @@ func TestSyncPushErrorsOnApplySlideUpdateFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local wins</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
 
@@ -1074,7 +1074,7 @@ func TestSyncPushErrorsOnApplySlideCreateFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
@@ -1100,7 +1100,7 @@ func TestSyncPushErrorsOnCloudCreateSlideFigureFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "new.png", S3Key: "figures/" + slideID + "/new.png",
@@ -1129,7 +1129,7 @@ func TestSyncPushErrorsOnCloudUpdateSlideFigureFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v2.png",
@@ -1139,7 +1139,7 @@ func TestSyncPushErrorsOnCloudUpdateSlideFigureFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
 			ID: 10, SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v1.png",
@@ -1168,14 +1168,14 @@ func TestSyncPushErrorsOnCloudDeleteSlideFigureFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
 			ID: 10, SlideID: slideID, Filename: "old.png", S3Key: "figures/" + slideID + "/old.png",
@@ -1203,14 +1203,14 @@ func TestSyncPushErrorsOnCloudDeleteObjectAfterDeleteFigure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
 			ID: 10, SlideID: slideID, Filename: "old.png", S3Key: "figures/" + slideID + "/old.png",
@@ -1236,7 +1236,7 @@ func TestSyncPushErrorsOnUploadFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot.png",
@@ -1265,7 +1265,7 @@ func TestSyncPushErrorsOnCloudCreateSlideDataFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics.csv",
@@ -1295,7 +1295,7 @@ func TestSyncPushErrorsOnCloudUpdateSlideDataFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics-v2.csv",
@@ -1306,7 +1306,7 @@ func TestSyncPushErrorsOnCloudUpdateSlideDataFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			ID: 20, SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics-v1.csv",
@@ -1336,14 +1336,14 @@ func TestSyncPushErrorsOnCloudDeleteSlideDataFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			ID: 20, SlideID: slideID, Filename: "old.csv", S3Key: "data/" + slideID + "/old.csv",
@@ -1373,7 +1373,7 @@ func TestSyncPullErrorsOnLocalCreateSlideFigureFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "new.png", S3Key: "figures/" + slideID + "/new.png",
@@ -1402,7 +1402,7 @@ func TestSyncPullErrorsOnLocalUpdateSlideFigureFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
 			ID: 1, SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot.png",
@@ -1413,7 +1413,7 @@ func TestSyncPullErrorsOnLocalUpdateSlideFigureFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v2.png",
@@ -1444,7 +1444,7 @@ func TestSyncPullErrorsOnLocalDeleteSlideFigureFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
 			ID: 1, SlideID: slideID, Filename: "old.png", S3Key: "figures/" + slideID + "/old.png",
@@ -1454,7 +1454,7 @@ func TestSyncPullErrorsOnLocalDeleteSlideFigureFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
@@ -1481,7 +1481,7 @@ func TestSyncPullErrorsOnLocalCreateSlideDataFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -1510,7 +1510,7 @@ func TestSyncPullErrorsOnLocalUpdateSlideDataFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			ID: 1, SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics.csv",
@@ -1521,7 +1521,7 @@ func TestSyncPullErrorsOnLocalUpdateSlideDataFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics-v2.csv",
@@ -1550,7 +1550,7 @@ func TestSyncPullErrorsOnLocalDeleteSlideDataFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			ID: 1, SlideID: slideID, Filename: "old.csv", S3Key: "data/" + slideID + "/old.csv",
@@ -1561,7 +1561,7 @@ func TestSyncPullErrorsOnLocalDeleteSlideDataFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
@@ -1588,7 +1588,7 @@ func TestSyncPullFigureFilenameRenameDeletesOldFile(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
 			ID: 1, SlideID: slideID, Filename: "old-name.png", S3Key: "figures/" + slideID + "/old-name.png",
@@ -1598,7 +1598,7 @@ func TestSyncPullFigureFilenameRenameDeletesOldFile(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "new-name.png", S3Key: "figures/" + slideID + "/new-name.png",
@@ -1635,7 +1635,7 @@ func TestSyncPullDataFileUpdateWithFilenameChange(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			ID: 1, SlideID: slideID, Filename: "old-data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -1648,7 +1648,7 @@ func TestSyncPullDataFileUpdateWithFilenameChange(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "old-data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
@@ -1681,7 +1681,7 @@ func TestSyncPushErrorsOnApplyFiguresToCloudFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "fig.png", S3Key: "figures/" + slideID + "/fig.png",
@@ -1708,7 +1708,7 @@ func TestSyncPushErrorsOnApplyDataFilesToCloudResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -1735,7 +1735,7 @@ func TestSyncPullErrorsOnApplyFiguresToLocalResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "fig.png", S3Key: "figures/" + slideID + "/fig.png",
@@ -1761,7 +1761,7 @@ func TestSyncPullErrorsOnApplyDataFilesToLocalResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -1790,7 +1790,7 @@ func TestSyncPullErrorsOnCloudBundleForSlideListFiguresError(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
@@ -1814,7 +1814,7 @@ func TestSyncPullErrorsOnCloudBundleForSlideListDataFilesError(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
@@ -1840,7 +1840,7 @@ func TestSyncPullErrorsOnLoadLocalBundleNonNotFoundError(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
@@ -1906,7 +1906,7 @@ func TestSyncPullErrorsOnApplySlideToLocalFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
@@ -1931,14 +1931,14 @@ func TestSyncPullErrorsOnApplySlideUpdateToLocalFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
@@ -1964,7 +1964,7 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideError(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
@@ -1974,7 +1974,7 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideError(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
@@ -2001,7 +2001,7 @@ func TestSyncPullDeleteFigureWithFileRemoval(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
 			{ID: 1, SlideID: slideID, Filename: "delete-me.png", S3Key: "figures/" + slideID + "/delete-me.png"},
@@ -2012,7 +2012,7 @@ func TestSyncPullDeleteFigureWithFileRemoval(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{
 			{SlideID: slideID, Filename: "keep-me.png", S3Key: "figures/" + slideID + "/keep-me.png"},
@@ -2052,7 +2052,7 @@ func TestSyncPullDeleteDataFileWithFileRemoval(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
 			{ID: 1, SlideID: slideID, Filename: "delete-me.csv", S3Key: "data/" + slideID + "/delete-me.csv",
@@ -2063,7 +2063,7 @@ func TestSyncPullDeleteDataFileWithFileRemoval(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
@@ -2095,7 +2095,7 @@ func TestSyncPullDataFileUpdateWithFilenameRename(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
 			{ID: 1, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -2107,7 +2107,7 @@ func TestSyncPullDataFileUpdateWithFilenameRename(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{
 			{SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
@@ -2351,7 +2351,7 @@ func TestDownloadFileWriteError(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "chart.png", S3Key: "figures/" + slideID + "/chart.png",
@@ -2393,6 +2393,115 @@ func (f *fixedPathLocalFiles) ResolveDataFilePath(_ string, _ string) (string, e
 	return f.dataFilePath, nil
 }
 
+// --- applyDataFilesToCloud: metadata-only create/update when local binary is absent ---
+
+func TestSyncPushCreatesCloudDataFileMetadataWithoutLocalBinary(t *testing.T) {
+	slideID := "20260308-a1b2c3d4"
+	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
+	localBundle := SlideBundle{
+		Slide: repository.Slide{
+			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+			HTMLContent: "<html>local</html>",
+			CreatedAt:   now, UpdatedAt: now,
+		},
+		DataFiles: []repository.SlideDataFile{{
+			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+			Size: 5, Hash: strings.Repeat("a", 64),
+		}},
+	}
+
+	service, _, cloudRepo, _, objects, _ := newTestService(t, []SlideBundle{localBundle}, nil)
+	if err := service.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	got := cloudRepo.bundle(slideID)
+	if len(got.DataFiles) != 1 || got.DataFiles[0].Filename != "data.csv" {
+		t.Fatalf("cloud data files = %+v, want metadata row for data.csv", got.DataFiles)
+	}
+	if _, ok := objects.objects["data/"+slideID+"/data.csv"]; ok {
+		t.Fatal("expected missing local data file to skip object upload")
+	}
+}
+
+func TestSyncPushUpdatesCloudDataFileMetadataWithoutLocalBinaryWhenS3KeyIsUnchanged(t *testing.T) {
+	slideID := "20260308-a1b2c3d4"
+	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
+
+	localBundle := SlideBundle{
+		Slide: repository.Slide{
+			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+			HTMLContent: "<html>local</html>",
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
+		},
+		DataFiles: []repository.SlideDataFile{{
+			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+			Size: 10, Hash: strings.Repeat("b", 64),
+		}},
+	}
+	cloudBundle := SlideBundle{
+		Slide: repository.Slide{
+			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+			HTMLContent: "<html>cloud</html>",
+			CreatedAt:   base, UpdatedAt: base,
+		},
+		DataFiles: []repository.SlideDataFile{{
+			ID: 20, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+			Size: 5, Hash: strings.Repeat("a", 64),
+		}},
+	}
+
+	service, _, cloudRepo, _, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	if err := service.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	got := cloudRepo.bundle(slideID)
+	if len(got.DataFiles) != 1 || got.DataFiles[0].Hash != strings.Repeat("b", 64) || got.DataFiles[0].Size != 10 {
+		t.Fatalf("cloud data files = %+v, want updated metadata with unchanged s3_key", got.DataFiles)
+	}
+	if _, ok := objects.objects["data/"+slideID+"/data.csv"]; ok {
+		t.Fatal("expected missing local data file to skip object upload")
+	}
+}
+
+func TestSyncPushErrorsWhenMissingLocalBinaryWouldChangeDataFileS3Key(t *testing.T) {
+	slideID := "20260308-a1b2c3d4"
+	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
+
+	localBundle := SlideBundle{
+		Slide: repository.Slide{
+			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+			HTMLContent: "<html>local</html>",
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
+		},
+		DataFiles: []repository.SlideDataFile{{
+			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
+			Size: 10, Hash: strings.Repeat("b", 64),
+		}},
+	}
+	cloudBundle := SlideBundle{
+		Slide: repository.Slide{
+			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+			HTMLContent: "<html>cloud</html>",
+			CreatedAt:   base, UpdatedAt: base,
+		},
+		DataFiles: []repository.SlideDataFile{{
+			ID: 20, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v1.csv",
+			Size: 5, Hash: strings.Repeat("a", 64),
+		}},
+	}
+
+	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	err := service.Sync(context.Background())
+	if err == nil {
+		t.Fatal("expected error when metadata-only push would change data file s3_key")
+	}
+	if !strings.Contains(err.Error(), "is required to change data file s3_key") {
+		t.Fatalf("error = %q, want missing-local-file s3_key guard", err.Error())
+	}
+}
+
 // --- applyDataFilesToCloud: upload error on data file create ---
 
 func TestSyncPushErrorsOnDataFileCreateUploadFailure(t *testing.T) {
@@ -2402,7 +2511,7 @@ func TestSyncPushErrorsOnDataFileCreateUploadFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -2434,7 +2543,7 @@ func TestSyncPushErrorsOnDataFileUpdateUploadFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
@@ -2445,7 +2554,7 @@ func TestSyncPushErrorsOnDataFileUpdateUploadFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			ID: 20, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v1.csv",
@@ -2476,7 +2585,7 @@ func TestSyncPushErrorsOnDataFileUpdateDeleteOldS3Failure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
@@ -2487,7 +2596,7 @@ func TestSyncPushErrorsOnDataFileUpdateDeleteOldS3Failure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			ID: 20, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v1.csv",
@@ -2528,14 +2637,14 @@ func TestSyncPushErrorsOnDataFileDeleteObjectFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			ID: 20, SlideID: slideID, Filename: "old.csv", S3Key: "data/" + slideID + "/old.csv",
@@ -2565,7 +2674,7 @@ func TestSyncPushErrorsOnFigureUpdateDeleteOldS3Failure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v2.png",
@@ -2575,7 +2684,7 @@ func TestSyncPushErrorsOnFigureUpdateDeleteOldS3Failure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
 			ID: 10, SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v1.png",
@@ -2611,7 +2720,7 @@ func TestSyncPushErrorsOnDataFileCreateResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -2641,7 +2750,7 @@ func TestSyncPushErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
@@ -2652,7 +2761,7 @@ func TestSyncPushErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			ID: 20, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v1.csv",
@@ -2682,7 +2791,7 @@ func TestSyncPullErrorsOnFigureDeleteResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
 			{ID: 1, SlideID: slideID, Filename: "delete-me.png", S3Key: "figures/" + slideID + "/delete-me.png"},
@@ -2692,7 +2801,7 @@ func TestSyncPullErrorsOnFigureDeleteResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
@@ -2720,7 +2829,7 @@ func TestSyncPullErrorsOnDataFileCreateResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -2754,7 +2863,7 @@ func TestSyncPullErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			ID: 1, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -2765,7 +2874,7 @@ func TestSyncPullErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
@@ -2798,7 +2907,7 @@ func TestSyncPullErrorsOnDataFileDeleteResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			ID: 1, SlideID: slideID, Filename: "delete-me.csv", S3Key: "data/" + slideID + "/delete-me.csv",
@@ -2809,7 +2918,7 @@ func TestSyncPullErrorsOnDataFileDeleteResolvePathFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
@@ -2871,7 +2980,7 @@ func TestSyncPullSkipsWhenLocalHasLaterPreExistingEdit(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local stays</html>",
-			CreatedAt: localUpdatedAt, UpdatedAt: localUpdatedAt,
+			CreatedAt:   localUpdatedAt, UpdatedAt: localUpdatedAt,
 			DeletedAt: &localDeletedAt,
 		},
 	}
@@ -2880,7 +2989,7 @@ func TestSyncPullSkipsWhenLocalHasLaterPreExistingEdit(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud loses</html>",
-			CreatedAt: localUpdatedAt, UpdatedAt: cloudUpdatedAt,
+			CreatedAt:   localUpdatedAt, UpdatedAt: cloudUpdatedAt,
 		},
 	}
 
@@ -2937,7 +3046,7 @@ func TestSyncPullErrorsOnFigurePlanReconciliationWithInvalidDesired(t *testing.T
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "bad.png", S3Key: "  ", // whitespace-only S3Key
@@ -2968,7 +3077,7 @@ func TestSyncPushErrorsOnFigurePlanReconciliationWithInvalidDesired(t *testing.T
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
 			SlideID: slideID, Filename: "bad.png", S3Key: "  ", // whitespace-only S3Key
@@ -2999,7 +3108,7 @@ func TestSyncPullErrorsOnDataFilePlanReconciliationWithInvalidDesired(t *testing
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "bad.csv", S3Key: "data/" + slideID + "/bad.csv",
@@ -3029,7 +3138,7 @@ func TestSyncPushErrorsOnDataFilePlanReconciliationWithInvalidDesired(t *testing
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "bad.csv", S3Key: "data/" + slideID + "/bad.csv",
@@ -3062,7 +3171,7 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideErrorInsideLoadBundle(t *testin
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: localUpdatedAt, UpdatedAt: localUpdatedAt,
+			CreatedAt:   localUpdatedAt, UpdatedAt: localUpdatedAt,
 		},
 	}})
 
@@ -3071,7 +3180,7 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideErrorInsideLoadBundle(t *testin
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: localUpdatedAt, UpdatedAt: cloudUpdatedAt,
+			CreatedAt:   localUpdatedAt, UpdatedAt: cloudUpdatedAt,
 		},
 	}})
 
@@ -3123,7 +3232,7 @@ func TestSyncPullErrorsOnFigureDeleteRemoveFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
 			{ID: 1, SlideID: slideID, Filename: "delete-me.png", S3Key: "figures/" + slideID + "/delete-me.png"},
@@ -3133,7 +3242,7 @@ func TestSyncPullErrorsOnFigureDeleteRemoveFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
@@ -3169,7 +3278,7 @@ func TestSyncPullErrorsOnDataFileDeleteRemoveFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
 			{ID: 1, SlideID: slideID, Filename: "delete-me.csv", S3Key: "data/" + slideID + "/delete-me.csv",
@@ -3180,7 +3289,7 @@ func TestSyncPullErrorsOnDataFileDeleteRemoveFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
@@ -3216,7 +3325,7 @@ func TestSyncPullErrorsOnDataFileUpdateRemoveFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>local</html>",
-			CreatedAt: base, UpdatedAt: base,
+			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
 			{ID: 1, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -3227,7 +3336,7 @@ func TestSyncPullErrorsOnDataFileUpdateRemoveFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: base, UpdatedAt: base.Add(5 * time.Minute),
+			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{
 			{SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
@@ -3266,7 +3375,7 @@ func TestSyncPullErrorsOnDataFileCreateRemoveFileFailure(t *testing.T) {
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: "<html>cloud</html>",
-			CreatedAt: now, UpdatedAt: now,
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
 			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
@@ -3418,19 +3527,19 @@ type memoryRepo struct {
 	syncVersion    repository.SyncVersion
 
 	// Error injection fields.
-	listSlidesErr              error
-	getSyncVersionErr          error
-	getSlideByIDErr            error
-	listFiguresBySlideIDErr    error
-	listDataFilesBySlideIDErr  error
-	createSlideFigureErr       error
-	updateSlideFigureErr       error
-	deleteSlideFigureErr       error
-	createSlideDataFileErr     error
-	updateSlideDataFileErr     error
-	deleteSlideDataFileErr     error
-	updateSlideErr             error
-	createSlideErr             error
+	listSlidesErr             error
+	getSyncVersionErr         error
+	getSlideByIDErr           error
+	listFiguresBySlideIDErr   error
+	listDataFilesBySlideIDErr error
+	createSlideFigureErr      error
+	updateSlideFigureErr      error
+	deleteSlideFigureErr      error
+	createSlideDataFileErr    error
+	updateSlideDataFileErr    error
+	deleteSlideDataFileErr    error
+	updateSlideErr            error
+	createSlideErr            error
 }
 
 func newMemoryRepo(bundles []SlideBundle) *memoryRepo {
