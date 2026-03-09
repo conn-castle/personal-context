@@ -41,7 +41,9 @@ func runRestoreDB(ctx context.Context, stdout io.Writer, _ io.Writer, path strin
 		return err
 	}
 	currentSnapshot, err := buildLocalSnapshot(ctx, stack)
-	_ = stack.Close()
+	if closeErr := stack.Close(); closeErr != nil {
+		return closeErr
+	}
 	if err != nil {
 		return err
 	}

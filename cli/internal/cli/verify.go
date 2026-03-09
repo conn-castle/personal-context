@@ -82,12 +82,11 @@ func runVerify(ctx context.Context, stdout io.Writer, _ io.Writer, fromCloud boo
 	if err != nil {
 		return err
 	}
+	defer func() { _ = restoreStack.Close() }()
 	if _, err := importSnapshotIntoStack(ctx, restoreStack, snapshot); err != nil {
-		_ = restoreStack.Close()
 		return err
 	}
 	roundTripSnapshot, err := buildLocalSnapshot(ctx, restoreStack)
-	_ = restoreStack.Close()
 	if err != nil {
 		return err
 	}

@@ -137,7 +137,7 @@ func TestReadRejectsGitLFSPointerFigures(t *testing.T) {
 	}
 	if err := os.WriteFile(
 		filepath.Join(root, "slides", "20260309-aaaabbbb", "figures", "plot.png"),
-		[]byte("version https://git-lfs.github.com/spec/v1\noid sha256:deadbeef\nsize 42\n"),
+		[]byte("version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 42\n"),
 		0o644,
 	); err != nil {
 		t.Fatalf("write figure: %v", err)
@@ -146,6 +146,58 @@ func TestReadRejectsGitLFSPointerFigures(t *testing.T) {
 	_, err := Read(root)
 	if err == nil {
 		t.Fatal("expected Read() to reject Git LFS pointer figure")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "git lfs") {
+		t.Fatalf("expected git lfs error, got %v", err)
+	}
+}
+
+func TestReadRejectsGitLFSPointerWithCRLF(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "templates"), 0o755); err != nil {
+		t.Fatalf("mkdir templates: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "slides", "20260309-aaaabbbb", "figures"), 0o755); err != nil {
+		t.Fatalf("mkdir slide dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "templates", "text-only.html"), []byte("<html>template</html>"), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
+	metadata := `{
+  "format_version": 1,
+  "id": "20260309-aaaabbbb",
+  "date": "2026-03-09",
+  "day_order": "a0",
+  "has_notes": false,
+  "figures": [
+    {
+      "filename": "plot.png",
+      "s3_key": "figures/20260309-aaaabbbb/plot.png",
+      "alt_text": null
+    }
+  ],
+  "data_files": [],
+  "created_at": "2026-03-09T12:00:00Z",
+  "updated_at": "2026-03-09T12:00:00Z"
+}`
+	if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "metadata.json"), []byte(metadata), 0o644); err != nil {
+		t.Fatalf("write metadata.json: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "slide.html"), []byte("<html>slide</html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+	// CRLF line endings
+	if err := os.WriteFile(
+		filepath.Join(root, "slides", "20260309-aaaabbbb", "figures", "plot.png"),
+		[]byte("version https://git-lfs.github.com/spec/v1\r\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\r\nsize 42\r\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("write figure: %v", err)
+	}
+
+	_, err := Read(root)
+	if err == nil {
+		t.Fatal("expected Read() to reject Git LFS pointer with CRLF line endings")
 	}
 	if !strings.Contains(strings.ToLower(err.Error()), "git lfs") {
 		t.Fatalf("expected git lfs error, got %v", err)
@@ -172,6 +224,51 @@ func TestWriteRejectsInvalidPathSegments(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected invalid slide id to fail")
+	}
+
+	// data file filename with path separator
+	err = Write(t.TempDir(), Snapshot{
+		Slides: []Slide{{
+			ID:          "20260309-aaaabbbb",
+			Date:        "2026-03-09",
+			DayOrder:    "a0",
+			HTMLContent: "x",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+			DataFiles: []DataFile{{
+				Filename: "../escape.csv",
+				S3Key:    "data/escape.csv",
+				Size:     10,
+				Hash:     "abcd",
+			}},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected invalid data file filename to fail")
+	}
+	if !strings.Contains(err.Error(), "data file filename") {
+		t.Fatalf("expected data file filename error, got: %v", err)
+	}
+
+	// backslash path separator (portable validation)
+	err = Write(t.TempDir(), Snapshot{
+		Slides: []Slide{{
+			ID:          "20260309-aaaabbbb",
+			Date:        "2026-03-09",
+			DayOrder:    "a0",
+			HTMLContent: "x",
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+			DataFiles: []DataFile{{
+				Filename: "dir\\file.csv",
+				S3Key:    "data/file.csv",
+				Size:     10,
+				Hash:     "abcd",
+			}},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected backslash in data file filename to fail")
 	}
 }
 
@@ -249,6 +346,30 @@ func TestReadRejectsStructuralMismatches(t *testing.T) {
 		}
 		if _, err := Read(root); err == nil {
 			t.Fatal("expected unexpected figure file to fail")
+		}
+	})
+
+	t.Run("invalid data file filename on read", func(t *testing.T) {
+		root := t.TempDir()
+		writeMinimalSnapshotTree(t, root, `{
+  "format_version": 1,
+  "id": "20260309-aaaabbbb",
+  "date": "2026-03-09",
+  "day_order": "a0",
+  "has_notes": false,
+  "figures": [],
+  "data_files": [
+    {"filename": "../escape.csv", "s3_key": "data/escape.csv", "size": 10, "hash": "abcd"}
+  ],
+  "created_at": "2026-03-09T12:00:00Z",
+  "updated_at": "2026-03-09T12:00:00Z"
+}`)
+		_, err := Read(root)
+		if err == nil {
+			t.Fatal("expected invalid data file filename to fail on read")
+		}
+		if !strings.Contains(err.Error(), "data file filename") {
+			t.Fatalf("expected data file filename error, got: %v", err)
 		}
 	})
 

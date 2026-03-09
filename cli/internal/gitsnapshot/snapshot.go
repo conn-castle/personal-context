@@ -91,7 +91,7 @@ type dataFile struct {
 	Description *string `json:"description"`
 }
 
-var lfsPointerPattern = regexp.MustCompile(`(?s)\Aversion https://git-lfs\.github\.com/spec/v1\noid sha256:[0-9a-fA-F]+\nsize [0-9]+\n?\z`)
+var lfsPointerPattern = regexp.MustCompile(`(?s)\Aversion https://git-lfs\.github\.com/spec/v1\r?\noid sha256:[0-9a-fA-F]{64}\r?\nsize [0-9]+\r?\n?\z`)
 
 type tempFile interface {
 	Write([]byte) (int, error)
@@ -205,6 +205,9 @@ func Write(root string, snapshot Snapshot) error {
 		})
 		metadataDataFiles := make([]dataFile, 0, len(dataFiles))
 		for _, file := range dataFiles {
+			if err := validatePathSegment("data file filename", file.Filename); err != nil {
+				return err
+			}
 			metadataDataFiles = append(metadataDataFiles, dataFile(file))
 		}
 
@@ -391,6 +394,9 @@ func readSlide(dir string, slideID string) (Slide, error) {
 	}
 	dataFiles := make([]DataFile, 0, len(metadata.DataFiles))
 	for _, file := range metadata.DataFiles {
+		if err := validatePathSegment("data file filename", file.Filename); err != nil {
+			return Slide{}, err
+		}
 		dataFiles = append(dataFiles, DataFile(file))
 	}
 
@@ -473,6 +479,9 @@ func validatePathSegment(field string, value string) error {
 	}
 	if value == "." || value == ".." {
 		return fmt.Errorf("%s must not be %q", field, value)
+	}
+	if strings.ContainsAny(value, "/\\") {
+		return fmt.Errorf("%s must not include path separators: %q", field, value)
 	}
 	if value != filepath.Base(value) {
 		return fmt.Errorf("%s must not include path separators: %q", field, value)
