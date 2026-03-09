@@ -104,6 +104,7 @@ Incomplete:
 - **v0.dev constraint:** The v0.dev reference project is used *solely* as a visual/UI reference. Copy specific UI elements (components, layouts, styles) for visual parity. Do NOT copy or replicate any backend code, API routes, business logic, data fetching, or state management from v0.dev. All backend and logic are designed and implemented from scratch in this phase.
 
 ### Tasks
+- [ ] Deep-dive the v0.dev reference project (`tmp/v0-personal-context-design/`) — catalog its file structure, components, pages, data flow, and styling approach to inform which UI elements to adopt
 - [ ] Set up Neon serverless driver in Next.js
 - [ ] Set up S3 client for presigned URL generation (Amplify IAM role or env vars)
 - [ ] **Tests first**: Write API route tests before implementation — for each route, test:
