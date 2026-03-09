@@ -163,7 +163,7 @@ On version change: query Neon for slides with `updated_at >= last_known_timestam
 ```
 ~/personal-context/
 ├── .pc/
-│   ├── config.json           # Neon URL, S3 bucket/region, aws_profile name, active project (0600, no AWS keys). Cloud mode detected by presence of neon_url + aws_profile.
+│   ├── config.json           # Neon URL, S3 bucket/region, aws_profile name, active project, optional s3_endpoint/s3_force_path_style (0600, no AWS keys). Cloud mode detected by presence of neon_url + aws_profile.
 │   ├── pc.db                 # local SQLite
 │   ├── last_sync             # timestamp of last cloud sync
 │   └── sync.lock             # file lock for concurrent sync prevention

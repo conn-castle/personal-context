@@ -26,7 +26,7 @@ var downloadS3FileFn = func(ctx context.Context, s3Client *pcs3.Client, key stri
 	defer func() { _ = body.Close() }()
 
 	destDir := filepath.Dir(destPath)
-	if err := os.MkdirAll(destDir, 0o755); err != nil {
+	if err := os.MkdirAll(destDir, 0o700); err != nil {
 		return fmt.Errorf("create directory: %w", err)
 	}
 
@@ -36,10 +36,13 @@ var downloadS3FileFn = func(ctx context.Context, s3Client *pcs3.Client, key stri
 	}
 	tmpPath := tmpFile.Name()
 
-	success := false
+	closed := false
+	renamed := false
 	defer func() {
-		_ = tmpFile.Close()
-		if !success {
+		if !closed {
+			_ = tmpFile.Close()
+		}
+		if !renamed {
 			_ = os.Remove(tmpPath)
 		}
 	}()
@@ -55,12 +58,13 @@ var downloadS3FileFn = func(ctx context.Context, s3Client *pcs3.Client, key stri
 	if err := tmpFile.Close(); err != nil {
 		return fmt.Errorf("close temp file: %w", err)
 	}
+	closed = true
 
 	if err := os.Rename(tmpPath, destPath); err != nil {
 		return fmt.Errorf("rename temp file: %w", err)
 	}
+	renamed = true
 
-	success = true
 	return nil
 }
 

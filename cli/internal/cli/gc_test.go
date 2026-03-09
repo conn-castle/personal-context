@@ -3,12 +3,18 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
+
+	_ "modernc.org/sqlite"
 )
 
 // --- GC cloud-aware tests ---
@@ -262,4 +268,224 @@ func (m *gcMockRepo) DeleteSlide(ctx context.Context, id string) error {
 		return m.deleteSlide(ctx, id)
 	}
 	return nil
+}
+
+// --- GC coverage tests (from coverage_test.go) ---
+
+func TestGCEmptyTrash(t *testing.T) {
+	setupEnv(t)
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"gc"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "No expired trash to clean up.") {
+		t.Fatalf("expected clean message, got %q", stdout.String())
+	}
+}
+
+func TestGCDeletesExpiredTrash(t *testing.T) {
+	homeDir := setupEnv(t)
+
+	id := addSlideWithContent(t,
+		`<html><img src="figures/fig.png">content</html>`, "", "",
+		map[string][]byte{"fig.png": []byte("image")},
+		map[string][]byte{"data.csv": []byte("a,b")},
+	)
+
+	// Soft-delete.
+	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	delCmd.SetArgs([]string{"delete", id})
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// Backdate to 31 days ago.
+	backdateDeletedAtUnit(t, homeDir, id, 31)
+
+	// Run gc.
+	stdout := &bytes.Buffer{}
+	gcCmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	gcCmd.SetArgs([]string{"gc"})
+	if err := gcCmd.Execute(); err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, fmt.Sprintf("Deleted %s", id)) {
+		t.Fatalf("expected 'Deleted %s' in output, got %q", id, out)
+	}
+	if !strings.Contains(out, "Removed 1 slide(s).") {
+		t.Fatalf("expected summary, got %q", out)
+	}
+
+	// Verify slide is gone from DB.
+	dbPath := filepath.Join(homeDir, "personal-context", ".pc", "pc.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM slides WHERE id = ?", id).Scan(&count); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected slide to be hard-deleted, got count=%d", count)
+	}
+
+	// Verify files are removed.
+	figurePath := filepath.Join(homeDir, "personal-context", "figures", id, "fig.png")
+	if _, err := os.Stat(figurePath); !os.IsNotExist(err) {
+		t.Fatalf("expected figure file to be removed, stat err=%v", err)
+	}
+	dataPath := filepath.Join(homeDir, "personal-context", "data", id, "data.csv")
+	if _, err := os.Stat(dataPath); !os.IsNotExist(err) {
+		t.Fatalf("expected data file to be removed, stat err=%v", err)
+	}
+}
+
+func TestGCLeavesYoungTrashUnit(t *testing.T) {
+	setupEnv(t)
+
+	id := addSlide(t)
+
+	// Soft-delete (just now).
+	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	delCmd.SetArgs([]string{"delete", id})
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// Run gc.
+	stdout := &bytes.Buffer{}
+	gcCmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	gcCmd.SetArgs([]string{"gc"})
+	if err := gcCmd.Execute(); err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "No expired trash to clean up.") {
+		t.Fatalf("expected young trash to be left alone, got %q", stdout.String())
+	}
+}
+
+func TestGCMixedAgesUnit(t *testing.T) {
+	homeDir := setupEnv(t)
+
+	idOld := addSlide(t, "--date", "2025-01-01")
+	idYoung := addSlide(t, "--date", "2025-01-02")
+
+	// Soft-delete both.
+	for _, id := range []string{idOld, idYoung} {
+		delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		delCmd.SetArgs([]string{"delete", id})
+		if err := delCmd.Execute(); err != nil {
+			t.Fatalf("delete %s: %v", id, err)
+		}
+	}
+
+	// Backdate only the old one.
+	backdateDeletedAtUnit(t, homeDir, idOld, 31)
+
+	// Run gc.
+	stdout := &bytes.Buffer{}
+	gcCmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	gcCmd.SetArgs([]string{"gc"})
+	if err := gcCmd.Execute(); err != nil {
+		t.Fatalf("gc: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, idOld) {
+		t.Fatalf("expected old slide %s to be deleted, got %q", idOld, out)
+	}
+	if strings.Contains(out, idYoung) {
+		t.Fatalf("expected young slide %s to NOT be deleted, got %q", idYoung, out)
+	}
+}
+
+func TestGCListSlidesDBError(t *testing.T) {
+	homeDir := setupEnv(t)
+
+	// Corrupt slides table.
+	corruptTable(t, homeDir, "slides")
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"gc"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error when slides table missing")
+	}
+}
+
+func TestGCDeleteSlideError(t *testing.T) {
+	homeDir := setupEnv(t)
+	id := addSlide(t)
+
+	// Soft-delete
+	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	delCmd.SetArgs([]string{"delete", id})
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// Backdate to 31 days ago
+	backdateDeletedAtUnit(t, homeDir, id, 31)
+
+	// Drop the slides table so DeleteSlide fails
+	// But first we need to make ListSlides succeed... so we use a different approach:
+	// Corrupt the slide_figures table referenced by cascade delete
+	// Actually, we need a simpler approach: drop sync_version to make delete trigger fail.
+	// DeleteSlide is a hard DELETE FROM slides, which triggers slides_sync_bump_after_delete.
+	corruptTable(t, homeDir, "sync_version")
+
+	stdout := &bytes.Buffer{}
+	gcCmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	gcCmd.SetArgs([]string{"gc"})
+	err := gcCmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when DeleteSlide trigger fails")
+	}
+	if !strings.Contains(err.Error(), "hard delete slide") {
+		t.Fatalf("expected 'hard delete slide' error, got %v", err)
+	}
+}
+
+func TestGCDeleteSlideDirError(t *testing.T) {
+	homeDir := setupEnv(t)
+	id := addSlideWithContent(t,
+		`<html><img src="figures/fig.png">content</html>`, "", "",
+		map[string][]byte{"fig.png": []byte("image")},
+		nil,
+	)
+
+	// Soft-delete
+	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	delCmd.SetArgs([]string{"delete", id})
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// Backdate to 31 days ago
+	backdateDeletedAtUnit(t, homeDir, id, 31)
+
+	// Make the figures directory unwritable so RemoveAll fails
+	figureSlideDir := filepath.Join(homeDir, "personal-context", "figures", id)
+	if err := os.Chmod(figureSlideDir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(figureSlideDir, 0o755) })
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	gcCmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
+	gcCmd.SetArgs([]string{"gc"})
+	err := gcCmd.Execute()
+	if err != nil {
+		t.Fatalf("expected gc to succeed with a warning, got error: %v", err)
+	}
+	output := stderr.String()
+	if !strings.Contains(output, "Warning: failed to remove files for slide") {
+		t.Fatalf("expected warning about failed file removal in stderr, got %q", output)
+	}
 }

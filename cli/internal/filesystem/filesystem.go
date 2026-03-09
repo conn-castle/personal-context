@@ -175,7 +175,7 @@ func (c *Client) copyInto(prefix string, slideID string, sourcePath string) (Sto
 	}
 
 	targetDir := filepath.Dir(targetPath)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o700); err != nil {
 		return StoredFile{}, fmt.Errorf("create destination directory: %w", err)
 	}
 

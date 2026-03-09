@@ -40,7 +40,7 @@ func TestRunSyncRunnerSyncError(t *testing.T) {
 
 	originalLoad := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
-	loadAWSConfigFn = func(context.Context, string, string) (aws.Config, error) {
+	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
 		return aws.Config{}, nil
 	}
 
@@ -98,7 +98,7 @@ func TestRunSyncInvokesServiceAndPrintsSuccess(t *testing.T) {
 
 	originalLoad := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
-	loadAWSConfigFn = func(context.Context, string, string) (aws.Config, error) {
+	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
 		return aws.Config{}, nil
 	}
 

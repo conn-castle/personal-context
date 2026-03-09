@@ -199,7 +199,7 @@ func TestRunSetupNonInteractiveS3AccessFails(t *testing.T) {
 
 	origValidate := validateS3AccessFn
 	t.Cleanup(func() { validateS3AccessFn = origValidate })
-	validateS3AccessFn = func(context.Context, string, string, string, string) error {
+	validateS3AccessFn = func(context.Context, string, string, string, string, string, bool) error {
 		return errors.New("access denied")
 	}
 
@@ -829,6 +829,7 @@ func TestRunSetupCloudAWSProfileWriteError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
+		"", false,
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error when AWS profile write fails")
@@ -876,6 +877,7 @@ func TestRunSetupCloudConfigWriteRollsBackAWSProfile(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
+		"", false,
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error when config write fails")
@@ -904,6 +906,7 @@ func TestRunSetupCloudResolveUserHomeDirError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
+		"", false,
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error when resolveUserHomeDir fails")
@@ -932,6 +935,7 @@ func TestRunSetupCloudExistingConfigReadError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
+		"", false,
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error when existing config is invalid")
@@ -959,6 +963,7 @@ func TestRunSetupCloudInteractiveMergePreviewRepoError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("y\n"),
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
+		"", false,
 		&mockRepo{}, true)
 	if err == nil {
 		t.Fatal("expected error when postgres repo creation fails in merge preview")
@@ -981,6 +986,7 @@ func TestRunSetupCloudInteractiveLocalSlidesCountError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("y\n"),
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
+		"", false,
 		localRepo, true)
 	if err == nil {
 		t.Fatal("expected error when local slide count fails")
@@ -1007,6 +1013,7 @@ func TestRunSetupCloudInteractiveCloudSlidesCountError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("y\n"),
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
+		"", false,
 		localRepo, true)
 	if err == nil {
 		t.Fatal("expected error when cloud slide count fails")
@@ -1038,6 +1045,7 @@ func TestRunSetupCloudInteractiveConfirmReadError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader(""),
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
+		"", false,
 		localRepo, true)
 	if err == nil {
 		t.Fatal("expected error when confirmation prompt fails")
@@ -1054,6 +1062,7 @@ func TestRunSetupCloudEmptyAWSKey(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "   ", "SECRET",
+		"", false,
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error for empty AWS key")
@@ -1158,6 +1167,7 @@ func TestRunSetupCloudInvalidS3Bucket(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "A", "us-east-1", "KEY", "SECRET",
+		"", false,
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error for invalid S3 bucket")
@@ -1171,6 +1181,7 @@ func TestRunSetupCloudInvalidS3Region(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "invalid", "KEY", "SECRET",
+		"", false,
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error for invalid S3 region")
@@ -1184,6 +1195,7 @@ func TestRunSetupCloudEmptyAWSSecret(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "   ",
+		"", false,
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error for empty AWS secret")
@@ -1213,7 +1225,7 @@ func mockAllCloudDeps(t *testing.T) {
 
 	origValidateS3 := validateS3AccessFn
 	t.Cleanup(func() { validateS3AccessFn = origValidateS3 })
-	validateS3AccessFn = func(context.Context, string, string, string, string) error { return nil }
+	validateS3AccessFn = func(context.Context, string, string, string, string, string, bool) error { return nil }
 
 	origSchema := applyPostgresSchemaFn
 	t.Cleanup(func() { applyPostgresSchemaFn = origSchema })

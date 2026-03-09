@@ -56,7 +56,7 @@ func Open(path string) (*Connection, error) {
 		return nil, fmt.Errorf("sqlite path is required")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create sqlite parent directory: %w", err)
 	}
 
@@ -111,62 +111,14 @@ func ApplyMigrations(ctx context.Context, db *sql.DB, migrationsDir string) erro
 		return fmt.Errorf("migrations directory is required")
 	}
 
-	if err := ensureMigrationTableFn(ctx, db); err != nil {
-		return err
-	}
-
 	entries, err := os.ReadDir(migrationsDir)
 	if err != nil {
 		return fmt.Errorf("read migrations directory: %w", err)
 	}
 
-	migrations := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-		migrations = append(migrations, entry.Name())
-	}
-	sort.Strings(migrations)
-
-	for _, migration := range migrations {
-		applied, err := isMigrationAppliedFn(ctx, db, migration)
-		if err != nil {
-			return err
-		}
-		if applied {
-			continue
-		}
-
-		content, err := readFileFn(filepath.Join(migrationsDir, migration))
-		if err != nil {
-			return fmt.Errorf("read migration %s: %w", migration, err)
-		}
-
-		tx, err := beginTxFn(db, ctx)
-		if err != nil {
-			return fmt.Errorf("begin migration transaction: %w", err)
-		}
-
-		if _, err := tx.ExecContext(ctx, string(content)); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("apply migration %s: %w", migration, err)
-		}
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)`,
-			migration,
-			time.Now().UTC().Format(migrationTimestampFormat),
-		); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("record migration %s: %w", migration, err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration %s: %w", migration, err)
-		}
-	}
-
-	return nil
+	return applyPendingMigrations(ctx, db, sqlMigrationFilenames(entries), func(migration string) ([]byte, error) {
+		return readFileFn(filepath.Join(migrationsDir, migration))
+	})
 }
 
 // ApplyMigrationsFS applies migration SQL files from an fs.FS in lexical order.
@@ -190,15 +142,19 @@ func ApplyMigrationsFromFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		return fmt.Errorf("filesystem is required")
 	}
 
-	if err := ensureMigrationTableFn(ctx, db); err != nil {
-		return err
-	}
-
 	entries, err := fs.ReadDir(fsys, ".")
 	if err != nil {
 		return fmt.Errorf("read migrations filesystem: %w", err)
 	}
 
+	return applyPendingMigrations(ctx, db, sqlMigrationFilenames(entries), func(migration string) ([]byte, error) {
+		return fs.ReadFile(fsys, migration)
+	})
+}
+
+// sqlMigrationFilenames keeps only root-level SQL migration files and returns
+// them in the lexical order expected by the migration runner.
+func sqlMigrationFilenames(entries []fs.DirEntry) []string {
 	migrations := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
@@ -207,6 +163,20 @@ func ApplyMigrationsFromFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		migrations = append(migrations, entry.Name())
 	}
 	sort.Strings(migrations)
+	return migrations
+}
+
+// applyPendingMigrations executes any unapplied migrations returned by the
+// caller-provided reader.
+func applyPendingMigrations(
+	ctx context.Context,
+	db *sql.DB,
+	migrations []string,
+	readMigration func(string) ([]byte, error),
+) error {
+	if err := ensureMigrationTableFn(ctx, db); err != nil {
+		return err
+	}
 
 	for _, migration := range migrations {
 		applied, err := isMigrationAppliedFn(ctx, db, migration)
@@ -217,32 +187,40 @@ func ApplyMigrationsFromFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 			continue
 		}
 
-		content, err := fs.ReadFile(fsys, migration)
+		content, err := readMigration(migration)
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", migration, err)
 		}
 
-		tx, err := beginTxFn(db, ctx)
-		if err != nil {
-			return fmt.Errorf("begin migration transaction: %w", err)
+		if err := applyMigration(ctx, db, migration, content); err != nil {
+			return err
 		}
+	}
 
-		if _, err := tx.ExecContext(ctx, string(content)); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("apply migration %s: %w", migration, err)
-		}
-		if _, err := tx.ExecContext(
-			ctx,
-			`INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)`,
-			migration,
-			time.Now().UTC().Format(migrationTimestampFormat),
-		); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("record migration %s: %w", migration, err)
-		}
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration %s: %w", migration, err)
-		}
+	return nil
+}
+
+func applyMigration(ctx context.Context, db *sql.DB, migration string, content []byte) error {
+	tx, err := beginTxFn(db, ctx)
+	if err != nil {
+		return fmt.Errorf("begin migration transaction: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, string(content)); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("apply migration %s: %w", migration, err)
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)`,
+		migration,
+		time.Now().UTC().Format(migrationTimestampFormat),
+	); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("record migration %s: %w", migration, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit migration %s: %w", migration, err)
 	}
 
 	return nil

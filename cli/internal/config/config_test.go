@@ -33,6 +33,52 @@ func TestReadWriteRoundTrip(t *testing.T) {
 	}
 }
 
+func TestReadWriteRoundTripWithS3Endpoint(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	original := Config{
+		NeonURL:          "postgres://user:pass@localhost:5432/db",
+		S3Bucket:         "my-bucket",
+		S3Region:         "us-east-1",
+		AWSProfile:       "personal-context",
+		S3Endpoint:       "http://localhost:9000",
+		S3ForcePathStyle: true,
+	}
+	if err := store.Write(original); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	loaded, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if loaded != original {
+		t.Fatalf("expected %+v, got %+v", original, loaded)
+	}
+}
+
+func TestModeIgnoresS3EndpointFields(t *testing.T) {
+	// S3Endpoint and S3ForcePathStyle should not affect Mode detection.
+	cfg := Config{
+		NeonURL:          "postgres://url",
+		S3Bucket:         "bucket",
+		S3Region:         "us-east-1",
+		AWSProfile:       "profile",
+		S3Endpoint:       "http://localhost:9000",
+		S3ForcePathStyle: true,
+	}
+	mode, err := cfg.Mode()
+	if err != nil {
+		t.Fatalf("Mode() error = %v", err)
+	}
+	if mode != ModeCloud {
+		t.Fatalf("expected %q, got %q", ModeCloud, mode)
+	}
+}
+
 func TestNewStoreRejectsEmptyHomeDir(t *testing.T) {
 	if _, err := NewStore(""); err == nil {
 		t.Fatal("expected error for empty home directory")

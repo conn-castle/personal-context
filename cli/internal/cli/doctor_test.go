@@ -926,3 +926,25 @@ func TestDoctorCloudWarnWriteError(t *testing.T) {
 		t.Fatal("expected error when stdout write fails on Cloud: WARN")
 	}
 }
+
+// --- Doctor: ListSlideIDsOnDisk error ---
+
+func TestDoctorListSlideIDsOnDiskError(t *testing.T) {
+	homeDir := setupEnv(t)
+
+	// Replace figures directory with a file to make ListSlideIDsOnDisk fail
+	figuresDir := filepath.Join(homeDir, "personal-context", "figures")
+	if err := os.RemoveAll(figuresDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(figuresDir, []byte("blocker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"doctor"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error when figures dir is a file")
+	}
+}

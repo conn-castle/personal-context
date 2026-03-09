@@ -30,11 +30,13 @@ const (
 
 // Config stores local/cloud runtime configuration.
 type Config struct {
-	NeonURL       string `json:"neon_url,omitempty"`
-	S3Bucket      string `json:"s3_bucket,omitempty"`
-	S3Region      string `json:"s3_region,omitempty"`
-	AWSProfile    string `json:"aws_profile,omitempty"`
-	ActiveProject string `json:"active_project,omitempty"`
+	NeonURL          string `json:"neon_url,omitempty"`
+	S3Bucket         string `json:"s3_bucket,omitempty"`
+	S3Region         string `json:"s3_region,omitempty"`
+	AWSProfile       string `json:"aws_profile,omitempty"`
+	ActiveProject    string `json:"active_project,omitempty"`
+	S3Endpoint       string `json:"s3_endpoint,omitempty"`
+	S3ForcePathStyle bool   `json:"s3_force_path_style,omitempty"`
 }
 
 // Store reads and writes config under ~/personal-context/.pc/config.json.

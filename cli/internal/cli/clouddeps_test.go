@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,7 @@ import (
 )
 
 func TestLoadAWSConfigEmptyProfile(t *testing.T) {
-	_, err := loadAWSConfig(context.Background(), t.TempDir(), "")
+	_, err := loadAWSConfig(context.Background(), "")
 	if err == nil {
 		t.Fatal("expected error for empty profile")
 	}
@@ -28,7 +29,7 @@ func TestLoadAWSConfigEmptyProfile(t *testing.T) {
 }
 
 func TestLoadAWSConfigWhitespaceOnlyProfile(t *testing.T) {
-	_, err := loadAWSConfig(context.Background(), t.TempDir(), "   ")
+	_, err := loadAWSConfig(context.Background(), "   ")
 	if err == nil {
 		t.Fatal("expected error for whitespace-only profile")
 	}
@@ -49,7 +50,7 @@ func TestOpenCloudStackS3ClientFactoryError(t *testing.T) {
 
 	originalLoad := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
-	loadAWSConfigFn = func(context.Context, string, string) (aws.Config, error) {
+	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
 		return aws.Config{}, nil
 	}
 
@@ -179,7 +180,7 @@ func TestOpenCloudStackAWSConfigLoadError(t *testing.T) {
 
 	original := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = original })
-	loadAWSConfigFn = func(context.Context, string, string) (aws.Config, error) {
+	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
 		return aws.Config{}, errors.New("aws config failed")
 	}
 
@@ -194,7 +195,7 @@ func TestOpenCloudStackPGPoolFactoryError(t *testing.T) {
 
 	originalLoad := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
-	loadAWSConfigFn = func(context.Context, string, string) (aws.Config, error) {
+	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
 		return aws.Config{}, nil
 	}
 
@@ -215,7 +216,7 @@ func TestOpenCloudStackPostgresRepoFactoryError(t *testing.T) {
 
 	originalLoad := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
-	loadAWSConfigFn = func(context.Context, string, string) (aws.Config, error) {
+	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
 		return aws.Config{}, nil
 	}
 
@@ -256,7 +257,7 @@ func TestOpenCloudStackSuccess(t *testing.T) {
 
 	originalLoad := loadAWSConfigFn
 	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
-	loadAWSConfigFn = func(_ context.Context, _ string, profile string) (aws.Config, error) {
+	loadAWSConfigFn = func(_ context.Context, profile string) (aws.Config, error) {
 		if profile != "personal-context" {
 			t.Fatalf("expected profile personal-context, got %q", profile)
 		}
@@ -326,6 +327,47 @@ func TestCloudStackCloseUsesClosePGXPoolFn(t *testing.T) {
 	}
 	if !closed {
 		t.Fatal("expected Close() to delegate to closePGXPoolFn")
+	}
+}
+
+func TestLoadAWSConfigCredentialsPathError(t *testing.T) {
+	original := userHomeDirFn
+	t.Cleanup(func() { userHomeDirFn = original })
+	userHomeDirFn = func() (string, error) {
+		return "", fmt.Errorf("user home unavailable")
+	}
+
+	_, err := loadAWSConfig(context.Background(), "my-profile")
+	if err == nil {
+		t.Fatal("expected error when credentials path resolution fails")
+	}
+	if !strings.Contains(err.Error(), "user home unavailable") {
+		t.Fatalf("expected user home error to propagate, got %v", err)
+	}
+}
+
+func TestLoadAWSConfigSuccessfulLoad(t *testing.T) {
+	homeDir := t.TempDir()
+	credentialsPath := filepath.Join(homeDir, ".aws", "credentials")
+	if err := os.MkdirAll(filepath.Dir(credentialsPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	content := "[test-profile]\naws_access_key_id = AKID\naws_secret_access_key = SECRET\n"
+	if err := os.WriteFile(credentialsPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	original := userHomeDirFn
+	t.Cleanup(func() { userHomeDirFn = original })
+	userHomeDirFn = func() (string, error) { return homeDir, nil }
+
+	cfg, err := loadAWSConfig(context.Background(), "test-profile")
+	if err != nil {
+		t.Fatalf("loadAWSConfig() error = %v", err)
+	}
+	// Verify the config was loaded (region defaults to empty since we didn't set it)
+	if cfg.Region != "" {
+		t.Fatalf("expected empty default region, got %q", cfg.Region)
 	}
 }
 

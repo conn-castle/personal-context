@@ -468,3 +468,151 @@ func TestMoveCommandInvalidDate(t *testing.T) {
 		t.Fatalf("expected error to contain 'invalid date', got %q", err.Error())
 	}
 }
+
+// --- Edit coverage: data files path, old file cleanup ---
+
+func TestEditWithDataFiles(t *testing.T) {
+	setupEnv(t)
+	// Add a slide with data files
+	id := addSlideWithContent(t,
+		"<html>original</html>", "", "",
+		nil,
+		map[string][]byte{"old.csv": []byte("old data")},
+	)
+
+	// Edit with different data files
+	newDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(newDir, "slide.html"), []byte("<html>edited</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(newDir, "data")
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "new.csv"), []byte("new data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"edit", id, newDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "updated") {
+		t.Fatalf("expected 'updated' in output: %s", stdout.String())
+	}
+}
+
+func TestEditReplacesFiguresAndDataFiles(t *testing.T) {
+	setupEnv(t)
+	// Add with both figures and data files
+	id := addSlideWithContent(t,
+		`<html><img src="figures/old.png">body</html>`,
+		"notes",
+		"",
+		map[string][]byte{"old.png": []byte("old-fig")},
+		map[string][]byte{"old-data.csv": []byte("x\n1\n")},
+	)
+
+	// Edit with new figures and data
+	newDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(newDir, "slide.html"), []byte(`<html><img src="figures/new.png">new</html>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(newDir, "notes.md"), []byte("new notes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	figDir := filepath.Join(newDir, "figures")
+	if err := os.MkdirAll(figDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(figDir, "new.png"), []byte("new-fig"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dataDir := filepath.Join(newDir, "data")
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "new-data.csv"), []byte("y\n2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"edit", id, newDir})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "updated") {
+		t.Fatalf("expected 'updated': %s", stdout.String())
+	}
+}
+
+// --- Move coverage: after/before positions ---
+
+func TestMovePositionAfter(t *testing.T) {
+	setupEnv(t)
+	id1 := addSlide(t, "--date", "2025-06-01")
+	id2 := addSlide(t, "--date", "2025-06-01")
+	id3 := addSlide(t, "--date", "2025-06-01")
+
+	// Move id3 after id1
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"move", id3, "--after", id1})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("move --after: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "moved") {
+		t.Fatalf("expected 'moved': %s", stdout.String())
+	}
+	_ = id2
+}
+
+func TestMovePositionBefore(t *testing.T) {
+	setupEnv(t)
+	id1 := addSlide(t, "--date", "2025-06-02")
+	_ = addSlide(t, "--date", "2025-06-02")
+	id3 := addSlide(t, "--date", "2025-06-02")
+
+	// Move id1 before id3
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"move", id1, "--before", id3})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("move --before: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "moved") {
+		t.Fatalf("expected 'moved': %s", stdout.String())
+	}
+}
+
+func TestMovePositionLast(t *testing.T) {
+	setupEnv(t)
+	id1 := addSlide(t, "--date", "2025-06-03")
+	_ = addSlide(t, "--date", "2025-06-03")
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"move", id1, "--last"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("move --last: %v", err)
+	}
+}
+
+func TestMoveDateAndPosition(t *testing.T) {
+	setupEnv(t)
+	id := addSlide(t, "--date", "2025-06-04")
+	// Add some slides on target date
+	_ = addSlide(t, "--date", "2025-06-05")
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"move", id, "--date", "2025-06-05", "--first"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("move --date --first: %v", err)
+	}
+}

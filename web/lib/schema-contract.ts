@@ -41,12 +41,13 @@ export function assertCanonicalSchemaContract(
   const paths = getCanonicalSchemaPaths(webRoot);
   const missingPaths: string[] = [];
 
-  if (!existsSync(paths.schemaSqlPath)) {
-    missingPaths.push(CANONICAL_SCHEMA_SQL_RELATIVE_PATH);
-  }
-
-  if (!existsSync(paths.schemaTypesPath)) {
-    missingPaths.push(CANONICAL_SCHEMA_TYPES_RELATIVE_PATH);
+  for (const [resolvedPath, relativePath] of [
+    [paths.schemaSqlPath, CANONICAL_SCHEMA_SQL_RELATIVE_PATH],
+    [paths.schemaTypesPath, CANONICAL_SCHEMA_TYPES_RELATIVE_PATH]
+  ] as const) {
+    if (!existsSync(resolvedPath)) {
+      missingPaths.push(relativePath);
+    }
   }
 
   if (missingPaths.length > 0) {

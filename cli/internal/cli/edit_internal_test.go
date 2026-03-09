@@ -502,6 +502,41 @@ func openEditInternalDB(t *testing.T, homeDir string) *sql.DB {
 	return db
 }
 
+func TestCommitStagedFilesRestoresBackupWhenRenameFails(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create an existing file at the final path so backup succeeds.
+	finalPath := filepath.Join(dir, "existing.txt")
+	if err := os.WriteFile(finalPath, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Point the temp path at a file that does not exist so os.Rename fails.
+	mutations := &editMutationState{
+		stagedFiles: []stagedReplacementFile{{
+			TempPath:  filepath.Join(dir, "nonexistent-temp"),
+			FinalPath: finalPath,
+		}},
+	}
+
+	err := mutations.commitStagedFiles()
+	if err == nil {
+		t.Fatal("expected error when temp file does not exist for rename")
+	}
+	if !strings.Contains(err.Error(), "commit staged file") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify the backup was restored — the original content should be back.
+	content, err := os.ReadFile(finalPath)
+	if err != nil {
+		t.Fatalf("read restored file: %v", err)
+	}
+	if string(content) != "original" {
+		t.Fatalf("expected backup to restore original content, got %q", string(content))
+	}
+}
+
 func TestBackupExistingFileForEditMissingDestination(t *testing.T) {
 	dir := t.TempDir()
 	finalPath := filepath.Join(dir, "missing.txt")
