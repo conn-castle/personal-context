@@ -44,6 +44,16 @@ func queryUpdatedAt(t *testing.T, db *sql.DB, slideID string) string {
 	return updatedAt
 }
 
+// backdateUpdatedAt sets updated_at to 1 hour in the past so that the next
+// trigger-generated timestamp is guaranteed to differ, without relying on sleep.
+func backdateUpdatedAt(t *testing.T, db *sql.DB, slideID string) {
+	t.Helper()
+	past := time.Now().UTC().Add(-time.Hour).Format("2006-01-02T15:04:05.000Z")
+	if _, err := db.Exec(`UPDATE slides SET updated_at = ? WHERE id = ?`, past, slideID); err != nil {
+		t.Fatalf("backdate updated_at for %s: %v", slideID, err)
+	}
+}
+
 func TestDeleteSetsDeletedAt(t *testing.T) {
 	homeDir, slideID := addSlideHelper(t)
 
@@ -127,16 +137,16 @@ func TestDeleteUpdatesUpdatedAt(t *testing.T) {
 	homeDir, slideID := addSlideHelper(t)
 
 	db := openTestDB(t, homeDir)
-	before := queryUpdatedAt(t, db, slideID)
 
-	// Small delay to ensure the trigger-generated timestamp differs.
-	time.Sleep(50 * time.Millisecond)
+	// Backdate updated_at so the trigger produces a distinguishable timestamp.
+	backdateUpdatedAt(t, db, slideID)
+	before := queryUpdatedAt(t, db, slideID)
 
 	runPCSuccess(t, homeDir, "delete", slideID)
 
 	after := queryUpdatedAt(t, db, slideID)
-	if after == before {
-		t.Fatalf("expected updated_at to change after delete, but both are %q", before)
+	if after <= before {
+		t.Fatalf("expected updated_at to advance after delete: before=%q after=%q", before, after)
 	}
 }
 
@@ -146,16 +156,16 @@ func TestRestoreUpdatesUpdatedAt(t *testing.T) {
 	runPCSuccess(t, homeDir, "delete", slideID)
 
 	db := openTestDB(t, homeDir)
-	before := queryUpdatedAt(t, db, slideID)
 
-	// Small delay to ensure the trigger-generated timestamp differs.
-	time.Sleep(50 * time.Millisecond)
+	// Backdate updated_at so the trigger produces a distinguishable timestamp.
+	backdateUpdatedAt(t, db, slideID)
+	before := queryUpdatedAt(t, db, slideID)
 
 	runPCSuccess(t, homeDir, "restore", slideID)
 
 	after := queryUpdatedAt(t, db, slideID)
-	if after == before {
-		t.Fatalf("expected updated_at to change after restore, but both are %q", before)
+	if after <= before {
+		t.Fatalf("expected updated_at to advance after restore: before=%q after=%q", before, after)
 	}
 }
 

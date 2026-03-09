@@ -57,14 +57,14 @@ Run from: `cli/`
 ./scripts/check_coverage.sh 95
 ```
 Run from: `cli/`
-Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `internal/repository/repositorytest` (contract helper), `internal/repository/postgres`, `internal/s3client` (integration-test-only, require Docker), and `internal/e2e`. Integration tests run separately with `-tags integration`.
+Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `internal/repository/repositorytest` (contract helper), `internal/repository/postgres`, `internal/s3client`, `internal/cloude2e` (integration-test-only, require Docker), and `internal/e2e`. Integration tests run separately with `-tags integration`.
 
 - Run per-package Go coverage gate
 ```bash
 ./scripts/check_coverage_per_package.sh 95
 ```
 Run from: `cli/`
-Notes: Fails when any tested package drops below 95%. Same exclusions as the aggregate coverage script. Integration-only packages (`postgres`, `s3client`) are tested with Docker via `-tags integration`.
+Notes: Fails when any tested package drops below 95%. Same exclusions as the aggregate coverage script. Integration-only packages (`postgres`, `s3client`, `cloude2e`) are tested with Docker via `-tags integration`.
 
 - Run full Phase 3 manual verification flow (opens slide preview in browser)
 ```bash
@@ -86,6 +86,14 @@ go test ./internal/e2e
 ```
 Run from: `cli/`
 Notes: Executed explicitly in CI because coverage scripts intentionally exclude `internal/e2e`.
+
+- Run cloud E2E integration tests
+```bash
+go test -tags integration ./internal/cloude2e/ -v -timeout 420s
+```
+Run from: `cli/`
+Prerequisites: Docker running (testcontainers-go spins up Postgres and MinIO containers).
+Notes: Uses `//go:build integration` tag. Tests cloud onboarding, first sync + doctor, two-home auto-sync conflict resolution, and `fetch --project --output` through the compiled `pc` binary. Schema-per-test and bucket-per-test isolation.
 
 - Run Go linter
 ```bash
@@ -193,4 +201,3 @@ Notes: Compares `schema/schema.sql` (Postgres) and `cli/internal/sqlite/sqlite_s
 ```
 Run from: repo root
 Notes: Fails when canonical `schema/` files are missing, when `cli/` or `web/` stop referencing them in executable/config files, or when workspace-local schema duplicates are introduced.
-

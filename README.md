@@ -60,6 +60,7 @@ go build -o pc ./cmd/pc
 ./scripts/check_coverage_per_package.sh 95
 go test -tags integration ./internal/repository/postgres/ -v -timeout 180s
 go test -tags integration ./internal/s3client/ -v -timeout 60s
+go test -tags integration ./internal/cloude2e/ -v -timeout 420s
 ./scripts/verify_phase3_manual.sh
 ./scripts/verify_local_demo.sh
 
@@ -153,12 +154,15 @@ go build -o pc ./cmd/pc
 ./scripts/check_coverage_per_package.sh 95
 go test -tags integration ./internal/repository/postgres/ -v -timeout 180s
 go test -tags integration ./internal/s3client/ -v -timeout 60s
+go test -tags integration ./internal/cloude2e/ -v -timeout 420s
 ./scripts/verify_phase3_manual.sh
 ./scripts/verify_local_demo.sh
 golangci-lint run ./...
 ```
 
-The two `-tags integration` commands require Docker because testcontainers-go starts Postgres and MinIO containers for the cloud data-layer packages.
+The three `-tags integration` commands require Docker because testcontainers-go starts Postgres and MinIO containers for the cloud data-layer packages.
+
+`go test -tags integration ./internal/cloude2e/ -v -timeout 420s` is the self-contained cloud CLI e2e suite: it drives the compiled `pc` binary through cloud onboarding, first sync plus doctor, two-home auto-sync conflict resolution, and `fetch --project --output` using testcontainers-backed Postgres and MinIO plus temp homes for isolated AWS credentials.
 
 `./scripts/verify_phase3_manual.sh` runs the full Phase 3 local flow (`setup/add/show/edit/move/delete/restore`), creates a standalone slide preview, and opens it in your default browser. Use `--no-open` for headless runs.
 

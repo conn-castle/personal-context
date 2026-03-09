@@ -9,21 +9,6 @@ import (
 	"testing"
 )
 
-// setupTestEnv creates a clean PC_HOME, runs `pc setup`, and returns the home dir.
-func setupTestEnv(t *testing.T) string {
-	t.Helper()
-	homeDir := t.TempDir()
-	t.Setenv("PC_HOME", homeDir)
-
-	stdout := &bytes.Buffer{}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"setup"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("setup: %v", err)
-	}
-	return homeDir
-}
-
 // inputFolderOpts configures a test input folder for pc add.
 type inputFolderOpts struct {
 	HTMLContent  string
@@ -89,7 +74,7 @@ func makeInputFolder(t *testing.T, opts inputFolderOpts) string {
 // ---------------------------------------------------------------------------
 
 func TestAddCommandSuccess(t *testing.T) {
-	setupTestEnv(t)
+	setupEnv(t)
 	inputDir := makeInputFolder(t, inputFolderOpts{})
 
 	stdout := &bytes.Buffer{}
@@ -108,7 +93,7 @@ func TestAddCommandSuccess(t *testing.T) {
 }
 
 func TestAddCommandWithDateFlag(t *testing.T) {
-	setupTestEnv(t)
+	setupEnv(t)
 	inputDir := makeInputFolder(t, inputFolderOpts{})
 
 	stdout := &bytes.Buffer{}
@@ -127,7 +112,7 @@ func TestAddCommandWithDateFlag(t *testing.T) {
 }
 
 func TestAddCommandWithProjectFlag(t *testing.T) {
-	setupTestEnv(t)
+	setupEnv(t)
 	inputDir := makeInputFolder(t, inputFolderOpts{})
 
 	stdout := &bytes.Buffer{}
@@ -146,7 +131,7 @@ func TestAddCommandWithProjectFlag(t *testing.T) {
 }
 
 func TestAddCommandWithFigures(t *testing.T) {
-	setupTestEnv(t)
+	setupEnv(t)
 	inputDir := makeInputFolder(t, inputFolderOpts{
 		HTMLContent: `<html><body><img src="figures/chart.png"></body></html>`,
 		Figures: map[string][]byte{
@@ -170,7 +155,7 @@ func TestAddCommandWithFigures(t *testing.T) {
 }
 
 func TestAddCommandWithDataFiles(t *testing.T) {
-	setupTestEnv(t)
+	homeDir := setupEnv(t)
 	inputDir := makeInputFolder(t, inputFolderOpts{
 		DataFiles: map[string][]byte{
 			"results.csv": []byte("col1,col2\n1,2\n"),
@@ -190,10 +175,39 @@ func TestAddCommandWithDataFiles(t *testing.T) {
 	if id == "" {
 		t.Fatal("expected slide ID on stdout")
 	}
+
+	// Verify data file was persisted: show --format json should list it.
+	showOut := &bytes.Buffer{}
+	showCmd := NewRootCommand(RootCommandOptions{Stdout: showOut, Stderr: &bytes.Buffer{}})
+	showCmd.SetArgs([]string{"show", "--format", "json", id})
+	if err := showCmd.Execute(); err != nil {
+		t.Fatalf("show after add: %v", err)
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(showOut.Bytes(), &parsed); err != nil {
+		t.Fatalf("parse show json: %v", err)
+	}
+	dataFiles, ok := parsed["data_files"].([]interface{})
+	if !ok || len(dataFiles) != 1 {
+		t.Fatalf("expected 1 data file in show output, got %v", parsed["data_files"])
+	}
+	df := dataFiles[0].(map[string]interface{})
+	if df["filename"] != "results.csv" {
+		t.Fatalf("expected filename=results.csv, got %v", df["filename"])
+	}
+	if df["hash"] == nil || df["hash"] == "" {
+		t.Fatal("expected non-empty hash for data file")
+	}
+
+	// Verify data file exists on disk.
+	dataPath := filepath.Join(homeDir, "personal-context", "data", id, "results.csv")
+	if _, err := os.Stat(dataPath); err != nil {
+		t.Fatalf("expected data file on disk at %s: %v", dataPath, err)
+	}
 }
 
 func TestAddCommandInvalidDate(t *testing.T) {
-	setupTestEnv(t)
+	setupEnv(t)
 	inputDir := makeInputFolder(t, inputFolderOpts{})
 
 	stdout := &bytes.Buffer{}
@@ -211,7 +225,7 @@ func TestAddCommandInvalidDate(t *testing.T) {
 }
 
 func TestAddCommandMissingSlideHTML(t *testing.T) {
-	setupTestEnv(t)
+	setupEnv(t)
 	// Create an empty directory with no slide.html.
 	emptyDir := t.TempDir()
 
@@ -230,7 +244,7 @@ func TestAddCommandMissingSlideHTML(t *testing.T) {
 }
 
 func TestAddCommandMutuallyExclusiveFlags(t *testing.T) {
-	setupTestEnv(t)
+	setupEnv(t)
 	inputDir := makeInputFolder(t, inputFolderOpts{})
 
 	stdout := &bytes.Buffer{}
@@ -248,7 +262,7 @@ func TestAddCommandMutuallyExclusiveFlags(t *testing.T) {
 }
 
 func TestAddCommandPositionFirst(t *testing.T) {
-	setupTestEnv(t)
+	setupEnv(t)
 
 	// Add the first slide (default position = last).
 	inputDir1 := makeInputFolder(t, inputFolderOpts{
@@ -282,126 +296,12 @@ func TestAddCommandPositionFirst(t *testing.T) {
 }
 
 func TestAddCommandNoArgs(t *testing.T) {
-	setupTestEnv(t)
+	setupEnv(t)
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
 	cmd.SetArgs([]string{"add"})
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for missing args")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Show command tests
-// ---------------------------------------------------------------------------
-
-// addTestSlide is a helper that adds a minimal slide and returns its ID.
-func addTestSlide(t *testing.T) string {
-	t.Helper()
-	inputDir := makeInputFolder(t, inputFolderOpts{})
-	stdout := &bytes.Buffer{}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", inputDir})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("add test slide: %v", err)
-	}
-	id := strings.TrimSpace(stdout.String())
-	if id == "" {
-		t.Fatal("add returned empty ID")
-	}
-	return id
-}
-
-func TestShowCommandTextFormat(t *testing.T) {
-	setupTestEnv(t)
-	id := addTestSlide(t)
-
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"show", id})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("show failed: %v", err)
-	}
-
-	out := stdout.String()
-	if !strings.Contains(out, id) {
-		t.Fatalf("expected output to contain slide ID %q, got %q", id, out)
-	}
-	if !strings.Contains(out, "Date:") {
-		t.Fatalf("expected output to contain 'Date:', got %q", out)
-	}
-}
-
-func TestShowCommandJSONFormat(t *testing.T) {
-	setupTestEnv(t)
-	id := addTestSlide(t)
-
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"show", "--format", "json", id})
-
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("show --format json failed: %v", err)
-	}
-
-	var parsed slideJSON
-	if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil {
-		t.Fatalf("expected valid JSON, got parse error: %v\nraw output: %s", err, stdout.String())
-	}
-	if parsed.ID != id {
-		t.Fatalf("expected JSON id=%q, got %q", id, parsed.ID)
-	}
-}
-
-func TestShowCommandNotFound(t *testing.T) {
-	setupTestEnv(t)
-
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"show", "nonexistent-id-12345"})
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for nonexistent slide")
-	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Fatalf("expected 'not found' error, got %q", err.Error())
-	}
-}
-
-func TestShowCommandInvalidFormat(t *testing.T) {
-	setupTestEnv(t)
-	id := addTestSlide(t)
-
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"show", "--format", "xml", id})
-
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for invalid format")
-	}
-	if !strings.Contains(err.Error(), "unknown format") {
-		t.Fatalf("expected 'unknown format' error, got %q", err.Error())
-	}
-}
-
-func TestShowCommandNoArgs(t *testing.T) {
-	setupTestEnv(t)
-
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"show"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -491,54 +391,154 @@ func TestResolvePositionFlagsMutualExclusion(t *testing.T) {
 	}
 }
 
-func TestTruncateShortString(t *testing.T) {
-	result := truncate("hello", 10)
-	if result != "hello" {
-		t.Fatalf("expected 'hello', got %q", result)
+func TestResolvePositionFlagsLastExplicit(t *testing.T) {
+	pos, err := resolvePositionFlags(false, true, "", "")
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if pos.kind != "last" {
+		t.Fatalf("expected last, got %q", pos.kind)
 	}
 }
 
-func TestTruncateLongString(t *testing.T) {
-	result := truncate("a very long string", 10)
-	expected := "a very ..."
-	if result != expected {
-		t.Fatalf("expected %q, got %q", expected, result)
+// --- computeDayOrder coverage: first, after, before on non-empty list ---
+
+func TestComputeDayOrderFirst(t *testing.T) {
+	setupEnv(t)
+	// Add two slides on same date so the list is non-empty
+	id1 := addSlide(t, "--date", "2025-05-01")
+	id2 := addSlide(t, "--date", "2025-05-01")
+
+	// Now add a third with --first
+	id3 := addSlide(t, "--date", "2025-05-01", "--first")
+
+	order1 := getDayOrder(t, id1)
+	order2 := getDayOrder(t, id2)
+	order3 := getDayOrder(t, id3)
+
+	// --first slide should sort before both existing slides
+	if order3 >= order1 {
+		t.Fatalf("--first slide day_order %q should be < first existing %q", order3, order1)
+	}
+	if order1 >= order2 {
+		t.Fatalf("original order violated: id1 %q should be < id2 %q", order1, order2)
 	}
 }
 
-func TestTruncateMultibyteRunes(t *testing.T) {
-	// 4 CJK characters = 4 runes but 12 bytes; truncate at 3 runes should not split
-	result := truncate("日本語文", 3)
-	if result != "日本語" {
-		t.Fatalf("expected %q, got %q", "日本語", result)
+func TestComputeDayOrderAfter(t *testing.T) {
+	setupEnv(t)
+	id1 := addSlide(t, "--date", "2025-05-02")
+	id2 := addSlide(t, "--date", "2025-05-02")
+
+	// Add a third after id1 (should be between id1 and id2)
+	id3 := addSlide(t, "--date", "2025-05-02", "--after", id1)
+
+	order1 := getDayOrder(t, id1)
+	order2 := getDayOrder(t, id2)
+	order3 := getDayOrder(t, id3)
+
+	if order3 <= order1 {
+		t.Fatalf("--after id1: new slide day_order %q should be > id1 %q", order3, order1)
+	}
+	if order3 >= order2 {
+		t.Fatalf("--after id1: new slide day_order %q should be < id2 %q", order3, order2)
 	}
 }
 
-func TestTruncateExactBoundary(t *testing.T) {
-	result := truncate("hello", 5)
-	if result != "hello" {
-		t.Fatalf("expected %q, got %q", "hello", result)
+func TestComputeDayOrderAfterLast(t *testing.T) {
+	setupEnv(t)
+	id1 := addSlide(t, "--date", "2025-05-03")
+	id2 := addSlide(t, "--date", "2025-05-03")
+
+	// Add after the last slide (should use GenerateAtEnd)
+	id3 := addSlide(t, "--date", "2025-05-03", "--after", id2)
+
+	order1 := getDayOrder(t, id1)
+	order2 := getDayOrder(t, id2)
+	order3 := getDayOrder(t, id3)
+
+	if order1 >= order2 {
+		t.Fatalf("original order violated: id1 %q should be < id2 %q", order1, order2)
+	}
+	if order3 <= order2 {
+		t.Fatalf("--after last: new slide day_order %q should be > id2 %q", order3, order2)
 	}
 }
 
-func TestTruncateMaxLenZero(t *testing.T) {
-	result := truncate("hello", 0)
-	if result != "" {
-		t.Fatalf("expected empty string, got %q", result)
+func TestComputeDayOrderBefore(t *testing.T) {
+	setupEnv(t)
+	id1 := addSlide(t, "--date", "2025-05-04")
+	id2 := addSlide(t, "--date", "2025-05-04")
+
+	// Add before id2 (should be between id1 and id2)
+	id3 := addSlide(t, "--date", "2025-05-04", "--before", id2)
+
+	order1 := getDayOrder(t, id1)
+	order2 := getDayOrder(t, id2)
+	order3 := getDayOrder(t, id3)
+
+	if order3 <= order1 {
+		t.Fatalf("--before id2: new slide day_order %q should be > id1 %q", order3, order1)
+	}
+	if order3 >= order2 {
+		t.Fatalf("--before id2: new slide day_order %q should be < id2 %q", order3, order2)
 	}
 }
 
-func TestTruncateMaxLenThree(t *testing.T) {
-	// maxLen=3 with string longer than 3: returns first 3 runes (no "...")
-	result := truncate("abcdef", 3)
-	if result != "abc" {
-		t.Fatalf("expected %q, got %q", "abc", result)
+func TestComputeDayOrderBeforeFirst(t *testing.T) {
+	setupEnv(t)
+	id1 := addSlide(t, "--date", "2025-05-05")
+	id2 := addSlide(t, "--date", "2025-05-05")
+
+	// Add before the first slide (should use GenerateAtStart)
+	id3 := addSlide(t, "--date", "2025-05-05", "--before", id1)
+
+	order1 := getDayOrder(t, id1)
+	order2 := getDayOrder(t, id2)
+	order3 := getDayOrder(t, id3)
+
+	if order3 >= order1 {
+		t.Fatalf("--before first: new slide day_order %q should be < id1 %q", order3, order1)
+	}
+	if order1 >= order2 {
+		t.Fatalf("original order violated: id1 %q should be < id2 %q", order1, order2)
 	}
 }
 
-func TestTruncateEmptyString(t *testing.T) {
-	result := truncate("", 10)
-	if result != "" {
-		t.Fatalf("expected empty string, got %q", result)
+func TestComputeDayOrderAfterNotFound(t *testing.T) {
+	setupEnv(t)
+	addSlide(t, "--date", "2025-05-06")
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>X</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"add", "--date", "2025-05-06", "--after", "nonexistent-id", dir})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for --after nonexistent")
+	}
+	if !strings.Contains(err.Error(), "reference slide") {
+		t.Fatalf("expected reference slide error, got: %v", err)
+	}
+}
+
+func TestComputeDayOrderBeforeNotFound(t *testing.T) {
+	setupEnv(t)
+	addSlide(t, "--date", "2025-05-07")
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>X</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"add", "--date", "2025-05-07", "--before", "nonexistent-id", dir})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for --before nonexistent")
+	}
+	if !strings.Contains(err.Error(), "reference slide") {
+		t.Fatalf("expected reference slide error, got: %v", err)
 	}
 }

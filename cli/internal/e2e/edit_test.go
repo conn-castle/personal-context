@@ -342,8 +342,17 @@ func TestEditPreservesImmutableFields(t *testing.T) {
 		t.Fatalf("query before edit: %v", err)
 	}
 
-	// Small delay to ensure updated_at changes
-	time.Sleep(50 * time.Millisecond)
+	// Backdate updated_at so the trigger produces a distinguishable timestamp.
+	pastTime := time.Now().UTC().Add(-time.Hour).Format("2006-01-02T15:04:05.000Z")
+	if _, err := db.Exec(`UPDATE slides SET updated_at = ? WHERE id = ?`, pastTime, slideID); err != nil {
+		t.Fatalf("backdate updated_at: %v", err)
+	}
+	// Re-read baseline after backdating.
+	if err := db.QueryRow(
+		"SELECT date, day_order, created_at, updated_at FROM slides WHERE id = ?", slideID,
+	).Scan(&dateBefore, &dayOrderBefore, &createdAtBefore, &updatedAtBefore); err != nil {
+		t.Fatalf("query after backdate: %v", err)
+	}
 
 	// Edit with different content
 	editDir := createInputFolder(t, inputFolderOpts{

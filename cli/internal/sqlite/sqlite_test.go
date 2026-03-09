@@ -317,7 +317,15 @@ func TestMigrationTriggersUpdateUpdatedAtAndSyncVersion(t *testing.T) {
 		t.Fatalf("select version before: %v", err)
 	}
 
-	time.Sleep(10 * time.Millisecond)
+	// Backdate updated_at to ensure the trigger produces a distinguishable timestamp.
+	pastTime := time.Now().UTC().Add(-time.Hour).Format("2006-01-02T15:04:05.000Z")
+	if _, err := connection.DB().Exec(`UPDATE slides SET updated_at = ? WHERE id = ?;`, pastTime, "20260305-abcddcba"); err != nil {
+		t.Fatalf("backdate updated_at: %v", err)
+	}
+	// Re-read beforeUpdatedAt after backdating, since that's our new baseline.
+	if err := connection.DB().QueryRow(`SELECT updated_at FROM slides WHERE id = ?;`, "20260305-abcddcba").Scan(&beforeUpdatedAt); err != nil {
+		t.Fatalf("select updated_at after backdate: %v", err)
+	}
 	if _, err := connection.DB().Exec(`UPDATE slides SET html_content = ? WHERE id = ?;`, "<h1>b</h1>", "20260305-abcddcba"); err != nil {
 		t.Fatalf("update slide: %v", err)
 	}

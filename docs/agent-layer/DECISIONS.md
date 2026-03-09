@@ -146,3 +146,8 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: `scripts/check_schema_equivalence.sh` compares tables, columns, indexes, and UNIQUE constraints between Postgres and SQLite schemas but does NOT compare types, CHECK expressions, or triggers.
     Reason: Type names (`TIMESTAMPTZ` vs `TEXT`), CHECK syntax, and trigger syntax are intentionally different between dialects. Structural equivalence (same tables with same columns and same indexes) is the meaningful invariant.
     Tradeoffs: A column type mismatch (e.g., wrong SQLite type) would not be caught; mitigated by integration tests exercising both backends against the same contract suite.
+
+- Decision 2026-03-08 d7e8f9: S3Endpoint and S3ForcePathStyle config fields for S3-compatible services
+    Decision: Added `s3_endpoint` and `s3_force_path_style` to Config. These are optional — empty/false means standard AWS S3. `Mode()` does not require them for cloud mode. Exposed as `--s3-endpoint` and `--s3-force-path-style` CLI flags (non-interactive only). Threaded through `openCloudStack`, `validateS3AccessFn`, and `runSetupCloud`.
+    Reason: Enables MinIO and other S3-compatible services for integration testing without env var hacks. Also supports users who self-host S3-compatible storage.
+    Tradeoffs: Two new config fields that most users won't need; `omitempty` keeps them invisible in default configs.

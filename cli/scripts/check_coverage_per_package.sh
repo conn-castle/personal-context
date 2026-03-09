@@ -36,7 +36,7 @@ while IFS= read -r pkg; do
 		status=1
 	fi
 
-done < <(go list ./... | grep -v -E '/(internal/repository/repositorytest|internal/repository/postgres|internal/s3client|internal/e2e|migrations)$')
+done < <(go list ./... | grep -v -E '/(internal/repository/repositorytest|internal/repository/postgres|internal/s3client|internal/e2e|internal/cloude2e|migrations)$')
 
 if [[ "$status" -ne 0 ]]; then
 	exit "$status"

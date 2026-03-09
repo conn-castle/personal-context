@@ -36,7 +36,7 @@ var (
 		return nil
 	}
 	// validateS3AccessFn creates temporary AWS credentials and verifies bucket access.
-	validateS3AccessFn = func(ctx context.Context, bucket string, region string, accessKey string, secretKey string) error {
+	validateS3AccessFn = func(ctx context.Context, bucket string, region string, accessKey string, secretKey string, endpoint string, forcePathStyle bool) error {
 		cfg, err := awssdkconfig.LoadDefaultConfig(ctx,
 			awssdkconfig.WithRegion(region),
 			awssdkconfig.WithCredentialsProvider(
@@ -46,7 +46,18 @@ var (
 		if err != nil {
 			return fmt.Errorf("load aws config: %w", err)
 		}
-		s3Client := awss3.NewFromConfig(cfg)
+		var opts []func(*awss3.Options)
+		if endpoint != "" {
+			opts = append(opts, func(o *awss3.Options) {
+				o.BaseEndpoint = aws.String(endpoint)
+			})
+		}
+		if forcePathStyle {
+			opts = append(opts, func(o *awss3.Options) {
+				o.UsePathStyle = true
+			})
+		}
+		s3Client := awss3.NewFromConfig(cfg, opts...)
 		_, err = s3Client.HeadBucket(ctx, &awss3.HeadBucketInput{
 			Bucket: aws.String(bucket),
 		})
@@ -113,6 +124,7 @@ func runSetupCloud(
 	store pcconfig.Store,
 	neonURL string, s3Bucket string, s3Region string,
 	awsKey string, awsSecret string,
+	s3Endpoint string, s3ForcePathStyle bool,
 	localRepo repository.Repository,
 	interactive bool,
 ) error {
@@ -143,7 +155,7 @@ func runSetupCloud(
 	}
 
 	// 3. Validate S3 access.
-	if err := validateS3AccessFn(ctx, s3Bucket, s3Region, awsKey, awsSecret); err != nil {
+	if err := validateS3AccessFn(ctx, s3Bucket, s3Region, awsKey, awsSecret, s3Endpoint, s3ForcePathStyle); err != nil {
 		return fmt.Errorf("S3 access check failed: %w", err)
 	}
 
@@ -211,11 +223,13 @@ func runSetupCloud(
 
 	// 7. Write cloud config (preserve ActiveProject from existing config).
 	cfg := pcconfig.Config{
-		NeonURL:       neonURL,
-		S3Bucket:      s3Bucket,
-		S3Region:      s3Region,
-		AWSProfile:    awsProfileName,
-		ActiveProject: existing.ActiveProject,
+		NeonURL:          neonURL,
+		S3Bucket:         s3Bucket,
+		S3Region:         s3Region,
+		AWSProfile:       awsProfileName,
+		ActiveProject:    existing.ActiveProject,
+		S3Endpoint:       s3Endpoint,
+		S3ForcePathStyle: s3ForcePathStyle,
 	}
 	if err := store.Write(cfg); err != nil {
 		// Rollback AWS credentials to previous state on config write failure.

@@ -17,12 +17,14 @@ import (
 
 // setupOptions holds the flags for the setup command.
 type setupOptions struct {
-	NeonURL     string
-	S3Bucket    string
-	S3Region    string
-	AWSKey      string
-	AWSSecret   string
-	RemoveCloud bool
+	NeonURL          string
+	S3Bucket         string
+	S3Region         string
+	AWSKey           string
+	AWSSecret        string
+	S3Endpoint       string
+	S3ForcePathStyle bool
+	RemoveCloud      bool
 }
 
 // hasCloudFlags returns true if any cloud flag was provided.
@@ -73,6 +75,8 @@ func newSetupCommand(stdout io.Writer, stderr io.Writer, stdin io.Reader) *cobra
 	cmd.Flags().StringVar(&opts.S3Region, "s3-region", "", "AWS region for S3 bucket")
 	cmd.Flags().StringVar(&opts.AWSKey, "aws-key", "", "AWS access key ID")
 	cmd.Flags().StringVar(&opts.AWSSecret, "aws-secret", "", "AWS secret access key")
+	cmd.Flags().StringVar(&opts.S3Endpoint, "s3-endpoint", "", "Custom S3 endpoint URL (for S3-compatible services)")
+	cmd.Flags().BoolVar(&opts.S3ForcePathStyle, "s3-force-path-style", false, "Use path-style S3 addressing (for S3-compatible services)")
 	cmd.Flags().BoolVar(&opts.RemoveCloud, "remove-cloud", false, "Remove cloud configuration")
 
 	return cmd
@@ -139,6 +143,7 @@ func runSetup(ctx context.Context, stdout io.Writer, stderr io.Writer, stdin io.
 		}
 		if err := runSetupCloud(ctx, stdout, stderr, nil, homeDir, store,
 			opts.NeonURL, opts.S3Bucket, opts.S3Region, opts.AWSKey, opts.AWSSecret,
+			opts.S3Endpoint, opts.S3ForcePathStyle,
 			nil, false); err != nil {
 			return err
 		}
@@ -184,6 +189,7 @@ func runSetup(ctx context.Context, stdout io.Writer, stderr io.Writer, stdin io.
 
 	return runSetupCloud(ctx, stdout, stderr, br, homeDir, store,
 		neonURL, s3Bucket, s3Region, awsKey, awsSecret,
+		"", false,
 		repo, true)
 }
 
