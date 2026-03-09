@@ -61,6 +61,7 @@ func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 	root.AddCommand(newEditCommand(stdout, stderr))
 	root.AddCommand(newDeleteCommand(stdout, stderr))
 	root.AddCommand(newRestoreCommand(stdout, stderr))
+	root.AddCommand(newRestoreDBCommand(stdout, stderr))
 	root.AddCommand(newMoveCommand(stdout, stderr))
 	root.AddCommand(newTrashCommand(stdout, stderr))
 	root.AddCommand(newSearchCommand(stdout, stderr))
@@ -69,6 +70,9 @@ func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 	root.AddCommand(newDoctorCommand(stdout, stderr))
 	root.AddCommand(newSyncCommand(stdout, stderr))
 	root.AddCommand(newFetchCommand(stdout, stderr))
+	root.AddCommand(newExportCommand(stdout, stderr))
+	root.AddCommand(newImportCommand(stdout, stderr))
+	root.AddCommand(newVerifyCommand(stdout, stderr))
 
 	return root
 }

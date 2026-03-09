@@ -26,7 +26,7 @@ Do not duplicate information that belongs in other memory files:
 
 <!-- ENTRIES START -->
 
-> **Status:** Phase 6 (Sync Engine & Cloud CLI) is complete. Bidirectional sync engine, cloud setup wizard, all 15 CLI commands are implemented, auto-sync in mutation commands is operational, and cloud-aware gc/doctor are in place. `pc sync` and `pc fetch` require cloud configuration. See ROADMAP.md for phase-by-phase implementation progress.
+> **Status:** Phase 7 (Export/Import System) is complete. Deterministic git snapshots, `pc export`, `pc import`, `pc restore-db`, and `pc verify` now sit on top of the Phase 6 sync/cloud workflow. Cloud-required commands are `pc sync`, `pc fetch`, `pc export --from-cloud`, and `pc verify --from-cloud`. See ROADMAP.md for phase-by-phase implementation progress.
 
 ## Project Overview
 
@@ -60,7 +60,7 @@ GitHub + S3                     <-- portable backup (git clone + S3 = full resto
 ```
 
 Any state can be reconstructed from any other (subject to two-tier guarantee):
-- Postgres <-- git export via `pc restore-db` then `pc sync` (Tier 2: data file binaries require S3; soft-deleted slides not in export)
+- Postgres <-- git export via `pc restore-db` then `pc sync` (Tier 2: data file rows are recreated even when git export omitted the binaries; object content still requires S3/original files, and soft-deleted slides stay excluded)
 - Local SQLite <-- Postgres via `pc sync` (Tier 1: fully lossless)
 - Git export <-- Postgres via `pc export` (Tier 2: data file binaries stay in S3; soft-deleted excluded)
 - Postgres <-- local SQLite via `pc sync` push phase (Tier 1: fully lossless)
@@ -99,7 +99,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 
 ### Schema Portability (Postgres / SQLite)
 - `schema/schema.sql` is the design-level source of truth (Postgres dialect). The canonical SQLite schema is embedded in `cli/internal/sqlite/sqlite_schema.sql` and applied via `Connection.ApplySchema()`.
-- Postgres schema embedded in `cli/internal/repository/postgres/postgres_schema.sql` and applied via `ApplySchema()`. Migration file: `cli/migrations/postgres/001_initial_schema.sql`.
+- Postgres schema embedded in `cli/internal/repository/postgres/postgres_schema.sql` and applied via `ApplySchema()`. No separate migration history is kept under `cli/`.
 - CI schema equivalence guard (`scripts/check_schema_equivalence.sh`) prevents structural drift between the two schemas.
 - `created_at` and `updated_at` are DB-managed via defaults and triggers. `deleted_at` set by application code. See "DB-Managed Timestamps" below.
 - `PRAGMA foreign_keys = ON` required on every SQLite connection (otherwise `ON DELETE CASCADE` silently ignored).
@@ -208,7 +208,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `Repository` interface with separate SQLite and Postgres implementations.
 - SQL dialects diverge enough that sharing query code via `database/sql` is a false economy.
 - **SQLite** (`cli/internal/sqlite/`): modernc.org/sqlite (pure Go), `?` positional params, `LIKE` for search, text timestamps. Custom migration runner with single embedded `sqlite_schema.sql`.
-- **Postgres** (`cli/internal/repository/postgres/`): pgx (direct, not database/sql), `$N` positional params, `ILIKE` for case-insensitive search, `RETURNING` clauses, native `time.Time`. Embedded DDL via `postgres_schema.sql` + `ApplySchema()`. Migration file in `cli/migrations/postgres/001_initial_schema.sql`.
+- **Postgres** (`cli/internal/repository/postgres/`): pgx (direct, not database/sql), `$N` positional params, `ILIKE` for case-insensitive search, `RETURNING` clauses, native `time.Time`. Embedded DDL via `postgres_schema.sql` + `ApplySchema()`. No separate migration history under `cli/`.
 - **Contract tests** (`cli/internal/repository/repositorytest/`): backend-agnostic test suite run against both SQLite and Postgres implementations.
 - **Integration tests**: testcontainers-go for both backends — Postgres uses schema-per-test isolation, SQLite uses temp files.
 
@@ -254,8 +254,8 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `pc fetch` — download data files from S3
 - `pc export` — DB to git folder format
 - `pc import <path>` — merge from git export (update if newer, else skip; full replacement of child rows)
-- `pc restore-db <path>` — rebuild DB from git export (destructive, auto-backup before wipe)
-- `pc verify` — full round-trip data integrity tests
+- `pc restore-db <path>` — rebuild DB from git export (destructive, writes a backup snapshot first under `~/personal-context/.pc/backups/`)
+- `pc verify` — full round-trip data integrity tests (`pc verify` for local, `pc verify --from-cloud` for cloud-rooted verification)
 
 ### `pc fetch` modes and flags
 - Slide mode:
@@ -278,7 +278,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
   - `pc export --path ./pc-export --github-remote origin`
 - Nightly data-repo workflow usage:
   - `pc export --from-cloud --path . --github-remote origin`
-  - Reads slide rows from Neon and file blobs from S3 using repository secrets.
+  - Reads slide rows from Neon and figure blobs from S3 using repository secrets; template exports still come from the seeded local template set because templates are not cloud-synced.
 
 ### `pc setup` flow details
 - Non-interactive mode:
@@ -511,6 +511,7 @@ All database fields of active (non-deleted) slides and figures lossless. Data fi
 - Path C: Local + files -> export -> git -> restore-db -> Local
 - Path D: Neon -> sync -> Local -> export -> git
 - Path E: git -> import -> Local
+- After `pc restore-db`, a later `pc sync` recreates data-file rows in cloud metadata even when the local binary is absent. The referenced object still has to exist in S3 or be restored separately.
 
 ## Testing
 

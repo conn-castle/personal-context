@@ -3,9 +3,9 @@
 -- =============================================================================
 --
 -- Design-level source of truth (Postgres dialect). The executable SQLite schema
--- is embedded in cli/internal/sqlite/sqlite_schema.sql. Postgres migrations will
--- live in cli/migrations/postgres/ (Phase 5). This file documents the intended
--- schema structure.
+-- is embedded in cli/internal/sqlite/sqlite_schema.sql, and the executable
+-- Postgres schema is embedded in cli/internal/repository/postgres/postgres_schema.sql.
+-- This file documents the intended schema structure.
 --
 -- Sort key: (date, day_order, id) — id is the universal tiebreaker.
 -- Slide ID format: {YYYYMMDD}-{8-random-hex} (e.g., 20250304-a3f2b7e1).

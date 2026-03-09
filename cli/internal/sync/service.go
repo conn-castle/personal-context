@@ -396,7 +396,7 @@ func (s *Service) applyDataFilesToCloud(
 		if err != nil {
 			return err
 		}
-		if err := s.uploadFile(ctx, create.S3Key, path); err != nil {
+		if _, err := s.uploadDataFileIfPresent(ctx, create.S3Key, path); err != nil {
 			return err
 		}
 		if _, err := s.cloudRepo.CreateSlideDataFile(ctx, create); err != nil {
@@ -409,14 +409,23 @@ func (s *Service) applyDataFilesToCloud(
 		if err != nil {
 			return err
 		}
-		if err := s.uploadFile(ctx, update.S3Key, path); err != nil {
+		uploaded, err := s.uploadDataFileIfPresent(ctx, update.S3Key, path)
+		if err != nil {
 			return err
 		}
 		old := existingByID[update.ID]
+		if !uploaded && old.S3Key != update.S3Key {
+			return fmt.Errorf(
+				"local data file %s is required to change data file s3_key from %s to %s",
+				path,
+				old.S3Key,
+				update.S3Key,
+			)
+		}
 		if _, err := s.cloudRepo.UpdateSlideDataFile(ctx, update); err != nil {
 			return err
 		}
-		if old.S3Key != update.S3Key {
+		if uploaded && old.S3Key != update.S3Key {
 			if err := s.cloudObjects.Delete(ctx, old.S3Key); err != nil {
 				return err
 			}
@@ -541,6 +550,19 @@ func (s *Service) uploadFile(ctx context.Context, key string, path string) error
 		return fmt.Errorf("upload %s: %w", key, err)
 	}
 	return nil
+}
+
+func (s *Service) uploadDataFileIfPresent(ctx context.Context, key string, path string) (bool, error) {
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat local file %s: %w", path, err)
+	}
+	if err := s.uploadFile(ctx, key, path); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Service) downloadFile(ctx context.Context, key string, path string) error {

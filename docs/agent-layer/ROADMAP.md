@@ -74,7 +74,7 @@ Incomplete:
 - Per-package coverage >=95% enforced. All packages pass. Linter clean.
 
 ## Phase 5 ✅ — Cloud Data Layer
-- Implemented Postgres repository (`cli/internal/repository/postgres/`) — full 24-method pgx-based Repository with positional params, ILIKE, RETURNING, native `time.Time`, `mapPgError`, `ensureRowsAffected`. Embedded DDL via `schema.go` + `ApplySchema()`. Migration file in `cli/migrations/postgres/001_initial_schema.sql`. 17 contract suite + 5 Postgres-specific integration tests (testcontainers-go, schema-per-test isolation) + 9 unit tests. 95.2% coverage.
+- Implemented Postgres repository (`cli/internal/repository/postgres/`) — full 24-method pgx-based Repository with positional params, ILIKE, RETURNING, native `time.Time`, `mapPgError`, `ensureRowsAffected`. Embedded DDL via `schema.go` + `ApplySchema()`. 17 contract suite + 5 Postgres-specific integration tests (testcontainers-go, schema-per-test isolation) + 9 unit tests. 95.2% coverage.
 - Implemented S3 client (`cli/internal/s3client/`) — `Upload`, `Download`, `Delete`, `Exists`, `HeadVersion`, `UpdateVersion` methods. DI constructor accepts pre-configured `*s3.Client` + bucket. Integration tests via testcontainers-go MinIO container (bucket-per-test isolation) + unit tests for error mapping. 98.6% coverage.
 - Implemented cloud config validation (`cli/internal/config/validate.go`) — `ValidateNeonURL`, `ValidateS3Bucket`, `ValidateS3Region`, `ValidateCloudConfig`. 48 table-driven test cases. 95.1% coverage.
 - Added CI schema equivalence guard (`scripts/check_schema_equivalence.sh`) — parses both schema files, compares tables, columns, indexes, and UNIQUE constraints. Added to CI workflow.
@@ -88,36 +88,10 @@ Incomplete:
 - Auto-sync (`runAutoSyncFn`) integrated into all 6 mutation commands: add, edit, delete, restore, move, gc. Failures are non-fatal (stderr warnings).
 - 160+ sync/conflict unit tests, integration tests (testcontainers Postgres+MinIO), and e2e coverage for cloud-command validation plus local-only/no-op entrypoints. Per-package coverage >=95%.
 
-## Phase 7 — Export/Import System
-
-### Goal
-- Full data portability. Two-tier integrity: Tier 1 (sync) fully lossless, Tier 2 (git export) lossless for DB fields + figures with data file references preserved.
-
-### Tasks
-- [ ] **Tests first**: Write conversion path tests before implementation — Tier 1 (full lossless) and Tier 2 (narrowed) guarantees:
-    - **Tier 1** — Path A: Local + files -> sync -> Neon + S3 -> sync -> Local + files (all fields, all figures, all data files byte-for-byte)
-    - **Tier 2** — Path B: Neon + S3 -> export -> git -> restore-db -> Neon (all fields + figures lossless; data file references preserved, binaries not in git)
-    - **Tier 2** — Path C: Local + files -> export -> git -> restore-db -> Local (same as B from local)
-    - **Tier 2** — Path D: Neon -> sync -> Local -> export -> git (full chain, narrowed at git boundary)
-    - **Tier 2** — Path E: git -> import -> Local SQLite (merge import)
-- [ ] **Tests first**: Write edge case tests covering: minimal slide, large slide (20+ figures, 100KB+ HTML, 50KB+ notes), unicode in HTML and notes, special characters in filenames, multiple slides same date with different day_order, slide date differs from created_at, soft-deleted slides excluded from export, empty database, `pc import` with overlapping IDs (same updated_at -> skip, older -> skip, newer -> update with full child row replacement)
-- [ ] **Tests first**: Write determinism test — export same data twice, verify byte-for-byte identical output (JSON key order, array sorting)
-- [ ] **Tests first**: Write LFS pointer detection test — create a file with LFS pointer format, verify import rejects it with clear error
-- [ ] **Tests first**: Write `pc restore-db` safety test — verify auto-backup created before wipe, verify restore from backup possible
-- [ ] Implement export engine, deterministic JSON serialization
-- [ ] Implement `pc export`, `pc import`, `pc restore-db`, `pc verify`
-- [ ] Implement LFS pointer detection
-
-- [ ] **Consolidate schema**: Fold all SQLite and Postgres migration files into canonical schema files per backend and remove individual migrations (no deployed users, so no migration history to preserve)
-
-### Exit criteria
-- All 5 conversion paths pass round-trip tests with full field verification.
-- All edge cases pass.
-- Export is deterministic (identical output for identical data).
-- LFS pointers detected and rejected.
-- `pc restore-db` creates backup before wipe.
-- Single canonical schema file per backend, no separate migration files (SQLite + Postgres).
-- `go test -cover` reports >95% for all packages.
+## Phase 7 ✅ — Export/Import System
+- Implemented deterministic git snapshot export/import support across local and cloud flows: `pc export`, `pc import`, `pc restore-db`, and `pc verify`, including LFS pointer rejection, import merge rules, and automatic restore backups.
+- Added local and cloud verification coverage for all five conversion paths plus the Phase 7 edge matrix: deterministic exports, large/unicode payloads, soft-delete exclusion, overlap semantics, cloud-rooted round trips, and restore-db -> sync into a fresh cloud while preserving data-file metadata.
+- Consolidated Postgres schema delivery into the embedded canonical schema file, removed the standalone Postgres migration artifact, and kept coverage gates above 95% for all tracked CLI packages.
 
 ## Phase 8 — v0.dev UI Design
 
