@@ -326,41 +326,34 @@ func (s *Service) applyFiguresToCloud(
 	desired []repository.SlideFigure,
 	existing []repository.SlideFigure,
 ) error {
+	// Upload all desired figures to ensure S3 content matches local state.
+	// File content may change without metadata changes (e.g., multi-machine edits
+	// where the S3Key stays the same but the local file content differs), so we
+	// cannot skip uploads based on the reconciliation plan alone.
+	for _, figure := range desired {
+		path, err := s.localFS.ResolveFigurePath(slideID, figure.Filename)
+		if err != nil {
+			return err
+		}
+		if err := s.uploadFile(ctx, figure.S3Key, path); err != nil {
+			return err
+		}
+	}
+
 	plan, err := PlanFigureReconciliation(slideID, existing, desired)
 	if err != nil {
 		return err
 	}
 
-	// Build a lookup by filename so we can resolve local file paths for creates/updates.
-	desiredByFilename := make(map[string]repository.SlideFigure, len(desired))
-	for _, fig := range desired {
-		desiredByFilename[fig.Filename] = fig
-	}
-
 	existingByID := indexFiguresByID(existing)
 
 	for _, create := range plan.Creates {
-		path, err := s.localFS.ResolveFigurePath(slideID, create.Filename)
-		if err != nil {
-			return err
-		}
-		if err := s.uploadFile(ctx, create.S3Key, path); err != nil {
-			return err
-		}
 		if _, err := s.cloudRepo.CreateSlideFigure(ctx, create); err != nil {
 			return err
 		}
 	}
 
 	for _, update := range plan.Updates {
-		fig := desiredByFilename[update.Filename]
-		path, err := s.localFS.ResolveFigurePath(slideID, fig.Filename)
-		if err != nil {
-			return err
-		}
-		if err := s.uploadFile(ctx, update.S3Key, path); err != nil {
-			return err
-		}
 		old := existingByID[update.ID]
 		if _, err := s.cloudRepo.UpdateSlideFigure(ctx, update); err != nil {
 			return err
