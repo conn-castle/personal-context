@@ -67,7 +67,7 @@ func addSlideWithContent(t *testing.T, html, notes, metadata string, figures map
 	}
 	if len(figures) > 0 {
 		figDir := filepath.Join(dir, "figures")
-		if err := os.MkdirAll(figDir, 0o755); err != nil {
+		if err := os.MkdirAll(figDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 		for name, data := range figures {
@@ -78,7 +78,7 @@ func addSlideWithContent(t *testing.T, html, notes, metadata string, figures map
 	}
 	if len(dataFiles) > 0 {
 		dataDir := filepath.Join(dir, "data")
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		if err := os.MkdirAll(dataDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 		for name, data := range dataFiles {

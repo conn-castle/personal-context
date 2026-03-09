@@ -389,7 +389,7 @@ func deleteEditFiles(stack *localStack, id string, figureFilenames []string, dat
 // a temp file so edits can commit atomically after metadata reconciliation.
 func stageReplacementFile(finalPath string, sourcePath string) (string, int64, error) {
 	targetDir := filepath.Dir(finalPath)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o700); err != nil {
 		return "", 0, fmt.Errorf("create destination directory: %w", err)
 	}
 

@@ -486,7 +486,7 @@ func TestEditWithDataFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	dataDir := filepath.Join(newDir, "data")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dataDir, "new.csv"), []byte("new data"), 0o644); err != nil {
@@ -532,7 +532,7 @@ func TestEditReplacesFiguresAndDataFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	dataDir := filepath.Join(newDir, "data")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dataDir, "new-data.csv"), []byte("y\n2\n"), 0o644); err != nil {

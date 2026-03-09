@@ -75,10 +75,9 @@ func TestMain(m *testing.M) {
 		_ = os.RemoveAll(tmpDir)
 		os.Exit(1)
 	}
-	defer func() { _ = postgresContainer.Terminate(ctx) }()
-
 	connString, err := postgresContainer.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
+		_ = postgresContainer.Terminate(ctx)
 		fmt.Fprintf(os.Stderr, "postgres connection string: %v\n", err)
 		os.Exit(1)
 	}
@@ -96,13 +95,15 @@ func TestMain(m *testing.M) {
 		),
 	)
 	if err != nil {
+		_ = postgresContainer.Terminate(ctx)
 		fmt.Fprintf(os.Stderr, "start minio: %v\n", err)
 		os.Exit(1)
 	}
-	defer func() { _ = minioContainer.Terminate(ctx) }()
 
 	endpoint, err := minioContainer.ConnectionString(ctx)
 	if err != nil {
+		_ = minioContainer.Terminate(ctx)
+		_ = postgresContainer.Terminate(ctx)
 		fmt.Fprintf(os.Stderr, "minio endpoint: %v\n", err)
 		os.Exit(1)
 	}
@@ -114,6 +115,8 @@ func TestMain(m *testing.M) {
 	cloudEnv.minioPassword = minioContainer.Password
 
 	exitCode := m.Run()
+	_ = minioContainer.Terminate(ctx)
+	_ = postgresContainer.Terminate(ctx)
 	_ = os.RemoveAll(tmpDir)
 	os.Exit(exitCode)
 }
@@ -416,7 +419,7 @@ func createInputFolder(t *testing.T, htmlContent string, notes string, figures m
 	}
 	if len(figures) > 0 {
 		figDir := filepath.Join(dir, "figures")
-		if err := os.MkdirAll(figDir, 0o755); err != nil {
+		if err := os.MkdirAll(figDir, 0o700); err != nil {
 			t.Fatalf("create figures dir: %v", err)
 		}
 		for name, data := range figures {
@@ -427,7 +430,7 @@ func createInputFolder(t *testing.T, htmlContent string, notes string, figures m
 	}
 	if len(dataFiles) > 0 {
 		dataDir := filepath.Join(dir, "data")
-		if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		if err := os.MkdirAll(dataDir, 0o700); err != nil {
 			t.Fatalf("create data dir: %v", err)
 		}
 		for name, data := range dataFiles {
