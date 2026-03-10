@@ -88,12 +88,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -101,31 +104,34 @@ jobs:
           go-version-file: cli/go.mod
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Lint
-        run: npm run lint
+        run: pnpm lint
 
       - name: Typecheck
-        run: npm run typecheck
+        run: pnpm typecheck
 
       - name: Test
-        run: npm test
+        run: pnpm test
 
       - name: Enforce coverage >= 95%
-        run: npm run test:coverage
+        run: pnpm test:coverage
 
       - name: Install Playwright browser
-        run: npx playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Build
-        run: npm run build
+        run: pnpm build
 
       - name: Run Playwright smoke e2e
-        run: npm run test:e2e:smoke
+        run: pnpm test:e2e:smoke
+
+      - name: Run Playwright Slide Browser e2e
+        run: pnpm test:e2e:slide-browser
 
       - name: Run Playwright standalone CLI slide e2e
-        run: npm run test:e2e:cli-slide
+        run: pnpm test:e2e:cli-slide
 
       - name: Run Playwright local demo e2e
-        run: npm run test:e2e:cli-demo
+        run: pnpm test:e2e:cli-demo

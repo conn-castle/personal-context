@@ -4,7 +4,7 @@ Personal Context is a local-first engineering notebook system that stores work a
 
 ## Status
 
-Roadmap Phase 7 (Export/Import System) is complete: deterministic git snapshots, `pc export`, `pc import`, `pc restore-db`, and `pc verify` are operational alongside the Phase 6 sync/cloud workflow. All planned CLI surfaces through Phase 7 are implemented; `pc sync`, `pc fetch`, `pc export --from-cloud`, and `pc verify --from-cloud` require cloud configuration.
+Roadmap Phase 9 (Web UI integration) is in progress. The web workspace now includes real API routes, the Slide Browser UI, sync polling, unit coverage gates, and Playwright browser coverage; the remaining planned Phase 9 task is Amplify deployment.
 
 ## Architecture
 
@@ -44,7 +44,7 @@ personal-context/
 
 - Go toolchain compatible with `cli/go.mod`
 - Node.js 22+
-- npm
+- pnpm (`npm i -g pnpm`)
 - Docker running for the Postgres and S3 integration suites (`testcontainers-go`)
 
 ### Local-Only Setup (Development Verification)
@@ -66,16 +66,22 @@ go test -tags integration ./internal/cloude2e/ -v -timeout 420s
 
 # Web
 cd ../web
-npm install
-npm run lint
-npm run typecheck
-npm test
-npm run test:coverage
-npm run build
-npx playwright install
-npm run test:e2e:smoke
-npm run test:e2e:cli-slide
-npm run test:e2e:cli-demo
+pnpm install
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm test:coverage
+pnpm build
+pnpm exec playwright install
+pnpm test:e2e:smoke
+pnpm test:e2e:slide-browser
+pnpm test:e2e:cli-slide
+pnpm test:e2e:cli-demo
+
+# Or from the repo root (recommended):
+make check          # everything
+make test           # just tests
+make web-e2e        # just Playwright
 
 # Repo-level schema contract
 cd ..
@@ -132,14 +138,14 @@ pc setup --remove-cloud
 
 ## Web UI Overview
 
-Phase 1 provides a Next.js scaffold with:
+Phase 9 currently provides:
 
 - App Router + TypeScript
-- Lint, unit tests, coverage thresholds (95%)
-- Playwright DB-free smoke test
+- Real slide/project/sync/file API routes backed by Neon + S3 helpers
+- Three-panel Slide Browser with date-grouped navigation, 16:9 sandboxed preview, notes editing, attachment actions, and deleted-slide restore flow
+- `useSyncManager` 4-layer polling and cursor-based pagination
+- Vitest coverage thresholds (95%) plus Playwright smoke and Slide Browser e2e coverage
 - Schema-contract module referencing canonical `schema/` artifacts
-
-Full production UI behavior (slides, filters, edit/delete/restore, sync manager) is implemented in later roadmap phases.
 
 ## Development Workflow
 
@@ -171,21 +177,26 @@ The three `-tags integration` commands require Docker because testcontainers-go 
 ### Web (`web/`)
 
 ```bash
-npm install
-npm run lint
-npm run typecheck
-npm test
-npm run test:coverage
-npm run build
-npx playwright install
-npm run test:e2e:smoke
-npm run test:e2e:cli-slide
-npm run test:e2e:cli-demo
+pnpm install
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm test:coverage
+pnpm build
+pnpm exec playwright install
+pnpm test:e2e:smoke
+pnpm test:e2e:slide-browser
+pnpm test:e2e:cli-slide
+pnpm test:e2e:cli-demo
 ```
 
-`npm run test:e2e:cli-slide` requires Go on `PATH` because it executes `cli/scripts/verify_phase3_manual.sh --no-open`.
+Or via Makefile: `make web-all` runs lint + typecheck + coverage + build + e2e.
 
-`npm run test:e2e:cli-demo` requires Go on `PATH` because it executes `cli/scripts/verify_local_demo.sh --no-open`.
+`pnpm test:e2e:slide-browser` exercises the mocked Slide Browser workflow (browse, filter, notes edit, delete/restore, sync badge, error states, pagination) via `page.route()` interception, so no real backend is required.
+
+`pnpm test:e2e:cli-slide` requires Go on `PATH` because it executes `cli/scripts/verify_phase3_manual.sh --no-open`.
+
+`pnpm test:e2e:cli-demo` requires Go on `PATH` because it executes `cli/scripts/verify_local_demo.sh --no-open`.
 
 ### Repository (`repo root`)
 
@@ -200,7 +211,7 @@ GitHub Actions workflow: `.github/workflows/ci.yml`
 
 - Enforces schema contract and schema-equivalence checks.
 - Runs CLI `go mod tidy -diff`, build/test/lint, aggregate coverage gate (`>=95%`), per-package coverage gate (`>=95%` for each tested package), CLI e2e, and the Docker-backed Postgres/S3 integration suites.
-- Runs web lint/test/coverage/build, Playwright smoke e2e, and Playwright standalone CLI-slide e2e.
+- Runs web lint/test/coverage/build, Playwright smoke e2e, Playwright Slide Browser e2e, and the standalone CLI-slide/local-demo Playwright flows.
 - Uses pinned `golangci-lint` version via `GOLANGCI_LINT_VERSION`.
 
 ## Nightly Export Example

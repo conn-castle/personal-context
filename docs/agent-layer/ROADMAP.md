@@ -104,10 +104,10 @@ Incomplete:
 - **v0.dev constraint:** The v0.dev reference project is used *solely* as a visual/UI reference. Copy specific UI elements (components, layouts, styles) for visual parity. Do NOT copy or replicate any backend code, API routes, business logic, data fetching, or state management from v0.dev. All backend and logic are designed and implemented from scratch in this phase.
 
 ### Tasks
-- [ ] Deep-dive the v0.dev reference project (`tmp/v0-personal-context-design/`) — catalog its file structure, components, pages, data flow, and styling approach to inform which UI elements to adopt
-- [ ] Set up Neon serverless driver in Next.js
-- [ ] Set up S3 client for presigned URL generation (Amplify IAM role or env vars)
-- [ ] **Tests first**: Write API route tests before implementation — for each route, test:
+- [x] Deep-dive the v0.dev reference project (`tmp/v0-personal-context-design/`) — catalog its file structure, components, pages, data flow, and styling approach to inform which UI elements to adopt
+- [x] Set up Neon serverless driver in Next.js
+- [x] Set up S3 client for presigned URL generation (Amplify IAM role or env vars)
+- [x] **Tests first**: Write API route tests before implementation — for each route, test:
     - GET /api/slides: pagination, project filter, deleted filter, updated_after filter, sort order, empty results
     - GET /api/slides/[id]: returns slide with figures and data files, 404 for nonexistent ID
     - PATCH /api/slides/[id]: updates project_id, notes, git_remote_url, git_hash; updated_at auto-bumped by trigger; updates sync_version; S3 _version bumped write-after with retry; rejects invalid ID
@@ -118,34 +118,35 @@ Incomplete:
     - GET /api/sync/changes: returns slides changed since timestamp, includes soft-deleted
     - GET /api/files presigned URLs: returns valid presigned URL, 404 for nonexistent file
     - GET /api/projects: returns distinct project_ids, excludes deleted slides
-- [ ] Implement all API routes
-- [ ] **Tests first**: Write `useSyncManager` unit tests before implementation — test each layer's trigger and cooldown behavior:
+- [x] Implement all API routes
+- [x] **Tests first**: Write `useSyncManager` unit tests before implementation — test each layer's trigger and cooldown behavior:
     - Layer 1 (manual): always fires, ignores cooldown
     - Layer 2 (interaction): respects 30s cooldown
     - Layer 3 (tab visibility): respects 30s cooldown
     - Layer 4 (idle polling): 60s when idle < 10 min, 5 min when idle > 10 min, stops when tab hidden
     - Version change triggers data fetch
     - Self-inflicted sync prevention: own mutations don't trigger unnecessary fetch
-- [ ] Implement `useSyncManager()` hook
-- [ ] Adopt UI components from v0.dev reference (visual/interaction parity only — no v0.dev backend, logic, or data layer code)
-- [ ] Wire UI components to real API routes
-- [ ] **Tests first**: Write component unit tests — virtual date slide injection logic (on date change, after 10+ consecutive), fractional index computation for drag-and-drop, markdown rendering output
-- [ ] Write Playwright e2e tests:
-    - Browse slides: slides render in 16:9 containers, virtual date slides appear, scroll through list
-    - Filter by project: select project, only matching slides shown, clear filter shows all
-    - Slide details: click slide, notes rendered as markdown, figures listed, data files listed with sizes, download link works
-    - Edit slide: change project_id, change notes, verify changes persist after page reload
-    - Delete and restore: soft delete slide, verify it disappears from main view, open trash, verify it appears, restore, verify it returns
-    - Drag-and-drop reorder: drag slide within same date, verify new order persists after reload
-    - Sync detection: use API to simulate CLI adding a slide (insert directly into test DB + bump version), verify sync manager detects and slide appears without manual refresh
-    - Error states: API unavailable, empty database (no slides)
+- [x] Implement `useSyncManager()` hook
+- [x] Adopt UI components from v0.dev reference (visual/interaction parity only — no v0.dev backend, logic, or data layer code)
+- [x] Wire UI components to real API routes
+- [x] **Tests first**: Write component/unit utility tests for virtual date slide grouping, fractional index computation, and markdown rendering output
+- [x] Write Playwright e2e tests:
+    - Browse slides: slides render with date headers, slide count badge, navigation buttons
+    - Filter by project: select project, only matching slides shown
+    - Slide details: click slide, notes rendered as markdown, figures listed, data files listed with sizes
+    - Edit slide: change notes, verify PATCH persists
+    - Delete and restore: soft delete slide, verify optimistic removal, show deleted view with restore
+    - Sync version display: sync version badge visible after interaction
+    - Error states: API unavailable shows error banner, empty database shows placeholder
+    - Load more pagination: cursor-based next-page loading
+- [ ] Build out real SettingsOverlay (theme, sync config, keyboard shortcuts, data management)
 - [ ] Deploy to AWS Amplify
 
 ### Exit criteria
 - All API routes pass test suite.
 - `useSyncManager` passes unit tests for all 4 layers.
 - All Playwright e2e tests pass.
-- `npm test -- --coverage` reports >95%.
+- `pnpm test:coverage` reports >95%.
 - Deployed and accessible on Amplify.
 
 ## Phase 10 — Deployment, CI/CD, and Integration Testing

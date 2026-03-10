@@ -26,7 +26,7 @@ Do not duplicate information that belongs in other memory files:
 
 <!-- ENTRIES START -->
 
-> **Status:** Phase 7 (Export/Import System) is complete. Deterministic git snapshots, `pc export`, `pc import`, `pc restore-db`, and `pc verify` now sit on top of the Phase 6 sync/cloud workflow. Cloud-required commands are `pc sync`, `pc fetch`, `pc export --from-cloud`, and `pc verify --from-cloud`. See ROADMAP.md for phase-by-phase implementation progress.
+> **Status:** Phase 8 (v0.dev UI design) is complete. Phase 9 (web UI integration) is in progress. See ROADMAP.md for phase-by-phase implementation progress.
 
 ## Project Overview
 
@@ -196,7 +196,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 | Component | Technology |
 |-----------|-----------|
 | CLI | Go: cobra, modernc.org/sqlite (pure Go), fracdex (fractional indexing), pgx (direct, not database/sql), aws-sdk-go-v2 (+credentials, +service/s3, +smithy-go), testcontainers-go (integration tests). Custom migration runner in `cli/internal/sqlite/` (no golang-migrate). |
-| Web UI | Next.js App Router, React, sandboxed iframes for slide HTML rendering |
+| Web UI | Next.js App Router, React, react-resizable-panels, shadcn/ui (New York), lucide-react, date-fns, sandboxed iframes for slide HTML rendering |
 | Web hosting | AWS Amplify (SSR via Lambda, us-east-1) |
 | DB (cloud) | Neon Postgres (provider-portable). @neondatabase/serverless HTTP driver for Lambda |
 | DB (local) | SQLite via modernc.org/sqlite (pure Go, no CGO) |
@@ -304,11 +304,63 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - 16:9 slide viewer with sandboxed iframes, `transform: scale()`, white background
 - Virtual date slides injected at render time
 - Filter by project
-- Intra-day drag-and-drop reorder (cross-date deferred to post-MVP)
-- View notes (markdown), figures, data files with sizes and download
-- Edit project_id, notes, git_remote_url, git_hash
+- Read-only chronological navigation (drag-and-drop reorder is still deferred)
+- View notes (markdown), figures, and data files with sizes plus open/download actions
+- Edit notes from the detail panel
 - Soft delete + trash view with restore
 - 4-layer sync polling via `useSyncManager()` hook
+
+### Web UI Architecture
+
+3-panel resizable layout using `react-resizable-panels` (v4 API, wrapped with v2-style `direction` prop in `resizable.tsx`):
+- `spreadsheet-viewer.tsx` — shell/layout (top-level orchestrator, owns all hook calls and UI state)
+- `slide-navigation.tsx` — left panel (slide list grouped by date, strip/grid views)
+- `slide-viewer.tsx` — center panel (scaled iframe preview of selected slide)
+- `slide-details.tsx` — right panel (tabbed: notes editor, figures via AssetCard, data files via AssetCard)
+- `slide-metadata-bar.tsx` — metadata strip above viewer (date, project, git info, more menu)
+- `collapsed-details-strip.tsx` — icon strip when details panel is hidden
+- `project-picker.tsx` — project filter popover (uses cmdk for search/multi-select)
+- `slide-date-picker.tsx` — calendar date picker (react-day-picker v9)
+- `slide-thumbnail.tsx` — thumbnail card in navigation panel
+- `asset-card.tsx` + `asset-preview-dialog.tsx` — file/figure cards with preview dialog
+- `settings-overlay.tsx` — settings dialog (placeholder, to be built out)
+- `theme-provider.tsx` — wraps next-themes ThemeProvider
+- `scaled-slide-frame.tsx` — 16:9 sandboxed iframe with `transform: scale()` (no figure URL resolution — renders htmlContent directly)
+
+### Web UI Hooks
+
+- `useSlides` (`hooks/use-slides.ts`) — data fetching, CRUD mutations, cursor-based pagination, optimistic updates
+- `useSyncManager` (`hooks/use-sync-manager.ts`) — 4-layer smart polling (manual, interaction, visibility, idle)
+
+### Web UI Libraries
+
+- **shadcn/ui** (New York style) — UI primitives in `components/ui/`. OKLCH color system, Tailwind v4.
+- **radix-ui** (unified package) — requires `web/.npmrc` with `public-hoist-pattern[]=@radix-ui/*` for pnpm to hoist sub-packages that shadcn/ui components import directly.
+- **react-resizable-panels** v4 — 3-panel layout. v4 API uses `Group`/`Panel`/`Separator` (not v2's `PanelGroup`/`Panel`/`PanelResizeHandle`). `resizable.tsx` provides v2-compatible `direction` prop wrapper. **Size props must use string percentages** (e.g., `"18%"`), not bare numbers (which are pixels in v4).
+- **next-themes** — dark mode support via `ThemeProvider` + `useTheme()`
+- **cmdk** — command palette for ProjectPicker search/multi-select
+- **react-day-picker** v9 — calendar in SlideDatePicker
+- **lucide-react** — icons
+- **date-fns** — date formatting
+
+### Web UI Test Strategy
+
+- Presentation components (`components/*.tsx`, `app/page.tsx`) and shadcn primitives (`components/ui/**`) are excluded from Vitest unit coverage thresholds.
+- These components are primarily validated via **Playwright e2e** tests (`tests/e2e/`), with focused component unit tests added for high-value state transitions.
+- Playwright e2e tests use `page.route()` interception for API mocking — no real backend or database needed.
+
+### Visual Regression Tests
+
+- `tests/e2e/ui-visual.e2e.spec.ts` — 8 tests covering: initial load, slide selection, panel toggles, tab switching, dark mode, settings overlay, empty state, grid view. Each test also asserts zero unexpected console errors.
+- Baselines stored in `tests/e2e/__screenshots__/ui-visual.e2e.spec.ts/*.png` (11 PNGs, committed to git).
+- `snapshotPathTemplate` in `playwright.config.ts` removes platform from paths: `{testDir}/__screenshots__/{testFilePath}/{arg}{ext}`.
+- `maxDiffPixelRatio: 0.02` on all `toHaveScreenshot()` calls to tolerate Next.js dev badge.
+- Run: `pnpm test:e2e:visual` (compare), `pnpm test:e2e:visual -- --update-snapshots` (regenerate).
+- Current baselines are macOS/darwin. Linux CI baselines deferred (see ISSUES.md f7g8h9).
+
+### Deployment
+
+- `amplify.yml` in `web/` configures AWS Amplify build/deploy (SSR via Lambda, us-east-1).
 
 ### API Routes
 - `GET /api/slides` — list (paginated, filtered)

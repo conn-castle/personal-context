@@ -120,71 +120,104 @@ Notes: Uses `//go:build integration` tag. Bucket-per-test isolation.
 
 ## Next.js Web UI (`web/`)
 
+Package manager: **pnpm** (lockfile: `web/pnpm-lock.yaml`).
+
 - Install dependencies
 ```bash
-npm install
+pnpm install
 ```
 Run from: `web/`
 
 - Run dev server
 ```bash
-npm run dev
+pnpm dev
 ```
 Run from: `web/`
 
 - Build for production
 ```bash
-npm run build
+pnpm build
 ```
 Run from: `web/`
 
 - Run tests
 ```bash
-npm test
+pnpm test
 ```
 Run from: `web/`
 
 - Run tests with coverage
 ```bash
-npm run test:coverage
+pnpm test:coverage
 ```
 Run from: `web/`
 Notes: CI enforces >95% coverage.
 
 - Run linter
 ```bash
-npm run lint
+pnpm lint
 ```
 Run from: `web/`
 
 - Run typecheck
 ```bash
-npm run typecheck
+pnpm typecheck
 ```
 Run from: `web/`
 
 - Run Playwright smoke e2e tests
 ```bash
-npm run test:e2e:smoke
+pnpm test:e2e:smoke
 ```
 Run from: `web/`
-Prerequisites: `npx playwright install` for browser binaries.
+Prerequisites: `pnpm exec playwright install` for browser binaries.
+Notes: Verifies the SlideBrowser "Personal Context" heading renders on the home page.
+
+- Run Playwright Slide Browser e2e tests
+```bash
+pnpm test:e2e:slide-browser
+```
+Run from: `web/`
+Prerequisites: `pnpm exec playwright install` for browser binaries.
+Notes: Uses `page.route()` API interception — no real backend needed. Tests browse, filter, detail, edit, delete/restore, sync version, error states, pagination.
 
 - Run Playwright e2e for standalone CLI slide preview flow
 ```bash
-npm run test:e2e:cli-slide
+pnpm test:e2e:cli-slide
 ```
 Run from: `web/`
-Prerequisites: Go toolchain and `npx playwright install` for browser binaries.
+Prerequisites: Go toolchain and `pnpm exec playwright install` for browser binaries.
 Notes: Executes `cli/scripts/verify_phase3_manual.sh --no-open`, then loads the generated `slide.html` in Chromium.
 
 - Run Playwright e2e for the generalized local demo artifact
 ```bash
-npm run test:e2e:cli-demo
+pnpm test:e2e:cli-demo
 ```
 Run from: `web/`
-Prerequisites: Go toolchain and `npx playwright install` for browser binaries.
+Prerequisites: Go toolchain and `pnpm exec playwright install` for browser binaries.
 Notes: Executes `cli/scripts/verify_local_demo.sh --no-open`, then loads the generated summary page in Chromium.
+
+## Makefile (repo root)
+
+A root Makefile provides common targets for both workspaces. Run `make` or `make help` for a full list.
+
+- Run all pre-commit checks (schema + lint + typecheck + test + build)
+```bash
+make check
+```
+Run from: repo root
+
+- Run all tests (CLI + Web)
+```bash
+make test
+```
+Run from: repo root
+
+- Start Next.js dev server
+```bash
+make dev
+```
+Run from: repo root
 
 ## Repository root
 
