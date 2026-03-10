@@ -133,9 +133,19 @@ export async function GET(
         s.project_id,
         s.updated_at,
         s.deleted_at,
-        (SELECT COUNT(*)::int FROM slide_figures f WHERE f.slide_id = s.id) AS figure_count,
-        (SELECT COUNT(*)::int FROM slide_data_files d WHERE d.slide_id = s.id) AS data_file_count
+        COALESCE(fc.figure_count, 0) AS figure_count,
+        COALESCE(dc.data_file_count, 0) AS data_file_count
       FROM slides s
+      LEFT JOIN (
+        SELECT slide_id, COUNT(*)::int AS figure_count
+        FROM slide_figures
+        GROUP BY slide_id
+      ) fc ON fc.slide_id = s.id
+      LEFT JOIN (
+        SELECT slide_id, COUNT(*)::int AS data_file_count
+        FROM slide_data_files
+        GROUP BY slide_id
+      ) dc ON dc.slide_id = s.id
       ${whereClause}
       ORDER BY s.date DESC, s.day_order ASC, s.id ASC
       LIMIT $${paramIndex}

@@ -37,12 +37,22 @@ export async function GET(
     const serverNow = serverNowResult[0].server_now as string;
 
     const items = (await sql.query(
-      `SELECT id, date, day_order, project_id, updated_at, deleted_at,
-           (SELECT COUNT(*)::int FROM slide_figures WHERE slide_id = s.id) as figure_count,
-           (SELECT COUNT(*)::int FROM slide_data_files WHERE slide_id = s.id) as data_file_count
+      `SELECT s.id, s.date, s.day_order, s.project_id, s.updated_at, s.deleted_at,
+           COALESCE(fc.figure_count, 0) AS figure_count,
+           COALESCE(dc.data_file_count, 0) AS data_file_count
          FROM slides s
-         WHERE updated_at >= $1 AND updated_at <= $2
-         ORDER BY date DESC, day_order ASC, id ASC`,
+         LEFT JOIN (
+           SELECT slide_id, COUNT(*)::int AS figure_count
+           FROM slide_figures
+           GROUP BY slide_id
+         ) fc ON fc.slide_id = s.id
+         LEFT JOIN (
+           SELECT slide_id, COUNT(*)::int AS data_file_count
+           FROM slide_data_files
+           GROUP BY slide_id
+         ) dc ON dc.slide_id = s.id
+         WHERE s.updated_at >= $1 AND s.updated_at <= $2
+         ORDER BY s.date DESC, s.day_order ASC, s.id ASC`,
       [since, serverNow]
     )) as Record<string, unknown>[];
 
