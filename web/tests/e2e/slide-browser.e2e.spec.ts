@@ -1,86 +1,123 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
-// Mock data
+// Dynamic date helpers — ensures tests are date-independent
+// ---------------------------------------------------------------------------
+
+function padTwo(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** Returns "YYYYMMDD" for use in slide IDs. */
+function dateId(d: Date): string {
+  return `${d.getFullYear()}${padTwo(d.getMonth() + 1)}${padTwo(d.getDate())}`;
+}
+
+/** Returns "YYYY-MM-DD" for use in date fields. */
+function dateField(d: Date): string {
+  return `${d.getFullYear()}-${padTwo(d.getMonth() + 1)}-${padTwo(d.getDate())}`;
+}
+
+/** Returns an ISO timestamp string with the given time suffix. */
+function dateIso(d: Date, time: string): string {
+  return `${dateField(d)}T${time}`;
+}
+
+const _now = new Date();
+_now.setHours(12, 0, 0, 0);
+const _yesterday = new Date(_now);
+_yesterday.setDate(_yesterday.getDate() - 1);
+const _twoDaysAgo = new Date(_now);
+_twoDaysAgo.setDate(_twoDaysAgo.getDate() - 2);
+
+const TODAY_ID = dateId(_now);
+const TODAY_DATE = dateField(_now);
+const YESTERDAY_ID = dateId(_yesterday);
+const YESTERDAY_DATE = dateField(_yesterday);
+const TWO_DAYS_AGO_ID = dateId(_twoDaysAgo);
+const TWO_DAYS_AGO_DATE = dateField(_twoDaysAgo);
+
+// ---------------------------------------------------------------------------
+// Mock data (dates computed relative to today)
 // ---------------------------------------------------------------------------
 
 const SLIDE_A = {
-  id: "20260309-aabbccdd",
-  date: "2026-03-09",
+  id: `${TODAY_ID}-aabbccdd`,
+  date: TODAY_DATE,
   day_order: "a0",
   project_id: "org/alpha",
-  updated_at: "2026-03-09T10:00:00Z",
+  updated_at: dateIso(_now, "10:00:00Z"),
   deleted_at: null,
   figure_count: 2,
   data_file_count: 1,
 };
 
 const SLIDE_B = {
-  id: "20260309-11223344",
-  date: "2026-03-09",
+  id: `${TODAY_ID}-11223344`,
+  date: TODAY_DATE,
   day_order: "a1",
   project_id: null,
-  updated_at: "2026-03-09T09:00:00Z",
+  updated_at: dateIso(_now, "09:00:00Z"),
   deleted_at: null,
   figure_count: 0,
   data_file_count: 0,
 };
 
 const SLIDE_C = {
-  id: "20260308-55667788",
-  date: "2026-03-08",
+  id: `${YESTERDAY_ID}-55667788`,
+  date: YESTERDAY_DATE,
   day_order: "a0",
   project_id: "org/beta",
-  updated_at: "2026-03-08T12:00:00Z",
+  updated_at: dateIso(_yesterday, "12:00:00Z"),
   deleted_at: null,
   figure_count: 1,
   data_file_count: 0,
 };
 
 const SLIDE_A_DETAIL = {
-  id: "20260309-aabbccdd",
-  date: "2026-03-09",
+  id: `${TODAY_ID}-aabbccdd`,
+  date: TODAY_DATE,
   day_order: "a0",
   html_content: "<h1>Slide A</h1><p>Some content here</p>",
   notes: "# Important\n\nThese are **bold** notes.",
   project_id: "org/alpha",
   git_remote_url: "https://github.com/org/repo",
   git_hash: "abc1234def5678",
-  created_at: "2026-03-09T08:00:00Z",
-  updated_at: "2026-03-09T10:00:00Z",
+  created_at: dateIso(_now, "08:00:00Z"),
+  updated_at: dateIso(_now, "10:00:00Z"),
   deleted_at: null,
   figures: [
-    { filename: "plot1.png", s3_key: "slides/20260309-aabbccdd/figures/plot1.png", size: 45056, alt_text: "Plot 1" },
-    { filename: "chart.svg", s3_key: "slides/20260309-aabbccdd/figures/chart.svg", size: 12288 },
+    { filename: "plot1.png", s3_key: `slides/${TODAY_ID}-aabbccdd/figures/plot1.png`, size: 45056, alt_text: "Plot 1" },
+    { filename: "chart.svg", s3_key: `slides/${TODAY_ID}-aabbccdd/figures/chart.svg`, size: 12288 },
   ],
   data_files: [
-    { filename: "results.csv", s3_key: "slides/20260309-aabbccdd/data/results.csv", size: 2048, description: "Experiment results" },
+    { filename: "results.csv", s3_key: `slides/${TODAY_ID}-aabbccdd/data/results.csv`, size: 2048, description: "Experiment results" },
   ],
 };
 
 const DELETED_SLIDE = {
-  id: "20260307-deadbeef",
-  date: "2026-03-07",
+  id: `${TWO_DAYS_AGO_ID}-deadbeef`,
+  date: TWO_DAYS_AGO_DATE,
   day_order: "a0",
   project_id: null,
-  updated_at: "2026-03-07T12:00:00Z",
-  deleted_at: "2026-03-07T14:00:00Z",
+  updated_at: dateIso(_twoDaysAgo, "12:00:00Z"),
+  deleted_at: dateIso(_twoDaysAgo, "14:00:00Z"),
   figure_count: 0,
   data_file_count: 0,
 };
 
 const DELETED_SLIDE_DETAIL = {
-  id: "20260307-deadbeef",
-  date: "2026-03-07",
+  id: `${TWO_DAYS_AGO_ID}-deadbeef`,
+  date: TWO_DAYS_AGO_DATE,
   day_order: "a0",
   html_content: "<p>Deleted slide content</p>",
   notes: null,
   project_id: null,
   git_remote_url: null,
   git_hash: null,
-  created_at: "2026-03-07T08:00:00Z",
-  updated_at: "2026-03-07T12:00:00Z",
-  deleted_at: "2026-03-07T14:00:00Z",
+  created_at: dateIso(_twoDaysAgo, "08:00:00Z"),
+  updated_at: dateIso(_twoDaysAgo, "12:00:00Z"),
+  deleted_at: dateIso(_twoDaysAgo, "14:00:00Z"),
   figures: [],
   data_files: [],
 };
@@ -160,7 +197,7 @@ async function setupMockApi(page: Page, overrides?: {
   });
 
   // Mock /api/slides/[id] (detail)
-  await page.route("**/api/slides/20260309-aabbccdd", async (route: Route) => {
+  await page.route(`**/api/slides/${TODAY_ID}-aabbccdd`, async (route: Route) => {
     const method = route.request().method();
     calls.push({ method, url: route.request().url() });
 
@@ -186,9 +223,9 @@ async function setupMockApi(page: Page, overrides?: {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          id: "20260309-aabbccdd",
-          deleted_at: "2026-03-09T12:00:00Z",
-          updated_at: "2026-03-09T12:00:00Z",
+          id: `${TODAY_ID}-aabbccdd`,
+          deleted_at: dateIso(_now, "12:00:00Z"),
+          updated_at: dateIso(_now, "12:00:00Z"),
           sync_version: 3,
         }),
       });
@@ -196,7 +233,7 @@ async function setupMockApi(page: Page, overrides?: {
   });
 
   // Mock /api/slides/[id] for deleted slide
-  await page.route("**/api/slides/20260307-deadbeef", async (route: Route) => {
+  await page.route(`**/api/slides/${TWO_DAYS_AGO_ID}-deadbeef`, async (route: Route) => {
     const method = route.request().method();
     calls.push({ method, url: route.request().url() });
 
@@ -210,15 +247,15 @@ async function setupMockApi(page: Page, overrides?: {
   });
 
   // Mock /api/slides/[id]/restore
-  await page.route("**/api/slides/20260307-deadbeef/restore", async (route: Route) => {
+  await page.route(`**/api/slides/${TWO_DAYS_AGO_ID}-deadbeef/restore`, async (route: Route) => {
     calls.push({ method: "POST", url: route.request().url() });
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        id: "20260307-deadbeef",
+        id: `${TWO_DAYS_AGO_ID}-deadbeef`,
         deleted_at: null,
-        updated_at: "2026-03-09T12:00:00Z",
+        updated_at: dateIso(_now, "12:00:00Z"),
         sync_version: 4,
       }),
     });
@@ -245,7 +282,7 @@ async function setupMockApi(page: Page, overrides?: {
       body: JSON.stringify(
         overrides?.syncVersion ?? {
           version: 0,
-          updated_at: "2026-03-09T10:00:00Z",
+          updated_at: dateIso(_now, "10:00:00Z"),
         }
       ),
     });
@@ -259,7 +296,7 @@ async function setupMockApi(page: Page, overrides?: {
       contentType: "application/json",
       body: JSON.stringify({
         items: [],
-        server_now: "2026-03-09T10:00:00Z",
+        server_now: dateIso(_now, "10:00:00Z"),
       }),
     });
   });
@@ -281,9 +318,9 @@ test.describe("Slide Browser", () => {
     // App title visible
     await expect(page.getByRole("heading", { name: "Personal Context" })).toBeVisible();
 
-    // Date headers visible (formatRelativeDate output depends on current date)
-    await expect(page.getByText(/Today|Yesterday|Mar 9/)).toBeVisible();
-    await expect(page.getByText(/Today|Yesterday|Mar 8/)).toBeVisible();
+    // Date headers visible (mock dates are today/yesterday, so labels are stable)
+    await expect(page.getByText("Today")).toBeVisible();
+    await expect(page.getByText("Yesterday")).toBeVisible();
 
     // Slide buttons visible (last 8 chars of IDs)
     await expect(page.getByText("aabbccdd")).toBeVisible();
@@ -343,8 +380,8 @@ test.describe("Slide Browser", () => {
     await expect(previewFrame.getByRole("heading", { name: "Slide A" })).toBeVisible();
     await expect(previewFrame.getByText("Some content here")).toBeVisible();
 
-    // Detail panel: metadata (date format depends on current date)
-    await expect(page.getByText(/Today|Yesterday|Mar 9/).last()).toBeVisible();
+    // Detail panel: metadata (slide A is today)
+    await expect(page.getByText("Today").last()).toBeVisible();
     await expect(page.getByText("org/alpha").last()).toBeVisible();
     // Git hash (first 7 chars)
     await expect(page.getByText("abc1234")).toBeVisible();
@@ -465,7 +502,7 @@ test.describe("Slide Browser", () => {
         contentType: "application/json",
         body: JSON.stringify({
           version: 0,
-          updated_at: "2026-03-09T10:00:00Z",
+          updated_at: dateIso(_now, "10:00:00Z"),
         }),
       });
     });
@@ -475,7 +512,7 @@ test.describe("Slide Browser", () => {
         contentType: "application/json",
         body: JSON.stringify({
           items: [],
-          server_now: "2026-03-09T10:00:00Z",
+          server_now: dateIso(_now, "10:00:00Z"),
         }),
       });
     });
@@ -507,7 +544,7 @@ test.describe("Slide Browser", () => {
   }) => {
     // TODO: unskip when version badge UI is implemented
     await setupMockApi(page, {
-      syncVersion: { version: 99, updated_at: "2026-03-09T12:00:00Z" },
+      syncVersion: { version: 99, updated_at: dateIso(_now, "12:00:00Z") },
     });
     await page.goto("/");
 
@@ -562,7 +599,7 @@ test.describe("Slide Browser", () => {
         contentType: "application/json",
         body: JSON.stringify({
           version: 0,
-          updated_at: "2026-03-09T10:00:00Z",
+          updated_at: dateIso(_now, "10:00:00Z"),
         }),
       });
     });
@@ -572,7 +609,7 @@ test.describe("Slide Browser", () => {
         contentType: "application/json",
         body: JSON.stringify({
           items: [],
-          server_now: "2026-03-09T10:00:00Z",
+          server_now: dateIso(_now, "10:00:00Z"),
         }),
       });
     });
