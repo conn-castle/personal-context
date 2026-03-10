@@ -201,6 +201,21 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     errorSpy.mockRestore();
   });
 
+  it("defaults sync_version to 0 when sync_version table is empty", async () => {
+    mockSql.mockResolvedValueOnce([makeSlideRow({ notes: "updated" })]);
+    // sync_version query returns empty
+    mockSql.mockResolvedValueOnce([]);
+    mockSql.mockResolvedValueOnce([]);
+    mockSql.mockResolvedValueOnce([]);
+
+    const res = await handlePatchSlide(slideId, { notes: "updated" });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.sync_version).toBe(0);
+    expect(mockBumpS3Version).toHaveBeenCalledWith(0);
+  });
+
   it("returns 500 on database error", async () => {
     mockSql.mockRejectedValueOnce(new Error("connection refused"));
 
