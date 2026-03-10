@@ -18,22 +18,29 @@ import {
 import { useState, useRef, useEffect } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { AssetCard } from "@/components/asset-card";
+import { MarkdownRenderer } from "@/components/markdown-renderer";
 
 interface SlideDetailsProps {
   slide: SlideDetail | null;
   activeTab?: string;
   onTabChange?: (tab: string) => void;
   onUpdateSlide?: (id: string, body: Record<string, unknown>) => void;
+  /** Whether the slide list is empty (no slides in the project). */
+  isEmpty?: boolean;
 }
 
 export function SlideDetails(props: SlideDetailsProps) {
-  const { slide, activeTab, onTabChange, onUpdateSlide } = props;
+  const { slide, activeTab, onTabChange, onUpdateSlide, isEmpty } = props;
   if (!slide) {
     return (
       <div className="h-full flex items-center justify-center bg-card text-card-foreground p-4">
         <div className="text-center text-muted-foreground">
           <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
-          <p className="text-sm">No slide selected</p>
+          <p className="text-sm">
+            {isEmpty
+              ? "No slides in this project"
+              : "Loading slide details..."}
+          </p>
         </div>
       </div>
     );
@@ -300,192 +307,3 @@ function NotesEditor({
   );
 }
 
-/** Simple markdown renderer for notes. */
-function MarkdownRenderer({ content }: { content: string }) {
-  const lines = content.split("\n");
-  const elements: React.ReactNode[] = [];
-  let inCodeBlock = false;
-  let codeContent = "";
-  let inTable = false;
-  let tableRows: string[][] = [];
-  let listItems: string[] = [];
-  let inList = false;
-  let isOrderedList = false;
-
-  const flushList = () => {
-    if (listItems.length > 0) {
-      const Tag = isOrderedList ? "ol" : "ul";
-      const listClass = isOrderedList ? "list-decimal" : "list-disc";
-      elements.push(
-        <Tag key={elements.length} className={`${listClass} list-inside space-y-1 my-2`}>
-          {listItems.map((item, i) => (
-            <li
-              key={i}
-              className="text-sm"
-              dangerouslySetInnerHTML={{ __html: parseInline(item) }}
-            />
-          ))}
-        </Tag>
-      );
-      listItems = [];
-    }
-    inList = false;
-  };
-
-  const flushTable = () => {
-    if (tableRows.length > 0) {
-      elements.push(
-        <div key={elements.length} className="overflow-x-auto my-3">
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr>
-                {tableRows[0]?.map((cell, i) => (
-                  <th
-                    key={i}
-                    className="border border-border px-3 py-1.5 bg-muted text-left font-medium"
-                  >
-                    {cell.trim()}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tableRows.slice(2).map((row, i) => (
-                <tr key={i}>
-                  {row.map((cell, j) => (
-                    <td key={j} className="border border-border px-3 py-1.5">
-                      {cell.trim()}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-      tableRows = [];
-    }
-    inTable = false;
-  };
-
-  const escapeHtml = (text: string): string => {
-    return text
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  };
-
-  const parseInline = (text: string): string => {
-    return escapeHtml(text)
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(
-        /`(.+?)`/g,
-        '<code class="bg-muted px-1 py-0.5 rounded text-xs font-mono">$1</code>'
-      );
-  };
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // Code blocks
-    if (line.startsWith("```")) {
-      if (!inCodeBlock) {
-        flushList();
-        flushTable();
-        inCodeBlock = true;
-        codeContent = "";
-      } else {
-        elements.push(
-          <pre
-            key={elements.length}
-            className="bg-muted rounded-md p-3 overflow-x-auto my-3"
-          >
-            <code className="text-xs font-mono">{codeContent.trim()}</code>
-          </pre>
-        );
-        inCodeBlock = false;
-      }
-      continue;
-    }
-
-    if (inCodeBlock) {
-      codeContent += line + "\n";
-      continue;
-    }
-
-    // Tables
-    if (line.includes("|") && line.trim().startsWith("|")) {
-      flushList();
-      inTable = true;
-      const cells = line.split("|").filter((c) => c.trim() !== "");
-      tableRows.push(cells);
-      continue;
-    } else if (inTable && !line.includes("|")) {
-      flushTable();
-    }
-
-    // Empty line
-    if (line.trim() === "") {
-      flushList();
-      continue;
-    }
-
-    // Headings
-    if (line.startsWith("### ")) {
-      flushList();
-      flushTable();
-      elements.push(
-        <h3 key={elements.length} className="font-semibold text-base mt-4 mb-2">
-          {line.slice(4)}
-        </h3>
-      );
-      continue;
-    }
-
-    if (line.startsWith("## ")) {
-      flushList();
-      flushTable();
-      elements.push(
-        <h2 key={elements.length} className="font-semibold text-lg mt-4 mb-2">
-          {line.slice(3)}
-        </h2>
-      );
-      continue;
-    }
-
-    // List items
-    if (line.match(/^[-*]\s/)) {
-      if (inList && isOrderedList) flushList();
-      inList = true;
-      isOrderedList = false;
-      listItems.push(line.slice(2));
-      continue;
-    }
-
-    if (line.match(/^\d+\.\s/)) {
-      if (inList && !isOrderedList) flushList();
-      inList = true;
-      isOrderedList = true;
-      listItems.push(line.replace(/^\d+\.\s/, ""));
-      continue;
-    }
-
-    // Regular paragraph
-    flushList();
-    flushTable();
-    elements.push(
-      <p
-        key={elements.length}
-        className="text-sm my-2"
-        dangerouslySetInnerHTML={{ __html: parseInline(line) }}
-      />
-    );
-  }
-
-  flushList();
-  flushTable();
-
-  return <>{elements}</>;
-}

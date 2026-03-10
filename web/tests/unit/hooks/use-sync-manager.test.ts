@@ -104,6 +104,7 @@ describe("useSyncManager", () => {
             id: "20260309-aabbccdd",
             date: "2026-03-09",
             day_order: "a0",
+            html_content: "<p>Test content</p>",
             project_id: null,
             updated_at: "2026-03-09T10:00:00Z",
             deleted_at: null,

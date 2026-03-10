@@ -6,6 +6,7 @@ export type SlideSummary = {
   id: string;
   date: string;
   day_order: string;
+  html_content: string;
   project_id: string | null;
   updated_at: string;
   deleted_at: string | null;

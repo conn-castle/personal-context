@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import type { SlideSummary } from "@/lib/types";
+import { ScaledSlideFrame } from "@/components/scaled-slide-frame";
 import { Image as ImageIcon, FileDown } from "lucide-react";
 
 interface SlideThumbnailProps {
@@ -29,17 +30,11 @@ export function SlideThumbnail({
     >
       {/* 16:9 aspect ratio container */}
       <div className="relative aspect-video bg-slide-bg rounded-md overflow-hidden">
-        {/* Slide ID and date placeholder (summary doesn't include html_content) */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center p-2 pointer-events-none">
-          <span className="text-[10px] font-mono text-muted-foreground/70 truncate max-w-full">
-            {slide.id}
-          </span>
-          {slide.project_id && (
-            <span className="text-[9px] text-primary/60 truncate max-w-full mt-0.5">
-              {slide.project_id}
-            </span>
-          )}
-        </div>
+        {/* Slide preview using ScaledSlideFrame */}
+        <ScaledSlideFrame
+          htmlContent={slide.html_content}
+          className="pointer-events-none"
+        />
 
         {/* Indicators */}
         <div className="absolute bottom-1 right-1 flex gap-1">

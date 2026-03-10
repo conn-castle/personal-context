@@ -106,6 +106,13 @@ export function SpreadsheetViewer() {
     );
   }, [slides, selectedProjects, projects.length]);
 
+  // Auto-select the most recent slide when slides load and none is selected
+  useEffect(() => {
+    if (filteredSlides.length > 0 && !selectedSlide) {
+      void selectSlide(filteredSlides[0].id);
+    }
+  }, [filteredSlides, selectedSlide, selectSlide]);
+
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -490,6 +497,7 @@ export function SpreadsheetViewer() {
         {/* Main content area with resizable panels */}
         <div className="flex-1 min-h-0">
           <ResizablePanelGroup
+            id="main-panel-group"
             key={`panels-${panelVisibility.navigation}-${panelVisibility.details}`}
             direction="horizontal"
             className="h-full"
@@ -498,6 +506,7 @@ export function SpreadsheetViewer() {
             {panelVisibility.navigation && (
               <>
                 <ResizablePanel
+                  id="nav-panel"
                   defaultSize="18%"
                   minSize="12%"
                   maxSize="50%"
@@ -519,6 +528,7 @@ export function SpreadsheetViewer() {
 
             {/* Main slide viewer with metadata bar */}
             <ResizablePanel
+              id="viewer-panel"
               defaultSize={
                 panelVisibility.navigation && panelVisibility.details
                   ? "54%"
@@ -536,10 +546,11 @@ export function SpreadsheetViewer() {
                     slide={selectedSlide}
                     onDelete={handleDeleteSlide}
                     onRestore={handleRestoreSlide}
+                    isEmpty={slides.length === 0}
                   />
                 )}
                 <div className="flex-1 min-h-0">
-                  <SlideViewer slide={selectedSlide} />
+                  <SlideViewer slide={selectedSlide} isEmpty={slides.length === 0} />
                 </div>
               </div>
             </ResizablePanel>
@@ -549,6 +560,7 @@ export function SpreadsheetViewer() {
               <>
                 <ResizableHandle withHandle />
                 <ResizablePanel
+                  id="details-panel"
                   defaultSize="28%"
                   minSize="20%"
                   maxSize="45%"
@@ -558,6 +570,7 @@ export function SpreadsheetViewer() {
                     activeTab={detailsActiveTab}
                     onTabChange={setDetailsActiveTab}
                     onUpdateSlide={handleUpdateSlide}
+                    isEmpty={slides.length === 0}
                   />
                 </ResizablePanel>
               </>

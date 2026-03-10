@@ -1,0 +1,6 @@
+/* Applied during visual regression screenshots only (via Playwright stylePath).
+   Hides the Next.js dev indicator badge. This does NOT silence dev tools —
+   assertNoNextJsErrors still inspects the shadow DOM for real errors. */
+nextjs-portal {
+  display: none !important;
+}

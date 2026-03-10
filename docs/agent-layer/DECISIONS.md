@@ -201,3 +201,13 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: Replaced hand-built UI components with v0.dev reference design components. Adapted `Slide` type to `SlideSummary`/`SlideDetail` split. All hook orchestration lives in `SpreadsheetViewer`, not `page.tsx`. `resizable.tsx` wraps react-resizable-panels v4 API with v2-style `direction` prop for shadcn compatibility.
     Reason: User required visual parity with v0.dev reference. v0.dev used a single `Slide` type with mock data; our real backend uses `SlideSummary` (list) and `SlideDetail` (selected). The v4 API renames `PanelGroup`→`Group`, `PanelResizeHandle`→`Separator`, `direction`→`orientation`.
     Tradeoffs: v0.dev ScaledSlideFrame lost figure URL resolution (moved to iframe rendering context). NotesEditor doesn't key on slideId (editing state may persist across slide changes — tracked in ISSUES.md).
+
+- Decision 2026-03-10 x3y4z5a: html_content included in SlideSummary for thumbnail rendering
+    Decision: Added `html_content` to `SlideSummary` and the `GET /api/slides` + `GET /api/sync/changes` responses. Thumbnails use the same `ScaledSlideFrame` component as the main viewer.
+    Reason: v0.dev reference renders thumbnails using `ScaledSlideFrame` with actual HTML content. With 20 slides per page, the additional payload is manageable (~1MB worst case per page).
+    Tradeoffs: Larger API responses. If slide HTML grows very large (100KB+), consider a separate thumbnail content endpoint or server-side thumbnail generation.
+
+- Decision 2026-03-10 y5z6a7a: react-markdown + remark-gfm + mermaid for notes rendering
+    Decision: Replaced custom inline MarkdownRenderer with `react-markdown` + `remark-gfm` + `mermaid` library. Mermaid code blocks are detected and rendered as SVG diagrams client-side.
+    Reason: Custom renderer only supported basic markdown (headings, bold, code, lists, tables). Full GFM support (strikethrough, task lists, autolinks) and mermaid diagrams were requested.
+    Tradeoffs: Three new dependencies (~220 packages total from mermaid). Mermaid is a large library; consider lazy loading if bundle size becomes a concern.

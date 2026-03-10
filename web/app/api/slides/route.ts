@@ -130,6 +130,7 @@ export async function GET(
         s.id,
         s.date,
         s.day_order,
+        s.html_content,
         s.project_id,
         s.updated_at,
         s.deleted_at,

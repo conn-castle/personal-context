@@ -181,6 +181,14 @@ Run from: `web/`
 Prerequisites: `pnpm exec playwright install` for browser binaries.
 Notes: Uses `page.route()` API interception — no real backend needed. Tests browse, filter, detail, edit, delete/restore, sync version, error states, pagination.
 
+- Run Playwright markdown rendering e2e tests
+```bash
+pnpm test:e2e:markdown
+```
+Run from: `web/`
+Prerequisites: `pnpm exec playwright install` for browser binaries.
+Notes: Verifies all markdown elements (H1–H6, bold, italic, strikethrough, code, lists, tables, task lists, blockquotes, links, mermaid diagrams) render correctly in the Notes panel. Includes visual snapshots.
+
 - Run Playwright e2e for standalone CLI slide preview flow
 ```bash
 pnpm test:e2e:cli-slide

@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-03-10 m3n4o5a: updateSlide does not propagate html_content back to SlideSummary list
+    Priority: Low. Area: web/hooks/use-slides.ts
+    Description: When a slide is updated via PATCH, `updateSlide` copies `project_id`, `updated_at`, and `deleted_at` from the response into the local SlideSummary list but not `html_content`. If PATCH is later extended to accept `html_content`, thumbnails will show stale content until a full refresh.
+    Next step: When PATCH is extended to accept `html_content`, add `html_content` to the fields copied in the `setSlides` updater.
+
 - Issue 2026-03-10 k1l2m3a: handleSyncData discards incremental sync payload
     Priority: Medium. Area: web/components/spreadsheet-viewer.tsx
     Description: `handleSyncData` callback ignores the `SyncChangesResponse` data from `useSyncManager` and does a full page-1 refetch via `refreshSlides()`. This wastes the incremental `GET /api/sync/changes` API call and resets pagination on every sync.

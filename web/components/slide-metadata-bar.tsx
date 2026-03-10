@@ -32,6 +32,8 @@ interface SlideMetadataBarProps {
   slide: SlideDetail | null;
   onDelete?: (id: string) => void;
   onRestore?: (id: string) => void;
+  /** Whether the slide list is empty (no slides in the project). */
+  isEmpty?: boolean;
 }
 
 function DateDisplay({ date }: { date: string }) {
@@ -44,7 +46,7 @@ function DateDisplay({ date }: { date: string }) {
   return <>{label}</>;
 }
 
-export function SlideMetadataBar({ slide, onDelete, onRestore }: SlideMetadataBarProps) {
+export function SlideMetadataBar({ slide, onDelete, onRestore, isEmpty }: SlideMetadataBarProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
@@ -77,7 +79,7 @@ export function SlideMetadataBar({ slide, onDelete, onRestore }: SlideMetadataBa
     return (
       <div className="h-10 border-b border-border bg-card flex items-center justify-center">
         <span className="text-sm text-muted-foreground">
-          No slide selected
+          {isEmpty ? "No slides in this project" : "Loading..."}
         </span>
       </div>
     );
