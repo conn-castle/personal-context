@@ -1,0 +1,22 @@
+version: 1
+applications:
+  - appRoot: web
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - npm i -g pnpm@10.28.2
+            - pnpm config set store-dir .pnpm-store
+            - pnpm install --frozen-lockfile
+        build:
+          commands:
+            - pnpm build
+      artifacts:
+        baseDirectory: .next
+        files:
+          - "**/*"
+      cache:
+        paths:
+          - .pnpm-store/**/*
+          - node_modules/**/*
+          - .next/cache/**/*

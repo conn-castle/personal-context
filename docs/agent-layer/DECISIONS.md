@@ -113,7 +113,7 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: Requires per-context resolution logic; trivial (URL rewriting in iframe, validation in CLI).
 
 - Decision 2026-03-05 v2w3x4: Web workspace uses Vitest for unit coverage gates
-    Decision: Use Vitest (not Jest) as the canonical `web/` unit test runner and coverage gate (`npm test`, `npm run test:coverage`).
+    Decision: Use Vitest (not Jest) as the canonical `web/` unit test runner and coverage gate (`pnpm test`, `pnpm test:coverage`).
     Reason: Roadmap allowed Vitest/Jest. Vitest offered a lean scaffold path with fast run times and simple 95% threshold enforcement.
     Tradeoffs: Next.js examples more commonly show Jest; contributors must follow the Vitest-specific config and scripts in this repo.
 
@@ -128,7 +128,7 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: Unsafe with t.Parallel (tests must restore original via t.Cleanup). Acceptable since cli package tests are not parallel. See ISSUES.md b2c3d4.
 
 - Decision 2026-03-05 y5z6a7: Phase 1 Playwright gate is DB-free smoke only
-    Decision: Phase 1 Playwright verification runs a DB-free smoke test (`npm run test:e2e:smoke`) against a static app route via `playwright.config` `webServer`.
+    Decision: Phase 1 Playwright verification runs a DB-free smoke test (`pnpm test:e2e:smoke`) against a static app route via `playwright.config` `webServer`.
     Reason: Full DB-backed e2e setup belongs to later phases; Phase 1 needs reproducible e2e wiring without introducing fake backend logic.
     Tradeoffs: Phase 1 e2e only proves browser/server wiring, not data workflows; richer e2e scenarios remain required in later roadmap phases.
 
@@ -161,3 +161,43 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: When a local slide has a data-file row but no local binary, `pc sync` still creates or updates the cloud metadata row if the S3 key is unchanged (or the row is new). Changing the S3 key without a local binary still fails.
     Reason: `pc restore-db` and `pc import` intentionally preserve data-file references without binaries. The Tier 2 restore paths need a later sync to recreate database state in a fresh cloud without inventing fake file content.
     Tradeoffs: Cloud metadata can temporarily reference an object that is absent from the bucket until the binary is restored from the original S3 source or re-uploaded from disk. Sync remains strict for S3 key changes because there is no safe object to point at.
+
+- Decision 2026-03-09 s3t4u5: Presentation components excluded from Vitest coverage thresholds
+    Decision: `components/*.tsx` and `app/page.tsx` are excluded from Vitest coverage thresholds; primary behavioral coverage comes from Playwright e2e, with targeted component unit tests allowed when they capture high-value state transitions.
+    Reason: These are mostly thin wrappers over UI libraries. Blanket unit coverage produces brittle prop-assertion tests, but a few local state paths are still worth pinning with focused component tests.
+    Tradeoffs: Coverage numbers appear lower than route/hook code; contributors must use judgment to add only high-signal component tests.
+
+- Decision 2026-03-09 t5u6v7: Playwright e2e uses page.route() API interception, not MSW
+    Decision: Playwright e2e tests mock the backend via `page.route()` API interception instead of MSW or a real backend.
+    Reason: Simplest approach — no extra dependencies, tests real frontend rendering while mocking network at the browser level.
+    Tradeoffs: Mocks are per-test boilerplate; MSW would centralize them but adds a dependency for little gain at current test count.
+
+- Decision 2026-03-09 u7v8w9: useSyncManager 4-layer polling instead of WebSocket
+    Decision: `useSyncManager` uses 4-layer polling (manual, interaction, tab visibility, idle) instead of WebSocket for change detection.
+    Reason: S3 `_version` file doesn't support push notifications. Polling is simpler and sufficient for low-frequency CLI-driven mutations.
+    Tradeoffs: Changes are not instant (seconds of latency); acceptable for single-user CLI-to-web workflow.
+
+- Decision 2026-03-09 v9w0x1: sync_version uses single-row singleton with trigger-driven auto-increment
+    Decision: `sync_version` table uses a single-row singleton pattern with a trigger that auto-increments on any slide mutation, not per-slide versioning.
+    Reason: Simpler client polling — one value to check. S3 `_version` mirrors this single integer.
+    Tradeoffs: Any mutation bumps the global version even if the web client already has the change; redundant refetch is cheap (small dataset).
+
+- Decision 2026-03-09 x9y0z1: react-resizable-panels v4 sizes must use string percentages
+    Decision: All `defaultSize`, `minSize`, `maxSize` props in `spreadsheet-viewer.tsx` use string percentages (e.g., `"18%"`) not bare numbers.
+    Reason: react-resizable-panels v4 treats bare numbers as **pixels**, not percentages. `defaultSize={18}` = 18px, which renders panels as tiny slivers.
+    Tradeoffs: None — this is a correctness fix. v2 used numbers-as-percentages; v4 changed the API.
+
+- Decision 2026-03-09 z1a2b3: pnpm .npmrc hoists @radix-ui/* for unified radix-ui package
+    Decision: `web/.npmrc` contains `public-hoist-pattern[]=@radix-ui/*` to hoist transitive `@radix-ui/react-*` sub-packages from the unified `radix-ui` meta-package.
+    Reason: shadcn/ui components import from `@radix-ui/react-*` (individual packages), but only the unified `radix-ui` is in `package.json`. pnpm's strict mode doesn't hoist transitive deps by default.
+    Tradeoffs: Slightly looser isolation for @radix-ui packages; required for the app to build.
+
+- Decision 2026-03-09 a3b4c5: Visual regression baselines committed as darwin, Linux CI deferred
+    Decision: Playwright visual regression baselines generated on macOS (darwin) and committed to git. `snapshotPathTemplate` removes platform from paths. Linux-based CI baselines deferred.
+    Reason: Docker-based Linux baseline generation hit pnpm + radix-ui hoisting issues. darwin baselines are sufficient for local development; CI visual tests will need Linux baselines when set up.
+    Tradeoffs: Visual tests will fail in Linux CI until Linux baselines are generated. `maxDiffPixelRatio: 0.02` tolerates minor rendering differences.
+
+- Decision 2026-03-09 w1x2y3: v0.dev UI adopted as canonical frontend, adapted for real types
+    Decision: Replaced hand-built UI components with v0.dev reference design components. Adapted `Slide` type to `SlideSummary`/`SlideDetail` split. All hook orchestration lives in `SpreadsheetViewer`, not `page.tsx`. `resizable.tsx` wraps react-resizable-panels v4 API with v2-style `direction` prop for shadcn compatibility.
+    Reason: User required visual parity with v0.dev reference. v0.dev used a single `Slide` type with mock data; our real backend uses `SlideSummary` (list) and `SlideDetail` (selected). The v4 API renames `PanelGroup`→`Group`, `PanelResizeHandle`→`Separator`, `direction`→`orientation`.
+    Tradeoffs: v0.dev ScaledSlideFrame lost figure URL resolution (moved to iframe rendering context). NotesEditor doesn't key on slideId (editing state may persist across slide changes — tracked in ISSUES.md).

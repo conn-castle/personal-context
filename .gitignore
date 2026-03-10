@@ -36,6 +36,7 @@ tmp/
 .env
 .pc/
 node_modules/
+.pnpm-store/
 coverage.out
 coverage.html
 *.test
