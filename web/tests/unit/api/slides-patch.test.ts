@@ -64,7 +64,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
       makeSlideRow({ project_id: "org/alpha" }),
     ]);
     // sync_version query
-    mockSql.mockResolvedValueOnce([{ version: 5 }]);
+    mockSql.mockResolvedValueOnce([{ version: 5, updated_at: "2025-03-04T10:00:00.000Z" }]);
     // figures
     mockSql.mockResolvedValueOnce(makeFigures());
     // data_files
@@ -76,14 +76,14 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     const body = await res.json();
     expect(body.slide.project_id).toBe("org/alpha");
     expect(body.sync_version).toBe(5);
-    expect(mockBumpS3Version).toHaveBeenCalledWith(5);
+    expect(mockBumpS3Version).toHaveBeenCalledWith(5, "2025-03-04T10:00:00.000Z");
   });
 
   it("updates notes and normalizes empty string to null", async () => {
     // Dynamic UPDATE query - empty notes normalized to null
     mockSql.mockResolvedValueOnce([makeSlideRow({ notes: null })]);
     // sync_version query
-    mockSql.mockResolvedValueOnce([{ version: 6 }]);
+    mockSql.mockResolvedValueOnce([{ version: 6, updated_at: "2025-03-04T10:00:00.000Z" }]);
     // figures
     mockSql.mockResolvedValueOnce([]);
     // data_files
@@ -103,7 +103,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     mockSql.mockResolvedValueOnce([
       makeSlideRow({ git_hash: gitHash, git_remote_url: gitUrl }),
     ]);
-    mockSql.mockResolvedValueOnce([{ version: 7 }]);
+    mockSql.mockResolvedValueOnce([{ version: 7, updated_at: "2025-03-04T10:00:00.000Z" }]);
     mockSql.mockResolvedValueOnce([]);
     mockSql.mockResolvedValueOnce([]);
 
@@ -172,21 +172,21 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
 
   it("bumps S3 version after successful update", async () => {
     mockSql.mockResolvedValueOnce([makeSlideRow()]);
-    mockSql.mockResolvedValueOnce([{ version: 10 }]);
+    mockSql.mockResolvedValueOnce([{ version: 10, updated_at: "2025-03-04T10:00:00.000Z" }]);
     mockSql.mockResolvedValueOnce([]);
     mockSql.mockResolvedValueOnce([]);
 
     const res = await handlePatchSlide(slideId, { notes: "updated" });
 
     expect(res.status).toBe(200);
-    expect(mockBumpS3Version).toHaveBeenCalledWith(10);
+    expect(mockBumpS3Version).toHaveBeenCalledWith(10, "2025-03-04T10:00:00.000Z");
   });
 
   it("returns 200 when S3 version bump fails after the update commits", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
     mockSql.mockResolvedValueOnce([makeSlideRow({ notes: "updated" })]);
-    mockSql.mockResolvedValueOnce([{ version: 11 }]);
+    mockSql.mockResolvedValueOnce([{ version: 11, updated_at: "2025-03-04T10:00:00.000Z" }]);
     mockSql.mockResolvedValueOnce([]);
     mockSql.mockResolvedValueOnce([]);
     mockBumpS3Version.mockRejectedValueOnce(new Error("S3 unavailable"));
@@ -213,7 +213,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.sync_version).toBe(0);
-    expect(mockBumpS3Version).toHaveBeenCalledWith(0);
+    expect(mockBumpS3Version).toHaveBeenCalledWith(0, expect.any(String));
   });
 
   it("returns 500 on database error", async () => {

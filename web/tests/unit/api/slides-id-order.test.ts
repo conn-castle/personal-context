@@ -64,7 +64,7 @@ describe("PATCH /api/slides/[id]/order", () => {
       },
     ]);
     // sync_version
-    mockSql.mockResolvedValueOnce([{ version: 9 }]);
+    mockSql.mockResolvedValueOnce([{ version: 9, updated_at: "2025-03-04T12:00:00.000Z" }]);
 
     const req = new NextRequest(
       `http://localhost/api/slides/${slideId}/order`,
@@ -101,7 +101,7 @@ describe("PATCH /api/slides/[id]/order", () => {
       },
     ]);
     // sync_version
-    mockSql.mockResolvedValueOnce([{ version: 10 }]);
+    mockSql.mockResolvedValueOnce([{ version: 10, updated_at: "2025-03-04T12:00:00.000Z" }]);
 
     const req = new NextRequest(
       `http://localhost/api/slides/${slideId}/order`,
@@ -139,7 +139,7 @@ describe("PATCH /api/slides/[id]/order", () => {
       },
     ]);
     // sync_version
-    mockSql.mockResolvedValueOnce([{ version: 11 }]);
+    mockSql.mockResolvedValueOnce([{ version: 11, updated_at: "2025-03-04T12:00:00.000Z" }]);
 
     const req = new NextRequest(
       `http://localhost/api/slides/${slideId}/order`,
@@ -179,7 +179,7 @@ describe("PATCH /api/slides/[id]/order", () => {
       },
     ]);
     // sync_version
-    mockSql.mockResolvedValueOnce([{ version: 12 }]);
+    mockSql.mockResolvedValueOnce([{ version: 12, updated_at: "2025-03-04T12:00:00.000Z" }]);
 
     const req = new NextRequest(
       `http://localhost/api/slides/${slideId}/order`,
@@ -217,7 +217,7 @@ describe("PATCH /api/slides/[id]/order", () => {
       },
     ]);
     // sync_version
-    mockSql.mockResolvedValueOnce([{ version: 13 }]);
+    mockSql.mockResolvedValueOnce([{ version: 13, updated_at: "2025-03-04T12:00:00.000Z" }]);
 
     const req = new NextRequest(
       `http://localhost/api/slides/${slideId}/order`,
@@ -476,7 +476,7 @@ describe("PATCH /api/slides/[id]/order", () => {
         updated_at: "2025-03-04T12:00:00.000Z",
       },
     ]);
-    mockSql.mockResolvedValueOnce([{ version: 14 }]);
+    mockSql.mockResolvedValueOnce([{ version: 14, updated_at: "2025-03-04T12:00:00.000Z" }]);
     mockBumpS3Version.mockRejectedValueOnce(new Error("S3 unavailable"));
 
     const req = new NextRequest(
@@ -494,6 +494,43 @@ describe("PATCH /api/slides/[id]/order", () => {
     expect(body.sync_version).toBe(14);
 
     errorSpy.mockRestore();
+  });
+
+  it("defaults sync_version to 0 when sync_version table is empty", async () => {
+    // Read current slide
+    mockSql.mockResolvedValueOnce([
+      { id: slideId, date: "2025-03-04", day_order: "a1" },
+    ]);
+    // Read siblings
+    mockSql.mockResolvedValueOnce([
+      { id: "20250304-11111111", day_order: "a0" },
+    ]);
+    // UPDATE
+    mockSql.mockResolvedValueOnce([
+      {
+        id: slideId,
+        date: "2025-03-04",
+        day_order: "a/",
+        updated_at: "2025-03-04T12:00:00.000Z",
+      },
+    ]);
+    // sync_version returns empty
+    mockSql.mockResolvedValueOnce([]);
+
+    const req = new NextRequest(
+      `http://localhost/api/slides/${slideId}/order`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ position: { kind: "first" } }),
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+    const res = await PATCH(req, makeContext(slideId));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.sync_version).toBe(0);
+    expect(mockBumpS3Version).toHaveBeenCalledWith(0, expect.any(String));
   });
 
   it("returns 500 on database error", async () => {

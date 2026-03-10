@@ -218,13 +218,15 @@ export async function PATCH(
     const updated = updateRows[0];
 
     // Read sync_version and bump S3
-    const versionRows = (await sql`SELECT version FROM sync_version LIMIT 1`) as {
+    const versionRows = (await sql`SELECT version, updated_at FROM sync_version LIMIT 1`) as {
       version: number;
+      updated_at: string;
     }[];
     const syncVersion = versionRows[0]?.version ?? 0;
+    const syncUpdatedAt = versionRows[0]?.updated_at ?? new Date().toISOString();
 
     try {
-      await bumpS3Version(syncVersion);
+      await bumpS3Version(syncVersion, syncUpdatedAt);
     } catch (error) {
       console.error(
         "PATCH /api/slides/[id]/order S3 version bump failed after Postgres commit:",

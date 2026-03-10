@@ -220,6 +220,83 @@ describe("PATCH /api/slides/[id]", () => {
     expect(body.code).toBe("BAD_REQUEST");
     expect(mockHandlePatchSlide).not.toHaveBeenCalled();
   });
+
+  it("returns 400 for invalid slide ID", async () => {
+    const req = new NextRequest(
+      "http://localhost/api/slides/bad-id",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ notes: "updated" }),
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+    const res = await PATCH(req, makeContext("bad-id"));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe("INVALID_ID");
+    expect(mockHandlePatchSlide).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for non-object body (null)", async () => {
+    const req = new NextRequest(
+      "http://localhost/api/slides/20260301-aabbccdd",
+      {
+        method: "PATCH",
+        body: JSON.stringify(null),
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+    const res = await PATCH(req, makeContext("20260301-aabbccdd"));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe("BAD_REQUEST");
+    expect(body.error).toBe("Request body must be a JSON object");
+    expect(mockHandlePatchSlide).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 for non-object body (array)", async () => {
+    const req = new NextRequest(
+      "http://localhost/api/slides/20260301-aabbccdd",
+      {
+        method: "PATCH",
+        body: JSON.stringify([1, 2, 3]),
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+    const res = await PATCH(req, makeContext("20260301-aabbccdd"));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe("BAD_REQUEST");
+    expect(body.error).toBe("Request body must be a JSON object");
+    expect(mockHandlePatchSlide).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when params resolution throws", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const req = new NextRequest(
+      "http://localhost/api/slides/20260301-aabbccdd",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ notes: "updated" }),
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+    const brokenContext = {
+      params: Promise.reject(new Error("params resolution failed")),
+    };
+    const res = await PATCH(req, brokenContext);
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.code).toBe("INTERNAL_ERROR");
+    expect(mockHandlePatchSlide).not.toHaveBeenCalled();
+
+    errorSpy.mockRestore();
+  });
 });
 
 describe("DELETE /api/slides/[id]", () => {
@@ -236,7 +313,7 @@ describe("DELETE /api/slides/[id]", () => {
     };
 
     mockSql.mockResolvedValueOnce([deletedRow]);
-    mockSql.mockResolvedValueOnce([{ version: 6 }]);
+    mockSql.mockResolvedValueOnce([{ version: 6, updated_at: "2026-03-09T10:00:00.000Z" }]);
     mockBumpS3Version.mockResolvedValue(undefined);
 
     const req = new NextRequest(
@@ -252,7 +329,7 @@ describe("DELETE /api/slides/[id]", () => {
     expect(body.updated_at).toBe("2026-03-09T10:00:00.000Z");
     expect(body.sync_version).toBe(6);
 
-    expect(mockBumpS3Version).toHaveBeenCalledWith(6);
+    expect(mockBumpS3Version).toHaveBeenCalledWith(6, "2026-03-09T10:00:00.000Z");
   });
 
   it("returns 404 for nonexistent slide", async () => {
@@ -303,7 +380,7 @@ describe("DELETE /api/slides/[id]", () => {
     };
 
     mockSql.mockResolvedValueOnce([deletedRow]);
-    mockSql.mockResolvedValueOnce([{ version: 11 }]);
+    mockSql.mockResolvedValueOnce([{ version: 11, updated_at: "2026-03-09T10:00:00.000Z" }]);
     mockBumpS3Version.mockResolvedValue(undefined);
 
     const req = new NextRequest(
@@ -313,7 +390,7 @@ describe("DELETE /api/slides/[id]", () => {
     await DELETE(req, makeContext("20260301-aabbccdd"));
 
     expect(mockSql).toHaveBeenCalledTimes(2);
-    expect(mockBumpS3Version).toHaveBeenCalledWith(11);
+    expect(mockBumpS3Version).toHaveBeenCalledWith(11, "2026-03-09T10:00:00.000Z");
   });
 
   it("returns 200 when S3 version bump fails after delete commits", async () => {
@@ -325,7 +402,7 @@ describe("DELETE /api/slides/[id]", () => {
     };
 
     mockSql.mockResolvedValueOnce([deletedRow]);
-    mockSql.mockResolvedValueOnce([{ version: 12 }]);
+    mockSql.mockResolvedValueOnce([{ version: 12, updated_at: "2026-03-09T10:00:00.000Z" }]);
     mockBumpS3Version.mockRejectedValueOnce(new Error("S3 unavailable"));
 
     const req = new NextRequest(

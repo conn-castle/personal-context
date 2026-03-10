@@ -9,7 +9,6 @@ import {
 } from "@/lib/api-error";
 import {
   isValidSlideId,
-  normalizeNotes,
   validateSlideUpdateInput,
 } from "@/lib/validation";
 import type { SlideDetail, SlideFile } from "@/lib/types";
@@ -43,31 +42,32 @@ export async function handlePatchSlide(
       return badRequest(validation.error);
     }
 
+    const { data } = validation;
     const sql = getDb() as SqlFn;
 
-    // Build dynamic UPDATE
+    // Build dynamic UPDATE from the validated & normalized data
     const setClauses: string[] = [];
     const values: unknown[] = [];
     let paramIndex = 1;
 
-    if ("project_id" in body) {
+    if ("project_id" in data) {
       setClauses.push(`project_id = $${paramIndex++}`);
-      values.push(body.project_id);
+      values.push(data.project_id);
     }
 
-    if ("notes" in body) {
+    if ("notes" in data) {
       setClauses.push(`notes = $${paramIndex++}`);
-      values.push(normalizeNotes(body.notes as string | null | undefined));
+      values.push(data.notes);
     }
 
-    if ("git_remote_url" in body) {
+    if ("git_remote_url" in data) {
       setClauses.push(`git_remote_url = $${paramIndex++}`);
-      values.push(body.git_remote_url);
+      values.push(data.git_remote_url);
     }
 
-    if ("git_hash" in body) {
+    if ("git_hash" in data) {
       setClauses.push(`git_hash = $${paramIndex++}`);
-      values.push(body.git_hash);
+      values.push(data.git_hash);
     }
 
     values.push(id);
@@ -82,13 +82,15 @@ export async function handlePatchSlide(
     const row = rows[0];
 
     // Read sync_version (trigger already fired from the UPDATE above)
-    const versionRows = (await sql`SELECT version FROM sync_version LIMIT 1`) as {
+    const versionRows = (await sql`SELECT version, updated_at FROM sync_version LIMIT 1`) as {
       version: number;
+      updated_at: string;
     }[];
     const syncVersion = versionRows[0]?.version ?? 0;
+    const syncUpdatedAt = versionRows[0]?.updated_at ?? new Date().toISOString();
 
     try {
-      await bumpS3Version(syncVersion);
+      await bumpS3Version(syncVersion, syncUpdatedAt);
     } catch (error) {
       console.error(
         "PATCH /api/slides/[id] S3 version bump failed after Postgres commit:",

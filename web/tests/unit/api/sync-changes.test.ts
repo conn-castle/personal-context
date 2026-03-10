@@ -27,11 +27,11 @@ describe("GET /api/sync/changes", () => {
       data_file_count: 1,
     };
 
-    // sql.query() for slides, sql`` for server_now
-    mockQuery.mockResolvedValueOnce([slideRow]);
+    // sql`` for server_now (called first), then sql.query() for slides
     mockSql.mockResolvedValueOnce([
       { server_now: "2026-03-09T10:00:00.000Z" },
     ]);
+    mockQuery.mockResolvedValueOnce([slideRow]);
 
     const req = new NextRequest(
       "http://localhost/api/sync/changes?since=2026-03-01T00:00:00.000Z"
@@ -57,10 +57,10 @@ describe("GET /api/sync/changes", () => {
       data_file_count: 0,
     };
 
-    mockQuery.mockResolvedValueOnce([deletedSlide]);
     mockSql.mockResolvedValueOnce([
       { server_now: "2026-03-09T10:00:00.000Z" },
     ]);
+    mockQuery.mockResolvedValueOnce([deletedSlide]);
 
     const req = new NextRequest(
       "http://localhost/api/sync/changes?since=2026-02-01T00:00:00.000Z"
@@ -74,10 +74,10 @@ describe("GET /api/sync/changes", () => {
   });
 
   it("returns empty items when no changes exist", async () => {
-    mockQuery.mockResolvedValueOnce([]);
     mockSql.mockResolvedValueOnce([
       { server_now: "2026-03-09T10:00:00.000Z" },
     ]);
+    mockQuery.mockResolvedValueOnce([]);
 
     const req = new NextRequest(
       "http://localhost/api/sync/changes?since=2026-03-09T00:00:00.000Z"
@@ -111,10 +111,10 @@ describe("GET /api/sync/changes", () => {
   });
 
   it("returns server_now from Postgres", async () => {
-    mockQuery.mockResolvedValueOnce([]);
     mockSql.mockResolvedValueOnce([
       { server_now: "2026-03-09T15:30:00.000Z" },
     ]);
+    mockQuery.mockResolvedValueOnce([]);
 
     const req = new NextRequest(
       "http://localhost/api/sync/changes?since=2026-03-09T00:00:00.000Z"
@@ -127,10 +127,10 @@ describe("GET /api/sync/changes", () => {
   });
 
   it("uses >= for timestamp comparison (Decision t7u8v9)", async () => {
-    mockQuery.mockResolvedValueOnce([]);
     mockSql.mockResolvedValueOnce([
       { server_now: "2026-03-09T10:00:00.000Z" },
     ]);
+    mockQuery.mockResolvedValueOnce([]);
 
     const req = new NextRequest(
       "http://localhost/api/sync/changes?since=2026-03-01T00:00:00.000Z"
@@ -142,8 +142,27 @@ describe("GET /api/sync/changes", () => {
     expect(firstCall[0]).toContain(">=");
   });
 
+  it("uses server_now as upper bound in items query", async () => {
+    mockSql.mockResolvedValueOnce([
+      { server_now: "2026-03-09T10:00:00.000Z" },
+    ]);
+    mockQuery.mockResolvedValueOnce([]);
+
+    const req = new NextRequest(
+      "http://localhost/api/sync/changes?since=2026-03-01T00:00:00.000Z"
+    );
+    await GET(req);
+
+    // Verify the items query uses server_now as the upper bound ($2)
+    const firstCall = mockQuery.mock.calls[0];
+    expect(firstCall[0]).toContain("<=");
+    expect(firstCall[1]).toEqual([
+      "2026-03-01T00:00:00.000Z",
+      "2026-03-09T10:00:00.000Z",
+    ]);
+  });
+
   it("returns 500 on unexpected database error", async () => {
-    mockQuery.mockRejectedValue(new Error("connection refused"));
     mockSql.mockRejectedValue(new Error("connection refused"));
 
     const req = new NextRequest(

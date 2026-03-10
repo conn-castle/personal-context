@@ -189,12 +189,18 @@ describe("S3 utilities", () => {
       mockSend.mockRejectedValue(new Error("NetworkError"));
       await expect(getS3Version()).rejects.toThrow("NetworkError");
     });
+
+    it("rethrows errors without a name property", async () => {
+      const err = { code: "AccessDenied", message: "Forbidden" };
+      mockSend.mockRejectedValue(err);
+      await expect(getS3Version()).rejects.toBe(err);
+    });
   });
 
   describe("bumpS3Version", () => {
-    it("writes version to S3", async () => {
+    it("writes version to S3 with provided updatedAt", async () => {
       mockSend.mockResolvedValue({});
-      await bumpS3Version(5);
+      await bumpS3Version(5, "2026-03-09T10:00:00.000Z");
       expect(mockSend).toHaveBeenCalledTimes(1);
       const callArg = mockSend.mock.calls[0][0] as Record<string, unknown>;
       expect(callArg.Bucket).toBe("test-bucket");
@@ -205,20 +211,25 @@ describe("S3 utilities", () => {
         updated_at: string;
       };
       expect(body.version).toBe(5);
-      expect(body.updated_at).toBeDefined();
+      expect(body.updated_at).toBe("2026-03-09T10:00:00.000Z");
     });
 
-    it("retries on failure and succeeds", async () => {
+    it("retries on failure with exponential backoff and succeeds", async () => {
       mockSend
         .mockRejectedValueOnce(new Error("Temporary"))
         .mockResolvedValue({});
-      await bumpS3Version(5);
+      await bumpS3Version(5, "2026-03-09T10:00:00.000Z");
       expect(mockSend).toHaveBeenCalledTimes(2);
     });
 
-    it("throws after max retries", async () => {
-      mockSend.mockRejectedValue(new Error("Persistent"));
-      await expect(bumpS3Version(5)).rejects.toThrow("Persistent");
+    it("throws after max retries with exponential backoff", async () => {
+      mockSend
+        .mockRejectedValueOnce(new Error("Persistent"))
+        .mockRejectedValueOnce(new Error("Persistent"))
+        .mockRejectedValueOnce(new Error("Persistent"));
+      await expect(
+        bumpS3Version(5, "2026-03-09T10:00:00.000Z")
+      ).rejects.toThrow("Persistent");
       expect(mockSend).toHaveBeenCalledTimes(3);
     });
   });

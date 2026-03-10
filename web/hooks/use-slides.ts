@@ -137,7 +137,11 @@ export function useSlides(): UseSlidesReturn {
         throw new Error(`Failed to fetch more slides: ${res.status}`);
       }
       const data = (await res.json()) as PaginatedResponse<SlideSummary>;
-      setSlides((prev) => [...prev, ...data.items]);
+      setSlides((prev) => {
+        const existingIds = new Set(prev.map(s => s.id));
+        const newItems = data.items.filter(item => !existingIds.has(item.id));
+        return [...prev, ...newItems];
+      });
       cursorRef.current = data.next_cursor;
       setHasMore(data.next_cursor !== null);
     } catch (err) {

@@ -177,11 +177,20 @@ export function validateSlideUpdateInput(
     if (body.project_id !== null && typeof body.project_id !== "string") {
       return { valid: false, error: "project_id must be a string or null" };
     }
-    // Normalize empty string to null (same convention as notes)
-    if (body.project_id === "") {
-      body.project_id = null;
+  }
+
+  // Build normalized data without mutating the input
+  const data: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (key === "project_id") {
+      // Normalize empty string to null (same convention as notes)
+      data.project_id = body.project_id === "" ? null : body.project_id;
+    } else if (key === "notes") {
+      data.notes = normalizeNotes(body.notes as string | null | undefined);
+    } else {
+      data[key] = body[key];
     }
   }
 
-  return { valid: true, data: body };
+  return { valid: true, data };
 }

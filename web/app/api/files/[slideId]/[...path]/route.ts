@@ -66,6 +66,14 @@ export async function GET(
     const sql = getDb() as SqlFn;
     const table = FILE_TYPE_TABLE[fileType as FileType];
 
+    // Defense-in-depth: FILE_TYPE_TABLE is already a closed map keyed by
+    // the FileType union, so `table` can only be one of the known values.
+    // This runtime check guards against future regressions if the map is
+    // ever widened, preventing arbitrary table names from reaching the query.
+    // Intentionally untested: this branch is unreachable under normal
+    // operation because VALID_FILE_TYPES constrains the input before
+    // FILE_TYPE_TABLE is accessed. It exists as defense-in-depth only.
+    /* c8 ignore next 3 */
     const VALID_TABLES = new Set(["slide_figures", "slide_data_files"]);
     if (!VALID_TABLES.has(table)) {
       throw new Error(`Invalid table: ${table}`);

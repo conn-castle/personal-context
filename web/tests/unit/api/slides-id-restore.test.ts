@@ -39,7 +39,7 @@ describe("POST /api/slides/[id]/restore", () => {
       },
     ]);
     // sync_version
-    mockSql.mockResolvedValueOnce([{ version: 8 }]);
+    mockSql.mockResolvedValueOnce([{ version: 8, updated_at: "2025-03-04T12:00:00.000Z" }]);
 
     const req = new NextRequest(
       `http://localhost/api/slides/${slideId}/restore`,
@@ -104,7 +104,7 @@ describe("POST /api/slides/[id]/restore", () => {
         updated_at: "2025-03-04T12:00:00.000Z",
       },
     ]);
-    mockSql.mockResolvedValueOnce([{ version: 12 }]);
+    mockSql.mockResolvedValueOnce([{ version: 12, updated_at: "2025-03-04T12:00:00.000Z" }]);
 
     const req = new NextRequest(
       `http://localhost/api/slides/${slideId}/restore`,
@@ -112,7 +112,7 @@ describe("POST /api/slides/[id]/restore", () => {
     );
     await POST(req, makeContext(slideId));
 
-    expect(mockBumpS3Version).toHaveBeenCalledWith(12);
+    expect(mockBumpS3Version).toHaveBeenCalledWith(12, "2025-03-04T12:00:00.000Z");
   });
 
   it("returns 200 when S3 version bump fails after restore commits", async () => {
@@ -125,7 +125,7 @@ describe("POST /api/slides/[id]/restore", () => {
         updated_at: "2025-03-04T12:00:00.000Z",
       },
     ]);
-    mockSql.mockResolvedValueOnce([{ version: 13 }]);
+    mockSql.mockResolvedValueOnce([{ version: 13, updated_at: "2025-03-04T12:00:00.000Z" }]);
     mockBumpS3Version.mockRejectedValueOnce(new Error("S3 unavailable"));
 
     const req = new NextRequest(
@@ -161,7 +161,7 @@ describe("POST /api/slides/[id]/restore", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.sync_version).toBe(0);
-    expect(mockBumpS3Version).toHaveBeenCalledWith(0);
+    expect(mockBumpS3Version).toHaveBeenCalledWith(0, expect.any(String));
   });
 
   it("returns 500 on database error", async () => {

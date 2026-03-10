@@ -37,11 +37,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: The `useEffect` for keyboard navigation re-registers the event listener on every `selectedSlide` and `filteredSlides` change. Between re-registrations, a keydown could reference stale data. Additionally, `goToPrevious`/`goToNext` duplicated logic recalculates `findIndex` on each call.
     Next step: Refactor to use `useRef` for `filteredSlides` and `selectedSlide`, with a single stable event handler.
 
-- Issue 2026-03-10 m5n6o7a: bumpS3Version timestamp diverges from Postgres NOW()
-    Priority: Low. Area: web/lib/s3.ts
-    Description: `bumpS3Version` writes `updated_at: new Date().toISOString()` from the JS server clock, while Postgres triggers use `NOW()`. If clocks differ, the S3-sourced `updated_at` used as initial sync cursor could miss or double-process changes.
-    Next step: Pass the Postgres `sync_version.updated_at` timestamp into `bumpS3Version` instead of generating a new one.
-
 - Issue 2026-03-10 n7o8p9a: CollapsedDetailsStrip may violate ResizablePanel contract
     Priority: Medium. Area: web/components/spreadsheet-viewer.tsx
     Description: When `panelVisibility.details` is false, `CollapsedDetailsStrip` may be rendered as a direct child of `ResizablePanelGroup` without a `ResizablePanel` wrapper. `react-resizable-panels` requires all direct children to be `Panel` or `PanelResizeHandle`.
@@ -82,10 +77,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: The idle polling `schedule` function recursively calls itself via `setTimeout`. If the `useEffect` re-runs while an old `tick()` is executing `doSync`, both old and new polling chains can be active concurrently. The `isSyncingRef` guard (added in Round 1) prevents double `doSync` execution but the redundant timers remain.
     Next step: Add a `cancelled` boolean in the effect that is set `true` in the cleanup function, checked before calling `schedule()` in the recursive callback.
 
-- Issue 2026-03-10 e9f0g1a: useSyncManager swallows all sync errors silently
+- Issue 2026-03-10 e9f0g1a: useSyncManager does not expose sync errors to consumers
     Priority: Low. Area: web/hooks/use-sync-manager.ts
-    Description: The `catch` block in `doSync` is empty. No logging, no error state exposed to consumers, and no way for the UI to indicate that sync is failing. If the server is down, the user has no indication their view may be stale.
-    Next step: Expose a `syncError` state or `lastSyncError` ref, or at minimum log to `console.warn` in development.
+    Description: The `catch` block in `doSync` now logs via `console.warn`, but no error state is exposed to consumers. The UI cannot indicate that sync is failing.
+    Next step: Expose a `syncError` state or `lastSyncError` ref so consumers can display a stale-data indicator.
 
 - Issue 2026-03-10 f1g2h3a: Dropdown menu items in SlideMetadataBar have no onClick handlers
     Priority: Low. Area: web/components/slide-metadata-bar.tsx
@@ -106,11 +101,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Priority: Low. Area: web/components
     Description: Several components have accessibility gaps: `SettingsOverlay` lacks Escape key handling, focus trapping, and ARIA `role="dialog"`; `SlideThumbnail` button has no `aria-label`; navigation view-mode toggle buttons use `title` instead of `aria-label`/`aria-pressed`.
     Next step: Replace `SettingsOverlay` div with shadcn/ui `Dialog` component (provides focus trapping, Escape, ARIA). Add `aria-label` to thumbnail buttons and `aria-pressed` to toggle buttons.
-
-- Issue 2026-03-10 j9k0l1a: bumpS3Version retry has no exponential backoff
-    Priority: Low. Area: web/lib/s3.ts
-    Description: The retry loop in `bumpS3Version` retries immediately without delay between attempts. For transient network errors or rate-limiting, immediate retries may all hit the same condition.
-    Next step: Add exponential backoff (e.g., 100ms, 200ms, 400ms) between retry attempts.
 
 - Issue 2026-03-09 f7g8h9: Linux CI visual regression baselines not yet generated
     Priority: Medium. Area: web/tests/e2e

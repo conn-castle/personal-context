@@ -120,17 +120,22 @@ export async function getS3Version(): Promise<{
 
 /**
  * Writes a new sync version to S3 `_version` key.
- * Retries up to 3 times on failure (Decision o7p8q9: write-after with retry).
+ * Retries up to 3 times on failure with exponential backoff
+ * (Decision o7p8q9: write-after with retry).
  *
  * @param version - The version number to write.
+ * @param updatedAt - The DB timestamp to use as updated_at (avoids clock divergence with Postgres).
  * @throws After all retry attempts fail.
  */
-export async function bumpS3Version(version: number): Promise<void> {
+export async function bumpS3Version(
+  version: number,
+  updatedAt: string
+): Promise<void> {
   const client = getS3Client();
   const bucket = getS3Bucket();
   const body = JSON.stringify({
     version,
-    updated_at: new Date().toISOString(),
+    updated_at: updatedAt,
   });
 
   let lastError: unknown;
@@ -146,6 +151,11 @@ export async function bumpS3Version(version: number): Promise<void> {
       return;
     } catch (err) {
       lastError = err;
+      if (attempt < S3_VERSION_RETRY_COUNT - 1) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.pow(2, attempt) * 100)
+        );
+      }
     }
   }
   throw lastError;

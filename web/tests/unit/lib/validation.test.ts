@@ -166,12 +166,14 @@ describe("validateSlideUpdateInput", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("normalizes empty string project_id to null", () => {
+  it("normalizes empty string project_id to null in returned data", () => {
     const body: Record<string, unknown> = { project_id: "" };
     const result = validateSlideUpdateInput(body);
     expect(result.valid).toBe(true);
     if (result.valid) {
       expect(result.data.project_id).toBeNull();
+      // Original body must not be mutated
+      expect(body.project_id).toBe("");
     }
   });
 
@@ -182,14 +184,31 @@ describe("validateSlideUpdateInput", () => {
     expect(result.valid).toBe(false);
   });
 
+  it("normalizes empty string notes to null in returned data", () => {
+    const body: Record<string, unknown> = { notes: "" };
+    const result = validateSlideUpdateInput(body);
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.data.notes).toBeNull();
+      // Original body must not be mutated
+      expect(body.notes).toBe("");
+    }
+  });
+
   it("accepts valid notes update", () => {
     const result = validateSlideUpdateInput({ notes: "some notes" });
     expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.data.notes).toBe("some notes");
+    }
   });
 
   it("accepts null notes", () => {
     const result = validateSlideUpdateInput({ notes: null });
     expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.data.notes).toBeNull();
+    }
   });
 
   it("rejects non-string notes", () => {
@@ -269,14 +288,23 @@ describe("validateSlideUpdateInput", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("accepts multiple valid fields together", () => {
+  it("accepts multiple valid fields together and returns normalized data", () => {
+    const gitHash = "a".repeat(40);
     const result = validateSlideUpdateInput({
       project_id: "org/proj",
       notes: "note",
       git_remote_url: "https://github.com/org/repo",
-      git_hash: "a".repeat(40),
+      git_hash: gitHash,
     });
     expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.data).toEqual({
+        project_id: "org/proj",
+        notes: "note",
+        git_remote_url: "https://github.com/org/repo",
+        git_hash: gitHash,
+      });
+    }
   });
 
   it("rejects when one field is invalid among valid ones", () => {

@@ -23,7 +23,7 @@ export interface UseSyncManagerOptions {
 export interface UseSyncManagerReturn {
   /** Layer 1: Trigger a manual sync. Always fires, ignores cooldown. */
   syncNow: () => Promise<void>;
-  /** Mark that the current client just performed a mutation. Prevents the next version-change from triggering a data fetch (self-inflicted sync prevention). */
+  /** Mark that the current client just performed a mutation. Stores the current version so the next sync can detect a purely self-inflicted version bump (+1) and skip the data fetch. If the server version jumps by more than one, external changes are also present and the data fetch proceeds normally. */
   markMutation: () => void;
   /** The last known sync version from the server. */
   version: number;
@@ -116,7 +116,7 @@ export function useSyncManager(
   // Mutable refs to avoid re-render dependency loops
   const lastCheckRef = useRef(0);
   const lastActivityRef = useRef(Date.now());
-  const selfMutationRef = useRef(false);
+  const selfMutationVersionRef = useRef<number | null>(null);
   const versionRef = useRef(0);
   const lastSyncAtRef = useRef<string | null>(null);
   const isSyncingRef = useRef(false);
@@ -146,16 +146,30 @@ export function useSyncManager(
         );
 
         if (versionData.version !== versionRef.current) {
-          // Self-inflicted mutation: update version but skip data fetch
-          if (selfMutationRef.current) {
-            selfMutationRef.current = false;
-            if (!lastSyncAtRef.current) {
-              lastSyncAtRef.current = versionData.updated_at;
-              setLastSyncAt(versionData.updated_at);
+          // Self-inflicted mutation: if the observed version is exactly one
+          // ahead of the version stored at mutation time, the change is purely
+          // self-inflicted — update version but skip the data fetch.  If the
+          // observed version jumped by more than one, external changes also
+          // occurred and we must NOT skip.
+          //
+          // Special case: when the stored mutation version is 0 (the client
+          // has never synced), we have no real baseline so we treat the first
+          // observed version as self-inflicted (skip once).
+          if (selfMutationVersionRef.current !== null) {
+            const storedVersion = selfMutationVersionRef.current;
+            selfMutationVersionRef.current = null;
+            const isSelfOnly =
+              storedVersion === 0 ||
+              versionData.version === storedVersion + 1;
+            if (isSelfOnly) {
+              if (!lastSyncAtRef.current) {
+                lastSyncAtRef.current = versionData.updated_at;
+                setLastSyncAt(versionData.updated_at);
+              }
+              versionRef.current = versionData.version;
+              setVersion(versionData.version);
+              return;
             }
-            versionRef.current = versionData.version;
-            setVersion(versionData.version);
-            return;
           }
 
           // Fetch incremental changes if we have a previous sync timestamp
@@ -181,8 +195,8 @@ export function useSyncManager(
           versionRef.current = versionData.version;
           setVersion(versionData.version);
         }
-      } catch {
-        // Swallow errors — sync failures are non-fatal
+      } catch (err) {
+        console.warn("Sync failed:", err);
       } finally {
         isSyncingRef.current = false;
         setIsSyncing(false);
@@ -196,9 +210,10 @@ export function useSyncManager(
     await doSync(true);
   }, [doSync]);
 
-  // Self-inflicted mutation flag
+  // Self-inflicted mutation: store the version at mutation time so doSync
+  // can compare and only skip if the server version is exactly +1.
   const markMutation = useCallback(() => {
-    selfMutationRef.current = true;
+    selfMutationVersionRef.current = versionRef.current;
   }, []);
 
   // Layer 2: Interaction (click) — respects cooldown

@@ -30,18 +30,21 @@ export async function GET(
 
     const sql = getDb();
 
-    const [items, serverNowResult] = await Promise.all([
-      sql.query(
-        `SELECT id, date, day_order, project_id, updated_at, deleted_at,
+    // Fetch server_now first and use it as the cutoff for the items query
+    // to avoid a race condition where items could be modified between the
+    // two queries, causing missed or duplicated changes.
+    const serverNowResult = (await sql`SELECT NOW() as server_now`) as Record<string, unknown>[];
+    const serverNow = serverNowResult[0].server_now as string;
+
+    const items = (await sql.query(
+      `SELECT id, date, day_order, project_id, updated_at, deleted_at,
            (SELECT COUNT(*)::int FROM slide_figures WHERE slide_id = s.id) as figure_count,
            (SELECT COUNT(*)::int FROM slide_data_files WHERE slide_id = s.id) as data_file_count
          FROM slides s
-         WHERE updated_at >= $1
+         WHERE updated_at >= $1 AND updated_at <= $2
          ORDER BY date DESC, day_order ASC, id ASC`,
-        [since]
-      ) as Promise<Record<string, unknown>[]>,
-      sql`SELECT NOW() as server_now` as Promise<Record<string, unknown>[]>,
-    ]);
+      [since, serverNow]
+    )) as Record<string, unknown>[];
 
     const slideSummaries: SlideSummary[] = items.map((row) => ({
       id: row.id as string,
@@ -53,8 +56,6 @@ export async function GET(
       figure_count: Number(row.figure_count),
       data_file_count: Number(row.data_file_count),
     }));
-
-    const serverNow = serverNowResult[0].server_now as string;
 
     return NextResponse.json({ items: slideSummaries, server_now: serverNow });
   } catch (err) {
