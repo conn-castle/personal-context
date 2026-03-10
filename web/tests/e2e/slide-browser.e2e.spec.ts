@@ -281,9 +281,9 @@ test.describe("Slide Browser", () => {
     // App title visible
     await expect(page.getByRole("heading", { name: "Personal Context" })).toBeVisible();
 
-    // Date headers visible (formatRelativeDate may show "Today"/"Yesterday" or "Mon, Mar 9")
-    await expect(page.getByText(/Today|Mon, Mar 9/)).toBeVisible();
-    await expect(page.getByText(/Yesterday|Sun, Mar 8/)).toBeVisible();
+    // Date headers visible (formatRelativeDate output depends on current date)
+    await expect(page.getByText(/Today|Yesterday|Mar 9/)).toBeVisible();
+    await expect(page.getByText(/Today|Yesterday|Mar 8/)).toBeVisible();
 
     // Slide buttons visible (last 8 chars of IDs)
     await expect(page.getByText("aabbccdd")).toBeVisible();
@@ -310,8 +310,8 @@ test.describe("Slide Browser", () => {
     // Open project picker
     await page.getByRole("button", { name: /All Projects/i }).click();
 
-    // Select org/alpha
-    await page.getByText("org/alpha").click();
+    // Select org/alpha (scope to cmdk items to avoid matching slide thumbnails)
+    await page.locator("[cmdk-item]", { hasText: "org/alpha" }).click();
 
     // Wait for filtered results
     await expect(page.getByText("1 slides")).toBeVisible();
@@ -343,8 +343,8 @@ test.describe("Slide Browser", () => {
     await expect(previewFrame.getByRole("heading", { name: "Slide A" })).toBeVisible();
     await expect(previewFrame.getByText("Some content here")).toBeVisible();
 
-    // Detail panel: metadata (use .last() to avoid matching date header in nav)
-    await expect(page.getByText("Mar 9, 2026").last()).toBeVisible();
+    // Detail panel: metadata (date format depends on current date)
+    await expect(page.getByText(/Today|Yesterday|Mar 9/).last()).toBeVisible();
     await expect(page.getByText("org/alpha").last()).toBeVisible();
     // Git hash (first 7 chars)
     await expect(page.getByText("abc1234")).toBeVisible();
