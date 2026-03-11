@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/fractionalindex"
@@ -25,6 +26,7 @@ type Server struct {
 	dataDir string
 	port    int
 	server  *http.Server
+	writeMu sync.Mutex // serializes read-modify-write cycles (PATCH, reorder)
 }
 
 // NewServer creates a local API server.
@@ -771,7 +773,11 @@ func (s *Server) handlePatchSlide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read-then-merge: fetch existing slide, merge PATCH fields
+	// Serialize read-modify-write to prevent concurrent PATCH requests from
+	// clobbering each other's changes (lost-update problem).
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	existing, err := s.repo.GetSlideByID(ctx, id)
 	if err != nil {
 		mapRepoError(w, err, "Slide")
@@ -955,7 +961,11 @@ func (s *Server) handleReorderSlide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read current slide
+	// Serialize read-modify-write to prevent concurrent reorder requests from
+	// overwriting unrelated metadata changes (lost-update problem).
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	existing, err := s.repo.GetSlideByID(ctx, id)
 	if err != nil {
 		mapRepoError(w, err, "Slide")
