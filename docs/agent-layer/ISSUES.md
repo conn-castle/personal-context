@@ -27,6 +27,16 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-03-11 t1u2v3a: Seed idempotency is fragile when user edits tutorial slide HTML
+    Priority: Low. Area: cli/internal/cli/seed.go
+    Description: `runSeed` uses HTML content as the identity key for existing tutorial slides (`existingByHTML`). If a user edits the HTML of a seeded slide, `runSeed` will not recognise it as existing and will create a duplicate on the next run. Stable IDs would require schema changes (a `seed_key` column or similar) and migration support.
+    Next step: When the schema is next extended, consider adding a `seed_key` or `origin` column to slides so seed idempotency is content-independent. Until then, the backfill repair logic handles partial deletion correctly.
+
+- Issue 2026-03-10 m3n4o5a: updateSlide does not propagate html_content back to SlideSummary list
+    Priority: Low. Area: web/hooks/use-slides.ts
+    Description: When a slide is updated via PATCH, `updateSlide` copies `project_id`, `updated_at`, and `deleted_at` from the response into the local SlideSummary list but not `html_content`. If PATCH is later extended to accept `html_content`, thumbnails will show stale content until a full refresh.
+    Next step: When PATCH is extended to accept `html_content`, add `html_content` to the fields copied in the `setSlides` updater.
+
 - Issue 2026-03-10 k1l2m3a: handleSyncData discards incremental sync payload
     Priority: Medium. Area: web/components/spreadsheet-viewer.tsx
     Description: `handleSyncData` callback ignores the `SyncChangesResponse` data from `useSyncManager` and does a full page-1 refetch via `refreshSlides()`. This wastes the incremental `GET /api/sync/changes` API call and resets pagination on every sync.

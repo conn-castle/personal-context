@@ -30,7 +30,7 @@ type ObjectStore interface {
 	Upload(ctx context.Context, key string, body io.Reader) error
 	Download(ctx context.Context, key string) (io.ReadCloser, error)
 	Delete(ctx context.Context, key string) error
-	UpdateVersion(ctx context.Context, version int64) error
+	UpdateVersion(ctx context.Context, version int64, updatedAt string) error
 }
 
 // SessionManager manages the on-disk sync lock and last-sync cursor.
@@ -191,7 +191,8 @@ func (s *Service) updateCloudVersion(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get cloud sync version: %w", err)
 	}
-	if err := s.cloudObjects.UpdateVersion(ctx, version.Version); err != nil {
+	updatedAt := version.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z")
+	if err := s.cloudObjects.UpdateVersion(ctx, version.Version, updatedAt); err != nil {
 		return fmt.Errorf("update cloud sync version object: %w", err)
 	}
 	return nil

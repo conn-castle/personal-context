@@ -13,18 +13,60 @@
  */
 import { expect, test, type Page, type Route } from "@playwright/test";
 
-// Allow a small pixel diff ratio to tolerate non-deterministic dev-mode
-// elements (e.g. the Next.js "1 Issue" badge that appears intermittently).
-const SNAPSHOT_OPTS = { maxDiffPixelRatio: 0.02 };
+import path from "path";
+
+// Hide the Next.js dev indicator badge from screenshots via injected CSS.
+// The stylePath stylesheet pierces Shadow DOM and applies only during capture.
+// assertNoNextJsErrors still inspects the shadow DOM for real errors.
+const SNAPSHOT_OPTS = {
+  maxDiffPixelRatio: 0.02,
+  stylePath: path.join(__dirname, "screenshot.css"),
+};
+
+
 
 // ---------------------------------------------------------------------------
 // Mock data
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Presentation-style HTML templates — styled to fill the 1920×1080 iframe
+// like a real slide deck, not bare unstyled text.
+// ---------------------------------------------------------------------------
+
+const SLIDE_A_HTML = [
+  '<div style="display:flex;flex-direction:column;justify-content:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif">',
+  '<h1 style="font-size:72px;font-weight:700;color:#1a1a2e;margin-bottom:32px">Experiment Results</h1>',
+  '<p style="font-size:36px;color:#4a4a6a;line-height:1.5;margin-bottom:24px">Analysis of the Q1 dataset reveals a 23% improvement in convergence rate across all test conditions.</p>',
+  '<p style="font-size:28px;color:#7a7a9a;line-height:1.6">Additional observations confirm the hypothesis that batch normalization significantly reduces training variance in the lower layers.</p>',
+  "</div>",
+].join("");
+
+const SLIDE_B_HTML = [
+  '<div style="display:flex;flex-direction:column;justify-content:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif">',
+  '<h1 style="font-size:72px;font-weight:700;color:#1a1a2e;margin-bottom:48px">Methodology</h1>',
+  '<ul style="font-size:32px;color:#4a4a6a;line-height:2;list-style:disc;padding-left:48px">',
+  "<li>Baseline comparison using standard SGD optimizer</li>",
+  "<li>Test group with adaptive learning rate schedule</li>",
+  "<li>Control for hardware variance across GPU clusters</li>",
+  "<li>Statistical significance threshold p &lt; 0.01</li>",
+  "</ul>",
+  "</div>",
+].join("");
+
+const SLIDE_C_HTML = [
+  '<div style="display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif;text-align:center">',
+  '<div style="font-size:20px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:4px;margin-bottom:24px">org/beta</div>',
+  '<h1 style="font-size:64px;font-weight:700;color:#1a1a2e;margin-bottom:32px">Infrastructure Migration Plan</h1>',
+  '<p style="font-size:32px;color:#4a4a6a;line-height:1.6;max-width:1200px">Phase 2 rollout targets completion by end of Q2 with zero-downtime deployment strategy.</p>',
+  "</div>",
+].join("");
+
 const SLIDE_A = {
   id: "20260309-aabbccdd",
   date: "2026-03-09",
   day_order: "a0",
+  html_content: SLIDE_A_HTML,
   project_id: "org/alpha",
   updated_at: "2026-03-09T10:00:00Z",
   deleted_at: null,
@@ -36,6 +78,7 @@ const SLIDE_B = {
   id: "20260309-11223344",
   date: "2026-03-09",
   day_order: "a1",
+  html_content: SLIDE_B_HTML,
   project_id: null,
   updated_at: "2026-03-09T09:00:00Z",
   deleted_at: null,
@@ -47,6 +90,7 @@ const SLIDE_C = {
   id: "20260308-55667788",
   date: "2026-03-08",
   day_order: "a0",
+  html_content: SLIDE_C_HTML,
   project_id: "org/beta",
   updated_at: "2026-03-08T12:00:00Z",
   deleted_at: null,
@@ -58,8 +102,7 @@ const SLIDE_A_DETAIL = {
   id: "20260309-aabbccdd",
   date: "2026-03-09",
   day_order: "a0",
-  html_content:
-    "<h1>Slide A</h1><p>Some content here</p><p>Additional analysis notes and observations from the experiment.</p>",
+  html_content: SLIDE_A_HTML,
   notes: "# Important\n\nThese are **bold** notes.\n\n- Item one\n- Item two",
   project_id: "org/alpha",
   git_remote_url: "https://github.com/org/repo",
@@ -100,13 +143,15 @@ const PROJECTS = ["org/alpha", "org/beta"];
  * Returns true for console messages that are expected dev-mode noise
  * (React hydration mismatches from next-themes, etc.) and should not
  * fail the "no console errors" assertion.
+ *
+ * NOTE: Keep this list tight. Only suppress messages that are known
+ * framework noise in dev mode, never real application errors.
  */
 function isExpectedDevWarning(msg: string): boolean {
   return (
     msg.includes("hydrat") ||
     msg.includes("Hydrat") ||
-    msg.includes("A tree hydrated") ||
-    msg.includes("Failed to load resource")
+    msg.includes("A tree hydrated")
   );
 }
 
@@ -209,13 +254,39 @@ async function setupMockApi(
 }
 
 /**
- * Asserts that no unexpected console errors or unhandled page errors occurred.
+ * Asserts that the Next.js dev indicator shows zero issues.
+ * Inspects the `<nextjs-portal>` shadow DOM for error indicator buttons.
+ */
+async function assertNoNextJsErrors(page: Page) {
+  const issueText = await page.evaluate(() => {
+    const portal = document.querySelector("nextjs-portal");
+    if (!portal || !portal.shadowRoot) return null;
+    const buttons = portal.shadowRoot.querySelectorAll("button");
+    for (const btn of buttons) {
+      const t = btn.textContent?.trim() || "";
+      if (/^\d+\s*Issues?$/.test(t)) return t;
+    }
+    return null;
+  });
+  expect(
+    issueText,
+    `Next.js dev indicator shows "${issueText}". ` +
+      `Run the dev server and inspect the error overlay for details.`
+  ).toBeNull();
+}
+
+/**
+ * Asserts that no unexpected console errors, unhandled page errors,
+ * failed network requests, or Next.js dev indicator issues occurred.
+ *
  * Filters out known dev-mode noise (e.g. React hydration mismatches from
  * next-themes setting the class attribute during SSR).
  */
-function assertNoErrors(
+async function assertNoErrors(
+  page: Page,
   consoleErrors: string[],
-  pageErrors: string[]
+  pageErrors: string[],
+  failedRequests: string[]
 ) {
   const realConsoleErrors = consoleErrors.filter(
     (e) => !isExpectedDevWarning(e)
@@ -228,6 +299,11 @@ function assertNoErrors(
     pageErrors,
     `Unhandled page errors:\n${pageErrors.join("\n")}`
   ).toEqual([]);
+  expect(
+    failedRequests,
+    `Failed network requests:\n${failedRequests.join("\n")}`
+  ).toEqual([]);
+  await assertNoNextJsErrors(page);
 }
 
 // ---------------------------------------------------------------------------
@@ -237,10 +313,12 @@ function assertNoErrors(
 test.describe("UI snapshots and console health @visual", () => {
   let consoleErrors: string[];
   let pageErrors: string[];
+  let failedRequests: string[];
 
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
     pageErrors = [];
+    failedRequests = [];
     page.on("console", (msg) => {
       if (msg.type() === "error") {
         consoleErrors.push(msg.text());
@@ -249,9 +327,16 @@ test.describe("UI snapshots and console health @visual", () => {
     page.on("pageerror", (error) => {
       pageErrors.push(error.message);
     });
+    page.on("requestfailed", (request) => {
+      // Ignore requests intercepted by route mocks (e.g. aborted by test teardown)
+      if (request.failure()?.errorText === "net::ERR_ABORTED") return;
+      failedRequests.push(
+        `${request.method()} ${request.url()} — ${request.failure()?.errorText ?? "unknown"}`
+      );
+    });
   });
 
-  test("initial load: three-panel layout with slides @visual", async ({
+  test("initial load: three-panel layout with auto-selected slide @visual", async ({
     page,
   }) => {
     await setupMockApi(page);
@@ -263,23 +348,21 @@ test.describe("UI snapshots and console health @visual", () => {
       page.getByRole("heading", { name: "Personal Context" })
     ).toBeVisible();
 
-    // Navigation panel has slide thumbnails with full IDs
-    await expect(
-      page.getByText("20260309-aabbccdd")
-    ).toBeAttached();
-    await expect(
-      page.getByText("20260309-11223344")
-    ).toBeAttached();
-    await expect(
-      page.getByText("20260308-55667788")
-    ).toBeAttached();
+    // Navigation panel has slide thumbnails (rendered as ScaledSlideFrame iframes)
+    // Verify thumbnails are present by checking the thumbnail buttons
+    const thumbnailButtons = page.locator(
+      ".aspect-video"
+    );
+    await expect(thumbnailButtons.first()).toBeVisible();
 
-    // Center panel shows empty placeholder
-    await expect(
-      page.getByText("Select a slide", { exact: true })
-    ).toBeVisible();
+    // Most recent slide (SLIDE_A) is auto-selected — iframe renders the HTML content
+    const iframe = page.locator('[data-testid="slide-viewer"]').frameLocator('iframe[title="Slide content"]');
+    await expect(iframe.locator("h1")).toBeVisible();
 
-    assertNoErrors(consoleErrors, pageErrors);
+    // Notes should be visible in detail panel (auto-selected slide's notes)
+    await expect(page.getByText("Important")).toBeVisible();
+
+    await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
     await expect(page).toHaveScreenshot("01-initial-load.png", SNAPSHOT_OPTS);
   });
 
@@ -290,11 +373,8 @@ test.describe("UI snapshots and console health @visual", () => {
     await page.goto("/");
     await expect(page.getByText("3 slides")).toBeVisible();
 
-    // Select slide A
-    await page.getByText("20260309-aabbccdd").click();
-
-    // Wait for detail to load — iframe renders the HTML content
-    const iframe = page.frameLocator('iframe[title="Slide content"]');
+    // SLIDE_A is auto-selected on load. Wait for detail to load.
+    const iframe = page.locator('[data-testid="slide-viewer"]').frameLocator('iframe[title="Slide content"]');
     await expect(iframe.locator("h1")).toBeVisible();
 
     // Notes should be visible in detail panel (default tab)
@@ -304,7 +384,7 @@ test.describe("UI snapshots and console health @visual", () => {
     await expect(page.getByText("org/alpha").last()).toBeVisible();
     await expect(page.getByText("abc1234d")).toBeVisible();
 
-    assertNoErrors(consoleErrors, pageErrors);
+    await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
     await expect(page).toHaveScreenshot("02-slide-selected.png", SNAPSHOT_OPTS);
   });
 
@@ -315,10 +395,9 @@ test.describe("UI snapshots and console health @visual", () => {
     await page.goto("/");
     await expect(page.getByText("3 slides")).toBeVisible();
 
-    // Select a slide first so all panels have content
-    await page.getByText("20260309-aabbccdd").click();
+    // SLIDE_A is auto-selected — wait for content to load
     await expect(
-      page.frameLocator('iframe[title="Slide content"]').locator("h1")
+      page.locator('[data-testid="slide-viewer"]').frameLocator('iframe[title="Slide content"]').locator("h1")
     ).toBeVisible();
 
     // Hide navigation panel with [ key
@@ -355,7 +434,7 @@ test.describe("UI snapshots and console health @visual", () => {
     // Restore metadata
     await page.keyboard.press("\\");
 
-    assertNoErrors(consoleErrors, pageErrors);
+    await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
   });
 
   test("detail tabs: switching between Notes, Figures, Files @visual", async ({
@@ -365,8 +444,7 @@ test.describe("UI snapshots and console health @visual", () => {
     await page.goto("/");
     await expect(page.getByText("3 slides")).toBeVisible();
 
-    // Select slide A
-    await page.getByText("20260309-aabbccdd").click();
+    // SLIDE_A is auto-selected — wait for notes to render
     await expect(page.getByText("Important")).toBeVisible();
 
     // Switch to Figures tab using role locator — tab text is hidden at narrow
@@ -387,7 +465,7 @@ test.describe("UI snapshots and console health @visual", () => {
 
     await expect(page).toHaveScreenshot("07-files-tab.png", SNAPSHOT_OPTS);
 
-    assertNoErrors(consoleErrors, pageErrors);
+    await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
   });
 
   test("dark mode: theme toggle switches appearance @visual", async ({
@@ -415,7 +493,7 @@ test.describe("UI snapshots and console health @visual", () => {
     await lightButton.click();
     await expect(page.locator("html")).not.toHaveClass(/dark/);
 
-    assertNoErrors(consoleErrors, pageErrors);
+    await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
   });
 
   test("settings overlay: opens and renders all sections @visual", async ({
@@ -448,7 +526,7 @@ test.describe("UI snapshots and console health @visual", () => {
       page.getByRole("heading", { name: "Settings" })
     ).not.toBeVisible();
 
-    assertNoErrors(consoleErrors, pageErrors);
+    await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
   });
 
   test("empty state: placeholder when no slides exist @visual", async ({
@@ -462,10 +540,10 @@ test.describe("UI snapshots and console health @visual", () => {
 
     await expect(page.getByText("0 slides")).toBeVisible();
     await expect(
-      page.getByText("Select a slide", { exact: true })
+      page.getByText("Empty project", { exact: true })
     ).toBeVisible();
 
-    assertNoErrors(consoleErrors, pageErrors);
+    await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
     await expect(page).toHaveScreenshot("10-empty-state.png", SNAPSHOT_OPTS);
   });
 
@@ -490,6 +568,6 @@ test.describe("UI snapshots and console health @visual", () => {
     // Switch back to strip view
     await page.getByTitle("Strip view").click();
 
-    assertNoErrors(consoleErrors, pageErrors);
+    await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
   });
 });

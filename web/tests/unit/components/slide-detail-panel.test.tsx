@@ -46,6 +46,12 @@ vi.mock("@/components/ui/scroll-area", () => ({
   ),
 }));
 
+vi.mock("@/components/markdown-renderer", () => ({
+  MarkdownRenderer: ({ content }: { content: string }) => (
+    <span>{content}</span>
+  ),
+}));
+
 vi.mock("@/components/asset-card", () => ({
   AssetCard: ({
     filename,
@@ -106,9 +112,14 @@ describe("SlideDetails", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows empty state when no slide is selected", () => {
-    render(<SlideDetails slide={null} />);
-    expect(screen.getByText("No slide selected")).toBeTruthy();
+  it("shows empty state when no slide is selected and project is empty", () => {
+    render(<SlideDetails slide={null} isEmpty={true} />);
+    expect(screen.getByText("No slides in this project")).toBeTruthy();
+  });
+
+  it("shows loading state when no slide is selected and project is not empty", () => {
+    render(<SlideDetails slide={null} isEmpty={false} />);
+    expect(screen.getByText("Loading slide details...")).toBeTruthy();
   });
 
   it("renders notes content for a selected slide", () => {

@@ -28,6 +28,24 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
 
 <!-- ENTRIES START -->
 
+- Backlog 2026-03-11 s1t2u3: Rod fallback for `pc screenshot` when system Chrome is not available
+    Priority: Low. Area: cli
+    Description: `pc screenshot` currently requires system Chrome/Chromium on PATH. Add Rod (Go headless Chrome library) as an automatic fallback that downloads Chromium on first use (~150MB) when no system browser is detected.
+    Acceptance criteria: `pc screenshot <id>` works on machines without Chrome installed, with a one-time auto-download and clear progress indicator.
+    Notes: Rod downloads Chromium to a cache directory. The existing `PC_CHROME_PATH` env var override should continue to take priority.
+
+- Backlog 2026-03-10 m2n2o2: Markdown-authored slides with reliable rendering
+    Priority: Medium. Area: slide-format
+    Description: Allow slides to be authored in Markdown instead of only raw HTML, or support a hybrid Markdown-plus-HTML model that still renders cleanly in previews, exports, and the web UI.
+    Acceptance criteria: Users can create and edit slides using the chosen Markdown or hybrid format; rendered output remains visually correct and consistent anywhere slides are displayed.
+    Notes: Decide whether Markdown is canonical source with HTML as a derived artifact, or whether a constrained hybrid format is the long-term source of truth.
+
+- Backlog 2026-03-10 h1i1j1: Web UI slide creation via + button in header
+    Priority: High. Area: web
+    Description: Allow users to create a new slide directly from the web UI via a + icon in the top header bar. Requires decisions about: what template to use, whether to prompt for project/date, how to set initial html_content, and whether this needs a new POST /api/slides endpoint (currently CLI-only).
+    Acceptance criteria: User can click + in the header, fill minimal fields, and a new slide appears in the navigation panel. Slide persists to Neon and syncs via existing sync mechanism.
+    Notes: Currently no slide creation endpoint exists (CLI only per CONTEXT.md). Needs a new POST /api/slides route, template selection UX, and decisions around default content generation.
+
 - Backlog 2026-03-06 g8h8i8: PDF export for slide ranges with optional title page
     Priority: Medium. Area: web
     Description: Allow exporting only a selected slide range to PDF and optionally prepend a title page during share/export flows.

@@ -17,6 +17,7 @@ describe("GET /api/slides", () => {
     id: "20250304-a3f2b7e1",
     date: "2025-03-04",
     day_order: "a0",
+    html_content: "<p>Test content</p>",
     project_id: null,
     updated_at: "2025-03-04T10:00:00.000Z",
     deleted_at: null,

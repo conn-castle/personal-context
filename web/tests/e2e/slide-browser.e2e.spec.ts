@@ -41,10 +41,50 @@ const TWO_DAYS_AGO_DATE = dateField(_twoDaysAgo);
 // Mock data (dates computed relative to today)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Presentation-style HTML templates — styled to fill the 1920×1080 iframe
+// like a real slide deck, not bare unstyled text.
+// ---------------------------------------------------------------------------
+
+const SLIDE_A_HTML = [
+  '<div style="display:flex;flex-direction:column;justify-content:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif">',
+  '<h1 style="font-size:72px;font-weight:700;color:#1a1a2e;margin-bottom:32px">Experiment Results</h1>',
+  '<p style="font-size:36px;color:#4a4a6a;line-height:1.5;margin-bottom:24px">Analysis of the Q1 dataset reveals a 23% improvement in convergence rate across all test conditions.</p>',
+  '<p style="font-size:28px;color:#7a7a9a;line-height:1.6">Additional observations confirm the hypothesis.</p>',
+  "</div>",
+].join("");
+
+const SLIDE_B_HTML = [
+  '<div style="display:flex;flex-direction:column;justify-content:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif">',
+  '<h1 style="font-size:72px;font-weight:700;color:#1a1a2e;margin-bottom:48px">Methodology</h1>',
+  '<ul style="font-size:32px;color:#4a4a6a;line-height:2;list-style:disc;padding-left:48px">',
+  "<li>Baseline comparison using standard SGD optimizer</li>",
+  "<li>Test group with adaptive learning rate schedule</li>",
+  "<li>Control for hardware variance across GPU clusters</li>",
+  "</ul>",
+  "</div>",
+].join("");
+
+const SLIDE_C_HTML = [
+  '<div style="display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif;text-align:center">',
+  '<div style="font-size:20px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:4px;margin-bottom:24px">org/beta</div>',
+  '<h1 style="font-size:64px;font-weight:700;color:#1a1a2e;margin-bottom:32px">Infrastructure Migration</h1>',
+  '<p style="font-size:32px;color:#4a4a6a;line-height:1.6;max-width:1200px">Phase 2 rollout targets completion by end of Q2.</p>',
+  "</div>",
+].join("");
+
+const DELETED_SLIDE_HTML = [
+  '<div style="display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif;text-align:center">',
+  '<h1 style="font-size:64px;font-weight:700;color:#1a1a2e;margin-bottom:32px">Archived Analysis</h1>',
+  '<p style="font-size:32px;color:#4a4a6a">This slide has been removed from the active deck.</p>',
+  "</div>",
+].join("");
+
 const SLIDE_A = {
   id: `${TODAY_ID}-aabbccdd`,
   date: TODAY_DATE,
   day_order: "a0",
+  html_content: SLIDE_A_HTML,
   project_id: "org/alpha",
   updated_at: dateIso(_now, "10:00:00Z"),
   deleted_at: null,
@@ -56,6 +96,7 @@ const SLIDE_B = {
   id: `${TODAY_ID}-11223344`,
   date: TODAY_DATE,
   day_order: "a1",
+  html_content: SLIDE_B_HTML,
   project_id: null,
   updated_at: dateIso(_now, "09:00:00Z"),
   deleted_at: null,
@@ -67,6 +108,7 @@ const SLIDE_C = {
   id: `${YESTERDAY_ID}-55667788`,
   date: YESTERDAY_DATE,
   day_order: "a0",
+  html_content: SLIDE_C_HTML,
   project_id: "org/beta",
   updated_at: dateIso(_yesterday, "12:00:00Z"),
   deleted_at: null,
@@ -78,7 +120,7 @@ const SLIDE_A_DETAIL = {
   id: `${TODAY_ID}-aabbccdd`,
   date: TODAY_DATE,
   day_order: "a0",
-  html_content: "<h1>Slide A</h1><p>Some content here</p>",
+  html_content: SLIDE_A_HTML,
   notes: "# Important\n\nThese are **bold** notes.",
   project_id: "org/alpha",
   git_remote_url: "https://github.com/org/repo",
@@ -99,6 +141,7 @@ const DELETED_SLIDE = {
   id: `${TWO_DAYS_AGO_ID}-deadbeef`,
   date: TWO_DAYS_AGO_DATE,
   day_order: "a0",
+  html_content: DELETED_SLIDE_HTML,
   project_id: null,
   updated_at: dateIso(_twoDaysAgo, "12:00:00Z"),
   deleted_at: dateIso(_twoDaysAgo, "14:00:00Z"),
@@ -110,7 +153,7 @@ const DELETED_SLIDE_DETAIL = {
   id: `${TWO_DAYS_AGO_ID}-deadbeef`,
   date: TWO_DAYS_AGO_DATE,
   day_order: "a0",
-  html_content: "<p>Deleted slide content</p>",
+  html_content: DELETED_SLIDE_HTML,
   notes: null,
   project_id: null,
   git_remote_url: null,
@@ -318,21 +361,19 @@ test.describe("Slide Browser", () => {
     // App title visible
     await expect(page.getByRole("heading", { name: "Personal Context" })).toBeVisible();
 
-    // Date headers visible (mock dates are today/yesterday, so labels are stable)
-    await expect(page.getByText("Today")).toBeVisible();
-    await expect(page.getByText("Yesterday")).toBeVisible();
-
-    // Slide buttons visible (last 8 chars of IDs)
-    await expect(page.getByText("aabbccdd")).toBeVisible();
-    await expect(page.getByText("11223344")).toBeVisible();
-    await expect(page.getByText("55667788")).toBeVisible();
+    // Date headers visible (mock dates are today/yesterday, so labels are stable).
+    // "Today" also appears in the metadata bar for the auto-selected slide, so
+    // scope to the first match (navigation date header).
+    await expect(page.getByText("Today").first()).toBeVisible();
+    await expect(page.getByText("Yesterday").first()).toBeVisible();
 
     // Slide count badge
     await expect(page.getByText("3 slides")).toBeVisible();
 
-    // Placeholder text when no slide selected
-    await expect(page.getByText("Select a slide", { exact: true })).toBeVisible();
-    await expect(page.getByText("Choose a slide from the navigation panel")).toBeVisible();
+    // Auto-selection: first slide (SLIDE_A) is auto-selected, so the viewer
+    // shows an iframe with slide content instead of a placeholder.
+    const previewFrame = page.locator('[data-testid="slide-viewer"]').frameLocator('iframe[title="Slide content"]');
+    await expect(previewFrame.getByRole("heading", { name: "Experiment Results" })).toBeVisible();
   });
 
   test("filter by project: selecting a project re-fetches slides @e2e", async ({
@@ -350,13 +391,8 @@ test.describe("Slide Browser", () => {
     // Select org/alpha (scope to cmdk items to avoid matching slide thumbnails)
     await page.locator("[cmdk-item]", { hasText: "org/alpha" }).click();
 
-    // Wait for filtered results
+    // Wait for filtered results — only 1 slide remains (SLIDE_A in org/alpha)
     await expect(page.getByText("1 slides")).toBeVisible();
-
-    // Verify only the alpha project slide is shown
-    await expect(page.getByText("aabbccdd")).toBeVisible();
-    await expect(page.getByText("11223344")).not.toBeVisible();
-    await expect(page.getByText("55667788")).not.toBeVisible();
 
     // Verify a project-filtered call was made
     const projectCalls = calls.filter(
@@ -372,13 +408,12 @@ test.describe("Slide Browser", () => {
     await page.goto("/");
     await expect(page.getByText("3 slides")).toBeVisible();
 
-    // Click slide A
-    await page.getByText("aabbccdd").click();
-    const previewFrame = page.frameLocator('iframe[title="Slide content"]');
+    // SLIDE_A is auto-selected (first in sort order: date DESC, day_order ASC)
+    const previewFrame = page.locator('[data-testid="slide-viewer"]').frameLocator('iframe[title="Slide content"]');
 
     // Center panel: HTML content rendered
-    await expect(previewFrame.getByRole("heading", { name: "Slide A" })).toBeVisible();
-    await expect(previewFrame.getByText("Some content here")).toBeVisible();
+    await expect(previewFrame.getByRole("heading", { name: "Experiment Results" })).toBeVisible();
+    await expect(previewFrame.getByText("23% improvement")).toBeVisible();
 
     // Detail panel: metadata (slide A is today)
     await expect(page.getByText("Today").last()).toBeVisible();
@@ -411,8 +446,7 @@ test.describe("Slide Browser", () => {
     await page.goto("/");
     await expect(page.getByText("3 slides")).toBeVisible();
 
-    // Select slide A
-    await page.getByText("aabbccdd").click();
+    // SLIDE_A is auto-selected (first in sort order)
     await expect(page.getByText("Important")).toBeVisible();
 
     // Click Edit button
@@ -443,10 +477,9 @@ test.describe("Slide Browser", () => {
     await page.goto("/");
     await expect(page.getByText("3 slides")).toBeVisible();
 
-    // Select slide A and delete it
-    await page.getByText("aabbccdd").click();
+    // SLIDE_A is auto-selected (first in sort order)
     await expect(
-      page
+      page.locator('[data-testid="slide-viewer"]')
         .frameLocator('iframe[title="Slide content"]')
         .getByRole("heading", { name: "Slide A" })
     ).toBeVisible();
@@ -456,7 +489,6 @@ test.describe("Slide Browser", () => {
 
     // Slide should be optimistically removed (2 slides remain)
     await expect(page.getByText("2 slides")).toBeVisible();
-    await expect(page.getByText("aabbccdd")).not.toBeVisible();
   });
 
   test.skip("show deleted: toggle shows deleted slides with restore button @e2e", async ({
@@ -472,10 +504,6 @@ test.describe("Slide Browser", () => {
 
     // Should fetch deleted slides
     await expect(page.getByText("1 slides")).toBeVisible();
-    await expect(page.getByText("deadbeef")).toBeVisible();
-
-    // Select the deleted slide
-    await page.getByText("deadbeef").click();
 
     // Should show "Deleted" badge (the destructive badge in detail panel)
     await expect(page.locator("[data-variant='destructive']", { hasText: "Deleted" })).toBeVisible();
@@ -535,8 +563,8 @@ test.describe("Slide Browser", () => {
     // Should show 0 slides
     await expect(page.getByText("0 slides")).toBeVisible();
 
-    // Placeholder text visible
-    await expect(page.getByText("Select a slide", { exact: true })).toBeVisible();
+    // Empty state text visible
+    await expect(page.getByText("Empty project")).toBeVisible();
   });
 
   test.skip("sync version display: version badge visible after interaction triggers sync @e2e", async ({
@@ -586,6 +614,14 @@ test.describe("Slide Browser", () => {
         ),
       });
     });
+    // Mock detail endpoint for auto-selected SLIDE_A
+    await page.route(`**/api/slides/${TODAY_ID}-aabbccdd`, async (route: Route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ slide: SLIDE_A_DETAIL }),
+      });
+    });
     await page.route("**/api/projects", async (route: Route) => {
       await route.fulfill({
         status: 200,
@@ -625,9 +661,9 @@ test.describe("Slide Browser", () => {
 
     await loadMore.click();
 
-    // Now 3 slides should be visible
+    // Now 3 slides should be visible, and "Yesterday" date header appears for SLIDE_C
     await expect(page.getByText("3 slides")).toBeVisible();
-    await expect(page.getByText("55667788")).toBeVisible();
+    await expect(page.getByText("Yesterday")).toBeVisible();
 
     // "Load more" should disappear (no more cursor)
     await expect(loadMore).not.toBeVisible();

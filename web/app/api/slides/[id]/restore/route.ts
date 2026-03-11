@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { bumpS3Version } from "@/lib/s3";
 import { invalidId, notFound, internalError } from "@/lib/api-error";
 import { isValidSlideId } from "@/lib/validation";
+import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
 import type { RestoreResponse } from "@/lib/types";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -17,7 +18,11 @@ type RouteContext = { params: Promise<{ id: string }> };
 export async function POST(
   _req: NextRequest,
   context: RouteContext
-): Promise<NextResponse> {
+): Promise<NextResponse | Response> {
+  if (isLocalMode()) {
+    return proxyToLocal(_req);
+  }
+
   try {
     const { id } = await context.params;
 

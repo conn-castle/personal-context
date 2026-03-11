@@ -10,6 +10,7 @@ SHELL := /bin/bash
 ROOT    := $(shell pwd)
 CLI_DIR := $(ROOT)/cli
 WEB_DIR := $(ROOT)/web
+WEB_CLOUD_ENV_CHECK := { [ -n "$$DATABASE_URL" ] && [ -n "$$S3_BUCKET" ]; } || { [ -f $(WEB_DIR)/.env.local ] && grep -Eq '^DATABASE_URL=.+' $(WEB_DIR)/.env.local 2>/dev/null && grep -Eq '^S3_BUCKET=.+' $(WEB_DIR)/.env.local 2>/dev/null; }
 
 # ---------------------------------------------------------------------------
 # Help (auto-generated from ## comments)
@@ -21,7 +22,7 @@ help: ## Show this help
 	@printf '\033[1mCommon workflows:\033[0m\n'
 	@printf '  \033[36mmake check\033[0m      Run everything needed before committing\n'
 	@printf '  \033[36mmake test\033[0m       Run all tests (CLI + Web)\n'
-	@printf '  \033[36mmake dev\033[0m        Start the Next.js dev server\n'
+	@printf '  \033[36mmake dev\033[0m        Start the web UI (auto-detect local vs cloud)\n'
 	@printf '\n\033[1mAll targets:\033[0m\n'
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}'
@@ -53,8 +54,48 @@ lint: cli-lint web-lint ## Lint everything (Go + ESLint)
 build: cli-build web-build ## Build everything (Go binary + Next.js)
 
 .PHONY: dev
-dev: ## Start the Next.js dev server
-	@cd $(WEB_DIR) && pnpm dev
+dev: ## Start web UI (auto-detects local vs cloud mode)
+	@if $(WEB_CLOUD_ENV_CHECK); then \
+		echo "→ Cloud credentials found, starting Next.js directly…"; \
+		cd $(WEB_DIR) && pnpm dev; \
+	else \
+		echo "→ No cloud credentials, starting local mode (pc serve + Next.js)…"; \
+		$(MAKE) dev-local; \
+	fi
+
+.PHONY: seed
+seed: cli-build ## Seed tutorial slides (idempotent)
+	@$(CLI_DIR)/pc seed
+
+.PHONY: dev-local
+dev-local: cli-build ## Start local dev mode (pc serve + proxied Next.js)
+	@$(CLI_DIR)/pc seed
+	@echo "→ Starting pc serve on port 9876…"
+	@set -eu; \
+	serve_pid=""; \
+	trap 'if [ -n "$$serve_pid" ]; then kill "$$serve_pid" 2>/dev/null || true; wait "$$serve_pid" 2>/dev/null || true; fi' EXIT INT TERM; \
+	$(CLI_DIR)/pc serve --port 9876 & \
+	serve_pid="$$!"; \
+	sleep 1; \
+	if ! kill -0 "$$serve_pid" 2>/dev/null; then \
+		echo "pc serve failed to start" >&2; \
+		exit 1; \
+	fi; \
+	echo "→ Starting Next.js with LOCAL_BACKEND_URL…"; \
+	cd $(WEB_DIR) && LOCAL_BACKEND_URL=http://127.0.0.1:9876 pnpm dev
+
+.PHONY: dev-cloud
+dev-cloud: ## Start cloud dev mode (Next.js with Neon/S3 — requires env vars)
+	@if $(WEB_CLOUD_ENV_CHECK); then \
+		cd $(WEB_DIR) && pnpm dev; \
+	else \
+		echo "DATABASE_URL and S3_BUCKET must be set (environment or web/.env.local) before running make dev-cloud" >&2; \
+		exit 1; \
+	fi
+
+.PHONY: serve
+serve: cli-build ## Start pc serve only (Go API server)
+	@$(CLI_DIR)/pc serve
 
 .PHONY: clean
 clean: ## Remove build artifacts

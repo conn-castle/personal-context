@@ -4,7 +4,7 @@ Personal Context is a local-first engineering notebook system that stores work a
 
 ## Status
 
-Roadmap Phase 9 (Web UI integration) is in progress. The web workspace now includes real API routes, the Slide Browser UI, sync polling, unit coverage gates, and Playwright browser coverage; the remaining planned Phase 9 task is Amplify deployment.
+Roadmap Phase 9 (Web UI integration) is in progress. The web workspace now includes real API routes, the Slide Browser UI, sync polling, unit coverage gates, Playwright browser coverage, and local dev mode (`pc serve`). Remaining Phase 9 tasks: contract tests (Go/Node API parity), settings overlay, and Amplify deployment.
 
 ## Architecture
 
@@ -135,6 +135,9 @@ pc setup --remove-cloud
 - `pc import <path>` — merge a git snapshot into local SQLite using `updated_at` rules (`same/older -> skip`, `newer -> replace`)
 - `pc restore-db <path>` — replace local SQLite state from a git snapshot and create an auto-backup snapshot first under `~/personal-context/.pc/backups/`
 - `pc verify` — run a local Tier 2 round-trip verification; `pc verify --from-cloud` verifies the cloud-rooted round-trip path
+- `pc serve` — start Go HTTP server on `127.0.0.1:9876` (default) implementing the web API against local SQLite + filesystem (`--port` to override)
+- `pc screenshot <id>` — capture a 1920x1080 PNG of a slide using headless Chrome (`--output` to set path; requires Chrome/Chromium or `PC_CHROME_PATH`)
+- `pc seed` — create 6 tutorial slides under `personal-context/tutorial` project (idempotent; auto-run by `make dev-local`)
 
 ## Web UI Overview
 
@@ -146,6 +149,31 @@ Phase 9 currently provides:
 - `useSyncManager` 4-layer polling and cursor-based pagination
 - Vitest coverage thresholds (95%) plus Playwright smoke and Slide Browser e2e coverage
 - Schema-contract module referencing canonical `schema/` artifacts
+- Local dev mode: Next.js proxies to `pc serve` when `LOCAL_BACKEND_URL` is set (no cloud credentials needed)
+
+### Local Dev Mode (`pc serve`)
+
+Run the full web UI against your local SQLite database and filesystem — no Neon or S3 required.
+
+```bash
+# Automatic: if DATABASE_URL and S3_BUCKET are set in the environment or web/.env.local,
+# starts cloud mode; otherwise starts local mode
+make dev
+
+# Explicit local mode
+make dev-local
+
+# Explicit cloud mode (fails fast if DATABASE_URL or S3_BUCKET is missing)
+make dev-cloud
+
+# Manual (two terminals):
+# Terminal 1:
+cd cli && go build -o pc ./cmd/pc && ./pc serve --port 9876
+# Terminal 2:
+cd web && LOCAL_BACKEND_URL=http://127.0.0.1:9876 pnpm dev
+```
+
+Prerequisites: `pc setup` must have been run (creates `~/personal-context/` and the local SQLite database). `make dev-cloud` requires non-empty `DATABASE_URL` and `S3_BUCKET` values in the shell environment or `web/.env.local`.
 
 ## Development Workflow
 

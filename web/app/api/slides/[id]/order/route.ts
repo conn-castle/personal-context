@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { bumpS3Version } from "@/lib/s3";
 import { invalidId, notFound, badRequest, internalError } from "@/lib/api-error";
 import { isValidSlideId, isValidDate } from "@/lib/validation";
+import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
 import { generateKeyBetween } from "fractional-indexing";
 import type { ReorderInput, ReorderResponse } from "@/lib/types";
 
@@ -147,7 +148,11 @@ function computeFractionalIndex(
 export async function PATCH(
   req: NextRequest,
   context: RouteContext
-): Promise<NextResponse> {
+): Promise<NextResponse | Response> {
+  if (isLocalMode()) {
+    return proxyToLocal(req);
+  }
+
   try {
     const { id } = await context.params;
 

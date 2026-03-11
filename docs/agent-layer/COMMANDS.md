@@ -181,6 +181,14 @@ Run from: `web/`
 Prerequisites: `pnpm exec playwright install` for browser binaries.
 Notes: Uses `page.route()` API interception — no real backend needed. Tests browse, filter, detail, edit, delete/restore, sync version, error states, pagination.
 
+- Run Playwright markdown rendering e2e tests
+```bash
+pnpm test:e2e:markdown
+```
+Run from: `web/`
+Prerequisites: `pnpm exec playwright install` for browser binaries.
+Notes: Verifies all markdown elements (H1–H6, bold, italic, strikethrough, code, lists, tables, task lists, blockquotes, links, mermaid diagrams) render correctly in the Notes panel. Includes visual snapshots.
+
 - Run Playwright e2e for standalone CLI slide preview flow
 ```bash
 pnpm test:e2e:cli-slide
@@ -213,11 +221,39 @@ make test
 ```
 Run from: repo root
 
-- Start Next.js dev server
+- Start web UI (auto-detects local vs cloud mode)
 ```bash
 make dev
 ```
 Run from: repo root
+Notes: If the shell environment or `web/.env.local` has non-empty `DATABASE_URL` and `S3_BUCKET`, runs `next dev` directly (cloud). Otherwise, starts `pc serve` + proxied `next dev` (local).
+
+- Start local dev mode (pc serve + proxied Next.js)
+```bash
+make dev-local
+```
+Run from: repo root
+Notes: Always starts `pc serve` on port 9876 and Next.js with `LOCAL_BACKEND_URL`.
+
+- Start cloud dev mode (Next.js with Neon/S3)
+```bash
+make dev-cloud
+```
+Run from: repo root
+Notes: Requires non-empty `DATABASE_URL` and `S3_BUCKET` in the shell environment or `web/.env.local`; fails fast if either is missing.
+
+- Start pc serve only (Go API server)
+```bash
+make serve
+```
+Run from: repo root
+
+- Seed tutorial slides (idempotent)
+```bash
+make seed
+```
+Run from: repo root
+Notes: Creates 6 tutorial slides under `personal-context/tutorial` project. Automatically run by `make dev-local`.
 
 ## Repository root
 

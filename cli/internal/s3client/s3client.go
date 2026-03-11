@@ -1,7 +1,9 @@
 package s3client
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -113,47 +115,81 @@ func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 	return true, nil
 }
 
-// HeadVersion reads the _version object as an int64.
-// Returns 0 when the _version key does not exist (new/empty bucket).
-func (c *Client) HeadVersion(ctx context.Context) (int64, error) {
+// versionPayload is the JSON structure stored in the _version S3 object.
+type versionPayload struct {
+	Version   int64  `json:"version"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// versionReadPayload uses pointer fields to detect missing JSON keys during deserialization.
+type versionReadPayload struct {
+	Version   *int64  `json:"version"`
+	UpdatedAt *string `json:"updated_at"`
+}
+
+// HeadVersion reads the _version object as JSON {"version": N, "updated_at": "ISO"}.
+// Returns (0, "", nil) when the _version key does not exist (new/empty bucket).
+// Backward-compatible: if JSON parse fails, tries plain text int64 (migration path).
+func (c *Client) HeadVersion(ctx context.Context) (int64, string, error) {
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(versionKey),
 	})
 	if err != nil {
 		if isNotFoundError(err) {
-			return 0, nil
+			return 0, "", nil
 		}
-		return 0, fmt.Errorf("head version: %w", mapS3Error(err))
+		return 0, "", fmt.Errorf("head version: %w", mapS3Error(err))
 	}
 	defer func() { _ = out.Body.Close() }()
 
 	data, err := io.ReadAll(out.Body)
 	if err != nil {
-		return 0, fmt.Errorf("read version body: %w", err)
+		return 0, "", fmt.Errorf("read version body: %w", err)
 	}
 
-	v, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
-	if err != nil {
-		return 0, fmt.Errorf("parse version %q: %w", string(data), err)
+	trimmed := strings.TrimSpace(string(data))
+	if strings.HasPrefix(trimmed, "{") {
+		var payload versionReadPayload
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return 0, "", fmt.Errorf("parse version object: %w", err)
+		}
+		if payload.Version == nil || payload.UpdatedAt == nil {
+			return 0, "", fmt.Errorf("parse version object %q: version and updated_at are required", string(data))
+		}
+		return *payload.Version, *payload.UpdatedAt, nil
 	}
-	return v, nil
+
+	// Backward-compatible fallback: plain text int64.
+	v, err := strconv.ParseInt(trimmed, 10, 64)
+	if err != nil {
+		return 0, "", fmt.Errorf("parse version %q: not valid JSON or integer", string(data))
+	}
+	return v, "", nil
 }
 
-// UpdateVersion writes the given version number to the _version object.
-// Args: version must be non-negative.
+// UpdateVersion writes the version as JSON {"version": N, "updated_at": "ISO"} to the _version object.
+// Args: version must be non-negative; updatedAt is an ISO 8601 timestamp string.
 // Returns: nil on success or a descriptive error.
-func (c *Client) UpdateVersion(ctx context.Context, version int64) error {
+func (c *Client) UpdateVersion(ctx context.Context, version int64, updatedAt string) error {
 	if version < 0 {
 		return fmt.Errorf("version must be non-negative, got %d", version)
 	}
+	if updatedAt == "" {
+		return fmt.Errorf("updatedAt must not be empty")
+	}
 
-	body := strings.NewReader(strconv.FormatInt(version, 10))
-	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
+	payload := versionPayload{Version: version, UpdatedAt: updatedAt}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal version payload: %w", err)
+	}
+
+	_, err = c.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(c.bucket),
 		Key:         aws.String(versionKey),
-		Body:        body,
-		ContentType: aws.String("text/plain"),
+		Body:        bytes.NewReader(data),
+		ContentType: aws.String("application/json"),
 	})
 	if err != nil {
 		return fmt.Errorf("update version: %w", mapS3Error(err))

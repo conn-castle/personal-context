@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { badRequest, internalError } from "@/lib/api-error";
 import { parseQueryInt, isValidISOTimestamp } from "@/lib/validation";
+import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
 import type { SlideSummary } from "@/lib/types";
 
 // Neon driver supports both tagged-template and function call forms.
@@ -56,7 +57,11 @@ function encodeCursor(payload: CursorPayload): string {
  */
 export async function GET(
   req: NextRequest
-): Promise<NextResponse> {
+): Promise<NextResponse | Response> {
+  if (isLocalMode()) {
+    return proxyToLocal(req);
+  }
+
   try {
     const sql = getDb() as SqlFn;
     const url = req.nextUrl;
@@ -130,6 +135,7 @@ export async function GET(
         s.id,
         s.date,
         s.day_order,
+        s.html_content,
         s.project_id,
         s.updated_at,
         s.deleted_at,

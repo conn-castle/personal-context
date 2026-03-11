@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { getPresignedUrl } from "@/lib/s3";
 import { invalidId, notFound, badRequest, internalError } from "@/lib/api-error";
 import { isValidSlideId, isValidFilename } from "@/lib/validation";
+import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
 import type { FileUrlResponse } from "@/lib/types";
 
 // Neon driver supports both tagged-template and function call forms.
@@ -35,7 +36,11 @@ const FILE_TYPE_TABLE: Record<FileType, string> = {
 export async function GET(
   _req: NextRequest,
   context: RouteContext
-): Promise<NextResponse> {
+): Promise<NextResponse | Response> {
+  if (isLocalMode()) {
+    return proxyToLocal(_req);
+  }
+
   try {
     const { slideId, path } = await context.params;
 

@@ -26,7 +26,7 @@ Do not duplicate information that belongs in other memory files:
 
 <!-- ENTRIES START -->
 
-> **Status:** Phase 8 (v0.dev UI design) is complete. Phase 9 (web UI integration) is in progress. See ROADMAP.md for phase-by-phase implementation progress.
+> **Status:** Phase 9 (web UI integration) is in progress. `pc serve` local dev mode is implemented and tested. See ROADMAP.md for remaining Phase 9 tasks.
 
 ## Project Overview
 
@@ -66,8 +66,9 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - Postgres <-- local SQLite via `pc sync` push phase (Tier 1: fully lossless)
 
 ### Source of Truth
-- **Cloud configured**: Neon Postgres + S3 is cloud source of truth. Web UI reads/writes here.
-- **Local-only mode**: Local SQLite + local files only. No web UI.
+- **Cloud configured**: Neon Postgres + S3 is cloud source of truth. Web UI reads/writes here via Next.js API routes.
+- **Local dev mode** (`pc serve`): Go HTTP server implements the same REST API using local SQLite + filesystem. Next.js API routes proxy to Go when `LOCAL_BACKEND_URL` is set. Web UI works identically in both modes.
+- **Local-only mode** (CLI only): Local SQLite + local files. No web UI.
 
 ## Data Model (5 Tables)
 
@@ -196,7 +197,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 | Component | Technology |
 |-----------|-----------|
 | CLI | Go: cobra, modernc.org/sqlite (pure Go), fracdex (fractional indexing), pgx (direct, not database/sql), aws-sdk-go-v2 (+credentials, +service/s3, +smithy-go), testcontainers-go (integration tests). Custom migration runner in `cli/internal/sqlite/` (no golang-migrate). |
-| Web UI | Next.js App Router, React, react-resizable-panels, shadcn/ui (New York), lucide-react, date-fns, sandboxed iframes for slide HTML rendering |
+| Web UI | Next.js App Router, React, react-resizable-panels, shadcn/ui (New York), lucide-react, date-fns, react-markdown + remark-gfm + mermaid (notes rendering), sandboxed iframes for slide HTML rendering |
 | Web hosting | AWS Amplify (SSR via Lambda, us-east-1) |
 | DB (cloud) | Neon Postgres (provider-portable). @neondatabase/serverless HTTP driver for Lambda |
 | DB (local) | SQLite via modernc.org/sqlite (pure Go, no CGO) |
@@ -248,6 +249,15 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 ### Search & Projects
 - `pc search <query>` — LIKE/ILIKE on html_content, notes, project_id (not git fields)
 - `pc project set|clear|list` — manage active project
+
+### Local Dev Server
+- `pc serve` — start Go HTTP server on `127.0.0.1:<port>` implementing the web API against local SQLite + filesystem. Used with `next dev` for local web UI development without cloud credentials.
+
+### Screenshot
+- `pc screenshot <id>` — renders slide HTML at 1920x1080 using headless Chrome and saves as PNG. Requires Chrome/Chromium on PATH or `PC_CHROME_PATH` env var. `--output` / `-o` to set output path (default: `<id>.png` in current directory).
+
+### Dev Tools
+- `pc seed` — creates 6 tutorial slides under the `personal-context/tutorial` project. Idempotent — backfills any missing built-in tutorial slides and skips only when all 6 already exist. Run automatically by `make dev-local`.
 
 ### Sync & Data
 - `pc sync` — bidirectional cloud sync (errors if no cloud)
@@ -304,8 +314,9 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - 16:9 slide viewer with sandboxed iframes, `transform: scale()`, white background
 - Virtual date slides injected at render time
 - Filter by project
+- Auto-selects the most recent slide on initial load (never shows an empty "select a slide" state when slides exist)
 - Read-only chronological navigation (drag-and-drop reorder is still deferred)
-- View notes (markdown), figures, and data files with sizes plus open/download actions
+- View notes (full markdown via react-markdown + remark-gfm + mermaid), figures, and data files with sizes plus open/download actions
 - Edit notes from the detail panel
 - Soft delete + trash view with restore
 - 4-layer sync polling via `useSyncManager()` hook
@@ -321,10 +332,11 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `collapsed-details-strip.tsx` — icon strip when details panel is hidden
 - `project-picker.tsx` — project filter popover (uses cmdk for search/multi-select)
 - `slide-date-picker.tsx` — calendar date picker (react-day-picker v9)
-- `slide-thumbnail.tsx` — thumbnail card in navigation panel
+- `slide-thumbnail.tsx` — thumbnail card in navigation panel (uses `ScaledSlideFrame` for HTML preview, identical rendering to main viewer)
 - `asset-card.tsx` + `asset-preview-dialog.tsx` — file/figure cards with preview dialog
 - `settings-overlay.tsx` — settings dialog (placeholder, to be built out)
 - `theme-provider.tsx` — wraps next-themes ThemeProvider
+- `markdown-renderer.tsx` — full markdown rendering via react-markdown + remark-gfm + mermaid diagram support
 - `scaled-slide-frame.tsx` — 16:9 sandboxed iframe with `transform: scale()` (no figure URL resolution — renders htmlContent directly)
 
 ### Web UI Hooks
@@ -340,6 +352,8 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - **next-themes** — dark mode support via `ThemeProvider` + `useTheme()`
 - **cmdk** — command palette for ProjectPicker search/multi-select
 - **react-day-picker** v9 — calendar in SlideDatePicker
+- **react-markdown** + **remark-gfm** — full markdown rendering for notes (GFM tables, strikethrough, task lists, autolinks)
+- **mermaid** — renders `mermaid` code blocks as diagrams in the notes panel
 - **lucide-react** — icons
 - **date-fns** — date formatting
 
@@ -388,6 +402,7 @@ type SlideSummary = {
   id: string;
   date: string; // YYYY-MM-DD
   day_order: string;
+  html_content: string;
   project_id: string | null;
   updated_at: string; // ISO 8601 UTC
   deleted_at: string | null;

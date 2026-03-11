@@ -5,10 +5,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 
@@ -321,6 +326,170 @@ func TestSearchWithoutSetup(t *testing.T) {
 	cmd.SetArgs([]string{"search", "query"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error without setup")
+	}
+}
+
+func TestServeHomeDirError(t *testing.T) {
+	withBrokenHomeDir(t, func() {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs([]string{"serve"})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestServeWithoutSetup(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"serve"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error without setup")
+	}
+}
+
+func TestServeInvalidPort(t *testing.T) {
+	setupEnv(t)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"serve", "--port", "0"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for invalid port")
+	}
+}
+
+func TestServeStartAndShutdown(t *testing.T) {
+	setupEnv(t)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close reserved port: %v", err)
+	}
+
+	var out, stderr bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runServe(ctx, &out, &stderr, port)
+	}()
+
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("timeout waiting for server start")
+		}
+
+		resp, err := http.Get(healthURL)
+		if err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for server shutdown")
+	}
+}
+
+func TestServePortInUse(t *testing.T) {
+	setupEnv(t)
+
+	// Bind a port so that srv.Start() fails immediately with "address already in use".
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	defer func() { _ = listener.Close() }()
+
+	var out, stderr bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = runServe(ctx, &out, &stderr, port)
+	if err == nil {
+		t.Fatal("expected error when port is in use")
+	}
+	if !strings.Contains(err.Error(), "address already in use") {
+		t.Errorf("expected 'address already in use' in error, got: %v", err)
+	}
+}
+
+// TestServeSignalShutdown exercises the SIGINT signal handler path specifically.
+// TestServeStartAndShutdown covers graceful shutdown via context cancellation;
+// this test verifies the OS signal → context cancellation bridge that is the
+// primary shutdown mechanism in production. Sending SIGINT to the test process
+// is inherently racy in theory, but in practice the signal is delivered before
+// the select timeout and the test is reliable across platforms and CI.
+func TestServeSignalShutdown(t *testing.T) {
+	setupEnv(t)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close reserved port: %v", err)
+	}
+
+	var out, stderr bytes.Buffer
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runServe(context.Background(), &out, &stderr, port)
+	}()
+
+	// Wait for the server to be ready.
+	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("timeout waiting for server start")
+		}
+		resp, err := http.Get(healthURL)
+		if err == nil {
+			_ = resp.Body.Close()
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	// Send SIGINT to trigger the signal handler path.
+	p, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("find process: %v", err)
+	}
+	if err := p.Signal(syscall.SIGINT); err != nil {
+		t.Fatalf("send SIGINT: %v", err)
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for server shutdown after SIGINT")
+	}
+
+	if !strings.Contains(stderr.String(), "shutting down") {
+		t.Errorf("expected 'shutting down' in stderr, got: %q", stderr.String())
 	}
 }
 
@@ -1256,5 +1425,53 @@ func TestDoctorWithoutSetup(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "FAIL") {
 		t.Fatalf("expected FAIL in output, got %q", stdout.String())
+	}
+}
+
+// --- Export: missing --path flag ---
+
+func TestExportMissingPathFlag(t *testing.T) {
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"export"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error when --path is missing")
+	}
+}
+
+func TestExportEmptyPath(t *testing.T) {
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"export", "--path", "  "})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error when --path is whitespace")
+	}
+}
+
+func TestExportHomeDirError(t *testing.T) {
+	withBrokenHomeDir(t, func() {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs([]string{"export", "--path", t.TempDir()})
+		if err := cmd.Execute(); err == nil {
+			t.Fatal("expected error for broken home dir")
+		}
+	})
+}
+
+func TestExportWithoutSetup(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"export", "--path", t.TempDir()})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error without setup")
+	}
+}
+
+func TestExportInvalidGitRemote(t *testing.T) {
+	setupEnv(t)
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"export", "--path", t.TempDir(), "--github-remote", "nonexistent-remote"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error for invalid git remote")
 	}
 }

@@ -227,34 +227,45 @@ func TestHeadVersionUpdateVersionRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	// Fresh bucket should return 0.
-	v, err := client.HeadVersion(ctx)
+	v, updatedAt, err := client.HeadVersion(ctx)
 	if err != nil {
 		t.Fatalf("HeadVersion() on fresh bucket error = %v", err)
 	}
 	if v != 0 {
 		t.Fatalf("HeadVersion() on fresh bucket = %d, want 0", v)
 	}
+	if updatedAt != "" {
+		t.Fatalf("HeadVersion() on fresh bucket updatedAt = %q, want empty", updatedAt)
+	}
 
-	if err := client.UpdateVersion(ctx, 42); err != nil {
+	firstUpdatedAt := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	if err := client.UpdateVersion(ctx, 42, firstUpdatedAt); err != nil {
 		t.Fatalf("UpdateVersion(42) error = %v", err)
 	}
-	v, err = client.HeadVersion(ctx)
+	v, updatedAt, err = client.HeadVersion(ctx)
 	if err != nil {
 		t.Fatalf("HeadVersion() error = %v", err)
 	}
 	if v != 42 {
 		t.Fatalf("HeadVersion() = %d, want 42", v)
 	}
+	if updatedAt != firstUpdatedAt {
+		t.Fatalf("HeadVersion() updatedAt = %q, want %q", updatedAt, firstUpdatedAt)
+	}
 
-	if err := client.UpdateVersion(ctx, 43); err != nil {
+	secondUpdatedAt := time.Date(2026, 3, 10, 13, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	if err := client.UpdateVersion(ctx, 43, secondUpdatedAt); err != nil {
 		t.Fatalf("UpdateVersion(43) error = %v", err)
 	}
-	v, err = client.HeadVersion(ctx)
+	v, updatedAt, err = client.HeadVersion(ctx)
 	if err != nil {
 		t.Fatalf("HeadVersion() error = %v", err)
 	}
 	if v != 43 {
 		t.Fatalf("HeadVersion() = %d, want 43", v)
+	}
+	if updatedAt != secondUpdatedAt {
+		t.Fatalf("HeadVersion() updatedAt = %q, want %q", updatedAt, secondUpdatedAt)
 	}
 }
 
@@ -346,8 +357,20 @@ func TestUploadRejectsNilBody(t *testing.T) {
 func TestUpdateVersionRejectsNegative(t *testing.T) {
 	client := newTestClient(t)
 
-	if err := client.UpdateVersion(context.Background(), -1); err == nil {
+	if err := client.UpdateVersion(context.Background(), -1, time.Now().UTC().Format(time.RFC3339)); err == nil {
 		t.Fatal("expected error for negative version")
+	}
+}
+
+func TestUpdateVersionRejectsEmptyUpdatedAt(t *testing.T) {
+	client := newTestClient(t)
+
+	err := client.UpdateVersion(context.Background(), 1, "")
+	if err == nil {
+		t.Fatal("expected error for empty updatedAt")
+	}
+	if !strings.Contains(err.Error(), "updatedAt must not be empty") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -360,9 +383,26 @@ func TestHeadVersionInvalidContent(t *testing.T) {
 		t.Fatalf("Upload() error = %v", err)
 	}
 
-	_, err := client.HeadVersion(ctx)
+	_, _, err := client.HeadVersion(ctx)
 	if err == nil {
 		t.Fatal("expected error for non-numeric version content")
+	}
+}
+
+func TestHeadVersionRejectsMalformedJSONObject(t *testing.T) {
+	client := newTestClient(t)
+	ctx := context.Background()
+
+	if err := client.Upload(ctx, "_version", bytes.NewReader([]byte(`{"foo":"bar"}`))); err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+
+	_, _, err := client.HeadVersion(ctx)
+	if err == nil {
+		t.Fatal("expected error for malformed JSON version payload")
+	}
+	if !strings.Contains(err.Error(), "version and updated_at are required") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -388,10 +428,10 @@ func TestErrorPathsWithUnreachableEndpoint(t *testing.T) {
 	if _, err := client.Exists(ctx, "some/key"); err == nil {
 		t.Fatal("expected error for Exists on unreachable endpoint")
 	}
-	if _, err := client.HeadVersion(ctx); err == nil {
+	if _, _, err := client.HeadVersion(ctx); err == nil {
 		t.Fatal("expected error for HeadVersion on unreachable endpoint")
 	}
-	if err := client.UpdateVersion(ctx, 1); err == nil {
+	if err := client.UpdateVersion(ctx, 1, time.Now().UTC().Format(time.RFC3339)); err == nil {
 		t.Fatal("expected error for UpdateVersion on unreachable endpoint")
 	}
 	if _, err := client.Download(ctx, "some/key"); err == nil {

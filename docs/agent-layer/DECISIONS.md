@@ -201,3 +201,18 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: Replaced hand-built UI components with v0.dev reference design components. Adapted `Slide` type to `SlideSummary`/`SlideDetail` split. All hook orchestration lives in `SpreadsheetViewer`, not `page.tsx`. `resizable.tsx` wraps react-resizable-panels v4 API with v2-style `direction` prop for shadcn compatibility.
     Reason: User required visual parity with v0.dev reference. v0.dev used a single `Slide` type with mock data; our real backend uses `SlideSummary` (list) and `SlideDetail` (selected). The v4 API renames `PanelGroup`→`Group`, `PanelResizeHandle`→`Separator`, `direction`→`orientation`.
     Tradeoffs: v0.dev ScaledSlideFrame lost figure URL resolution (moved to iframe rendering context). NotesEditor doesn't key on slideId (editing state may persist across slide changes — tracked in ISSUES.md).
+
+- Decision 2026-03-10 x3y4z5a: html_content included in SlideSummary for thumbnail rendering
+    Decision: Added `html_content` to `SlideSummary` and the `GET /api/slides` + `GET /api/sync/changes` responses. Thumbnails use the same `ScaledSlideFrame` component as the main viewer.
+    Reason: v0.dev reference renders thumbnails using `ScaledSlideFrame` with actual HTML content. With 20 slides per page, the additional payload is manageable (~1MB worst case per page).
+    Tradeoffs: Larger API responses. If slide HTML grows very large (100KB+), consider a separate thumbnail content endpoint or server-side thumbnail generation.
+
+- Decision 2026-03-10 y5z6a7a: react-markdown + remark-gfm + mermaid for notes rendering
+    Decision: Replaced custom inline MarkdownRenderer with `react-markdown` + `remark-gfm` + `mermaid` library. Mermaid code blocks are detected and rendered as SVG diagrams client-side.
+    Reason: Custom renderer only supported basic markdown (headings, bold, code, lists, tables). Full GFM support (strikethrough, task lists, autolinks) and mermaid diagrams were requested.
+    Tradeoffs: Three new dependencies (~220 packages total from mermaid). Mermaid is a large library; consider lazy loading if bundle size becomes a concern.
+
+- Decision 2026-03-10 a8b9c0d: `pc serve` as Go REST server for local dev mode (dual-backend architecture)
+    Decision: Local dev mode uses a Go HTTP server (`pc serve`) that implements the same REST API shape as the Next.js API routes, backed by the existing Go SQLite repository and local filesystem. Next.js API routes detect `LOCAL_BACKEND_URL` and proxy to the Go server. Cloud mode (Amplify) is unchanged — Node.js handles Neon + S3 directly.
+    Reason: Three alternatives were evaluated: (1) Go reverse proxy replacing Node entirely — precludes cloud-deployed frontend on Amplify; (2) SQLite-in-Node via env var — adds SQLite dependency to Node, requires SQL dialect translation layer, pollutes the production web app; (3) Go REST server — reuses existing Go repository layer (24 methods, already tested), no new Node dependencies, and keeps the web-side changes isolated to a small proxy helper plus the affected API route handlers. The Go CLI already has full SQLite access, filesystem code, and contract tests for both SQLite and Postgres implementations.
+    Tradeoffs: Two implementations of the same API logic (Go for local, Node for cloud). Mitigated by contract tests that call both backends with identical inputs and assert response parity + correctness. Both must stay in sync when API changes are made. Cloud `_version` now uses JSON `{version, updated_at}` as the canonical payload, while readers retain compatibility with legacy bare-integer objects.
