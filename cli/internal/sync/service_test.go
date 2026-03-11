@@ -3429,8 +3429,8 @@ func (c *countingObjectStore) Delete(ctx context.Context, key string) error {
 	return c.inner.Delete(ctx, key)
 }
 
-func (c *countingObjectStore) UpdateVersion(ctx context.Context, version int64) error {
-	return c.inner.UpdateVersion(ctx, version)
+func (c *countingObjectStore) UpdateVersion(ctx context.Context, version int64, updatedAt string) error {
+	return c.inner.UpdateVersion(ctx, version, updatedAt)
 }
 
 // --- countingLocalFiles returns error after N calls to ResolveDataFilePath ---
@@ -3904,7 +3904,7 @@ func (m *mockObjectStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-func (m *mockObjectStore) UpdateVersion(_ context.Context, version int64) error {
+func (m *mockObjectStore) UpdateVersion(_ context.Context, version int64, _ string) error {
 	if m.updateVersionErr != nil {
 		return m.updateVersionErr
 	}

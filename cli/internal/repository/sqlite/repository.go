@@ -146,6 +146,14 @@ func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlide
 		builder.WriteString(` AND date <= ?`)
 		args = append(args, *filter.DateTo)
 	}
+	if filter.UpdatedAfter != nil {
+		builder.WriteString(` AND updated_at >= ?`)
+		args = append(args, filter.UpdatedAfter.UTC().Format("2006-01-02T15:04:05.000Z"))
+	}
+	if filter.UpdatedBefore != nil {
+		builder.WriteString(` AND updated_at <= ?`)
+		args = append(args, filter.UpdatedBefore.UTC().Format("2006-01-02T15:04:05.000Z"))
+	}
 	if filter.Query != nil {
 		escaped := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(trimmedQuery)
 		q := "%" + escaped + "%"

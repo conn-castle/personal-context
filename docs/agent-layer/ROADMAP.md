@@ -139,6 +139,28 @@ Incomplete:
     - Sync version display: sync version badge visible after interaction
     - Error states: API unavailable shows error banner, empty database shows placeholder
     - Load more pagination: cursor-based next-page loading
+- [ ] **Local dev mode (`pc serve`)** — Go HTTP server that implements the same REST API as the Next.js routes, backed by local SQLite + filesystem. Next.js API routes detect `LOCAL_BACKEND_URL` and proxy to the Go server. Details:
+    - **Architecture**: `pc serve` starts a Go HTTP server on `127.0.0.1:<port>`. It implements every `/api/*` endpoint using the existing Go `Repository` interface (SQLite) and local filesystem for figures/data files. Next.js API route handlers detect `LOCAL_BACKEND_URL` and delegate to `web/lib/local-proxy.ts`, which forwards requests to the Go server. When `LOCAL_BACKEND_URL` is unset, the existing Neon + S3 route logic stays active.
+    - **Go server endpoints** (mirror web API 1:1):
+        - `GET /api/slides` — paginated list (cursor, project filter, deleted filter, updated_after)
+        - `GET /api/slides/:id` — single slide with figures and data files
+        - `PATCH /api/slides/:id` — update project_id, notes, git fields
+        - `PATCH /api/slides/:id/order` — reorder (fractional index)
+        - `DELETE /api/slides/:id` — soft delete
+        - `POST /api/slides/:id/restore` — restore
+        - `GET /api/sync/version` — return sync_version from SQLite (static in local mode, no S3)
+        - `GET /api/sync/changes?since=<ISO>` — changed slides since timestamp
+        - `GET /local-files/:slide_id/figures/:filename` — serve local figure file
+        - `GET /local-files/:slide_id/data/:filename` — serve local data file
+        - `GET /api/files/:slideId/:fileType/:filename` — returns `{url, expires_at}` JSON (matching cloud presigned-URL shape)
+        - `GET /api/projects` — distinct project_ids
+    - **File serving**: Go serves figures/data files directly from the local filesystem (`~/personal-context/figures/` and `~/personal-context/data/`). The `/api/files` response returns JSON with a direct Go-server URL under `/local-files/...` instead of an S3 presigned URL.
+    - **Sync behavior in local mode**: `GET /api/sync/version` returns the SQLite `sync_version` table value. The web UI's `useSyncManager` still polls, but version only changes when `pc` CLI mutates locally. No S3 involved.
+    - **S3 `_version` format alignment**: JSON `{version, updated_at}` is now the canonical `_version` payload in cloud mode, with legacy bare-integer reads retained for compatibility.
+    - **Startup**: `pc serve` reads the CLI config (`~/personal-context/.pc/config.json`), opens the SQLite DB, resolves the local data directory, and starts listening. `make dev` / `make dev-local` are responsible for launching Next.js alongside it.
+    - **Security**: Bind to `127.0.0.1` only (never `0.0.0.0`). Validate file paths to prevent directory traversal. No authentication (local-only).
+    - **Contract tests**: Shared test fixtures define inputs + expected outputs. Each test calls both the Next.js API route (against Neon/test DB) and the Go HTTP endpoint (against SQLite) with the same input, then asserts: (1) both responses are identical (parity), and (2) both match the expected output (correctness). Run in CI with testcontainers for Postgres.
+    - **Web-side changes**: `web/lib/local-proxy.ts` plus the affected route handlers under `web/app/api/**` implement local-mode proxying. When `LOCAL_BACKEND_URL` is unset, the routes continue using Neon/S3 helpers directly.
 - [ ] Build out real SettingsOverlay (theme, sync config, keyboard shortcuts, data management)
 - [ ] Deploy to AWS Amplify
 
@@ -147,6 +169,8 @@ Incomplete:
 - `useSyncManager` passes unit tests for all 4 layers.
 - All Playwright e2e tests pass.
 - `pnpm test:coverage` reports >95%.
+- `pc serve` starts Go HTTP server and `make dev` works without cloud credentials.
+- Contract tests verify parity between Go and Node API implementations.
 - Deployed and accessible on Amplify.
 
 ## Phase 10 — Deployment, CI/CD, and Integration Testing

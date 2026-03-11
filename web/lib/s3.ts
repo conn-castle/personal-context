@@ -12,6 +12,32 @@ const S3_VERSION_RETRY_COUNT = 3;
 let s3Client: S3Client | null = null;
 
 /**
+ * Parses the canonical JSON `_version` payload.
+ *
+ * @param body - Raw `_version` object body.
+ * @returns Parsed version metadata.
+ * @throws If required fields are missing or have the wrong types.
+ */
+function parseVersionObject(body: string): { version: number; updated_at: string } {
+  const parsed: unknown = JSON.parse(body);
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error(`Failed to parse _version content: ${body}`);
+  }
+
+  const obj = parsed as Record<string, unknown>;
+  if (typeof obj.version !== "number" || typeof obj.updated_at !== "string") {
+    throw new Error(
+      "Failed to parse _version content: JSON object must include numeric version and string updated_at"
+    );
+  }
+
+  return {
+    version: obj.version,
+    updated_at: obj.updated_at,
+  };
+}
+
+/**
  * Returns a lazily-initialized S3 client singleton.
  *
  * @returns The S3 client.
@@ -104,12 +130,17 @@ export async function getS3Version(): Promise<{
     const body = await response.Body?.transformToString();
     if (!body) return { version: 0, updated_at: "" };
 
-    const parsed = JSON.parse(body) as Record<string, unknown>;
-    return {
-      version: typeof parsed.version === "number" ? parsed.version : 0,
-      updated_at:
-        typeof parsed.updated_at === "string" ? parsed.updated_at : "",
-    };
+    const trimmedBody = body.trim();
+    if (trimmedBody.startsWith("{")) {
+      return parseVersionObject(trimmedBody);
+    }
+
+    // Backward-compatible fallback: plain text int64 (Go CLI legacy format).
+    const v = parseInt(trimmedBody, 10);
+    if (!isNaN(v)) {
+      return { version: v, updated_at: "" };
+    }
+    throw new Error(`Failed to parse _version content: ${body}`);
   } catch (err: unknown) {
     if (isNotFoundError(err)) {
       return { version: 0, updated_at: "" };

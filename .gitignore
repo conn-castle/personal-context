@@ -37,7 +37,7 @@ tmp/
 .pc/
 node_modules/
 .pnpm-store/
-coverage.out
+coverage*.out
 coverage.html
 *.test
 /cli/pc

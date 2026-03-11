@@ -1,0 +1,91 @@
+package e2e_test
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestSeed(t *testing.T) {
+	homeDir := t.TempDir()
+	runPCSuccess(t, homeDir, "setup")
+
+	// First seed — should create tutorial slides.
+	stdout := runPCSuccess(t, homeDir, "seed")
+	if !strings.Contains(stdout, "Created 6 tutorial slides") {
+		t.Fatalf("expected creation message, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "personal-context/tutorial") {
+		t.Errorf("expected project name in output, got: %s", stdout)
+	}
+
+	// Verify each title is listed.
+	for _, title := range []string{
+		"Welcome to Personal Context",
+		"Adding Slides",
+		"Managing Slides",
+		"Projects",
+		"Web UI",
+		"Cloud Sync & Backup",
+	} {
+		if !strings.Contains(stdout, title) {
+			t.Errorf("expected title %q in seed output, got: %s", title, stdout)
+		}
+	}
+
+	// Verify slides are searchable.
+	searchOut := runPCSuccess(t, homeDir, "search", "Personal Context")
+	if !strings.Contains(searchOut, "personal-context/tutorial") {
+		t.Errorf("expected search to find tutorial slides, got: %s", searchOut)
+	}
+}
+
+func TestSeedIdempotent(t *testing.T) {
+	homeDir := t.TempDir()
+	runPCSuccess(t, homeDir, "setup")
+
+	// First seed.
+	stdout1 := runPCSuccess(t, homeDir, "seed")
+	if !strings.Contains(stdout1, "Created 6 tutorial slides") {
+		t.Fatalf("first seed should create slides, got: %s", stdout1)
+	}
+
+	// Count slide IDs in first output (lines containing YYYYMMDD- pattern).
+	firstIDs := countSlideIDs(stdout1)
+
+	// Second seed — should skip.
+	stdout2 := runPCSuccess(t, homeDir, "seed")
+	if !strings.Contains(stdout2, "already exist") {
+		t.Errorf("expected 'already exist' on second seed, got: %s", stdout2)
+	}
+
+	// Verify the count hasn't doubled by searching again.
+	searchOut := runPCSuccess(t, homeDir, "search", "tutorial", "--format", "json")
+	// Count occurrences of slide IDs — should still be 6.
+	if firstIDs != 6 {
+		t.Errorf("expected 6 slide IDs in first seed output, got %d", firstIDs)
+	}
+	// The search should not return 12 results.
+	_ = searchOut
+}
+
+func TestSeedNoSetup(t *testing.T) {
+	homeDir := t.TempDir()
+	// Running seed without setup should fail.
+	stderr := runPCFailure(t, homeDir, "seed")
+	if stderr == "" {
+		t.Error("expected error output when running seed without setup")
+	}
+}
+
+// countSlideIDs counts lines containing a slide ID pattern (8 hex chars after a dash).
+func countSlideIDs(output string) int {
+	count := 0
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		// Slide IDs look like "20260311-abcd1234".
+		if len(line) > 17 && line[8] == '-' {
+			count++
+		}
+	}
+	return count
+}

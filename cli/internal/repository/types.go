@@ -93,6 +93,8 @@ type ListSlidesFilter struct {
 	DateTo         *string
 	Limit          int
 	Query          *string
+	UpdatedAfter   *time.Time
+	UpdatedBefore  *time.Time
 }
 
 // CreateSlideFigureInput contains required and optional fields for figure inserts.

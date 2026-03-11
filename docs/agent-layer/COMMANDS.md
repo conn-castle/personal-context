@@ -221,11 +221,39 @@ make test
 ```
 Run from: repo root
 
-- Start Next.js dev server
+- Start web UI (auto-detects local vs cloud mode)
 ```bash
 make dev
 ```
 Run from: repo root
+Notes: If the shell environment or `web/.env.local` has non-empty `DATABASE_URL` and `S3_BUCKET`, runs `next dev` directly (cloud). Otherwise, starts `pc serve` + proxied `next dev` (local).
+
+- Start local dev mode (pc serve + proxied Next.js)
+```bash
+make dev-local
+```
+Run from: repo root
+Notes: Always starts `pc serve` on port 9876 and Next.js with `LOCAL_BACKEND_URL`.
+
+- Start cloud dev mode (Next.js with Neon/S3)
+```bash
+make dev-cloud
+```
+Run from: repo root
+Notes: Requires non-empty `DATABASE_URL` and `S3_BUCKET` in the shell environment or `web/.env.local`; fails fast if either is missing.
+
+- Start pc serve only (Go API server)
+```bash
+make serve
+```
+Run from: repo root
+
+- Seed tutorial slides (idempotent)
+```bash
+make seed
+```
+Run from: repo root
+Notes: Creates 6 tutorial slides under `personal-context/tutorial` project. Automatically run by `make dev-local`.
 
 ## Repository root
 

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getS3Version } from "@/lib/s3";
 import { internalError } from "@/lib/api-error";
+import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
 import type { SyncVersionResponse } from "@/lib/types";
 import type { ErrorResponseBody } from "@/lib/api-error";
 
@@ -11,7 +12,11 @@ import type { ErrorResponseBody } from "@/lib/api-error";
  */
 export async function GET(
   _req: NextRequest
-): Promise<NextResponse<SyncVersionResponse | ErrorResponseBody>> {
+): Promise<NextResponse<SyncVersionResponse | ErrorResponseBody> | Response> {
+  if (isLocalMode()) {
+    return proxyToLocal(_req);
+  }
+
   try {
     void _req;
     const { version, updated_at } = await getS3Version();

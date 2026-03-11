@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { badRequest, internalError } from "@/lib/api-error";
 import type { ErrorResponseBody } from "@/lib/api-error";
 import { isValidISOTimestamp } from "@/lib/validation";
+import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
 import type { SyncChangesResponse, SlideSummary } from "@/lib/types";
 
 /**
@@ -14,7 +15,11 @@ import type { SyncChangesResponse, SlideSummary } from "@/lib/types";
  */
 export async function GET(
   req: NextRequest
-): Promise<NextResponse<SyncChangesResponse | ErrorResponseBody>> {
+): Promise<NextResponse<SyncChangesResponse | ErrorResponseBody> | Response> {
+  if (isLocalMode()) {
+    return proxyToLocal(req);
+  }
+
   try {
     const since = req.nextUrl.searchParams.get("since");
 

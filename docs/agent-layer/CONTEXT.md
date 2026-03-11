@@ -26,7 +26,7 @@ Do not duplicate information that belongs in other memory files:
 
 <!-- ENTRIES START -->
 
-> **Status:** Phase 8 (v0.dev UI design) is complete. Phase 9 (web UI integration) is in progress. See ROADMAP.md for phase-by-phase implementation progress.
+> **Status:** Phase 9 (web UI integration) is in progress. `pc serve` local dev mode is implemented and tested. See ROADMAP.md for remaining Phase 9 tasks.
 
 ## Project Overview
 
@@ -66,8 +66,9 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - Postgres <-- local SQLite via `pc sync` push phase (Tier 1: fully lossless)
 
 ### Source of Truth
-- **Cloud configured**: Neon Postgres + S3 is cloud source of truth. Web UI reads/writes here.
-- **Local-only mode**: Local SQLite + local files only. No web UI.
+- **Cloud configured**: Neon Postgres + S3 is cloud source of truth. Web UI reads/writes here via Next.js API routes.
+- **Local dev mode** (`pc serve`): Go HTTP server implements the same REST API using local SQLite + filesystem. Next.js API routes proxy to Go when `LOCAL_BACKEND_URL` is set. Web UI works identically in both modes.
+- **Local-only mode** (CLI only): Local SQLite + local files. No web UI.
 
 ## Data Model (5 Tables)
 
@@ -248,6 +249,15 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 ### Search & Projects
 - `pc search <query>` — LIKE/ILIKE on html_content, notes, project_id (not git fields)
 - `pc project set|clear|list` — manage active project
+
+### Local Dev Server
+- `pc serve` — start Go HTTP server on `127.0.0.1:<port>` implementing the web API against local SQLite + filesystem. Used with `next dev` for local web UI development without cloud credentials.
+
+### Screenshot
+- `pc screenshot <id>` — renders slide HTML at 1920x1080 using headless Chrome and saves as PNG. Requires Chrome/Chromium on PATH or `PC_CHROME_PATH` env var. `--output` / `-o` to set output path (default: `<id>.png` in current directory).
+
+### Dev Tools
+- `pc seed` — creates 6 tutorial slides under the `personal-context/tutorial` project. Idempotent — backfills any missing built-in tutorial slides and skips only when all 6 already exist. Run automatically by `make dev-local`.
 
 ### Sync & Data
 - `pc sync` — bidirectional cloud sync (errors if no cloud)

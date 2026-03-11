@@ -9,6 +9,7 @@ import {
 } from "@/lib/api-error";
 import type { ErrorResponseBody } from "@/lib/api-error";
 import { isValidSlideId } from "@/lib/validation";
+import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
 import type { SlideDetail, SlideFile, DeleteResponse } from "@/lib/types";
 import { handlePatchSlide } from "@/lib/slides-handlers";
 
@@ -22,7 +23,11 @@ type RouteContext = { params: Promise<{ id: string }> };
 export async function GET(
   _req: NextRequest,
   context: RouteContext
-): Promise<NextResponse<{ slide: SlideDetail } | ErrorResponseBody>> {
+): Promise<NextResponse<{ slide: SlideDetail } | ErrorResponseBody> | Response> {
+  if (isLocalMode()) {
+    return proxyToLocal(_req);
+  }
+
   try {
     const { id } = await context.params;
 
@@ -107,7 +112,11 @@ export async function GET(
 export async function PATCH(
   req: NextRequest,
   context: RouteContext
-): Promise<NextResponse> {
+): Promise<NextResponse | Response> {
+  if (isLocalMode()) {
+    return proxyToLocal(req);
+  }
+
   try {
     const { id } = await context.params;
 
@@ -143,7 +152,11 @@ export async function PATCH(
 export async function DELETE(
   _req: NextRequest,
   context: RouteContext
-): Promise<NextResponse<DeleteResponse | ErrorResponseBody>> {
+): Promise<NextResponse<DeleteResponse | ErrorResponseBody> | Response> {
+  if (isLocalMode()) {
+    return proxyToLocal(_req);
+  }
+
   try {
     const { id } = await context.params;
 

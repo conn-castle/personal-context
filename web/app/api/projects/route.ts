@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { internalError } from "@/lib/api-error";
+import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
 import type { ProjectsResponse } from "@/lib/types";
 import type { ErrorResponseBody } from "@/lib/api-error";
 
@@ -11,7 +12,11 @@ import type { ErrorResponseBody } from "@/lib/api-error";
  */
 export async function GET(
   _req: NextRequest
-): Promise<NextResponse<ProjectsResponse | ErrorResponseBody>> {
+): Promise<NextResponse<ProjectsResponse | ErrorResponseBody> | Response> {
+  if (isLocalMode()) {
+    return proxyToLocal(_req);
+  }
+
   try {
     void _req;
     const sql = getDb();

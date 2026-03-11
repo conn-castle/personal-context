@@ -110,3 +110,40 @@ func TestWriteTextFileAtomicallyEmptyContent(t *testing.T) {
 		t.Fatalf("expected empty file, got %q", got)
 	}
 }
+
+func TestWriteTextFileAtomicallyCreateTempError(t *testing.T) {
+	// Create the parent dir, then make it read-only so CreateTemp fails.
+	dir := t.TempDir()
+	subDir := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(subDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(subDir, 0o755) })
+
+	path := filepath.Join(subDir, "file.txt")
+	err := writeTextFileAtomically(path, []byte("data"), 0o755, 0o644)
+	if err == nil {
+		t.Fatal("expected error when directory is read-only")
+	}
+}
+
+func TestWriteTextFileAtomicallyRenameError(t *testing.T) {
+	// Write to a path where the target is a directory (rename will fail).
+	dir := t.TempDir()
+	targetDir := filepath.Join(dir, "target")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Create a file inside target to prevent rename from replacing the directory.
+	if err := os.WriteFile(filepath.Join(targetDir, "blocker"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := writeTextFileAtomically(targetDir, []byte("data"), 0o755, 0o644)
+	if err == nil {
+		t.Fatal("expected error when target is a non-empty directory")
+	}
+}

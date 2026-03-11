@@ -28,6 +28,12 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
 
 <!-- ENTRIES START -->
 
+- Backlog 2026-03-11 s1t2u3: Rod fallback for `pc screenshot` when system Chrome is not available
+    Priority: Low. Area: cli
+    Description: `pc screenshot` currently requires system Chrome/Chromium on PATH. Add Rod (Go headless Chrome library) as an automatic fallback that downloads Chromium on first use (~150MB) when no system browser is detected.
+    Acceptance criteria: `pc screenshot <id>` works on machines without Chrome installed, with a one-time auto-download and clear progress indicator.
+    Notes: Rod downloads Chromium to a cache directory. The existing `PC_CHROME_PATH` env var override should continue to take priority.
+
 - Backlog 2026-03-10 m2n2o2: Markdown-authored slides with reliable rendering
     Priority: Medium. Area: slide-format
     Description: Allow slides to be authored in Markdown instead of only raw HTML, or support a hybrid Markdown-plus-HTML model that still renders cleanly in previews, exports, and the web UI.

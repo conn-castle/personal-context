@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
@@ -399,6 +400,70 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if err := repo.DeleteSlide(ctx, "20259999-missing00"); !errors.Is(err, repository.ErrNotFound) {
 			t.Fatalf("expected ErrNotFound for missing slide delete, got %v", err)
 		}
+	})
+
+	t.Run("updated_at window filters are inclusive", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		firstUpdatedAt := time.Date(2025, 3, 4, 10, 0, 0, 0, time.UTC)
+		middleUpdatedAt := time.Date(2025, 3, 4, 11, 0, 0, 0, time.UTC)
+		lastUpdatedAt := time.Date(2025, 3, 4, 12, 0, 0, 0, time.UTC)
+
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250304-a1b2c3d4",
+			Date:        "2025-03-04",
+			DayOrder:    "a",
+			HTMLContent: "<h1>First</h1>",
+			UpdatedAt:   &firstUpdatedAt,
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250304-b2c3d4e5",
+			Date:        "2025-03-04",
+			DayOrder:    "b",
+			HTMLContent: "<h1>Middle</h1>",
+			UpdatedAt:   &middleUpdatedAt,
+		})
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID:          "20250304-c3d4e5f6",
+			Date:        "2025-03-04",
+			DayOrder:    "c",
+			HTMLContent: "<h1>Last</h1>",
+			UpdatedAt:   &lastUpdatedAt,
+		})
+
+		afterResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+			UpdatedAfter: &middleUpdatedAt,
+		})
+		if err != nil {
+			t.Fatalf("ListSlides(UpdatedAfter) error = %v", err)
+		}
+		assertExactOrder(t, slideIDs(afterResults), []string{
+			"20250304-b2c3d4e5",
+			"20250304-c3d4e5f6",
+		})
+
+		beforeResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+			UpdatedBefore: &middleUpdatedAt,
+		})
+		if err != nil {
+			t.Fatalf("ListSlides(UpdatedBefore) error = %v", err)
+		}
+		assertExactOrder(t, slideIDs(beforeResults), []string{
+			"20250304-a1b2c3d4",
+			"20250304-b2c3d4e5",
+		})
+
+		windowResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+			UpdatedAfter:  &middleUpdatedAt,
+			UpdatedBefore: &middleUpdatedAt,
+		})
+		if err != nil {
+			t.Fatalf("ListSlides(UpdatedAfter+UpdatedBefore) error = %v", err)
+		}
+		assertExactOrder(t, slideIDs(windowResults), []string{
+			"20250304-b2c3d4e5",
+		})
 	})
 
 	t.Run("templates CRUD", func(t *testing.T) {

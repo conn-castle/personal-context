@@ -174,15 +174,41 @@ describe("S3 utilities", () => {
       expect(result).toEqual({ version: 0, updated_at: "" });
     });
 
-    it("returns version 0 for malformed JSON body", async () => {
+    it("throws for malformed JSON object body", async () => {
       mockSend.mockResolvedValue({
         Body: {
           transformToString: () =>
             Promise.resolve(JSON.stringify({ foo: "bar" })),
         },
       });
+      await expect(getS3Version()).rejects.toThrow(
+        "JSON object must include numeric version and string updated_at"
+      );
+    });
+
+    it("falls back to plain text int64 (Go CLI legacy format)", async () => {
+      mockSend.mockResolvedValue({
+        Body: { transformToString: () => Promise.resolve("42") },
+      });
       const result = await getS3Version();
-      expect(result).toEqual({ version: 0, updated_at: "" });
+      expect(result).toEqual({ version: 42, updated_at: "" });
+    });
+
+    it("falls back to plain text int64 with whitespace", async () => {
+      mockSend.mockResolvedValue({
+        Body: { transformToString: () => Promise.resolve("  7  \n") },
+      });
+      const result = await getS3Version();
+      expect(result).toEqual({ version: 7, updated_at: "" });
+    });
+
+    it("throws for unparseable non-JSON, non-integer content", async () => {
+      mockSend.mockResolvedValue({
+        Body: { transformToString: () => Promise.resolve("not-a-number") },
+      });
+      await expect(getS3Version()).rejects.toThrow(
+        "Failed to parse _version content"
+      );
     });
 
     it("rethrows non-NotFound errors", async () => {
