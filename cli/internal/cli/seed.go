@@ -47,6 +47,11 @@ func runSeed(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 	}
 
 	seeds := builtinSeeds()
+	// Keyed by HTML content: if a user edits a seeded slide's HTML, re-running
+	// seed will not recognise it and will create a duplicate. This is a known
+	// limitation of the v1 content-based identity approach. Stable seed IDs
+	// would require a schema column (e.g. seed_key) and migration support.
+	// See ISSUES.md t1u2v3a.
 	existingByHTML := make(map[string]string, len(existing))
 	for _, slide := range existing {
 		existingByHTML[slide.HTMLContent] = slide.DayOrder

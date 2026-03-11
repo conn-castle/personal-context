@@ -187,7 +187,8 @@ export function MarkdownRenderer({ content }: { content: string }) {
       rehypePlugins={[rehypeHighlight]}
       components={{
         // Intercept <pre> to wrap code blocks with a header bar.
-        pre({ children, ...rest }) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        pre({ children, node, ...rest }) {
           // ReactMarkdown wraps <code> inside <pre> for fenced blocks.
           // Extract language from the inner <code> className.
           const codeChild =
@@ -234,9 +235,14 @@ export function MarkdownRenderer({ content }: { content: string }) {
         },
 
         // Handle inline code (no change needed, but keep mermaid guard)
-        code(props: ComponentPropsWithoutRef<"code"> & { inline?: boolean }) {
+        code(
+          props: ComponentPropsWithoutRef<"code"> & {
+            inline?: boolean;
+            node?: unknown;
+          }
+        ) {
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { className, children, inline, ...rest } = props;
+          const { className, children, inline, node, ...rest } = props;
           return (
             <code className={className} {...rest}>
               {children}

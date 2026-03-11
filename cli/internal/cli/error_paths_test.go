@@ -431,6 +431,12 @@ func TestServePortInUse(t *testing.T) {
 	}
 }
 
+// TestServeSignalShutdown exercises the SIGINT signal handler path specifically.
+// TestServeStartAndShutdown covers graceful shutdown via context cancellation;
+// this test verifies the OS signal → context cancellation bridge that is the
+// primary shutdown mechanism in production. Sending SIGINT to the test process
+// is inherently racy in theory, but in practice the signal is delivered before
+// the select timeout and the test is reliable across platforms and CI.
 func TestServeSignalShutdown(t *testing.T) {
 	setupEnv(t)
 

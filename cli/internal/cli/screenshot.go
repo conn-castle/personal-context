@@ -104,8 +104,8 @@ func searchCandidates(candidates []string) (string, error) {
 // buildSlideHTML wraps slide HTML content in a full 1920x1080 document suitable
 // for headless Chrome screenshot capture.
 func buildSlideHTML(htmlContent string) string {
-	// If the content is a full document (has <html> or <!DOCTYPE>), use it as-is
-	// but inject the viewport constraint.
+	// If the content is a full document (has <html> or <!DOCTYPE>), return it
+	// as-is — full documents carry their own styling and viewport rules.
 	lower := strings.ToLower(htmlContent)
 	if strings.Contains(lower, "<html") || strings.Contains(lower, "<!doctype") {
 		return htmlContent

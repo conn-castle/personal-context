@@ -60,12 +60,14 @@ func TestSeedIdempotent(t *testing.T) {
 
 	// Verify the count hasn't doubled by searching again.
 	searchOut := runPCSuccess(t, homeDir, "search", "tutorial", "--format", "json")
-	// Count occurrences of slide IDs — should still be 6.
 	if firstIDs != 6 {
 		t.Errorf("expected 6 slide IDs in first seed output, got %d", firstIDs)
 	}
-	// The search should not return 12 results.
-	_ = searchOut
+	// The search should still return exactly 6 tutorial slides, not 12.
+	searchIDs := strings.Count(searchOut, `"id"`)
+	if searchIDs != 6 {
+		t.Errorf("expected 6 slide IDs in search output after second seed, got %d", searchIDs)
+	}
 }
 
 func TestSeedNoSetup(t *testing.T) {
