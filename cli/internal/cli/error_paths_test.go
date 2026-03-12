@@ -376,7 +376,7 @@ func TestServeStartAndShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runServe(ctx, &out, &stderr, port)
+		errCh <- runServe(ctx, &out, &stderr, port, DefaultVersion)
 	}()
 
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/health", port)
@@ -422,7 +422,7 @@ func TestServePortInUse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err = runServe(ctx, &out, &stderr, port)
+	err = runServe(ctx, &out, &stderr, port, DefaultVersion)
 	if err == nil {
 		t.Fatal("expected error when port is in use")
 	}
@@ -452,7 +452,7 @@ func TestServeSignalShutdown(t *testing.T) {
 	var out, stderr bytes.Buffer
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runServe(context.Background(), &out, &stderr, port)
+		errCh <- runServe(context.Background(), &out, &stderr, port, DefaultVersion)
 	}()
 
 	// Wait for the server to be ready.

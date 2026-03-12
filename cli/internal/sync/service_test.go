@@ -3849,6 +3849,9 @@ func (m *memoryRepo) GetSyncVersion(_ context.Context) (repository.SyncVersion, 
 	return m.syncVersion, nil
 }
 func (m *memoryRepo) ListDistinctProjectIDs(_ context.Context) ([]string, error) { return nil, nil }
+func (m *memoryRepo) CountActiveSlides(_ context.Context) (int, error)          { return 0, nil }
+func (m *memoryRepo) CountTrashedSlides(_ context.Context) (int, error)         { return 0, nil }
+func (m *memoryRepo) PurgeDeletedSlides(_ context.Context) ([]string, error)    { return nil, nil }
 
 func (m *memoryRepo) bundle(slideID string) SlideBundle {
 	slide, ok := m.slides[slideID]

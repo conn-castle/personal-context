@@ -73,7 +73,7 @@ func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 	root.AddCommand(newExportCommand(stdout, stderr))
 	root.AddCommand(newImportCommand(stdout, stderr))
 	root.AddCommand(newVerifyCommand(stdout, stderr))
-	root.AddCommand(newServeCommand(stdout, stderr))
+	root.AddCommand(newServeCommand(stdout, stderr, version))
 	root.AddCommand(newScreenshotCommand(stdout, stderr))
 	root.AddCommand(newSeedCommand(stdout, stderr))
 

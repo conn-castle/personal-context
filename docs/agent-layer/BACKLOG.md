@@ -28,6 +28,12 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
 
 <!-- ENTRIES START -->
 
+- Backlog 2026-03-11 v3w4x5: GitHub backup/sync integration and Settings link
+    Priority: Medium. Area: web, infra
+    Description: Implement GitHub-based backup/sync (nightly export to a private data repo). The Settings overlay "GitHub Repository" link should point to the user's backup data repo, not the source code repo. May involve configuring the target repo, auth, and scheduling.
+    Acceptance criteria: Nightly export pushes to a configured GitHub repo. Settings overlay links to the user's data backup repo. Setup wizard or config allows specifying the target repo.
+    Notes: Nightly export workflow example exists at `docs/nightly-export-workflow.example.yml`. The current Settings "GitHub Repository" link is a placeholder pointing to the source repo.
+
 - Backlog 2026-03-11 s1t2u3: Rod fallback for `pc screenshot` when system Chrome is not available
     Priority: Low. Area: cli
     Description: `pc screenshot` currently requires system Chrome/Chromium on PATH. Add Rod (Go headless Chrome library) as an automatic fallback that downloads Chromium on first use (~150MB) when no system browser is detected.

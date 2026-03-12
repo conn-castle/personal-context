@@ -132,6 +132,25 @@ export type VirtualDateSlide = {
   date: string;
 };
 
+/** GET /api/info response. */
+export type AppInfoResponse = {
+  mode: "local" | "cloud";
+  version: string;
+};
+
+/** GET /api/stats response. */
+export type StatsResponse = {
+  total_slides: number;
+  total_projects: number;
+  trashed_slides: number;
+};
+
+/** DELETE /api/slides/trash response. */
+export type PurgeTrashResponse = {
+  purged_count: number;
+  sync_version: number;
+};
+
 // ---------- UI-specific types (v0.dev design) ----------
 
 /** Navigation panel view mode. */

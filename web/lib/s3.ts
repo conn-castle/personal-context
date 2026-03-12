@@ -2,6 +2,7 @@ import {
   S3Client,
   GetObjectCommand,
   PutObjectCommand,
+  DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
@@ -190,6 +191,41 @@ export async function bumpS3Version(
     }
   }
   throw lastError;
+}
+
+/**
+ * Deletes multiple S3 objects by key in a single batch request.
+ *
+ * Uses the DeleteObjects API which supports up to 1000 keys per call.
+ * Keys are batched automatically if the count exceeds the API limit.
+ *
+ * @param keys - The S3 object keys to delete.
+ * @throws If the S3 DeleteObjects call fails.
+ */
+export async function deleteS3Objects(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+
+  const client = getS3Client();
+  const bucket = getS3Bucket();
+  const BATCH_SIZE = 1000;
+
+  for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+    const batch = keys.slice(i, i + BATCH_SIZE);
+    const command = new DeleteObjectsCommand({
+      Bucket: bucket,
+      Delete: {
+        Objects: batch.map((key) => ({ Key: key })),
+        Quiet: true,
+      },
+    });
+    const result = await client.send(command);
+    if (result.Errors && result.Errors.length > 0) {
+      const details = result.Errors.map(
+        (error) => `${error.Key ?? "<unknown>"} (${error.Code ?? "Unknown"})`
+      ).join(", ");
+      throw new Error(`S3 delete failed for: ${details}`);
+    }
+  }
 }
 
 /**

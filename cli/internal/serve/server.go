@@ -25,14 +25,15 @@ type Server struct {
 	repo    repository.Repository
 	dataDir string
 	port    int
+	version string
 	server  *http.Server
 	writeMu sync.Mutex // serializes read-modify-write cycles (PATCH, reorder)
 }
 
 // NewServer creates a local API server.
 // Args: repo is the SQLite repository; dataDir is the base data directory (e.g., ~/personal-context);
-// port is the port to listen on.
-func NewServer(repo repository.Repository, dataDir string, port int) (*Server, error) {
+// port is the port to listen on; version is the CLI version exposed by `/api/info`.
+func NewServer(repo repository.Repository, dataDir string, port int, version string) (*Server, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("repository is required")
 	}
@@ -42,7 +43,10 @@ func NewServer(repo repository.Repository, dataDir string, port int) (*Server, e
 	if port < 1 || port > 65535 {
 		return nil, fmt.Errorf("port must be between 1 and 65535, got %d", port)
 	}
-	return &Server{repo: repo, dataDir: dataDir, port: port}, nil
+	if strings.TrimSpace(version) == "" {
+		return nil, fmt.Errorf("version is required")
+	}
+	return &Server{repo: repo, dataDir: dataDir, port: port, version: version}, nil
 }
 
 // Start begins listening on 127.0.0.1:<port>. Blocks until the server shuts down.
@@ -79,8 +83,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /api/info", s.handleInfo)
+	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	mux.HandleFunc("GET /api/slides", s.handleListSlides)
+	mux.HandleFunc("DELETE /api/slides/trash", s.handlePurgeTrash)
 	mux.HandleFunc("GET /api/slides/{id}", s.handleGetSlide)
 	mux.HandleFunc("PATCH /api/slides/{id}", s.handlePatchSlide)
 	mux.HandleFunc("DELETE /api/slides/{id}", s.handleDeleteSlide)
@@ -538,6 +545,80 @@ func (s *Server) buildSlideDetail(ctx context.Context, slide repository.Slide) (
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// handleInfo returns server mode and version information.
+func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"mode":    "local",
+		"version": s.version,
+	})
+}
+
+// handleStats returns aggregate counts: total slides, total projects, and trashed slides.
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	totalSlides, err := s.repo.CountActiveSlides(ctx)
+	if err != nil {
+		mapRepoError(w, err, "slides")
+		return
+	}
+
+	trashedSlides, err := s.repo.CountTrashedSlides(ctx)
+	if err != nil {
+		mapRepoError(w, err, "slides")
+		return
+	}
+
+	projects, err := s.repo.ListDistinctProjectIDs(ctx)
+	if err != nil {
+		mapRepoError(w, err, "projects")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]int{
+		"total_slides":   totalSlides,
+		"total_projects": len(projects),
+		"trashed_slides": trashedSlides,
+	})
+}
+
+// handlePurgeTrash hard-deletes all soft-deleted (trashed) slides and removes their
+// filesystem directories for figures and data.
+func (s *Server) handlePurgeTrash(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	// Bulk delete all soft-deleted slides and get their IDs for filesystem cleanup.
+	purgedIDs, err := s.repo.PurgeDeletedSlides(ctx)
+	if err != nil {
+		mapRepoError(w, err, "slides")
+		return
+	}
+
+	// Best-effort removal of local filesystem dirs for figures and data.
+	for _, id := range purgedIDs {
+		for _, subdir := range []string{"figures", "data"} {
+			dirPath := filepath.Join(s.dataDir, subdir, id)
+			if rmErr := os.RemoveAll(dirPath); rmErr != nil {
+				log.Printf("warning: failed to remove %s: %v", dirPath, rmErr)
+			}
+		}
+	}
+
+	syncVersion, err := s.repo.GetSyncVersion(ctx)
+	if err != nil {
+		mapRepoError(w, err, "sync version")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"purged_count": len(purgedIDs),
+		"sync_version": syncVersion.Version,
+	})
 }
 
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {

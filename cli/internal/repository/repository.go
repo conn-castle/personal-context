@@ -39,4 +39,14 @@ type Repository interface {
 
 	// ListDistinctProjectIDs returns sorted distinct non-NULL project_id values from active slides.
 	ListDistinctProjectIDs(ctx context.Context) ([]string, error)
+
+	// CountActiveSlides returns the number of non-deleted slides.
+	CountActiveSlides(ctx context.Context) (int, error)
+
+	// CountTrashedSlides returns the number of soft-deleted slides.
+	CountTrashedSlides(ctx context.Context) (int, error)
+
+	// PurgeDeletedSlides hard-deletes all soft-deleted slides (CASCADE removes child rows)
+	// and returns the IDs of the purged slides for filesystem/S3 cleanup by the caller.
+	PurgeDeletedSlides(ctx context.Context) ([]string, error)
 }
