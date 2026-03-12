@@ -20,6 +20,12 @@ vi.mock("@aws-sdk/client-s3", () => {
         Object.assign(this, input);
       }
     },
+    DeleteObjectsCommand: class MockDeleteObjectsCommand {
+      [key: string]: unknown;
+      constructor(input: Record<string, unknown>) {
+        Object.assign(this, input);
+      }
+    },
   };
 });
 
@@ -33,6 +39,7 @@ import {
   getPresignedUrl,
   getS3Version,
   bumpS3Version,
+  deleteS3Objects,
   resetS3Client,
 } from "@/lib/s3";
 
@@ -257,6 +264,58 @@ describe("S3 utilities", () => {
         bumpS3Version(5, "2026-03-09T10:00:00.000Z")
       ).rejects.toThrow("Persistent");
       expect(mockSend).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe("deleteS3Objects", () => {
+    it("returns without calling S3 when the key list is empty", async () => {
+      await deleteS3Objects([]);
+
+      expect(mockSend).not.toHaveBeenCalled();
+    });
+
+    it("deletes all provided keys in a single batch", async () => {
+      mockSend.mockResolvedValue({});
+
+      await deleteS3Objects(["figures/a.png", "data/b.csv"]);
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      const callArg = mockSend.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg.Bucket).toBe("test-bucket");
+      expect(callArg.Delete).toEqual({
+        Objects: [{ Key: "figures/a.png" }, { Key: "data/b.csv" }],
+        Quiet: true,
+      });
+    });
+
+    it("throws when S3 reports per-object delete failures", async () => {
+      mockSend.mockResolvedValue({
+        Errors: [{ Key: "figures/a.png", Code: "AccessDenied" }],
+      });
+
+      await expect(deleteS3Objects(["figures/a.png"])).rejects.toThrow(
+        "S3 delete failed for: figures/a.png (AccessDenied)"
+      );
+    });
+
+    it("splits more than 1000 keys into multiple batch requests", async () => {
+      mockSend.mockResolvedValue({});
+
+      await deleteS3Objects(
+        Array.from({ length: 1001 }, (_, index) => `figures/key-${index}.png`)
+      );
+
+      expect(mockSend).toHaveBeenCalledTimes(2);
+      const firstBatch = mockSend.mock.calls[0][0] as {
+        Delete: { Objects: Array<{ Key: string }> };
+      };
+      const secondBatch = mockSend.mock.calls[1][0] as {
+        Delete: { Objects: Array<{ Key: string }> };
+      };
+      expect(firstBatch.Delete.Objects).toHaveLength(1000);
+      expect(secondBatch.Delete.Objects).toEqual([
+        { Key: "figures/key-1000.png" },
+      ]);
     });
   });
 });

@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newServeCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+func newServeCommand(stdout io.Writer, stderr io.Writer, version string) *cobra.Command {
 	var port int
 
 	cmd := &cobra.Command{
@@ -28,7 +28,7 @@ Use this to run the web UI locally without cloud credentials (Neon/S3).
 Set LOCAL_BACKEND_URL=http://127.0.0.1:<port> when running 'next dev'.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runServe(cmd.Context(), stdout, stderr, port)
+			return runServe(cmd.Context(), stdout, stderr, port, version)
 		},
 	}
 
@@ -37,7 +37,7 @@ Set LOCAL_BACKEND_URL=http://127.0.0.1:<port> when running 'next dev'.`,
 	return cmd
 }
 
-func runServe(ctx context.Context, _ io.Writer, stderr io.Writer, port int) error {
+func runServe(ctx context.Context, _ io.Writer, stderr io.Writer, port int, version string) error {
 	homeDir, err := resolveHomeDir()
 	if err != nil {
 		return err
@@ -51,7 +51,7 @@ func runServe(ctx context.Context, _ io.Writer, stderr io.Writer, port int) erro
 
 	dataDir := basePath(homeDir)
 
-	srv, err := serve.NewServer(stack.Repo, dataDir, port)
+	srv, err := serve.NewServer(stack.Repo, dataDir, port, version)
 	if err != nil {
 		return fmt.Errorf("create server: %w", err)
 	}

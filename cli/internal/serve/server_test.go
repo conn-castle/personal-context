@@ -33,6 +33,7 @@ type mockRepo struct {
 	updateSlideErr    error
 	softDeleteErr     error
 	restoreErr        error
+	deleteSlideErr    error
 	listFiguresErr    error
 	listDataFilesErr  error
 	listProjectsErr   error
@@ -186,7 +187,19 @@ func (m *mockRepo) GetSyncVersion(_ context.Context) (repository.SyncVersion, er
 func (m *mockRepo) CreateSlide(context.Context, repository.CreateSlideInput) (repository.Slide, error) {
 	return repository.Slide{}, repository.ErrNotFound
 }
-func (m *mockRepo) DeleteSlide(context.Context, string) error {
+func (m *mockRepo) DeleteSlide(_ context.Context, id string) error {
+	if m.deleteSlideErr != nil {
+		return m.deleteSlideErr
+	}
+	for i, s := range m.slides {
+		if s.ID == id {
+			m.slides = append(m.slides[:i], m.slides[i+1:]...)
+			delete(m.figures, id)
+			delete(m.dataFiles, id)
+			m.syncVer.Version++
+			return nil
+		}
+	}
 	return repository.ErrNotFound
 }
 func (m *mockRepo) CreateSlideFigure(context.Context, repository.CreateSlideFigureInput) (repository.SlideFigure, error) {
@@ -231,10 +244,12 @@ func (m *mockRepo) DeleteTemplate(context.Context, string) error {
 
 // --- Test helpers ---
 
+const testServerVersion = "0.1.0"
+
 func setupTestServer(t *testing.T, repo *mockRepo) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	srv := &Server{repo: repo, dataDir: t.TempDir(), port: 9876}
+	srv := &Server{repo: repo, dataDir: t.TempDir(), port: 9876, version: testServerVersion}
 	srv.registerRoutes(mux)
 	return httptest.NewServer(corsMiddleware(mux))
 }
@@ -242,7 +257,7 @@ func setupTestServer(t *testing.T, repo *mockRepo) *httptest.Server {
 func setupTestServerWithDataDir(t *testing.T, repo *mockRepo, dataDir string) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
-	srv := &Server{repo: repo, dataDir: dataDir, port: 9876}
+	srv := &Server{repo: repo, dataDir: dataDir, port: 9876, version: testServerVersion}
 	srv.registerRoutes(mux)
 	return httptest.NewServer(corsMiddleware(mux))
 }
@@ -318,14 +333,14 @@ func TestBuildSlideSummary_LookupErrors(t *testing.T) {
 // --- NewServer tests ---
 
 func TestNewServer_NilRepo(t *testing.T) {
-	_, err := NewServer(nil, "/tmp", 9876)
+	_, err := NewServer(nil, "/tmp", 9876, testServerVersion)
 	if err == nil || !strings.Contains(err.Error(), "repository is required") {
 		t.Fatalf("expected repo required error, got %v", err)
 	}
 }
 
 func TestNewServer_EmptyDataDir(t *testing.T) {
-	_, err := NewServer(newMockRepo(), "", 9876)
+	_, err := NewServer(newMockRepo(), "", 9876, testServerVersion)
 	if err == nil || !strings.Contains(err.Error(), "data directory is required") {
 		t.Fatalf("expected data dir error, got %v", err)
 	}
@@ -333,15 +348,22 @@ func TestNewServer_EmptyDataDir(t *testing.T) {
 
 func TestNewServer_InvalidPort(t *testing.T) {
 	for _, port := range []int{0, -1, 65536, 99999} {
-		_, err := NewServer(newMockRepo(), "/tmp", port)
+		_, err := NewServer(newMockRepo(), "/tmp", port, testServerVersion)
 		if err == nil || !strings.Contains(err.Error(), "port must be between") {
 			t.Fatalf("expected port error for %d, got %v", port, err)
 		}
 	}
 }
 
+func TestNewServer_EmptyVersion(t *testing.T) {
+	_, err := NewServer(newMockRepo(), "/tmp", 9876, "")
+	if err == nil || !strings.Contains(err.Error(), "version is required") {
+		t.Fatalf("expected version error, got %v", err)
+	}
+}
+
 func TestNewServer_Valid(t *testing.T) {
-	srv, err := NewServer(newMockRepo(), "/tmp", 9876)
+	srv, err := NewServer(newMockRepo(), "/tmp", 9876, testServerVersion)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2102,7 +2124,7 @@ func TestComputeFractionalIndex_AfterNotFound(t *testing.T) {
 
 func TestStart_AndShutdown(t *testing.T) {
 	repo := newMockRepo()
-	srv, err := NewServer(repo, t.TempDir(), 19876)
+	srv, err := NewServer(repo, t.TempDir(), 19876, testServerVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2180,7 +2202,7 @@ func TestDeleteSlide_RefetchError(t *testing.T) {
 	repo := &softDeleteOnlyRepo{mockRepo: base, failGetAfterDelete: false}
 
 	mux := http.NewServeMux()
-	srv := &Server{repo: repo, dataDir: t.TempDir(), port: 9876}
+	srv := &Server{repo: repo, dataDir: t.TempDir(), port: 9876, version: testServerVersion}
 	srv.registerRoutes(mux)
 	ts := httptest.NewServer(corsMiddleware(mux))
 	defer ts.Close()
@@ -2218,7 +2240,7 @@ func TestRestoreSlide_RefetchError(t *testing.T) {
 	repo := &restoreOnlyRepo{mockRepo: base, failGetAfterRestore: true}
 
 	mux := http.NewServeMux()
-	srv := &Server{repo: repo, dataDir: t.TempDir(), port: 9876}
+	srv := &Server{repo: repo, dataDir: t.TempDir(), port: 9876, version: testServerVersion}
 	srv.registerRoutes(mux)
 	ts := httptest.NewServer(corsMiddleware(mux))
 	defer ts.Close()
@@ -2461,7 +2483,7 @@ func TestGetFile_EmptyHost(t *testing.T) {
 		{Filename: "fig.png", S3Key: "figures/20260310-aaaaaaaa/fig.png"},
 	}
 	mux := http.NewServeMux()
-	srv := &Server{repo: repo, dataDir: t.TempDir(), port: 9876}
+	srv := &Server{repo: repo, dataDir: t.TempDir(), port: 9876, version: testServerVersion}
 	srv.registerRoutes(mux)
 
 	// Use httptest.ResponseRecorder to control the Host header
@@ -2481,5 +2503,316 @@ func TestGetFile_EmptyHost(t *testing.T) {
 	urlStr := body["url"].(string)
 	if !strings.Contains(urlStr, "127.0.0.1:9876") {
 		t.Fatalf("expected fallback host, got %s", urlStr)
+	}
+}
+
+// --- handleInfo tests ---
+
+func TestHandleInfo(t *testing.T) {
+	repo := newMockRepo()
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	res, err := http.Get(ts.URL + "/api/info")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if body["mode"] != "local" {
+		t.Errorf("expected mode=local, got %s", body["mode"])
+	}
+	if body["version"] != "0.1.0" {
+		t.Errorf("expected version=0.1.0, got %s", body["version"])
+	}
+}
+
+// --- handleStats tests ---
+
+func TestHandleStats(t *testing.T) {
+	now := time.Now().UTC()
+	deletedAt := now.Add(-1 * time.Hour)
+	repo := newMockRepo()
+	proj := "test-project"
+	repo.slides = []repository.Slide{
+		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: "<p>active1</p>", ProjectID: &proj, UpdatedAt: now, CreatedAt: now},
+		{ID: "20260310-a1b2c3d5", Date: "2026-03-10", DayOrder: "a1", HTMLContent: "<p>active2</p>", UpdatedAt: now, CreatedAt: now},
+		{ID: "20260310-a1b2c3d6", Date: "2026-03-10", DayOrder: "a2", HTMLContent: "<p>trashed</p>", UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
+	}
+	repo.projectIDs = []string{"test-project"}
+
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	res, err := http.Get(ts.URL + "/api/stats")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+
+	var body map[string]int
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if body["total_slides"] != 2 {
+		t.Errorf("expected total_slides=2, got %d", body["total_slides"])
+	}
+	if body["total_projects"] != 1 {
+		t.Errorf("expected total_projects=1, got %d", body["total_projects"])
+	}
+	if body["trashed_slides"] != 1 {
+		t.Errorf("expected trashed_slides=1, got %d", body["trashed_slides"])
+	}
+}
+
+func TestHandleStats_Empty(t *testing.T) {
+	repo := newMockRepo()
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	res, err := http.Get(ts.URL + "/api/stats")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	var body map[string]int
+	_ = json.NewDecoder(res.Body).Decode(&body)
+
+	if body["total_slides"] != 0 {
+		t.Errorf("expected total_slides=0, got %d", body["total_slides"])
+	}
+	if body["total_projects"] != 0 {
+		t.Errorf("expected total_projects=0, got %d", body["total_projects"])
+	}
+	if body["trashed_slides"] != 0 {
+		t.Errorf("expected trashed_slides=0, got %d", body["trashed_slides"])
+	}
+}
+
+func TestHandleStats_ListSlidesError(t *testing.T) {
+	repo := newMockRepo()
+	repo.listSlidesErr = fmt.Errorf("db error")
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	res, err := http.Get(ts.URL + "/api/stats")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", res.StatusCode)
+	}
+}
+
+func TestHandleStats_ListProjectsError(t *testing.T) {
+	repo := newMockRepo()
+	repo.listProjectsErr = fmt.Errorf("db error")
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	res, err := http.Get(ts.URL + "/api/stats")
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", res.StatusCode)
+	}
+}
+
+// --- handlePurgeTrash tests ---
+
+func TestHandlePurgeTrash(t *testing.T) {
+	now := time.Now().UTC()
+	deletedAt := now.Add(-1 * time.Hour)
+	repo := newMockRepo()
+	repo.slides = []repository.Slide{
+		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: "<p>active</p>", UpdatedAt: now, CreatedAt: now},
+		{ID: "20260310-a1b2c3d5", Date: "2026-03-10", DayOrder: "a1", HTMLContent: "<p>trashed1</p>", UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
+		{ID: "20260310-a1b2c3d6", Date: "2026-03-10", DayOrder: "a2", HTMLContent: "<p>trashed2</p>", UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
+	}
+
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
+	if err != nil {
+		t.Fatalf("create request: %v", err)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	purgedCount := int(body["purged_count"].(float64))
+	if purgedCount != 2 {
+		t.Errorf("expected purged_count=2, got %d", purgedCount)
+	}
+
+	// Verify active slide was not deleted
+	if len(repo.slides) != 1 {
+		t.Errorf("expected 1 remaining slide, got %d", len(repo.slides))
+	}
+	if repo.slides[0].ID != "20260310-a1b2c3d4" {
+		t.Errorf("expected active slide to remain, got %s", repo.slides[0].ID)
+	}
+}
+
+func TestHandlePurgeTrash_Empty(t *testing.T) {
+	repo := newMockRepo()
+	repo.slides = []repository.Slide{
+		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: "<p>active</p>", UpdatedAt: time.Now().UTC(), CreatedAt: time.Now().UTC()},
+	}
+
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	var body map[string]any
+	_ = json.NewDecoder(res.Body).Decode(&body)
+
+	purgedCount := int(body["purged_count"].(float64))
+	if purgedCount != 0 {
+		t.Errorf("expected purged_count=0, got %d", purgedCount)
+	}
+}
+
+func TestHandlePurgeTrash_RemovesFilesystemDirs(t *testing.T) {
+	now := time.Now().UTC()
+	deletedAt := now.Add(-1 * time.Hour)
+	repo := newMockRepo()
+	slideID := "20260310-a1b2c3d4"
+	repo.slides = []repository.Slide{
+		{ID: slideID, Date: "2026-03-10", DayOrder: "a0", HTMLContent: "<p>trashed</p>", UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
+	}
+
+	dataDir := t.TempDir()
+	// Create figure and data directories
+	figDir := filepath.Join(dataDir, "figures", slideID)
+	dataFileDir := filepath.Join(dataDir, "data", slideID)
+	if err := os.MkdirAll(figDir, 0o755); err != nil {
+		t.Fatalf("create fig dir: %v", err)
+	}
+	if err := os.MkdirAll(dataFileDir, 0o755); err != nil {
+		t.Fatalf("create data dir: %v", err)
+	}
+	// Write a test file
+	if err := os.WriteFile(filepath.Join(figDir, "test.png"), []byte("img"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	ts := setupTestServerWithDataDir(t, repo, dataDir)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+
+	// Verify directories were removed
+	if _, err := os.Stat(figDir); !os.IsNotExist(err) {
+		t.Errorf("expected figure dir to be removed")
+	}
+	if _, err := os.Stat(dataFileDir); !os.IsNotExist(err) {
+		t.Errorf("expected data file dir to be removed")
+	}
+}
+
+func TestHandlePurgeTrash_ListSlidesError(t *testing.T) {
+	repo := newMockRepo()
+	repo.listSlidesErr = fmt.Errorf("db error")
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", res.StatusCode)
+	}
+}
+
+func TestHandlePurgeTrash_DeleteSlideError(t *testing.T) {
+	now := time.Now().UTC()
+	deletedAt := now.Add(-1 * time.Hour)
+	repo := newMockRepo()
+	repo.slides = []repository.Slide{
+		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: "<p>trashed</p>", UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
+	}
+	repo.deleteSlideErr = fmt.Errorf("db error")
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", res.StatusCode)
+	}
+}
+
+func TestHandlePurgeTrash_GetSyncVersionError(t *testing.T) {
+	repo := newMockRepo()
+	repo.getSyncVersionErr = fmt.Errorf("db error")
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer func() { _ = res.Body.Close() }()
+
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", res.StatusCode)
 	}
 }

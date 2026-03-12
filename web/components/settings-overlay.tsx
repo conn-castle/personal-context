@@ -1,466 +1,303 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import { useTheme } from 'next-themes'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
+import { useState, useEffect, useCallback } from "react";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { X, Github, Globe, Users, Trash2, Plus } from 'lucide-react'
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import {
+  Trash2,
+  Github,
+  Loader2,
+} from "lucide-react";
+import type { AppInfoResponse, StatsResponse } from "@/lib/types";
 
 interface SettingsOverlayProps {
-  open: boolean
-  onClose: () => void
+  open: boolean;
+  onClose: () => void;
+  syncVersion: number;
+  lastSyncAt: string | null;
+  onDataChanged: () => void;
 }
 
-export function SettingsOverlay({ open, onClose }: SettingsOverlayProps) {
-  // Demo state for various input types
-  const [autoSave, setAutoSave] = useState(true)
-  const [showThumbnails, setShowThumbnails] = useState(true)
-  const [compactMode, setCompactMode] = useState(false)
-  const { theme, setTheme } = useTheme()
-  const [defaultView, setDefaultView] = useState('strip')
-  const [slideBackground, setSlideBackground] = useState('default')
-  const [fontSize, setFontSize] = useState('medium')
-  const [shareAccess, setShareAccess] = useState('private')
-  const [allowComments, setAllowComments] = useState(true)
-  const [allowDownloads, setAllowDownloads] = useState(false)
-  const [notifyOnView, setNotifyOnView] = useState(true)
-  const [displayName, setDisplayName] = useState('My Research Project')
-  const [description, setDescription] = useState('')
-  const [linkedRepos, setLinkedRepos] = useState([
-    { id: '1', name: 'happy-ai/sleep-staging-classifier', branch: 'main' },
-    { id: '2', name: 'happy-ai/data-pipeline', branch: 'develop' },
-  ])
-  const [selectedTags, setSelectedTags] = useState(['research', 'ml'])
-  const [exportFormats, setExportFormats] = useState({
-    pdf: true,
-    html: true,
-    markdown: false,
-    json: false,
-  })
+/**
+ * Settings dialog with Sync & Connection, Data Management, and About sections.
+ *
+ * Uses shadcn Dialog for accessibility (focus trapping, Escape key, ARIA role).
+ * Fetches /api/info and /api/stats on open.
+ */
+export function SettingsOverlay({
+  open,
+  onClose,
+  syncVersion,
+  lastSyncAt,
+  onDataChanged,
+}: SettingsOverlayProps) {
+  const [info, setInfo] = useState<AppInfoResponse | null>(null);
+  const [stats, setStats] = useState<StatsResponse | null>(null);
+  const [isPurging, setIsPurging] = useState(false);
+  const [purgeError, setPurgeError] = useState<string | null>(null);
 
-  const availableTags = ['research', 'ml', 'production', 'draft', 'archived', 'shared']
+  // Fetch info and stats when dialog opens
+  useEffect(() => {
+    if (!open) return;
 
-  const toggleTag = (tag: string) => {
-    setSelectedTags(prev => 
-      prev.includes(tag) 
-        ? prev.filter(t => t !== tag)
-        : [...prev, tag]
-    )
+    setInfo(null);
+    setStats(null);
+    setPurgeError(null);
+
+    const controller = new AbortController();
+
+    void Promise.all([
+      fetch("/api/info", { signal: controller.signal })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: AppInfoResponse | null) => {
+          if (data) setInfo(data);
+        })
+        .catch(() => {
+          /* network error — info stays null */
+        }),
+      fetch("/api/stats", { signal: controller.signal })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: StatsResponse | null) => {
+          if (data) setStats(data);
+        })
+        .catch(() => {
+          /* network error — stats stays null */
+        }),
+    ]);
+
+    return () => controller.abort();
+  }, [open]);
+
+  const handlePurgeTrash = useCallback(async () => {
+    setIsPurging(true);
+    setPurgeError(null);
+    try {
+      const res = await fetch("/api/slides/trash", { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(
+          (body as Record<string, string> | null)?.error ?? "Purge failed"
+        );
+      }
+
+      // Refresh stats
+      const statsRes = await fetch("/api/stats");
+      if (statsRes.ok) {
+        const newStats = (await statsRes.json()) as StatsResponse;
+        setStats(newStats);
+      }
+
+      onDataChanged();
+    } catch (err) {
+      setPurgeError(err instanceof Error ? err.message : "Purge failed");
+    } finally {
+      setIsPurging(false);
+    }
+  }, [onDataChanged]);
+
+  /**
+   * Formats an ISO timestamp for display.
+   *
+   * @param iso - ISO 8601 timestamp string.
+   * @returns Human-readable date/time string.
+   */
+  function formatSyncTime(iso: string): string {
+    try {
+      return new Date(iso).toLocaleString();
+    } catch {
+      return iso;
+    }
   }
-
-  const removeRepo = (id: string) => {
-    setLinkedRepos(prev => prev.filter(r => r.id !== id))
-  }
-
-  if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 bg-background">
-      {/* Header */}
-      <header className="h-14 border-b border-border flex items-center justify-between px-6">
-        <h1 className="text-lg font-semibold">Settings</h1>
-        <Button variant="ghost" size="icon-sm" onClick={onClose}>
-          <X className="w-5 h-5" />
-        </Button>
-      </header>
+    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onClose()}>
+      <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Settings</DialogTitle>
+          <DialogDescription>
+            View sync status, manage data, and app information.
+          </DialogDescription>
+        </DialogHeader>
 
-      {/* Content */}
-      <ScrollArea className="h-[calc(100vh-3.5rem)]">
-        <div className="max-w-2xl mx-auto p-6 pb-12">
-          <div className="space-y-10">
-            
-            {/* Project Info Section */}
-            <section>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-                Project Info
-              </h2>
-              <div className="space-y-4">
-                {/* Text Input */}
-                <div className="space-y-2">
-                  <Label htmlFor="displayName">Display Name</Label>
-                  <Input 
-                    id="displayName"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder="Enter project name"
-                  />
-                </div>
-                
-                {/* Textarea */}
-                <div className="space-y-2">
-                  <Label htmlFor="description">Description</Label>
-                  <Textarea 
-                    id="description"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Add a description for this project..."
-                    rows={3}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    This description will be visible to anyone with access.
-                  </p>
-                </div>
-
-                {/* Multi-select with badges (Tags) */}
-                <div className="space-y-2">
-                  <Label>Tags</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {availableTags.map(tag => (
-                      <Badge 
-                        key={tag}
-                        variant={selectedTags.includes(tag) ? 'default' : 'outline'}
-                        className="cursor-pointer"
-                        onClick={() => toggleTag(tag)}
-                      >
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Click to select or deselect tags.
-                  </p>
-                </div>
-              </div>
-            </section>
-
-            {/* General Section */}
-            <section>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-                General
-              </h2>
-              <div className="space-y-1">
-                {/* Toggle/Switch */}
-                <div className="flex items-center justify-between py-3 border-b border-border">
-                  <div>
-                    <p className="text-sm font-medium">Auto-save notes</p>
-                    <p className="text-xs text-muted-foreground">Automatically save notes as you type</p>
-                  </div>
-                  <Switch checked={autoSave} onCheckedChange={setAutoSave} />
-                </div>
-                
-                {/* Toggle/Switch */}
-                <div className="flex items-center justify-between py-3 border-b border-border">
-                  <div>
-                    <p className="text-sm font-medium">Show thumbnails</p>
-                    <p className="text-xs text-muted-foreground">Display slide thumbnails in navigation</p>
-                  </div>
-                  <Switch checked={showThumbnails} onCheckedChange={setShowThumbnails} />
-                </div>
-
-                {/* Toggle/Switch */}
-                <div className="flex items-center justify-between py-3 border-b border-border">
-                  <div>
-                    <p className="text-sm font-medium">Compact mode</p>
-                    <p className="text-xs text-muted-foreground">Reduce spacing for more content density</p>
-                  </div>
-                  <Switch checked={compactMode} onCheckedChange={setCompactMode} />
-                </div>
-
-                {/* Dropdown/Select */}
-                <div className="flex items-center justify-between py-3 border-b border-border">
-                  <div>
-                    <p className="text-sm font-medium">Default view mode</p>
-                    <p className="text-xs text-muted-foreground">How slides appear in the navigation panel</p>
-                  </div>
-                  <Select value={defaultView} onValueChange={setDefaultView}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="strip">Strip view</SelectItem>
-                      <SelectItem value="grid">Grid view</SelectItem>
-                      <SelectItem value="list">List view</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Dropdown/Select */}
-                <div className="flex items-center justify-between py-3 border-b border-border">
-                  <div>
-                    <p className="text-sm font-medium">Font size</p>
-                    <p className="text-xs text-muted-foreground">Base font size for the interface</p>
-                  </div>
-                  <Select value={fontSize} onValueChange={setFontSize}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="small">Small</SelectItem>
-                      <SelectItem value="medium">Medium</SelectItem>
-                      <SelectItem value="large">Large</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </section>
-
-            {/* Appearance Section */}
-            <section>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-                Appearance
-              </h2>
-              <div className="space-y-1">
-                {/* Dropdown/Select */}
-                <div className="flex items-center justify-between py-3 border-b border-border">
-                  <div>
-                    <p className="text-sm font-medium">Theme</p>
-                    <p className="text-xs text-muted-foreground">Select your preferred color scheme</p>
-                  </div>
-                  <Select value={theme} onValueChange={setTheme}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="light">Light</SelectItem>
-                      <SelectItem value="dark">Dark</SelectItem>
-                      <SelectItem value="system">System</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Dropdown/Select */}
-                <div className="flex items-center justify-between py-3 border-b border-border">
-                  <div>
-                    <p className="text-sm font-medium">Slide background</p>
-                    <p className="text-xs text-muted-foreground">Background color for the main slide view</p>
-                  </div>
-                  <Select value={slideBackground} onValueChange={setSlideBackground}>
-                    <SelectTrigger className="w-[140px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="default">Default</SelectItem>
-                      <SelectItem value="white">White</SelectItem>
-                      <SelectItem value="gray">Gray</SelectItem>
-                      <SelectItem value="dark">Dark</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </section>
-
-            {/* Sharing & Privacy Section */}
-            <section>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-                Sharing & Privacy
-              </h2>
-              <div className="space-y-1">
-                {/* Dropdown/Select */}
-                <div className="flex items-center justify-between py-3 border-b border-border">
-                  <div className="flex items-start gap-3">
-                    <Globe className="w-4 h-4 mt-0.5 text-muted-foreground" />
-                    <div>
-                      <p className="text-sm font-medium">Access level</p>
-                      <p className="text-xs text-muted-foreground">Who can view this project</p>
-                    </div>
-                  </div>
-                  <Select value={shareAccess} onValueChange={setShareAccess}>
-                    <SelectTrigger className="w-[160px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="private">Private (only me)</SelectItem>
-                      <SelectItem value="team">Team members</SelectItem>
-                      <SelectItem value="link">Anyone with link</SelectItem>
-                      <SelectItem value="public">Public</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Toggle/Switch with icon */}
-                <div className="flex items-center justify-between py-3 border-b border-border">
-                  <div className="flex items-start gap-3">
-                    <Users className="w-4 h-4 mt-0.5 text-muted-foreground" />
-                    <div>
-                      <p className="text-sm font-medium">Allow comments</p>
-                      <p className="text-xs text-muted-foreground">Let viewers add comments to slides</p>
-                    </div>
-                  </div>
-                  <Switch checked={allowComments} onCheckedChange={setAllowComments} />
-                </div>
-
-                {/* Toggle/Switch */}
-                <div className="flex items-center justify-between py-3 border-b border-border">
-                  <div>
-                    <p className="text-sm font-medium">Allow downloads</p>
-                    <p className="text-xs text-muted-foreground">Let viewers download slides and files</p>
-                  </div>
-                  <Switch checked={allowDownloads} onCheckedChange={setAllowDownloads} />
-                </div>
-
-                {/* Toggle/Switch */}
-                <div className="flex items-center justify-between py-3 border-b border-border">
-                  <div>
-                    <p className="text-sm font-medium">Notify on view</p>
-                    <p className="text-xs text-muted-foreground">Get notified when someone views this project</p>
-                  </div>
-                  <Switch checked={notifyOnView} onCheckedChange={setNotifyOnView} />
-                </div>
-              </div>
-            </section>
-
-            {/* Linked Repositories Section */}
-            <section>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-                Linked Repositories
-              </h2>
-              <div className="space-y-3">
-                {linkedRepos.map(repo => (
-                  <div 
-                    key={repo.id}
-                    className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/30"
+        <div className="space-y-6 py-2">
+          {/* Section 1: Sync & Connection */}
+          <section>
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+              Sync & Connection
+            </h3>
+            <div className="space-y-3">
+              {/* Mode badge */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Mode</span>
+                {info ? (
+                  <Badge
+                    variant={info.mode === "local" ? "secondary" : "default"}
+                    className={
+                      info.mode === "local"
+                        ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                        : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                    }
                   >
-                    <div className="flex items-center gap-3">
-                      <Github className="w-4 h-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm font-medium">{repo.name}</p>
-                        <p className="text-xs text-muted-foreground">Branch: {repo.branch}</p>
-                      </div>
-                    </div>
-                    <Button 
-                      variant="ghost" 
-                      size="icon-sm"
-                      onClick={() => removeRepo(repo.id)}
-                      className="text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
-                <Button variant="outline" size="sm" className="w-full">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Link Repository
-                </Button>
+                    {info.mode === "local" ? "Local" : "Cloud"}
+                  </Badge>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    Loading...
+                  </span>
+                )}
               </div>
-            </section>
 
-            {/* Export Options Section - Checkboxes */}
-            <section>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-                Export Options
-              </h2>
-              <p className="text-sm text-muted-foreground mb-4">
-                Select which formats are available when exporting slides.
-              </p>
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <Checkbox 
-                    id="export-pdf"
-                    checked={exportFormats.pdf}
-                    onCheckedChange={(checked) => setExportFormats(prev => ({ ...prev, pdf: !!checked }))}
-                  />
-                  <Label htmlFor="export-pdf" className="text-sm font-normal cursor-pointer">
-                    PDF Document (.pdf)
-                  </Label>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Checkbox 
-                    id="export-html"
-                    checked={exportFormats.html}
-                    onCheckedChange={(checked) => setExportFormats(prev => ({ ...prev, html: !!checked }))}
-                  />
-                  <Label htmlFor="export-html" className="text-sm font-normal cursor-pointer">
-                    HTML Presentation (.html)
-                  </Label>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Checkbox 
-                    id="export-markdown"
-                    checked={exportFormats.markdown}
-                    onCheckedChange={(checked) => setExportFormats(prev => ({ ...prev, markdown: !!checked }))}
-                  />
-                  <Label htmlFor="export-markdown" className="text-sm font-normal cursor-pointer">
-                    Markdown (.md)
-                  </Label>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Checkbox 
-                    id="export-json"
-                    checked={exportFormats.json}
-                    onCheckedChange={(checked) => setExportFormats(prev => ({ ...prev, json: !!checked }))}
-                  />
-                  <Label htmlFor="export-json" className="text-sm font-normal cursor-pointer">
-                    JSON Data (.json)
-                  </Label>
-                </div>
+              {/* Last sync time */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Last synced</span>
+                <span className="text-sm text-muted-foreground">
+                  {lastSyncAt ? formatSyncTime(lastSyncAt) : "Never"}
+                </span>
               </div>
-            </section>
 
-            {/* Keyboard Shortcuts Section */}
-            <section>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-                Keyboard Shortcuts
-              </h2>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-sm">Navigate slides</span>
-                  <div className="flex gap-1">
-                    <kbd className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-muted text-muted-foreground border border-border rounded text-xs font-mono">←</kbd>
-                    <kbd className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-muted text-muted-foreground border border-border rounded text-xs font-mono">→</kbd>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-sm">Toggle navigation panel</span>
-                  <kbd className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-muted text-muted-foreground border border-border rounded text-xs font-mono">[</kbd>
-                </div>
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-sm">Toggle metadata bar</span>
-                  <kbd className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-muted text-muted-foreground border border-border rounded text-xs font-mono">\</kbd>
-                </div>
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-sm">Toggle details panel</span>
-                  <kbd className="inline-flex items-center justify-center min-w-[24px] h-6 px-2 bg-muted text-muted-foreground border border-border rounded text-xs font-mono">]</kbd>
-                </div>
+              {/* Sync version */}
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Sync version</span>
+                <span className="text-sm text-muted-foreground font-mono">
+                  {syncVersion || "—"}
+                </span>
               </div>
-            </section>
+            </div>
+          </section>
 
-            {/* Danger Zone Section */}
-            <section>
-              <h2 className="text-sm font-semibold text-destructive uppercase tracking-wider mb-4">
-                Danger Zone
-              </h2>
-              <div className="p-4 border border-destructive/30 rounded-lg bg-destructive/5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium">Delete this project</p>
-                    <p className="text-xs text-muted-foreground">
-                      Once deleted, this project cannot be recovered.
-                    </p>
+          <Separator />
+
+          {/* Section 2: Data Management */}
+          <section>
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+              Data Management
+            </h3>
+            <div className="space-y-3">
+              {stats ? (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Total slides</span>
+                    <span className="text-sm text-muted-foreground font-mono">
+                      {stats.total_slides}
+                    </span>
                   </div>
-                  <Button variant="destructive" size="sm">
-                    Delete Project
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Projects</span>
+                    <span className="text-sm text-muted-foreground font-mono">
+                      {stats.total_projects}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm">Slides in trash</span>
+                    <span className="text-sm text-muted-foreground font-mono">
+                      {stats.trashed_slides}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">Loading stats...</p>
+              )}
+
+              {purgeError && (
+                <p className="text-sm text-destructive">{purgeError}</p>
+              )}
+
+              {/* Purge Trash with confirmation */}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    className="w-full"
+                    disabled={
+                      isPurging || !stats || stats.trashed_slides === 0
+                    }
+                  >
+                    {isPurging ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4 mr-2" />
+                    )}
+                    {isPurging
+                      ? "Purging..."
+                      : `Purge Trash${stats && stats.trashed_slides > 0 ? ` (${stats.trashed_slides})` : ""}`}
                   </Button>
-                </div>
-              </div>
-            </section>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Permanently delete all trashed slides?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete{" "}
+                      {stats?.trashed_slides ?? 0} trashed slide
+                      {stats?.trashed_slides === 1 ? "" : "s"} and all
+                      associated figures and data files. This action cannot be
+                      undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={() => void handlePurgeTrash()}
+                      className="bg-destructive text-white hover:bg-destructive/90"
+                    >
+                      Purge All
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+          </section>
 
-            {/* About Section */}
-            <section>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-4">
-                About
-              </h2>
-              <div className="space-y-2 text-sm text-muted-foreground">
-                <p>Personal Context Viewer</p>
-                <p>Version 1.0.0</p>
-              </div>
-            </section>
+          <Separator />
 
-          </div>
+          {/* Section 3: About */}
+          <section>
+            <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">
+              About
+            </h3>
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <div className="flex items-center justify-between">
+                <span>Version</span>
+                <span className="font-mono">
+                  {info?.version ?? "—"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span>Mode</span>
+                <span>{info?.mode ?? "—"}</span>
+              </div>
+              <a
+                href="https://github.com/conn-castle/personal-context"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors pt-1"
+              >
+                <Github className="w-4 h-4" />
+                <span>GitHub Repository</span>
+              </a>
+            </div>
+          </section>
         </div>
-      </ScrollArea>
-    </div>
-  )
+      </DialogContent>
+    </Dialog>
+  );
 }

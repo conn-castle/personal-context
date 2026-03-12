@@ -102,15 +102,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: The `onDownload` and `onDelete` callbacks passed to `AssetCard` for both figures and data files are empty arrow functions. The delete confirmation dialog appears but the confirmed action is a no-op.
     Next step: Implement download via the `/api/files` presigned URL endpoint. Decide on figure/data-file deletion UX (CLI-only or web-editable).
 
-- Issue 2026-03-10 h5i6j7a: Settings overlay state is local-only with no persistence
-    Priority: Medium. Area: web/components/settings-overlay.tsx
-    Description: All settings state (autoSave, showThumbnails, compactMode, defaultView, fontSize, etc.) is managed as local `useState` with hardcoded defaults. Closing and reopening the overlay resets everything. No persistence to localStorage or API.
-    Next step: Determine which settings are real vs placeholder. Persist real settings to `localStorage` or a future API endpoint.
-
-- Issue 2026-03-10 i7j8k9a: Accessibility gaps in web UI components
+- Issue 2026-03-10 i7j8k9a: Accessibility gaps in web UI components (partial fix)
     Priority: Low. Area: web/components
-    Description: Several components have accessibility gaps: `SettingsOverlay` lacks Escape key handling, focus trapping, and ARIA `role="dialog"`; `SlideThumbnail` button has no `aria-label`; navigation view-mode toggle buttons use `title` instead of `aria-label`/`aria-pressed`.
-    Next step: Replace `SettingsOverlay` div with shadcn/ui `Dialog` component (provides focus trapping, Escape, ARIA). Add `aria-label` to thumbnail buttons and `aria-pressed` to toggle buttons.
+    Description: `SlideThumbnail` button has no `aria-label`; navigation view-mode toggle buttons use `title` instead of `aria-label`/`aria-pressed`. SettingsOverlay was migrated to shadcn Dialog (Escape, focus trap, ARIA role="dialog" now handled).
+    Next step: Add `aria-label` to thumbnail buttons and `aria-pressed` to toggle buttons.
 
 - Issue 2026-03-09 f7g8h9: Linux CI visual regression baselines not yet generated
     Priority: Medium. Area: web/tests/e2e

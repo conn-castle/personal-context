@@ -22,6 +22,7 @@ import { SlideDatePicker } from "@/components/slide-date-picker";
 import { SettingsOverlay } from "@/components/settings-overlay";
 import { useSlides } from "@/hooks/use-slides";
 import { useSyncManager } from "@/hooks/use-sync-manager";
+import { useLocalStorage } from "@/hooks/use-local-storage";
 import type { ViewMode, PanelVisibility, SlideSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
@@ -62,18 +63,23 @@ export function SpreadsheetViewer() {
     void fetchProjects();
   }, [refreshSlides, fetchProjects]);
 
-  const { markMutation } = useSyncManager({
-    onSyncData: handleSyncData,
-  });
+  const { markMutation, version, lastSyncAt } =
+    useSyncManager({
+      onSyncData: handleSyncData,
+    });
 
-  // Multi-select project filter (empty = all projects)
-  const [selectedProjects, setSelectedProjects] = useState<string[]>([]);
-  const [viewMode, setViewMode] = useState<ViewMode>("strip");
-  const [panelVisibility, setPanelVisibility] = useState<PanelVisibility>({
-    navigation: true,
-    details: true,
-    metadata: true,
-  });
+  // Persisted UI state via localStorage
+  const [selectedProjects, setSelectedProjects, selectedProjectsLoaded] =
+    useLocalStorage<string[]>("selectedProjects", []);
+  const [viewMode, setViewMode] = useLocalStorage<ViewMode>("viewMode", "strip");
+  const [panelVisibility, setPanelVisibility] =
+    useLocalStorage<PanelVisibility>("panelVisibility", {
+      navigation: true,
+      details: true,
+      metadata: true,
+    });
+  const [lastSelectedSlideId, setLastSelectedSlideId, lastSelectedSlideLoaded] =
+    useLocalStorage<string | null>("lastSelectedSlideId", null);
   const [detailsActiveTab, setDetailsActiveTab] = useState("notes");
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -87,10 +93,14 @@ export function SpreadsheetViewer() {
 
   // Fetch slides on mount and when project filter changes
   useEffect(() => {
+    if (!selectedProjectsLoaded) {
+      return;
+    }
+
     const projectFilter =
       selectedProjects.length === 1 ? selectedProjects[0] : undefined;
     void fetchSlides({ project: projectFilter });
-  }, [selectedProjects, fetchSlides]);
+  }, [selectedProjects, selectedProjectsLoaded, fetchSlides]);
 
   // Client-side multi-project filtering (for multi-select beyond API support)
   const filteredSlides = useMemo(() => {
@@ -106,12 +116,36 @@ export function SpreadsheetViewer() {
     );
   }, [slides, selectedProjects, projects.length]);
 
-  // Auto-select the most recent slide when slides load and none is selected
+  const selectAndRememberSlide = useCallback(
+    (id: string) => {
+      setLastSelectedSlideId(id);
+      return selectSlide(id);
+    },
+    [selectSlide, setLastSelectedSlideId]
+  );
+
+  // Auto-select: prefer last-selected slide, fall back to most recent
   useEffect(() => {
-    if (filteredSlides.length > 0 && !selectedSlide) {
-      void selectSlide(filteredSlides[0].id);
+    if (!selectedProjectsLoaded || !lastSelectedSlideLoaded) {
+      return;
     }
-  }, [filteredSlides, selectedSlide, selectSlide]);
+
+    if (filteredSlides.length > 0 && !selectedSlide) {
+      const target =
+        lastSelectedSlideId &&
+        filteredSlides.find((s) => s.id === lastSelectedSlideId)
+          ? lastSelectedSlideId
+          : filteredSlides[0].id;
+      void selectAndRememberSlide(target);
+    }
+  }, [
+    filteredSlides,
+    lastSelectedSlideId,
+    lastSelectedSlideLoaded,
+    selectedProjectsLoaded,
+    selectedSlide,
+    selectAndRememberSlide,
+  ]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -132,14 +166,14 @@ export function SpreadsheetViewer() {
         case "ArrowUp":
           e.preventDefault();
           if (currentIndex > 0) {
-            void selectSlide(filteredSlides[currentIndex - 1].id);
+            void selectAndRememberSlide(filteredSlides[currentIndex - 1].id);
           }
           break;
         case "ArrowRight":
         case "ArrowDown":
           e.preventDefault();
           if (currentIndex < filteredSlides.length - 1) {
-            void selectSlide(filteredSlides[currentIndex + 1].id);
+            void selectAndRememberSlide(filteredSlides[currentIndex + 1].id);
           }
           break;
         case "[":
@@ -159,49 +193,49 @@ export function SpreadsheetViewer() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedSlide, filteredSlides, selectSlide]);
+  }, [selectedSlide, filteredSlides, selectAndRememberSlide, setPanelVisibility]);
 
   const toggleNavigation = useCallback(() => {
     setPanelVisibility((v) => ({ ...v, navigation: !v.navigation }));
-  }, []);
+  }, [setPanelVisibility]);
 
   const toggleDetails = useCallback(() => {
     setPanelVisibility((v) => ({ ...v, details: !v.details }));
-  }, []);
+  }, [setPanelVisibility]);
 
   const openDetailsToTab = useCallback((tab: string) => {
     setDetailsActiveTab(tab);
     setPanelVisibility((v) => ({ ...v, details: true }));
-  }, []);
+  }, [setPanelVisibility]);
 
   const toggleMetadata = useCallback(() => {
     setPanelVisibility((v) => ({ ...v, metadata: !v.metadata }));
-  }, []);
+  }, [setPanelVisibility]);
 
   const goToPrevious = useCallback(() => {
     const currentIndex = filteredSlides.findIndex(
       (s) => s.id === selectedSlide?.id
     );
     if (currentIndex > 0) {
-      void selectSlide(filteredSlides[currentIndex - 1].id);
+      void selectAndRememberSlide(filteredSlides[currentIndex - 1].id);
     }
-  }, [selectedSlide, filteredSlides, selectSlide]);
+  }, [selectedSlide, filteredSlides, selectAndRememberSlide]);
 
   const goToNext = useCallback(() => {
     const currentIndex = filteredSlides.findIndex(
       (s) => s.id === selectedSlide?.id
     );
     if (currentIndex < filteredSlides.length - 1) {
-      void selectSlide(filteredSlides[currentIndex + 1].id);
+      void selectAndRememberSlide(filteredSlides[currentIndex + 1].id);
     }
-  }, [selectedSlide, filteredSlides, selectSlide]);
+  }, [selectedSlide, filteredSlides, selectAndRememberSlide]);
 
   const goToDate = useCallback(
     (date: Date) => {
       const dateStr = date.toISOString().split("T")[0];
       const slideOnDate = filteredSlides.find((s) => s.date === dateStr);
       if (slideOnDate) {
-        void selectSlide(slideOnDate.id);
+        void selectAndRememberSlide(slideOnDate.id);
         return;
       }
       // Find nearest slide
@@ -215,17 +249,17 @@ export function SpreadsheetViewer() {
         return diffA - diffB;
       });
       if (sorted.length > 0) {
-        void selectSlide(sorted[0].id);
+        void selectAndRememberSlide(sorted[0].id);
       }
     },
-    [filteredSlides, selectSlide]
+    [filteredSlides, selectAndRememberSlide]
   );
 
   const handleSelectSlide = useCallback(
     (slide: SlideSummary) => {
-      void selectSlide(slide.id);
+      void selectAndRememberSlide(slide.id);
     },
-    [selectSlide]
+    [selectAndRememberSlide]
   );
 
   const handleUpdateSlide = useCallback(
@@ -269,6 +303,9 @@ export function SpreadsheetViewer() {
       <SettingsOverlay
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
+        syncVersion={version}
+        lastSyncAt={lastSyncAt}
+        onDataChanged={handleSyncData}
       />
       <div className="h-screen flex flex-col bg-background">
         {/* Error banner */}

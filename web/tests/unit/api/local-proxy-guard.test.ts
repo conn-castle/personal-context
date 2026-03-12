@@ -24,6 +24,7 @@ vi.mock("@/lib/s3", () => ({
   getPresignedUrl: vi.fn(),
   getS3Version: vi.fn(),
   bumpS3Version: vi.fn(),
+  deleteS3Objects: vi.fn(),
 }));
 
 import { proxyToLocal } from "@/lib/local-proxy";
@@ -35,6 +36,9 @@ import { POST as restorePOST } from "@/app/api/slides/[id]/restore/route";
 import { GET as syncVersionGET } from "@/app/api/sync/version/route";
 import { GET as syncChangesGET } from "@/app/api/sync/changes/route";
 import { GET as filesGET } from "@/app/api/files/[slideId]/[...path]/route";
+import { GET as infoGET } from "@/app/api/info/route";
+import { GET as statsGET } from "@/app/api/stats/route";
+import { DELETE as trashDELETE } from "@/app/api/slides/trash/route";
 
 const mockProxy = proxyToLocal as ReturnType<typeof vi.fn>;
 
@@ -130,6 +134,29 @@ describe("API routes — local proxy guard", () => {
       }),
     };
     const res = await filesGET(req, ctx);
+    expect(mockProxy).toHaveBeenCalledWith(req);
+    expect(res.status).toBe(200);
+  });
+
+  it("GET /api/info proxies in local mode", async () => {
+    const req = new NextRequest("http://localhost/api/info");
+    const res = await infoGET(req);
+    expect(mockProxy).toHaveBeenCalledWith(req);
+    expect(res.status).toBe(200);
+  });
+
+  it("GET /api/stats proxies in local mode", async () => {
+    const req = new NextRequest("http://localhost/api/stats");
+    const res = await statsGET(req);
+    expect(mockProxy).toHaveBeenCalledWith(req);
+    expect(res.status).toBe(200);
+  });
+
+  it("DELETE /api/slides/trash proxies in local mode", async () => {
+    const req = new NextRequest("http://localhost/api/slides/trash", {
+      method: "DELETE",
+    });
+    const res = await trashDELETE(req);
     expect(mockProxy).toHaveBeenCalledWith(req);
     expect(res.status).toBe(200);
   });
