@@ -859,6 +859,116 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 	})
 
+	t.Run("CountActiveSlides and CountTrashedSlides", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		// Empty DB: both counts are zero.
+		active, err := repo.CountActiveSlides(ctx)
+		if err != nil {
+			t.Fatalf("CountActiveSlides(empty) error = %v", err)
+		}
+		if active != 0 {
+			t.Fatalf("expected 0 active slides, got %d", active)
+		}
+		trashed, err := repo.CountTrashedSlides(ctx)
+		if err != nil {
+			t.Fatalf("CountTrashedSlides(empty) error = %v", err)
+		}
+		if trashed != 0 {
+			t.Fatalf("expected 0 trashed slides, got %d", trashed)
+		}
+
+		// Create two slides, trash one.
+		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID: "20250410-c0a1b2c3", Date: "2025-04-10", DayOrder: "a", HTMLContent: "<h1>A</h1>",
+		})
+		toTrash := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID: "20250410-c0d4e5f6", Date: "2025-04-10", DayOrder: "b", HTMLContent: "<h1>B</h1>",
+		})
+		if err := repo.SoftDeleteSlide(ctx, toTrash.ID); err != nil {
+			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		}
+
+		active, err = repo.CountActiveSlides(ctx)
+		if err != nil {
+			t.Fatalf("CountActiveSlides error = %v", err)
+		}
+		if active != 1 {
+			t.Fatalf("expected 1 active slide, got %d", active)
+		}
+		trashed, err = repo.CountTrashedSlides(ctx)
+		if err != nil {
+			t.Fatalf("CountTrashedSlides error = %v", err)
+		}
+		if trashed != 1 {
+			t.Fatalf("expected 1 trashed slide, got %d", trashed)
+		}
+	})
+
+	t.Run("PurgeDeletedSlides", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		// Purge on empty DB returns empty slice.
+		ids, err := repo.PurgeDeletedSlides(ctx)
+		if err != nil {
+			t.Fatalf("PurgeDeletedSlides(empty) error = %v", err)
+		}
+		if len(ids) != 0 {
+			t.Fatalf("expected 0 purged IDs, got %d", len(ids))
+		}
+
+		// Create 3 slides, trash 2, purge.
+		activeSlide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID: "20250411-a0a1a1a1", Date: "2025-04-11", DayOrder: "a", HTMLContent: "<h1>Active</h1>",
+		})
+		trash1 := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID: "20250411-b0b2b2b2", Date: "2025-04-11", DayOrder: "b", HTMLContent: "<h1>Trash1</h1>",
+		})
+		trash2 := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+			ID: "20250411-c0c3c3c3", Date: "2025-04-11", DayOrder: "c", HTMLContent: "<h1>Trash2</h1>",
+		})
+
+		if err := repo.SoftDeleteSlide(ctx, trash1.ID); err != nil {
+			t.Fatalf("SoftDeleteSlide(1) error = %v", err)
+		}
+		if err := repo.SoftDeleteSlide(ctx, trash2.ID); err != nil {
+			t.Fatalf("SoftDeleteSlide(2) error = %v", err)
+		}
+
+		ids, err = repo.PurgeDeletedSlides(ctx)
+		if err != nil {
+			t.Fatalf("PurgeDeletedSlides error = %v", err)
+		}
+		if len(ids) != 2 {
+			t.Fatalf("expected 2 purged IDs, got %d: %v", len(ids), ids)
+		}
+
+		// Active slide should still exist.
+		_, err = repo.GetSlideByID(ctx, activeSlide.ID)
+		if err != nil {
+			t.Fatalf("active slide should still exist: %v", err)
+		}
+
+		// Trashed slides should be hard-deleted.
+		for _, trashID := range []string{trash1.ID, trash2.ID} {
+			_, err = repo.GetSlideByID(ctx, trashID)
+			if !errors.Is(err, repository.ErrNotFound) {
+				t.Fatalf("expected ErrNotFound for purged slide %s, got %v", trashID, err)
+			}
+		}
+
+		// Count should reflect the purge.
+		trashed, err := repo.CountTrashedSlides(ctx)
+		if err != nil {
+			t.Fatalf("CountTrashedSlides after purge error = %v", err)
+		}
+		if trashed != 0 {
+			t.Fatalf("expected 0 trashed after purge, got %d", trashed)
+		}
+	})
+
 	t.Run("ListDistinctProjectIDs", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()

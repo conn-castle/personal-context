@@ -559,24 +559,18 @@ func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Get all non-deleted slides
-	allSlides, err := s.repo.ListSlides(ctx, repository.ListSlidesFilter{})
+	totalSlides, err := s.repo.CountActiveSlides(ctx)
 	if err != nil {
 		mapRepoError(w, err, "slides")
 		return
 	}
 
-	// Get trashed slides
-	trashedSlides, err := s.repo.ListSlides(ctx, repository.ListSlidesFilter{
-		IncludeDeleted: true,
-		OnlyDeleted:    true,
-	})
+	trashedSlides, err := s.repo.CountTrashedSlides(ctx)
 	if err != nil {
 		mapRepoError(w, err, "slides")
 		return
 	}
 
-	// Get distinct projects
 	projects, err := s.repo.ListDistinctProjectIDs(ctx)
 	if err != nil {
 		mapRepoError(w, err, "projects")
@@ -584,9 +578,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]int{
-		"total_slides":   len(allSlides),
+		"total_slides":   totalSlides,
 		"total_projects": len(projects),
-		"trashed_slides": len(trashedSlides),
+		"trashed_slides": trashedSlides,
 	})
 }
 
@@ -598,33 +592,21 @@ func (s *Server) handlePurgeTrash(w http.ResponseWriter, r *http.Request) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	// Find all soft-deleted slides
-	trashedSlides, err := s.repo.ListSlides(ctx, repository.ListSlidesFilter{
-		IncludeDeleted: true,
-		OnlyDeleted:    true,
-	})
+	// Bulk delete all soft-deleted slides and get their IDs for filesystem cleanup.
+	purgedIDs, err := s.repo.PurgeDeletedSlides(ctx)
 	if err != nil {
 		mapRepoError(w, err, "slides")
 		return
 	}
 
-	purgedCount := 0
-	for _, slide := range trashedSlides {
-		// Hard-delete from DB (CASCADE handles child rows)
-		if err := s.repo.DeleteSlide(ctx, slide.ID); err != nil {
-			mapRepoError(w, err, "slide")
-			return
-		}
-
-		// Best-effort removal of local filesystem dirs for figures and data
+	// Best-effort removal of local filesystem dirs for figures and data.
+	for _, id := range purgedIDs {
 		for _, subdir := range []string{"figures", "data"} {
-			dirPath := filepath.Join(s.dataDir, subdir, slide.ID)
+			dirPath := filepath.Join(s.dataDir, subdir, id)
 			if rmErr := os.RemoveAll(dirPath); rmErr != nil {
 				log.Printf("warning: failed to remove %s: %v", dirPath, rmErr)
 			}
 		}
-
-		purgedCount++
 	}
 
 	syncVersion, err := s.repo.GetSyncVersion(ctx)
@@ -634,7 +616,7 @@ func (s *Server) handlePurgeTrash(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"purged_count": purgedCount,
+		"purged_count": len(purgedIDs),
 		"sync_version": syncVersion.Version,
 	})
 }

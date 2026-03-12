@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const mockSql = vi.fn();
+const mockTransaction = vi.fn();
+const mockSql = Object.assign(vi.fn(), { transaction: mockTransaction });
 const mockBumpS3Version = vi.fn();
 const mockDeleteS3Objects = vi.fn();
 vi.mock("@/lib/db", () => ({
@@ -16,9 +17,33 @@ vi.mock("@/lib/s3", () => ({
 
 import { DELETE } from "@/app/api/slides/trash/route";
 
+/**
+ * Helper: sets up mockSql for a trash DELETE request.
+ *
+ * The route calls sql`` 4 times inside sql.transaction([...]) to create query
+ * objects, then calls sql`` once more for the sync version query. This helper
+ * configures mock returns for all calls in the correct order.
+ */
+function setupTrashMocks(
+  transactionResult: unknown[],
+  syncVersionRow: Record<string, unknown>[] | undefined
+) {
+  // 4 tagged-template calls inside the transaction array (return dummy query objects)
+  for (let i = 0; i < 4; i++) {
+    mockSql.mockReturnValueOnce({});
+  }
+  mockTransaction.mockResolvedValueOnce(transactionResult);
+
+  if (syncVersionRow !== undefined) {
+    // Sync version query (outside transaction)
+    mockSql.mockResolvedValueOnce(syncVersionRow);
+  }
+}
+
 describe("DELETE /api/slides/trash", () => {
   beforeEach(() => {
     mockSql.mockReset();
+    mockTransaction.mockReset();
     mockBumpS3Version.mockReset();
     mockDeleteS3Objects.mockReset();
     mockBumpS3Version.mockResolvedValue(undefined);
@@ -26,14 +51,10 @@ describe("DELETE /api/slides/trash", () => {
   });
 
   it("purges trashed slides and returns count", async () => {
-    mockSql
-      .mockResolvedValueOnce([{ count: 2 }]) // count trashed
-      .mockResolvedValueOnce([{ s3_key: "fig1" }]) // figure keys
-      .mockResolvedValueOnce([{ s3_key: "data1" }]) // data file keys
-      .mockResolvedValueOnce([]) // DELETE
-      .mockResolvedValueOnce([
-        { version: 5, updated_at: "2026-03-11T12:00:00.000Z" },
-      ]); // sync version
+    setupTrashMocks(
+      [[{ count: 2 }], [{ s3_key: "fig1" }], [{ s3_key: "data1" }], []],
+      [{ version: 5, updated_at: "2026-03-11T12:00:00.000Z" }]
+    );
 
     const req = new NextRequest("http://localhost/api/slides/trash", {
       method: "DELETE",
@@ -52,11 +73,10 @@ describe("DELETE /api/slides/trash", () => {
   });
 
   it("returns zero when no trashed slides exist", async () => {
-    mockSql
-      .mockResolvedValueOnce([{ count: 0 }]) // count trashed
-      .mockResolvedValueOnce([
-        { version: 3, updated_at: "2026-03-11T12:05:00.000Z" },
-      ]); // sync version
+    setupTrashMocks(
+      [[{ count: 0 }], [], [], []],
+      [{ version: 3, updated_at: "2026-03-11T12:05:00.000Z" }]
+    );
 
     const req = new NextRequest("http://localhost/api/slides/trash", {
       method: "DELETE",
@@ -72,7 +92,11 @@ describe("DELETE /api/slides/trash", () => {
   });
 
   it("returns 500 on database error", async () => {
-    mockSql.mockRejectedValueOnce(new Error("connection refused"));
+    // Transaction inner calls still consume sql`` calls
+    for (let i = 0; i < 4; i++) {
+      mockSql.mockReturnValueOnce({});
+    }
+    mockTransaction.mockRejectedValueOnce(new Error("connection refused"));
 
     const req = new NextRequest("http://localhost/api/slides/trash", {
       method: "DELETE",
@@ -85,14 +109,10 @@ describe("DELETE /api/slides/trash", () => {
   });
 
   it("purges trashed slides with no S3 keys to clean", async () => {
-    mockSql
-      .mockResolvedValueOnce([{ count: 1 }]) // count trashed
-      .mockResolvedValueOnce([]) // no figure keys
-      .mockResolvedValueOnce([]) // no data file keys
-      .mockResolvedValueOnce([]) // DELETE
-      .mockResolvedValueOnce([
-        { version: 7, updated_at: "2026-03-11T12:10:00.000Z" },
-      ]); // sync version
+    setupTrashMocks(
+      [[{ count: 1 }], [], [], []],
+      [{ version: 7, updated_at: "2026-03-11T12:10:00.000Z" }]
+    );
 
     const req = new NextRequest("http://localhost/api/slides/trash", {
       method: "DELETE",
@@ -111,9 +131,10 @@ describe("DELETE /api/slides/trash", () => {
   });
 
   it("falls back to zero for empty sync version result", async () => {
-    mockSql
-      .mockResolvedValueOnce([{ count: 0 }]) // count trashed
-      .mockResolvedValueOnce([]); // empty sync version
+    setupTrashMocks(
+      [[{ count: 0 }], [], [], []],
+      [] // empty sync version
+    );
 
     const req = new NextRequest("http://localhost/api/slides/trash", {
       method: "DELETE",
@@ -128,14 +149,10 @@ describe("DELETE /api/slides/trash", () => {
   });
 
   it("still succeeds when the S3 version bump fails after the delete", async () => {
-    mockSql
-      .mockResolvedValueOnce([{ count: 1 }])
-      .mockResolvedValueOnce([{ s3_key: "fig1" }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        { version: 9, updated_at: "2026-03-11T12:15:00.000Z" },
-      ]);
+    setupTrashMocks(
+      [[{ count: 1 }], [{ s3_key: "fig1" }], [], []],
+      [{ version: 9, updated_at: "2026-03-11T12:15:00.000Z" }]
+    );
     mockBumpS3Version.mockRejectedValueOnce(new Error("s3 unavailable"));
 
     const req = new NextRequest("http://localhost/api/slides/trash", {

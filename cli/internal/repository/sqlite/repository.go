@@ -621,6 +621,58 @@ func (r *Repository) ListDistinctProjectIDs(ctx context.Context) ([]string, erro
 	return projects, nil
 }
 
+// CountActiveSlides returns the number of non-deleted slides.
+func (r *Repository) CountActiveSlides(ctx context.Context) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM slides WHERE deleted_at IS NULL`).Scan(&count)
+	if err != nil {
+		return 0, mapSQLiteError(err)
+	}
+	return count, nil
+}
+
+// CountTrashedSlides returns the number of soft-deleted slides.
+func (r *Repository) CountTrashedSlides(ctx context.Context) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM slides WHERE deleted_at IS NOT NULL`).Scan(&count)
+	if err != nil {
+		return 0, mapSQLiteError(err)
+	}
+	return count, nil
+}
+
+// PurgeDeletedSlides hard-deletes all soft-deleted slides and returns their IDs.
+func (r *Repository) PurgeDeletedSlides(ctx context.Context) ([]string, error) {
+	// Collect IDs first (needed by callers for filesystem cleanup).
+	rows, err := r.db.QueryContext(ctx, `SELECT id FROM slides WHERE deleted_at IS NOT NULL`)
+	if err != nil {
+		return nil, mapSQLiteError(err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, mapSQLiteError(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapSQLiteError(err)
+	}
+	if len(ids) == 0 {
+		return ids, nil
+	}
+
+	// Bulk delete (CASCADE handles child rows).
+	_, err = r.db.ExecContext(ctx, `DELETE FROM slides WHERE deleted_at IS NOT NULL`)
+	if err != nil {
+		return nil, mapSQLiteError(err)
+	}
+	return ids, nil
+}
+
 type slideRow struct {
 	ID           string
 	Date         string

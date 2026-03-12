@@ -22,7 +22,8 @@ import { NextRequest } from "next/server";
 // Shared mock setup (must precede all route imports)
 // ---------------------------------------------------------------------------
 
-const mockSql = vi.fn();
+const mockTransaction = vi.fn();
+const mockSql = Object.assign(vi.fn(), { transaction: mockTransaction });
 const mockBumpS3Version = vi.fn();
 const mockDeleteS3Objects = vi.fn();
 const mockGetPresignedUrl = vi.fn();
@@ -196,6 +197,7 @@ describe("Contract: GET /api/stats", () => {
 describe("Contract: DELETE /api/slides/trash", () => {
   beforeEach(() => {
     mockSql.mockReset();
+    mockTransaction.mockReset();
     mockBumpS3Version.mockReset();
     mockDeleteS3Objects.mockReset();
     mockBumpS3Version.mockResolvedValue(undefined);
@@ -203,12 +205,19 @@ describe("Contract: DELETE /api/slides/trash", () => {
   });
 
   it("response shape matches { purged_count: number, sync_version: number }", async () => {
-    mockSql
-      .mockResolvedValueOnce([{ count: 1 }]) // count trashed
-      .mockResolvedValueOnce([]) // figure keys
-      .mockResolvedValueOnce([]) // data file keys
-      .mockResolvedValueOnce([]) // DELETE rows
-      .mockResolvedValueOnce([SYNC_VERSION_ROW]); // sync version
+    // 4 tagged-template calls inside the transaction array create query objects
+    for (let i = 0; i < 4; i++) {
+      mockSql.mockReturnValueOnce({});
+    }
+    // Transaction resolves with: [countResult, figureKeys, dataFileKeys, deleteResult]
+    mockTransaction.mockResolvedValueOnce([
+      [{ count: 1 }],
+      [],
+      [],
+      [],
+    ]);
+    // Sync version query (outside transaction)
+    mockSql.mockResolvedValueOnce([SYNC_VERSION_ROW]);
 
     const req = new NextRequest("http://localhost/api/slides/trash", {
       method: "DELETE",

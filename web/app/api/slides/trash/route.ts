@@ -22,28 +22,30 @@ export async function DELETE(
   try {
     const sql = getDb();
 
-    // Count trashed slides before deleting
-    const countResult = (await sql`
-      SELECT COUNT(*)::int AS count FROM slides WHERE deleted_at IS NOT NULL
-    `) as Record<string, unknown>[];
-    const purgedCount = (countResult[0]?.count as number) ?? 0;
-
-    if (purgedCount > 0) {
-      // Collect S3 keys for cleanup before deleting DB rows
-      const figureKeys = (await sql`
+    // Run count, key collection, and delete in a single transaction so all
+    // statements see the same snapshot — prevents a concurrent restore from
+    // causing S3 key divergence.
+    const [countResult, figureKeys, dataFileKeys] = (await sql.transaction([
+      sql`SELECT COUNT(*)::int AS count FROM slides WHERE deleted_at IS NOT NULL`,
+      sql`
         SELECT sf.s3_key FROM slide_figures sf
         JOIN slides s ON s.id = sf.slide_id
         WHERE s.deleted_at IS NOT NULL
-      `) as Record<string, unknown>[];
-      const dataFileKeys = (await sql`
+      `,
+      sql`
         SELECT sdf.s3_key FROM slide_data_files sdf
         JOIN slides s ON s.id = sdf.slide_id
         WHERE s.deleted_at IS NOT NULL
-      `) as Record<string, unknown>[];
+      `,
+      sql`DELETE FROM slides WHERE deleted_at IS NOT NULL`,
+    ])) as [
+      Record<string, unknown>[],
+      Record<string, unknown>[],
+      Record<string, unknown>[],
+    ];
+    const purgedCount = (countResult[0]?.count as number) ?? 0;
 
-      // Hard-delete from DB (CASCADE handles child rows)
-      await sql`DELETE FROM slides WHERE deleted_at IS NOT NULL`;
-
+    if (purgedCount > 0) {
       // Best-effort S3 cleanup
       const allKeys = [
         ...figureKeys.map((r) => r.s3_key as string),

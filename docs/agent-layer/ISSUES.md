@@ -27,21 +27,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
-- Issue 2026-03-11 w1x2y3a: handleStats fetches full rows to count — should use COUNT queries
-    Priority: Low. Area: cli/internal/serve/server.go
-    Description: `handleStats` calls `ListSlides` twice (active + trashed) and `ListDistinctProjectIDs`, loading all row data into memory just to count with `len()`. Acceptable for local single-user datasets, but the repository interface lacks `CountSlides`/`CountProjects` methods. The cloud counterpart in `web/app/api/stats/route.ts` correctly uses `COUNT(*)`.
-    Next step: Add `CountSlides(ctx, filter) (int, error)` and `CountDistinctProjectIDs(ctx) (int, error)` to the repository interface when the serve endpoints are next extended.
-
-- Issue 2026-03-11 x3y4z5a: handlePurgeTrash uses N+1 deletes instead of bulk delete
-    Priority: Low. Area: cli/internal/serve/server.go
-    Description: `handlePurgeTrash` deletes slides one-by-one in a loop. A bulk `DELETE WHERE deleted_at IS NOT NULL` would be faster and atomic. The repository interface lacks a bulk purge method. Acceptable for local datasets; partial purge on mid-loop failure is re-runnable.
-    Next step: Add `PurgeDeletedSlides(ctx) (int, error)` to the repository interface when purge-trash is next extended.
-
-- Issue 2026-03-11 y5z6a7a: Concurrent restore/purge race in web trash route
-    Priority: Low. Area: web/app/api/slides/trash/route.ts
-    Description: S3 keys are collected before `DELETE FROM slides WHERE deleted_at IS NOT NULL`. If a slide is restored between the SELECT and DELETE, the row survives but its S3 objects may be deleted. Low risk — purge-trash is a manual user action, and concurrent restore is unlikely.
-    Next step: Wrap key collection + DELETE in a Postgres transaction when the route is next modified.
-
 - Issue 2026-03-11 t1u2v3a: Seed idempotency is fragile when user edits tutorial slide HTML
     Priority: Low. Area: cli/internal/cli/seed.go
     Description: `runSeed` uses HTML content as the identity key for existing tutorial slides (`existingByHTML`). If a user edits the HTML of a seeded slide, `runSeed` will not recognise it as existing and will create a duplicate on the next run. Stable IDs would require schema changes (a `seed_key` column or similar) and migration support.

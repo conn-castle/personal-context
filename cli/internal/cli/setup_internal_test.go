@@ -89,6 +89,9 @@ func (m *mockRepo) GetSyncVersion(context.Context) (repository.SyncVersion, erro
 func (m *mockRepo) ListDistinctProjectIDs(context.Context) ([]string, error) {
 	return nil, nil
 }
+func (m *mockRepo) CountActiveSlides(context.Context) (int, error)        { return 0, nil }
+func (m *mockRepo) CountTrashedSlides(context.Context) (int, error)       { return 0, nil }
+func (m *mockRepo) PurgeDeletedSlides(context.Context) ([]string, error)  { return nil, nil }
 
 func TestSeedTemplatesAllNew(t *testing.T) {
 	created := make(map[string]bool)

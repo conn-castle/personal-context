@@ -28,16 +28,18 @@ type mockRepo struct {
 	syncVer    repository.SyncVersion
 
 	// Error injection
-	listSlidesErr     error
-	getSlideErr       error
-	updateSlideErr    error
-	softDeleteErr     error
-	restoreErr        error
-	deleteSlideErr    error
-	listFiguresErr    error
-	listDataFilesErr  error
-	listProjectsErr   error
-	getSyncVersionErr error
+	listSlidesErr      error
+	getSlideErr        error
+	updateSlideErr     error
+	softDeleteErr      error
+	restoreErr         error
+	deleteSlideErr     error
+	countSlidesErr     error
+	purgeDeletedErr    error
+	listFiguresErr     error
+	listDataFilesErr   error
+	listProjectsErr    error
+	getSyncVersionErr  error
 }
 
 func newMockRepo() *mockRepo {
@@ -240,6 +242,51 @@ func (m *mockRepo) ListTemplates(context.Context) ([]repository.Template, error)
 }
 func (m *mockRepo) DeleteTemplate(context.Context, string) error {
 	return repository.ErrNotFound
+}
+func (m *mockRepo) CountActiveSlides(_ context.Context) (int, error) {
+	if m.countSlidesErr != nil {
+		return 0, m.countSlidesErr
+	}
+	count := 0
+	for _, s := range m.slides {
+		if s.DeletedAt == nil {
+			count++
+		}
+	}
+	return count, nil
+}
+func (m *mockRepo) CountTrashedSlides(_ context.Context) (int, error) {
+	if m.countSlidesErr != nil {
+		return 0, m.countSlidesErr
+	}
+	count := 0
+	for _, s := range m.slides {
+		if s.DeletedAt != nil {
+			count++
+		}
+	}
+	return count, nil
+}
+func (m *mockRepo) PurgeDeletedSlides(_ context.Context) ([]string, error) {
+	if m.purgeDeletedErr != nil {
+		return nil, m.purgeDeletedErr
+	}
+	var ids []string
+	var remaining []repository.Slide
+	for _, s := range m.slides {
+		if s.DeletedAt != nil {
+			ids = append(ids, s.ID)
+			delete(m.figures, s.ID)
+			delete(m.dataFiles, s.ID)
+		} else {
+			remaining = append(remaining, s)
+		}
+	}
+	m.slides = remaining
+	if len(ids) > 0 {
+		m.syncVer.Version++
+	}
+	return ids, nil
 }
 
 // --- Test helpers ---
@@ -2604,9 +2651,9 @@ func TestHandleStats_Empty(t *testing.T) {
 	}
 }
 
-func TestHandleStats_ListSlidesError(t *testing.T) {
+func TestHandleStats_CountSlidesError(t *testing.T) {
 	repo := newMockRepo()
-	repo.listSlidesErr = fmt.Errorf("db error")
+	repo.countSlidesErr = fmt.Errorf("db error")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
@@ -2758,32 +2805,9 @@ func TestHandlePurgeTrash_RemovesFilesystemDirs(t *testing.T) {
 	}
 }
 
-func TestHandlePurgeTrash_ListSlidesError(t *testing.T) {
+func TestHandlePurgeTrash_PurgeError(t *testing.T) {
 	repo := newMockRepo()
-	repo.listSlidesErr = fmt.Errorf("db error")
-	ts := setupTestServer(t, repo)
-	defer ts.Close()
-
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer func() { _ = res.Body.Close() }()
-
-	if res.StatusCode != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", res.StatusCode)
-	}
-}
-
-func TestHandlePurgeTrash_DeleteSlideError(t *testing.T) {
-	now := time.Now().UTC()
-	deletedAt := now.Add(-1 * time.Hour)
-	repo := newMockRepo()
-	repo.slides = []repository.Slide{
-		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: "<p>trashed</p>", UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
-	}
-	repo.deleteSlideErr = fmt.Errorf("db error")
+	repo.purgeDeletedErr = fmt.Errorf("db error")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
