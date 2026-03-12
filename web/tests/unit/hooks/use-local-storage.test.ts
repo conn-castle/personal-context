@@ -218,6 +218,28 @@ describe("useLocalStorage", () => {
     expect(window.localStorage.getItem("viewMode")).toBeNull();
   });
 
+  it("resets to default when key changes to one with no stored value", async () => {
+    window.localStorage.setItem("pc:keyA", JSON.stringify("valueA"));
+
+    let currentKey = "keyA";
+    const { result, rerender } = renderHook(() =>
+      useLocalStorage(currentKey, "default")
+    );
+
+    await waitFor(() => {
+      expect(result.current[0]).toBe("valueA");
+      expect(result.current[2]).toBe(true);
+    });
+
+    // Switch to a key that has no stored value
+    currentKey = "keyB";
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current[0]).toBe("default");
+    });
+  });
+
   it("survives localStorage.setItem error", async () => {
     const setItemSpy = vi
       .spyOn(window.localStorage, "setItem")

@@ -38,6 +38,8 @@ export function useLocalStorage<T>(
       const item = window.localStorage.getItem(prefixedKey);
       if (item !== null) {
         setStoredValue(JSON.parse(item) as T);
+      } else {
+        setStoredValue(defaultValueRef.current);
       }
     } catch {
       setStoredValue(defaultValueRef.current);

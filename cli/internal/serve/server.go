@@ -595,6 +595,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePurgeTrash(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	// Find all soft-deleted slides
 	trashedSlides, err := s.repo.ListSlides(ctx, repository.ListSlidesFilter{
 		IncludeDeleted: true,
@@ -613,11 +616,12 @@ func (s *Server) handlePurgeTrash(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Remove local filesystem dirs for figures and data
+		// Best-effort removal of local filesystem dirs for figures and data
 		for _, subdir := range []string{"figures", "data"} {
 			dirPath := filepath.Join(s.dataDir, subdir, slide.ID)
-			// Remove the directory if it exists; ignore errors for non-existent dirs
-			_ = os.RemoveAll(dirPath)
+			if rmErr := os.RemoveAll(dirPath); rmErr != nil {
+				log.Printf("warning: failed to remove %s: %v", dirPath, rmErr)
+			}
 		}
 
 		purgedCount++
