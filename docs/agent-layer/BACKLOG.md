@@ -28,6 +28,12 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
 
 <!-- ENTRIES START -->
 
+- Backlog 2026-03-12 r6s6t6: Web UI trash view and restore flow
+    Priority: High. Area: web
+    Description: Add a visible way in the web UI to switch into a trash/deleted-slides view, browse soft-deleted slides, inspect them, and restore a slide back to the active deck.
+    Acceptance criteria: User can open a trash view from the web UI, see only soft-deleted slides, select one to review its content/metadata, and restore it so it disappears from trash and returns to the active list after refresh/sync.
+    Notes: Backend support already exists for deleted-slide listing and restore; the missing piece is the user-facing navigation/toggle and end-to-end trash workflow in the current UI.
+
 - Backlog 2026-03-11 v3w4x5: GitHub backup/sync integration and Settings link
     Priority: Medium. Area: web, infra
     Description: Implement GitHub-based backup/sync (nightly export to a private data repo). The Settings overlay "GitHub Repository" link should point to the user's backup data repo, not the source code repo. May involve configuring the target repo, auth, and scheduling.
@@ -70,11 +76,11 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
     Acceptance criteria: Hard-deleted slides are removed from all machines and web UI without full reconciliation. Tombstones cleaned up after retention period.
     Notes: Currently mitigated by full reconciliation on version-bump-with-no-changes. See Decision d1e2f3.
 
-- Backlog 2026-03-05 a1b1c1: Cross-date drag-and-drop in web UI
+- Backlog 2026-03-05 a1b1c1: Web UI slide reordering and moves
     Priority: High. Area: web
-    Description: Allow users to drag slides across date boundaries in the web UI, changing both `date` and `day_order`.
-    Acceptance criteria: Slide can be dragged from one date group to another; date and day_order update correctly via API.
-    Notes: MVP restricts to intra-day. Web UI is independent of CLI so cross-date moves will be needed.
+    Description: Add a visible way in the web UI to move slides around, including reordering within a date group and moving a slide to a different date/group.
+    Acceptance criteria: User can move a slide earlier/later in the current group and into another date from the web UI; `date` and `day_order` update correctly and the new order persists after refresh/sync.
+    Notes: Backend reorder support already exists; the missing piece is user-facing move/reorder controls in the current UI, whether drag-and-drop, explicit move actions, or both.
 
 - Backlog 2026-03-05 b2c2d2: Google Slides migration tool
     Priority: Medium. Area: cli
@@ -87,10 +93,11 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
     Description: Dedicated skill/template system for CLI-based slide creation by agents.
     Acceptance criteria: Agents can discover available templates and create slides using structured skill invocations.
 
-- Backlog 2026-03-05 d4e4f4: Agentic chat panel in web UI
-    Priority: Low. Area: web
-    Description: Embedded chat panel in the web UI for agent-assisted slide creation and editing.
-    Acceptance criteria: User can converse with an agent to create/modify slides.
+- Backlog 2026-03-05 d4e4f4: Agentic `pc` interface in web UI
+    Priority: Medium. Area: web
+    Description: Add an embedded agent interface in the web UI that lets users interact with their slide library the way an agent would via `pc`, including command-like creation, editing, search, movement, delete/restore, and related workflows.
+    Acceptance criteria: User can open the UI agent panel, issue natural-language or command-oriented requests, and see the agent read or mutate slides through the same underlying capabilities exposed by `pc`, with visible results and clear confirmations/errors.
+    Notes: Reuse the existing `pc`/agent capability surface as the source of truth rather than inventing a separate browser-only action model.
 
 - Backlog 2026-03-05 f6a6b6: Multi-user auth with per-user S3 namespace
     Priority: Low. Area: infra
