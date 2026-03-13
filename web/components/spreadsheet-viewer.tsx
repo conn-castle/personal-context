@@ -41,6 +41,48 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 
+/**
+ * Returns the selected slide index or -1 when the selection is absent.
+ *
+ * @param slides - The current filtered slide list.
+ * @param selectedSlideId - The currently selected slide ID.
+ * @returns The zero-based index in `slides`, or -1 when not found.
+ */
+function getSelectedSlideIndex(
+  slides: SlideSummary[],
+  selectedSlideId: string | undefined
+): number {
+  if (!selectedSlideId) {
+    return -1;
+  }
+  return slides.findIndex((slide) => slide.id === selectedSlideId);
+}
+
+/**
+ * Finds the exact-date slide or the nearest slide by date when no exact match exists.
+ *
+ * @param slides - The current filtered slide list.
+ * @param targetDate - The requested calendar date.
+ * @returns The best slide to jump to, if one exists.
+ */
+function findNearestSlideByDate(
+  slides: SlideSummary[],
+  targetDate: Date
+): SlideSummary | undefined {
+  const targetDateStr = targetDate.toISOString().split("T")[0];
+  const exactMatch = slides.find((slide) => slide.date === targetDateStr);
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const [nearestSlide] = [...slides].sort((left, right) => {
+    const leftDiff = Math.abs(new Date(left.date).getTime() - targetDate.getTime());
+    const rightDiff = Math.abs(new Date(right.date).getTime() - targetDate.getTime());
+    return leftDiff - rightDiff;
+  });
+  return nearestSlide;
+}
+
 export function SpreadsheetViewer() {
   const {
     slides,
@@ -86,6 +128,13 @@ export function SpreadsheetViewer() {
   const { theme, setTheme } = useTheme();
   const isDarkMode = theme === "dark";
 
+  const togglePanel = useCallback(
+    (panel: keyof PanelVisibility) => {
+      setPanelVisibility((value) => ({ ...value, [panel]: !value[panel] }));
+    },
+    [setPanelVisibility]
+  );
+
   // Fetch projects on mount
   useEffect(() => {
     void fetchProjects();
@@ -124,6 +173,25 @@ export function SpreadsheetViewer() {
     [selectSlide, setLastSelectedSlideId]
   );
 
+  const selectSlideAtIndex = useCallback(
+    (index: number) => {
+      const target = filteredSlides[index];
+      if (target) {
+        void selectAndRememberSlide(target.id);
+      }
+    },
+    [filteredSlides, selectAndRememberSlide]
+  );
+
+  const selectRelativeSlide = useCallback(
+    (offset: -1 | 1) => {
+      const nextIndex =
+        getSelectedSlideIndex(filteredSlides, selectedSlide?.id) + offset;
+      selectSlideAtIndex(nextIndex);
+    },
+    [filteredSlides, selectSlideAtIndex, selectedSlide?.id]
+  );
+
   // Auto-select: prefer last-selected slide, fall back to most recent
   useEffect(() => {
     if (!selectedProjectsLoaded || !lastSelectedSlideLoaded) {
@@ -157,51 +225,43 @@ export function SpreadsheetViewer() {
         return;
       }
 
-      const currentIndex = filteredSlides.findIndex(
-        (s) => s.id === selectedSlide?.id
-      );
-
       switch (e.key) {
         case "ArrowLeft":
         case "ArrowUp":
           e.preventDefault();
-          if (currentIndex > 0) {
-            void selectAndRememberSlide(filteredSlides[currentIndex - 1].id);
-          }
+          selectRelativeSlide(-1);
           break;
         case "ArrowRight":
         case "ArrowDown":
           e.preventDefault();
-          if (currentIndex < filteredSlides.length - 1) {
-            void selectAndRememberSlide(filteredSlides[currentIndex + 1].id);
-          }
+          selectRelativeSlide(1);
           break;
         case "[":
           e.preventDefault();
-          setPanelVisibility((v) => ({ ...v, navigation: !v.navigation }));
+          togglePanel("navigation");
           break;
         case "]":
           e.preventDefault();
-          setPanelVisibility((v) => ({ ...v, details: !v.details }));
+          togglePanel("details");
           break;
         case "\\":
           e.preventDefault();
-          setPanelVisibility((v) => ({ ...v, metadata: !v.metadata }));
+          togglePanel("metadata");
           break;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedSlide, filteredSlides, selectAndRememberSlide, setPanelVisibility]);
+  }, [selectRelativeSlide, togglePanel]);
 
   const toggleNavigation = useCallback(() => {
-    setPanelVisibility((v) => ({ ...v, navigation: !v.navigation }));
-  }, [setPanelVisibility]);
+    togglePanel("navigation");
+  }, [togglePanel]);
 
   const toggleDetails = useCallback(() => {
-    setPanelVisibility((v) => ({ ...v, details: !v.details }));
-  }, [setPanelVisibility]);
+    togglePanel("details");
+  }, [togglePanel]);
 
   const openDetailsToTab = useCallback((tab: string) => {
     setDetailsActiveTab(tab);
@@ -209,47 +269,22 @@ export function SpreadsheetViewer() {
   }, [setPanelVisibility]);
 
   const toggleMetadata = useCallback(() => {
-    setPanelVisibility((v) => ({ ...v, metadata: !v.metadata }));
-  }, [setPanelVisibility]);
+    togglePanel("metadata");
+  }, [togglePanel]);
 
   const goToPrevious = useCallback(() => {
-    const currentIndex = filteredSlides.findIndex(
-      (s) => s.id === selectedSlide?.id
-    );
-    if (currentIndex > 0) {
-      void selectAndRememberSlide(filteredSlides[currentIndex - 1].id);
-    }
-  }, [selectedSlide, filteredSlides, selectAndRememberSlide]);
+    selectRelativeSlide(-1);
+  }, [selectRelativeSlide]);
 
   const goToNext = useCallback(() => {
-    const currentIndex = filteredSlides.findIndex(
-      (s) => s.id === selectedSlide?.id
-    );
-    if (currentIndex < filteredSlides.length - 1) {
-      void selectAndRememberSlide(filteredSlides[currentIndex + 1].id);
-    }
-  }, [selectedSlide, filteredSlides, selectAndRememberSlide]);
+    selectRelativeSlide(1);
+  }, [selectRelativeSlide]);
 
   const goToDate = useCallback(
     (date: Date) => {
-      const dateStr = date.toISOString().split("T")[0];
-      const slideOnDate = filteredSlides.find((s) => s.date === dateStr);
-      if (slideOnDate) {
-        void selectAndRememberSlide(slideOnDate.id);
-        return;
-      }
-      // Find nearest slide
-      const sorted = [...filteredSlides].sort((a, b) => {
-        const diffA = Math.abs(
-          new Date(a.date).getTime() - date.getTime()
-        );
-        const diffB = Math.abs(
-          new Date(b.date).getTime() - date.getTime()
-        );
-        return diffA - diffB;
-      });
-      if (sorted.length > 0) {
-        void selectAndRememberSlide(sorted[0].id);
+      const target = findNearestSlideByDate(filteredSlides, date);
+      if (target) {
+        void selectAndRememberSlide(target.id);
       }
     },
     [filteredSlides, selectAndRememberSlide]
@@ -292,9 +327,7 @@ export function SpreadsheetViewer() {
     [restoreSlide, markMutation]
   );
 
-  const currentIndex = filteredSlides.findIndex(
-    (s) => s.id === selectedSlide?.id
-  );
+  const currentIndex = getSelectedSlideIndex(filteredSlides, selectedSlide?.id);
   const hasPrevious = currentIndex > 0;
   const hasNext = currentIndex < filteredSlides.length - 1;
 

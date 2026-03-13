@@ -4,7 +4,7 @@ Personal Context is a local-first engineering notebook system that stores work a
 
 ## Status
 
-Roadmap Phase 9 (Web UI integration) is in progress. The web workspace now includes real API routes, the Slide Browser UI, sync polling, unit coverage gates, Playwright browser coverage, and local dev mode (`pc serve`). Remaining Phase 9 tasks: contract tests (Go/Node API parity), settings overlay, and Amplify deployment.
+Phase 9 (Web UI integration) is complete. Phase 10 (Deployment, CI/CD, and Integration Testing) is next — see [Roadmap](docs/agent-layer/ROADMAP.md).
 
 ## Architecture
 
@@ -76,6 +76,8 @@ pnpm exec playwright install
 pnpm test:e2e:smoke
 pnpm test:e2e:slide-browser
 pnpm test:e2e:cli-slide
+pnpm test:e2e:markdown
+pnpm test:e2e:visual
 pnpm test:e2e:cli-demo
 
 # Or from the repo root (recommended):
@@ -141,7 +143,7 @@ pc setup --remove-cloud
 
 ## Web UI Overview
 
-Phase 9 currently provides:
+The web UI provides:
 
 - App Router + TypeScript
 - Real slide/project/sync/file API routes backed by Neon + S3 helpers
@@ -214,6 +216,8 @@ pnpm build
 pnpm exec playwright install
 pnpm test:e2e:smoke
 pnpm test:e2e:slide-browser
+pnpm test:e2e:markdown
+pnpm test:e2e:visual
 pnpm test:e2e:cli-slide
 pnpm test:e2e:cli-demo
 ```

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -256,6 +257,60 @@ func isValidGitHash(hash string) bool {
 		}
 	}
 	return true
+}
+
+type listSlidesQuery struct {
+	limit  int
+	cursor *cursorPayload
+	filter repository.ListSlidesFilter
+}
+
+// parseListSlidesQuery normalizes the list-slides query parameters into one struct.
+func parseListSlidesQuery(query url.Values) (listSlidesQuery, string) {
+	parsed := listSlidesQuery{
+		limit:  20,
+		filter: repository.ListSlidesFilter{},
+	}
+
+	if raw := query.Get("limit"); raw != "" {
+		var value int
+		if _, err := fmt.Sscan(raw, &value); err == nil {
+			if value < 1 {
+				value = 1
+			}
+			if value > 100 {
+				value = 100
+			}
+			parsed.limit = value
+		}
+	}
+
+	if raw := query.Get("cursor"); raw != "" {
+		cursor, err := decodeCursor(raw)
+		if err != nil {
+			return listSlidesQuery{}, "Invalid cursor format"
+		}
+		parsed.cursor = cursor
+	}
+
+	if project := query.Get("project"); project != "" {
+		parsed.filter.ProjectID = &project
+	}
+
+	if query.Get("deleted") == "true" {
+		parsed.filter.OnlyDeleted = true
+		parsed.filter.IncludeDeleted = true
+	}
+
+	if updatedAfter := query.Get("updated_after"); updatedAfter != "" {
+		timestamp, err := time.Parse(time.RFC3339Nano, updatedAfter)
+		if err != nil {
+			return listSlidesQuery{}, "Invalid updated_after timestamp"
+		}
+		parsed.filter.UpdatedAfter = &timestamp
+	}
+
+	return parsed, ""
 }
 
 type slideSummary struct {
@@ -635,79 +690,28 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListSlides(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	query := r.URL.Query()
-
-	// Parse limit
-	limit := 20
-	if raw := query.Get("limit"); raw != "" {
-		var v int
-		if _, err := fmt.Sscan(raw, &v); err == nil {
-			if v < 1 {
-				v = 1
-			}
-			if v > 100 {
-				v = 100
-			}
-			limit = v
-		}
-	}
-
-	// Parse cursor
-	var cursor *cursorPayload
-	if raw := query.Get("cursor"); raw != "" {
-		c, err := decodeCursor(raw)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "Invalid cursor format", "BAD_REQUEST")
-			return
-		}
-		cursor = c
+	parsedQuery, queryErr := parseListSlidesQuery(r.URL.Query())
+	if queryErr != "" {
+		writeError(w, http.StatusBadRequest, queryErr, "BAD_REQUEST")
+		return
 	}
 
 	// Fetch the full matching set, then sort and paginate in API order.
 	// The repository contract sorts ascending and applies LIMIT before returning,
 	// which would otherwise truncate the wrong end of the result set.
-	filter := repository.ListSlidesFilter{}
-	if project := query.Get("project"); project != "" {
-		filter.ProjectID = &project
-	}
-
-	// Parse deleted filter
-	if query.Get("deleted") == "true" {
-		filter.OnlyDeleted = true
-	}
-
-	// Parse updated_after
-	if ua := query.Get("updated_after"); ua != "" {
-		t, err := time.Parse(time.RFC3339Nano, ua)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "Invalid updated_after timestamp", "BAD_REQUEST")
-			return
-		}
-		filter.UpdatedAfter = &t
-	}
-
-	// We need IncludeDeleted if OnlyDeleted is set (the filter logic already handles this)
-	if filter.OnlyDeleted {
-		filter.IncludeDeleted = true
-	}
-
-	slides, err := s.repo.ListSlides(ctx, filter)
+	slides, err := s.repo.ListSlides(ctx, parsedQuery.filter)
 	if err != nil {
 		mapRepoError(w, err, "slides")
 		return
 	}
 
-	// Sort for the API: date DESC, day_order ASC, id ASC
-	// The repo sorts by (date, day_order, id) ASC. We need DESC date.
-	// Reverse the slice to get date DESC first, but that's not quite right since
-	// within the same date, day_order should be ASC. Let me sort properly.
 	sortSlidesForAPI(slides)
 
 	// Apply cursor-based pagination manually since repo doesn't support cursors
-	if cursor != nil {
+	if parsedQuery.cursor != nil {
 		startIdx := -1
 		for i, slide := range slides {
-			if isAfterCursor(slide, cursor) {
+			if isAfterCursor(slide, parsedQuery.cursor) {
 				startIdx = i
 				break
 			}
@@ -720,15 +724,15 @@ func (s *Server) handleListSlides(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Truncate to limit+1 for pagination after applying the final API sort.
-	if len(slides) > limit+1 {
-		slides = slides[:limit+1]
+	if len(slides) > parsedQuery.limit+1 {
+		slides = slides[:parsedQuery.limit+1]
 	}
 
 	items := make([]slideSummary, 0, len(slides))
-	hasNextPage := len(slides) > limit
+	hasNextPage := len(slides) > parsedQuery.limit
 	resultSlides := slides
 	if hasNextPage {
-		resultSlides = slides[:limit]
+		resultSlides = slides[:parsedQuery.limit]
 	}
 
 	for _, slide := range resultSlides {
@@ -756,15 +760,7 @@ func (s *Server) handleListSlides(w http.ResponseWriter, r *http.Request) {
 
 // sortSlidesForAPI sorts slides in date DESC, day_order ASC, id ASC order.
 func sortSlidesForAPI(slides []repository.Slide) {
-	for i := 1; i < len(slides); i++ {
-		for j := i; j > 0; j-- {
-			if compareSlidesForAPI(slides[j], slides[j-1]) < 0 {
-				slides[j], slides[j-1] = slides[j-1], slides[j]
-			} else {
-				break
-			}
-		}
-	}
+	slices.SortFunc(slides, compareSlidesForAPI)
 }
 
 func compareSlidesForAPI(a, b repository.Slide) int {
@@ -809,6 +805,33 @@ func isAfterCursor(slide repository.Slide, cursor *cursorPayload) bool {
 		return true
 	}
 	return false
+}
+
+// compareSlidesByDayOrder sorts siblings within a single date by day_order then ID.
+func compareSlidesByDayOrder(left, right repository.Slide) int {
+	if left.DayOrder < right.DayOrder {
+		return -1
+	}
+	if left.DayOrder > right.DayOrder {
+		return 1
+	}
+	if left.ID < right.ID {
+		return -1
+	}
+	if left.ID > right.ID {
+		return 1
+	}
+	return 0
+}
+
+// findSlideIndexByID returns the index of a slide with the given ID or -1.
+func findSlideIndexByID(slides []repository.Slide, slideID string) int {
+	for index, slide := range slides {
+		if slide.ID == slideID {
+			return index
+		}
+	}
+	return -1
 }
 
 func (s *Server) handleGetSlide(w http.ResponseWriter, r *http.Request) {
@@ -1078,17 +1101,7 @@ func (s *Server) handleReorderSlide(w http.ResponseWriter, r *http.Request) {
 			dateSiblings = append(dateSiblings, sl)
 		}
 	}
-	// Sort by day_order ASC, id ASC
-	for i := 1; i < len(dateSiblings); i++ {
-		for j := i; j > 0; j-- {
-			if dateSiblings[j].DayOrder < dateSiblings[j-1].DayOrder ||
-				(dateSiblings[j].DayOrder == dateSiblings[j-1].DayOrder && dateSiblings[j].ID < dateSiblings[j-1].ID) {
-				dateSiblings[j], dateSiblings[j-1] = dateSiblings[j-1], dateSiblings[j]
-			} else {
-				break
-			}
-		}
-	}
+	slices.SortFunc(dateSiblings, compareSlidesByDayOrder)
 
 	newOrder, err := computeFractionalIndex(dateSiblings, input.Kind, input.ReferenceID)
 	if err != nil {
@@ -1145,13 +1158,7 @@ func computeFractionalIndex(siblings []repository.Slide, kind string, refID *str
 		}
 		return generateKeyBetween(siblings[len(siblings)-1].DayOrder, ""), nil
 	case "before":
-		refIdx := -1
-		for i, s := range siblings {
-			if s.ID == *refID {
-				refIdx = i
-				break
-			}
-		}
+		refIdx := findSlideIndexByID(siblings, *refID)
 		if refIdx == -1 {
 			return "", fmt.Errorf("reference slide not found: %s", *refID)
 		}
@@ -1161,13 +1168,7 @@ func computeFractionalIndex(siblings []repository.Slide, kind string, refID *str
 		}
 		return generateKeyBetween(prevOrder, siblings[refIdx].DayOrder), nil
 	case "after":
-		refIdx := -1
-		for i, s := range siblings {
-			if s.ID == *refID {
-				refIdx = i
-				break
-			}
-		}
+		refIdx := findSlideIndexByID(siblings, *refID)
 		if refIdx == -1 {
 			return "", fmt.Errorf("reference slide not found: %s", *refID)
 		}
@@ -1285,33 +1286,10 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-
-	// Validate that the file record exists in the DB
-	var fileExists bool
-	if fileType == "figures" {
-		figures, err := s.repo.ListSlideFiguresBySlideID(ctx, slideID)
-		if err != nil {
-			mapRepoError(w, err, "slide files")
-			return
-		}
-		for _, f := range figures {
-			if f.Filename == filename {
-				fileExists = true
-				break
-			}
-		}
-	} else {
-		dataFiles, err := s.repo.ListSlideDataFilesBySlideID(ctx, slideID)
-		if err != nil {
-			mapRepoError(w, err, "slide files")
-			return
-		}
-		for _, f := range dataFiles {
-			if f.Filename == filename {
-				fileExists = true
-				break
-			}
-		}
+	fileExists, err := s.slideFileExists(ctx, slideID, fileType, filename)
+	if err != nil {
+		mapRepoError(w, err, "slide files")
+		return
 	}
 
 	if !fileExists {
@@ -1338,6 +1316,41 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 		"url":        fileURL,
 		"expires_at": "2099-01-01T00:00:00Z",
 	})
+}
+
+// slideFileExists reports whether the requested slide file is present in repository metadata.
+func (s *Server) slideFileExists(
+	ctx context.Context,
+	slideID string,
+	fileType string,
+	filename string,
+) (bool, error) {
+	switch fileType {
+	case "figures":
+		figures, err := s.repo.ListSlideFiguresBySlideID(ctx, slideID)
+		if err != nil {
+			return false, err
+		}
+		for _, figure := range figures {
+			if figure.Filename == filename {
+				return true, nil
+			}
+		}
+		return false, nil
+	case "data":
+		dataFiles, err := s.repo.ListSlideDataFilesBySlideID(ctx, slideID)
+		if err != nil {
+			return false, err
+		}
+		for _, dataFile := range dataFiles {
+			if dataFile.Filename == filename {
+				return true, nil
+			}
+		}
+		return false, nil
+	default:
+		return false, fmt.Errorf("unknown file type %q", fileType)
+	}
 }
 
 func (s *Server) handleServeFile(w http.ResponseWriter, r *http.Request) {

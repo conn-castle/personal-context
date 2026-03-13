@@ -26,7 +26,7 @@ Do not duplicate information that belongs in other memory files:
 
 <!-- ENTRIES START -->
 
-> **Status:** Phase 9 (web UI integration) is in progress. `pc serve` local dev mode is implemented and tested. See ROADMAP.md for remaining Phase 9 tasks.
+> **Status:** Phase 9 (web UI integration) is complete. Phase 10 (Deployment, CI/CD, and Integration Testing) is next. See ROADMAP.md.
 
 ## Project Overview
 
@@ -388,6 +388,9 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `GET /api/files/[slide_id]/data/[filename]` — presigned download URL
 - `GET /api/files/[slide_id]/figures/[filename]` — presigned figure URL
 - `GET /api/projects` — distinct project_ids
+- `GET /api/info` — application mode and version
+- `GET /api/stats` — total slides, total projects, trashed slide count
+- `DELETE /api/slides/trash` — bulk purge all soft-deleted slides
 - No slide creation endpoint (CLI only)
 
 ### API payload shapes
@@ -559,6 +562,37 @@ type SlideDetail = {
       projects: string[];
     }
     ```
+
+- `GET /api/info`
+  - Response:
+    ```ts
+    {
+      mode: "local" | "cloud";
+      version: string;
+    }
+    ```
+
+- `GET /api/stats`
+  - Response:
+    ```ts
+    {
+      total_slides: number;
+      total_projects: number;
+      trashed_slides: number;
+    }
+    ```
+  - `500` on database query failure.
+
+- `DELETE /api/slides/trash`
+  - Bulk hard-deletes all soft-deleted slides. Best-effort cleanup of associated figures/data files.
+  - Response:
+    ```ts
+    {
+      purged_count: number;
+      sync_version: number;
+    }
+    ```
+  - `500` on database operation failure.
 
 ## Soft Deletes
 

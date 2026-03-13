@@ -1,5 +1,7 @@
 # `pc serve` Implementation Plan
 
+> **Phase 9 completed (2026-03).** This plan is retained as architectural rationale. For current state, see CONTEXT.md.
+
 ## Overview
 
 Add a `pc serve` command to the Go CLI that starts an HTTP server implementing the same REST API as the Next.js API routes, backed by local SQLite + filesystem. This enables `make dev` without cloud credentials (Neon/S3).

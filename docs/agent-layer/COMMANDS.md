@@ -255,6 +255,12 @@ make seed
 Run from: repo root
 Notes: Creates 6 tutorial slides under `personal-context/tutorial` project. Automatically run by `make dev-local`.
 
+- Run all web checks (lint + typecheck + coverage + build + e2e)
+```bash
+make web-all
+```
+Run from: repo root
+
 ## Repository root
 
 - Check schema equivalence between Postgres and SQLite
