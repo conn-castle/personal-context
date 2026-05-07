@@ -32,6 +32,11 @@ describe("local-proxy", () => {
       process.env.LOCAL_BACKEND_URL = "http://127.0.0.1:9876";
       expect(isLocalMode()).toBe(true);
     });
+
+    it("returns false when LOCAL_BACKEND_URL uses non-loopback host", () => {
+      process.env.LOCAL_BACKEND_URL = "https://example.com";
+      expect(isLocalMode()).toBe(false);
+    });
   });
 
   describe("proxyToLocal", () => {
@@ -65,6 +70,12 @@ describe("local-proxy", () => {
       expect(response.status).toBe(200);
       const body = (await response.json()) as Record<string, unknown>;
       expect(body.items).toEqual([]);
+    });
+
+    it("throws when LOCAL_BACKEND_URL is non-loopback", async () => {
+      process.env.LOCAL_BACKEND_URL = "https://example.com";
+      const request = new Request("http://localhost:3000/api/slides");
+      await expect(proxyToLocal(request)).rejects.toThrow(/loopback host/);
     });
 
     it("proxies a PATCH request with body", async () => {
@@ -114,6 +125,8 @@ describe("local-proxy", () => {
           "x-custom": "kept",
           connection: "keep-alive",
           "transfer-encoding": "chunked",
+          authorization: "Bearer abc",
+          cookie: "session=abc",
         },
         body: "{}",
       });
@@ -125,6 +138,8 @@ describe("local-proxy", () => {
       expect(headers.get("x-custom")).toBe("kept");
       expect(headers.has("connection")).toBe(false);
       expect(headers.has("transfer-encoding")).toBe(false);
+      expect(headers.has("authorization")).toBe(false);
+      expect(headers.has("cookie")).toBe(false);
     });
 
     it("forwards response headers and strips hop-by-hop headers", async () => {
@@ -145,6 +160,26 @@ describe("local-proxy", () => {
 
       expect(response.headers.get("content-type")).toBe("application/json");
       expect(response.headers.get("x-request-id")).toBe("abc-123");
+    });
+
+    it("does not forward set-cookie from proxied responses", async () => {
+      process.env.LOCAL_BACKEND_URL = "http://127.0.0.1:9876";
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response("{}", {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "set-cookie": "session=abc; Path=/; HttpOnly",
+          },
+        }),
+      );
+      globalThis.fetch = mockFetch;
+
+      const request = new Request("http://localhost:3000/api/slides");
+      const response = await proxyToLocal(request);
+
+      expect(response.headers.get("content-type")).toBe("application/json");
+      expect(response.headers.has("set-cookie")).toBe(false);
     });
 
     it("preserves error status codes from Go server", async () => {

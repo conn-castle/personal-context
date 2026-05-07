@@ -7,9 +7,22 @@ vi.mock("@/lib/db", () => ({
 }));
 
 const mockGetPresignedUrl = vi.fn();
+const { mockIsLocalMode, mockProxyToLocal } = vi.hoisted(() => ({
+  mockIsLocalMode: vi.fn(),
+  mockProxyToLocal: vi.fn(),
+}));
 vi.mock("@/lib/s3", () => ({
   getPresignedUrl: (...args: unknown[]) => mockGetPresignedUrl(...args),
   getS3Version: vi.fn(),
+}));
+
+vi.mock("@/lib/auth-helpers", () => ({
+  requireUser: vi.fn().mockResolvedValue({ id: "test-user-id", email: "test@test.com" }),
+}));
+
+vi.mock("@/lib/local-proxy", () => ({
+  isLocalMode: mockIsLocalMode,
+  proxyToLocal: mockProxyToLocal,
 }));
 
 import { GET } from "@/app/api/files/[slideId]/[...path]/route";
@@ -26,9 +39,27 @@ describe("GET /api/files/[slideId]/[...path]", () => {
   beforeEach(() => {
     mockSql.mockReset();
     mockGetPresignedUrl.mockReset();
+    mockIsLocalMode.mockReset();
+    mockIsLocalMode.mockReturnValue(false);
+    mockProxyToLocal.mockReset();
   });
 
   const slideId = "20250304-a3f2b7e1";
+
+  it("proxies to the local backend in local mode", async () => {
+    const proxied = new Response("proxied", { status: 202 });
+    mockIsLocalMode.mockReturnValueOnce(true);
+    mockProxyToLocal.mockResolvedValueOnce(proxied);
+
+    const req = new NextRequest(
+      `http://localhost/api/files/${slideId}/figures/chart.png`
+    );
+    const res = await GET(req, makeContext(slideId, ["figures", "chart.png"]));
+
+    expect(res).toBe(proxied);
+    expect(mockProxyToLocal).toHaveBeenCalledWith(req);
+    expect(mockSql).not.toHaveBeenCalled();
+  });
 
   it("returns presigned URL for a figure file", async () => {
     mockSql.mockResolvedValueOnce([
@@ -49,7 +80,8 @@ describe("GET /api/files/[slideId]/[...path]", () => {
     expect(body.url).toBe("https://s3.example.com/signed-url");
     expect(body.expires_at).toBe("2025-03-04T13:00:00.000Z");
     expect(mockGetPresignedUrl).toHaveBeenCalledWith(
-      `figures/${slideId}/chart-v2.png`
+      `figures/${slideId}/chart-v2.png`,
+      "test-user-id"
     );
   });
 
@@ -71,7 +103,8 @@ describe("GET /api/files/[slideId]/[...path]", () => {
     const body = await res.json();
     expect(body.url).toBe("https://s3.example.com/data-url");
     expect(mockGetPresignedUrl).toHaveBeenCalledWith(
-      `data/${slideId}/results-2025.csv`
+      `data/${slideId}/results-2025.csv`,
+      "test-user-id"
     );
   });
 

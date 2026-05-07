@@ -28,6 +28,10 @@ vi.mock("fractional-indexing", () => ({
   ),
 }));
 
+vi.mock("@/lib/auth-helpers", () => ({
+  requireUser: vi.fn().mockResolvedValue({ id: "test-user-id", email: "test@test.com" }),
+}));
+
 import { PATCH } from "@/app/api/slides/[id]/order/route";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -530,7 +534,7 @@ describe("PATCH /api/slides/[id]/order", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.sync_version).toBe(0);
-    expect(mockBumpS3Version).toHaveBeenCalledWith(0, expect.any(String));
+    expect(mockBumpS3Version).toHaveBeenCalledWith(0, expect.any(String), "test-user-id");
   });
 
   it("returns 500 on database error", async () => {

@@ -110,6 +110,28 @@ func runSetupRemoveCloud(stdout io.Writer, homeDir string, store pcconfig.Store)
 	return nil
 }
 
+func runSetupInitCloudSchema(ctx context.Context, stdout io.Writer, neonURL string) error {
+	if err := pcconfig.ValidateNeonURL(neonURL); err != nil {
+		return fmt.Errorf("invalid neon URL: %w", err)
+	}
+	if err := validateNeonConnectivityFn(ctx, neonURL); err != nil {
+		return fmt.Errorf("neon connectivity check failed: %w", err)
+	}
+
+	pool, err := newPGXPoolFn(ctx, neonURL)
+	if err != nil {
+		return fmt.Errorf("connect to postgres for schema: %w", err)
+	}
+	defer closePGXPool(pool)
+
+	if err := applyPostgresSchemaFn(ctx, pool); err != nil {
+		return fmt.Errorf("apply postgres schema: %w", err)
+	}
+
+	_, _ = fmt.Fprintln(stdout, "Cloud Postgres schema initialized successfully.")
+	return nil
+}
+
 // runSetupCloud validates cloud credentials, applies the Postgres schema, and writes
 // cloud configuration. When interactive is true, a merge preview is shown and
 // confirmation is required before writing.
@@ -125,6 +147,7 @@ func runSetupCloud(
 	neonURL string, s3Bucket string, s3Region string,
 	awsKey string, awsSecret string,
 	s3Endpoint string, s3ForcePathStyle bool,
+	apiKey string,
 	localRepo repository.Repository,
 	interactive bool,
 ) error {
@@ -148,6 +171,10 @@ func runSetupCloud(
 	if strings.TrimSpace(awsSecret) == "" {
 		return fmt.Errorf("AWS secret key is required")
 	}
+	trimmedAPIKey := strings.TrimSpace(apiKey)
+	if trimmedAPIKey == "" {
+		return fmt.Errorf("API key is required")
+	}
 
 	// 2. Validate Neon connectivity.
 	if err := validateNeonConnectivityFn(ctx, neonURL); err != nil {
@@ -170,9 +197,18 @@ func runSetupCloud(
 		return fmt.Errorf("apply postgres schema: %w", err)
 	}
 
-	// 5. Merge preview (interactive only).
+	// 5. Validate API key and resolve user scope for cloud operations.
+	validatedUserID, err := resolveUserIDFn(ctx, pool, trimmedAPIKey)
+	if err != nil {
+		return fmt.Errorf("validate API key: %w", err)
+	}
+	if strings.TrimSpace(validatedUserID) == "" {
+		return fmt.Errorf("validate API key: resolved user ID is empty")
+	}
+
+	// 6. Merge preview (interactive only).
 	if interactive {
-		cloudRepo, err := newPostgresRepoFn(pool)
+		cloudRepo, err := newPostgresRepoFn(pool, validatedUserID)
 		if err != nil {
 			return fmt.Errorf("create temporary postgres repository: %w", err)
 		}
@@ -208,7 +244,7 @@ func runSetupCloud(
 		return fmt.Errorf("read config: %w", readErr)
 	}
 
-	// 6. Write AWS credentials profile (snapshot existing file for rollback).
+	// 7. Write AWS credentials profile (snapshot existing file for rollback).
 	userHome, err := resolveUserHomeDir()
 	if err != nil {
 		return err
@@ -221,7 +257,7 @@ func runSetupCloud(
 		return fmt.Errorf("write AWS credentials profile: %w", err)
 	}
 
-	// 7. Write cloud config (preserve ActiveProject from existing config).
+	// 8. Write cloud config (preserve ActiveProject from existing config).
 	cfg := pcconfig.Config{
 		NeonURL:          neonURL,
 		S3Bucket:         s3Bucket,
@@ -230,6 +266,7 @@ func runSetupCloud(
 		ActiveProject:    existing.ActiveProject,
 		S3Endpoint:       s3Endpoint,
 		S3ForcePathStyle: s3ForcePathStyle,
+		APIKey:           trimmedAPIKey,
 	}
 	if err := store.Write(cfg); err != nil {
 		// Rollback AWS credentials to previous state on config write failure.

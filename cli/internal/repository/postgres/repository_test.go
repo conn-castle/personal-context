@@ -95,7 +95,17 @@ func newPostgresRepo(t *testing.T) repository.Repository {
 		t.Fatalf("ApplySchema() error = %v", err)
 	}
 
-	repo, err := New(pool)
+	// Create a test user required by the user_id FK on slides.
+	const testUserID = "test-user-contract"
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)`,
+		testUserID, schemaName+"@test.com", "hash-placeholder",
+	); err != nil {
+		pool.Close()
+		t.Fatalf("create test user: %v", err)
+	}
+
+	repo, err := New(pool, testUserID)
 	if err != nil {
 		pool.Close()
 		t.Fatalf("New() error = %v", err)
@@ -137,7 +147,17 @@ func newConcreteRepo(t *testing.T) (*Repository, *pgxpool.Pool) {
 		t.Fatalf("ApplySchema() error = %v", err)
 	}
 
-	repo, err := New(pool)
+	// Create a test user required by the user_id FK on slides.
+	const testUserID = "test-user-concrete"
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)`,
+		testUserID, schemaName+"@test.com", "hash-placeholder",
+	); err != nil {
+		pool.Close()
+		t.Fatalf("create test user: %v", err)
+	}
+
+	repo, err := New(pool, testUserID)
 	if err != nil {
 		pool.Close()
 		t.Fatalf("New() error = %v", err)
@@ -158,6 +178,20 @@ func mustCreateSlide(t *testing.T, repo repository.Repository, input repository.
 		t.Fatalf("CreateSlide() error = %v", err)
 	}
 	return slide
+}
+
+func mustCreateUser(t *testing.T, pool *pgxpool.Pool, userID string, email string) {
+	t.Helper()
+
+	if _, err := pool.Exec(
+		context.Background(),
+		`INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)`,
+		userID,
+		email,
+		"hash-placeholder",
+	); err != nil {
+		t.Fatalf("create test user %q: %v", userID, err)
+	}
 }
 
 func TestPostgresRepositoryContractSuite(t *testing.T) {
@@ -255,7 +289,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 		S3Key:    "figures/20260305-missing00/x.png",
 	})
 	if !errors.Is(err, repository.ErrForeignKeyViolation) {
-		t.Fatalf("expected ErrForeignKeyViolation for orphan figure, got %v", err)
+		t.Fatalf("expected ErrForeignKeyViolation for orphan figure create, got %v", err)
 	}
 
 	figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
@@ -283,6 +317,17 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 	if !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument for invalid data file create, got %v", err)
 	}
+	_, err = repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
+		SlideID:  "20260305-missing00",
+		Filename: "missing.csv",
+		S3Key:    "data/20260305-missing00/missing.csv",
+		Size:     1,
+		Hash:     strings.Repeat("a", 64),
+	})
+	if !errors.Is(err, repository.ErrForeignKeyViolation) {
+		t.Fatalf("expected ErrForeignKeyViolation for orphan data-file create, got %v", err)
+	}
+
 	_, err = repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
 		SlideID:  slide.ID,
 		Filename: "x.csv",
@@ -321,6 +366,175 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 	}
 	if err := repo.DeleteSlideDataFile(ctx, 999999); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing data-file delete, got %v", err)
+	}
+}
+
+func TestAssetQueriesAreUserScoped(t *testing.T) {
+	repoA, pool := newConcreteRepo(t)
+	ctx := context.Background()
+
+	const userB = "test-user-secondary"
+	mustCreateUser(t, pool, userB, "secondary@test.local")
+	repoB, err := New(pool, userB)
+	if err != nil {
+		t.Fatalf("New() for secondary user error = %v", err)
+	}
+
+	slideA := mustCreateSlide(t, repoA, repository.CreateSlideInput{
+		ID:          "20260305-abcdd001",
+		Date:        "2026-03-05",
+		DayOrder:    "a",
+		HTMLContent: "<h1>user-a</h1>",
+	})
+	slideB := mustCreateSlide(t, repoB, repository.CreateSlideInput{
+		ID:          "20260305-abcdd002",
+		Date:        "2026-03-05",
+		DayOrder:    "b",
+		HTMLContent: "<h1>user-b</h1>",
+	})
+
+	figureA, err := repoA.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
+		SlideID:  slideA.ID,
+		Filename: "a.png",
+		S3Key:    "figures/20260305-abcdd001/a.png",
+	})
+	if err != nil {
+		t.Fatalf("CreateSlideFigure() for user A error = %v", err)
+	}
+	if _, err := repoB.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
+		SlideID:  slideA.ID,
+		Filename: "cross.png",
+		S3Key:    "figures/20260305-abcdd001/cross.png",
+	}); !errors.Is(err, repository.ErrForeignKeyViolation) {
+		t.Fatalf("expected ErrForeignKeyViolation for cross-user figure create, got %v", err)
+	}
+	if _, err := repoB.GetSlideFigureByID(ctx, figureA.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-user figure get, got %v", err)
+	}
+	if _, err := repoB.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{
+		ID:       figureA.ID,
+		Filename: "steal.png",
+	}); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-user figure update, got %v", err)
+	}
+	figuresForAFromB, err := repoB.ListSlideFiguresBySlideID(ctx, slideA.ID)
+	if err != nil {
+		t.Fatalf("ListSlideFiguresBySlideID() for cross-user slide error = %v", err)
+	}
+	if len(figuresForAFromB) != 0 {
+		t.Fatalf("expected no cross-user figures, got %d", len(figuresForAFromB))
+	}
+	if err := repoB.DeleteSlideFigure(ctx, figureA.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-user figure delete, got %v", err)
+	}
+	if _, err := repoB.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
+		SlideID:  slideB.ID,
+		Filename: "b.png",
+		S3Key:    "figures/20260305-abcdd002/b.png",
+	}); err != nil {
+		t.Fatalf("expected same-user figure create to succeed, got %v", err)
+	}
+
+	dataFileA, err := repoA.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
+		SlideID:  slideA.ID,
+		Filename: "a.csv",
+		S3Key:    "data/20260305-abcdd001/a.csv",
+		Size:     16,
+		Hash:     strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatalf("CreateSlideDataFile() for user A error = %v", err)
+	}
+	if _, err := repoB.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
+		SlideID:  slideA.ID,
+		Filename: "cross.csv",
+		S3Key:    "data/20260305-abcdd001/cross.csv",
+		Size:     1,
+		Hash:     strings.Repeat("b", 64),
+	}); !errors.Is(err, repository.ErrForeignKeyViolation) {
+		t.Fatalf("expected ErrForeignKeyViolation for cross-user data-file create, got %v", err)
+	}
+	if _, err := repoB.GetSlideDataFileByID(ctx, dataFileA.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-user data-file get, got %v", err)
+	}
+	if _, err := repoB.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+		ID:       dataFileA.ID,
+		Filename: "steal.csv",
+	}); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-user data-file update, got %v", err)
+	}
+	filesForAFromB, err := repoB.ListSlideDataFilesBySlideID(ctx, slideA.ID)
+	if err != nil {
+		t.Fatalf("ListSlideDataFilesBySlideID() for cross-user slide error = %v", err)
+	}
+	if len(filesForAFromB) != 0 {
+		t.Fatalf("expected no cross-user data files, got %d", len(filesForAFromB))
+	}
+	if err := repoB.DeleteSlideDataFile(ctx, dataFileA.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-user data-file delete, got %v", err)
+	}
+	if _, err := repoB.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
+		SlideID:  slideB.ID,
+		Filename: "b.csv",
+		S3Key:    "data/20260305-abcdd002/b.csv",
+		Size:     8,
+		Hash:     strings.Repeat("c", 64),
+	}); err != nil {
+		t.Fatalf("expected same-user data-file create to succeed, got %v", err)
+	}
+}
+
+func TestApplySchemaRejectsLegacyPreAuthCloudSchema(t *testing.T) {
+	ctx := context.Background()
+	schemaCounter++
+	schemaName := fmt.Sprintf("legacy_%d_%d", time.Now().UnixNano(), schemaCounter)
+
+	adminPool, err := pgxpool.New(ctx, sharedContainer.connStr)
+	if err != nil {
+		t.Fatalf("pgxpool.New() error = %v", err)
+	}
+	if _, err := adminPool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA %s", schemaName)); err != nil {
+		adminPool.Close()
+		t.Fatalf("CREATE SCHEMA error = %v", err)
+	}
+	adminPool.Close()
+
+	connStr := sharedContainer.connStr + fmt.Sprintf("&search_path=%s", schemaName)
+	pool, err := pgxpool.New(ctx, connStr)
+	if err != nil {
+		t.Fatalf("pgxpool.New(search_path) error = %v", err)
+	}
+	defer pool.Close()
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE slides (
+			id TEXT PRIMARY KEY,
+			date DATE NOT NULL,
+			day_order TEXT NOT NULL DEFAULT 'n',
+			html_content TEXT NOT NULL,
+			notes TEXT,
+			project_id TEXT,
+			git_remote_url TEXT,
+			git_hash TEXT,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			deleted_at TIMESTAMPTZ
+		);
+		CREATE TABLE sync_version (
+			id INTEGER PRIMARY KEY,
+			version BIGINT NOT NULL DEFAULT 0,
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		);
+	`); err != nil {
+		t.Fatalf("create legacy schema fixtures error = %v", err)
+	}
+
+	err = ApplySchema(ctx, pool)
+	if err == nil {
+		t.Fatal("expected ApplySchema to reject legacy pre-auth schema")
+	}
+	if !strings.Contains(err.Error(), "legacy pre-auth cloud schema detected") {
+		t.Fatalf("expected explicit legacy schema guard error, got %v", err)
 	}
 }
 

@@ -46,6 +46,10 @@ vi.mock("@/lib/local-proxy", () => ({
   proxyToLocal: vi.fn(),
 }));
 
+vi.mock("@/lib/auth-helpers", () => ({
+  requireUser: vi.fn().mockResolvedValue({ id: "test-user-id", email: "test@test.com" }),
+}));
+
 // ---------------------------------------------------------------------------
 // Route handler imports (after mocks are established)
 // ---------------------------------------------------------------------------

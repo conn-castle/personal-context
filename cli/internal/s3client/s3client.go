@@ -19,21 +19,28 @@ const versionKey = "_version"
 
 // Client wraps the AWS S3 SDK for figure and data file operations.
 type Client struct {
-	s3     *s3.Client
-	bucket string
+	s3        *s3.Client
+	bucket    string
+	keyPrefix string // prepended to every S3 key (e.g. "users/{userId}/")
 }
 
-// New creates an S3 client for the given bucket.
-// Args: s3Client is an initialized AWS S3 client; bucket is the S3 bucket name.
+// New creates an S3 client for the given bucket with an optional key prefix.
+// Args: s3Client is an initialized AWS S3 client; bucket is the S3 bucket name;
+// keyPrefix is prepended to every key (use "" for no prefix).
 // Returns: a configured client or an error when arguments are invalid.
-func New(s3Client *s3.Client, bucket string) (*Client, error) {
+func New(s3Client *s3.Client, bucket string, keyPrefix string) (*Client, error) {
 	if s3Client == nil {
 		return nil, fmt.Errorf("s3 client is required")
 	}
 	if strings.TrimSpace(bucket) == "" {
 		return nil, fmt.Errorf("bucket name is required")
 	}
-	return &Client{s3: s3Client, bucket: bucket}, nil
+	return &Client{s3: s3Client, bucket: bucket, keyPrefix: keyPrefix}, nil
+}
+
+// prefixedKey returns the full S3 key with the client's prefix prepended.
+func (c *Client) prefixedKey(key string) string {
+	return c.keyPrefix + key
 }
 
 // Upload writes an object to S3.
@@ -47,9 +54,10 @@ func (c *Client) Upload(ctx context.Context, key string, body io.Reader) error {
 		return fmt.Errorf("body is required")
 	}
 
+	fullKey := c.prefixedKey(key)
 	_, err := c.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(c.bucket),
-		Key:    aws.String(key),
+		Key:    aws.String(fullKey),
 		Body:   body,
 	})
 	if err != nil {
@@ -66,9 +74,10 @@ func (c *Client) Download(ctx context.Context, key string) (io.ReadCloser, error
 		return nil, fmt.Errorf("key is required")
 	}
 
+	fullKey := c.prefixedKey(key)
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
-		Key:    aws.String(key),
+		Key:    aws.String(fullKey),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", key, mapS3Error(err))
@@ -84,9 +93,10 @@ func (c *Client) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("key is required")
 	}
 
+	fullKey := c.prefixedKey(key)
 	_, err := c.s3.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(c.bucket),
-		Key:    aws.String(key),
+		Key:    aws.String(fullKey),
 	})
 	if err != nil {
 		return fmt.Errorf("delete %s: %w", key, mapS3Error(err))
@@ -102,9 +112,10 @@ func (c *Client) Exists(ctx context.Context, key string) (bool, error) {
 		return false, fmt.Errorf("key is required")
 	}
 
+	fullKey := c.prefixedKey(key)
 	_, err := c.s3.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(c.bucket),
-		Key:    aws.String(key),
+		Key:    aws.String(fullKey),
 	})
 	if err != nil {
 		if isNotFoundError(err) {
@@ -131,9 +142,10 @@ type versionReadPayload struct {
 // Returns (0, "", nil) when the _version key does not exist (new/empty bucket).
 // Backward-compatible: if JSON parse fails, tries plain text int64 (migration path).
 func (c *Client) HeadVersion(ctx context.Context) (int64, string, error) {
+	fullKey := c.prefixedKey(versionKey)
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
-		Key:    aws.String(versionKey),
+		Key:    aws.String(fullKey),
 	})
 	if err != nil {
 		if isNotFoundError(err) {
@@ -185,9 +197,10 @@ func (c *Client) UpdateVersion(ctx context.Context, version int64, updatedAt str
 		return fmt.Errorf("marshal version payload: %w", err)
 	}
 
+	fullKey := c.prefixedKey(versionKey)
 	_, err = c.s3.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(c.bucket),
-		Key:         aws.String(versionKey),
+		Key:         aws.String(fullKey),
 		Body:        bytes.NewReader(data),
 		ContentType: aws.String("application/json"),
 	})

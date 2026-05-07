@@ -61,6 +61,11 @@ var bucketCounter int
 
 func newTestClient(t *testing.T) *Client {
 	t.Helper()
+	return newTestClientWithPrefix(t, "")
+}
+
+func newTestClientWithPrefix(t *testing.T, keyPrefix string) *Client {
+	t.Helper()
 
 	ctx := context.Background()
 	bucketCounter++
@@ -79,7 +84,7 @@ func newTestClient(t *testing.T) *Client {
 		t.Fatalf("CreateBucket(%s) error = %v", bucketName, err)
 	}
 
-	client, err := New(s3Client, bucketName)
+	client, err := New(s3Client, bucketName, keyPrefix)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -269,6 +274,85 @@ func TestHeadVersionUpdateVersionRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTenantPrefixScopesObjectsAndVersion(t *testing.T) {
+	client := newTestClientWithPrefix(t, "users/user-123/")
+	ctx := context.Background()
+	key := "figures/20260305-a1b2c3d4/prefixed.png"
+	payload := []byte("tenant-scoped")
+
+	if err := client.Upload(ctx, key, bytes.NewReader(payload)); err != nil {
+		t.Fatalf("Upload() error = %v", err)
+	}
+
+	if _, err := client.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(client.bucket),
+		Key:    aws.String("users/user-123/" + key),
+	}); err != nil {
+		t.Fatalf("expected object under tenant prefix: %v", err)
+	}
+	if _, err := client.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(client.bucket),
+		Key:    aws.String(key),
+	}); !isNotFoundError(err) {
+		t.Fatalf("expected bucket-root object to be missing, got %v", err)
+	}
+
+	rc, err := client.Download(ctx, key)
+	if err != nil {
+		t.Fatalf("Download() error = %v", err)
+	}
+	got, err := io.ReadAll(rc)
+	_ = rc.Close()
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("Download() content mismatch: got %q, want %q", got, payload)
+	}
+
+	exists, err := client.Exists(ctx, key)
+	if err != nil {
+		t.Fatalf("Exists() error = %v", err)
+	}
+	if !exists {
+		t.Fatal("Exists() should be true for prefixed object")
+	}
+
+	updatedAt := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)
+	if err := client.UpdateVersion(ctx, 7, updatedAt); err != nil {
+		t.Fatalf("UpdateVersion() error = %v", err)
+	}
+	if _, err := client.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(client.bucket),
+		Key:    aws.String("users/user-123/_version"),
+	}); err != nil {
+		t.Fatalf("expected version object under tenant prefix: %v", err)
+	}
+	if _, err := client.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(client.bucket),
+		Key:    aws.String("_version"),
+	}); !isNotFoundError(err) {
+		t.Fatalf("expected bucket-root version object to be missing, got %v", err)
+	}
+	version, gotUpdatedAt, err := client.HeadVersion(ctx)
+	if err != nil {
+		t.Fatalf("HeadVersion() error = %v", err)
+	}
+	if version != 7 || gotUpdatedAt != updatedAt {
+		t.Fatalf("HeadVersion() = (%d, %q), want (7, %q)", version, gotUpdatedAt, updatedAt)
+	}
+
+	if err := client.Delete(ctx, key); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if _, err := client.s3.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(client.bucket),
+		Key:    aws.String("users/user-123/" + key),
+	}); !isNotFoundError(err) {
+		t.Fatalf("expected prefixed object to be deleted, got %v", err)
+	}
+}
+
 func TestUploadToNonexistentBucketFails(t *testing.T) {
 	s3Client := s3.New(s3.Options{
 		BaseEndpoint: aws.String(sharedMinio.endpoint),
@@ -277,7 +361,7 @@ func TestUploadToNonexistentBucketFails(t *testing.T) {
 		UsePathStyle: true,
 	})
 
-	client, err := New(s3Client, "nonexistent-bucket-12345")
+	client, err := New(s3Client, "nonexistent-bucket-12345", "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -300,13 +384,13 @@ func TestDownloadNonexistentKeyFails(t *testing.T) {
 func TestNewClientRejectsInvalidArguments(t *testing.T) {
 	s3Client := s3.New(s3.Options{Region: "us-east-1"})
 
-	if _, err := New(nil, "bucket"); err == nil {
+	if _, err := New(nil, "bucket", ""); err == nil {
 		t.Fatal("expected error for nil s3 client")
 	}
-	if _, err := New(s3Client, ""); err == nil {
+	if _, err := New(s3Client, "", ""); err == nil {
 		t.Fatal("expected error for empty bucket")
 	}
-	if _, err := New(s3Client, "  "); err == nil {
+	if _, err := New(s3Client, "  ", ""); err == nil {
 		t.Fatal("expected error for whitespace bucket")
 	}
 }
@@ -415,7 +499,7 @@ func TestErrorPathsWithUnreachableEndpoint(t *testing.T) {
 		UsePathStyle: true,
 	})
 
-	client, err := New(s3Client, "any-bucket")
+	client, err := New(s3Client, "any-bucket", "")
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}

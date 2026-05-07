@@ -382,7 +382,7 @@ func TestBuildCloudSnapshotAndCloudPhase7Commands(t *testing.T) {
 	}
 
 	previousOpenCloudStackFn := openCloudStackFn
-	openCloudStackFn = func(_ context.Context, _ string) (*cloudStack, error) {
+	openCloudStackFn = func(_ context.Context, _, _ string) (*cloudStack, error) {
 		return &cloudStack{Repo: stack.Repo}, nil
 	}
 	t.Cleanup(func() { openCloudStackFn = previousOpenCloudStackFn })

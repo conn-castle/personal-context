@@ -121,7 +121,7 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 	hasWarnings = hasWarnings || warned
 
 	// Cloud connectivity check (only when cloud is configured).
-	cloud, cloudErr := openCloudStackFn(ctx, homeDir)
+	cloud, cloudErr := openCloudStackFn(ctx, homeDir, "")
 	if cloudErr == nil {
 		// Verify the Postgres connection is actually alive.
 		if _, pingErr := cloud.Repo.GetSyncVersion(ctx); pingErr != nil {

@@ -95,21 +95,28 @@ describe("S3 utilities", () => {
   });
 
   describe("getPresignedUrl", () => {
-    it("generates a presigned URL with default expiry", async () => {
+    const userId = "test-user-id";
+
+    it("generates a presigned URL with default expiry and user prefix", async () => {
       mockGetSignedUrl.mockResolvedValue("https://signed.example.com/key");
-      const result = await getPresignedUrl("figures/slide-1/image.png");
+      const result = await getPresignedUrl("figures/slide-1/image.png", userId);
       expect(result.url).toBe("https://signed.example.com/key");
       expect(result.expires_at).toBeDefined();
       const expiresAt = new Date(result.expires_at).getTime();
       expect(expiresAt).toBeGreaterThan(Date.now());
+      expect(mockGetSignedUrl).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ Key: "users/test-user-id/figures/slide-1/image.png" }),
+        expect.anything()
+      );
     });
 
     it("uses custom expiry when provided", async () => {
       mockGetSignedUrl.mockResolvedValue("https://signed.example.com/key");
-      await getPresignedUrl("key", 600);
+      await getPresignedUrl("key", userId, 600);
       expect(mockGetSignedUrl).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ Bucket: "test-bucket", Key: "key" }),
+        expect.objectContaining({ Bucket: "test-bucket", Key: "users/test-user-id/key" }),
         { expiresIn: 600 }
       );
     });
@@ -118,11 +125,11 @@ describe("S3 utilities", () => {
       process.env.PRESIGNED_URL_EXPIRY_SECONDS = "900";
       mockGetSignedUrl.mockResolvedValue("https://signed.example.com/key");
 
-      await getPresignedUrl("key");
+      await getPresignedUrl("key", userId);
 
       expect(mockGetSignedUrl).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ Bucket: "test-bucket", Key: "key" }),
+        expect.objectContaining({ Bucket: "test-bucket", Key: "users/test-user-id/key" }),
         { expiresIn: 900 }
       );
     });
@@ -131,22 +138,24 @@ describe("S3 utilities", () => {
       process.env.PRESIGNED_URL_EXPIRY_SECONDS = "abc";
       mockGetSignedUrl.mockResolvedValue("https://signed.example.com/key");
 
-      await expect(getPresignedUrl("key")).rejects.toThrow(
+      await expect(getPresignedUrl("key", userId)).rejects.toThrow(
         "PRESIGNED_URL_EXPIRY_SECONDS must be a positive integer"
       );
     });
   });
 
   describe("getS3Version", () => {
+    const userId = "test-user-id";
+
     it("returns version 0 when NoSuchKey", async () => {
       mockSend.mockRejectedValue({ name: "NoSuchKey" });
-      const result = await getS3Version();
+      const result = await getS3Version(userId);
       expect(result).toEqual({ version: 0, updated_at: "" });
     });
 
     it("returns version 0 when NotFound", async () => {
       mockSend.mockRejectedValue({ name: "NotFound" });
-      const result = await getS3Version();
+      const result = await getS3Version(userId);
       expect(result).toEqual({ version: 0, updated_at: "" });
     });
 
@@ -162,22 +171,29 @@ describe("S3 utilities", () => {
             ),
         },
       });
-      const result = await getS3Version();
+      const result = await getS3Version(userId);
       expect(result.version).toBe(42);
       expect(result.updated_at).toBe("2026-03-09T00:00:00Z");
+    });
+
+    it("uses per-user key prefix", async () => {
+      mockSend.mockRejectedValue({ name: "NoSuchKey" });
+      await getS3Version(userId);
+      const callArg = mockSend.mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg.Key).toBe("users/test-user-id/_version");
     });
 
     it("returns version 0 for empty body", async () => {
       mockSend.mockResolvedValue({
         Body: { transformToString: () => Promise.resolve("") },
       });
-      const result = await getS3Version();
+      const result = await getS3Version(userId);
       expect(result).toEqual({ version: 0, updated_at: "" });
     });
 
     it("returns version 0 for null body", async () => {
       mockSend.mockResolvedValue({ Body: null });
-      const result = await getS3Version();
+      const result = await getS3Version(userId);
       expect(result).toEqual({ version: 0, updated_at: "" });
     });
 
@@ -188,7 +204,7 @@ describe("S3 utilities", () => {
             Promise.resolve(JSON.stringify({ foo: "bar" })),
         },
       });
-      await expect(getS3Version()).rejects.toThrow(
+      await expect(getS3Version(userId)).rejects.toThrow(
         "JSON object must include numeric version and string updated_at"
       );
     });
@@ -197,7 +213,7 @@ describe("S3 utilities", () => {
       mockSend.mockResolvedValue({
         Body: { transformToString: () => Promise.resolve("42") },
       });
-      const result = await getS3Version();
+      const result = await getS3Version(userId);
       expect(result).toEqual({ version: 42, updated_at: "" });
     });
 
@@ -205,7 +221,7 @@ describe("S3 utilities", () => {
       mockSend.mockResolvedValue({
         Body: { transformToString: () => Promise.resolve("  7  \n") },
       });
-      const result = await getS3Version();
+      const result = await getS3Version(userId);
       expect(result).toEqual({ version: 7, updated_at: "" });
     });
 
@@ -213,31 +229,33 @@ describe("S3 utilities", () => {
       mockSend.mockResolvedValue({
         Body: { transformToString: () => Promise.resolve("not-a-number") },
       });
-      await expect(getS3Version()).rejects.toThrow(
+      await expect(getS3Version(userId)).rejects.toThrow(
         "Failed to parse _version content"
       );
     });
 
     it("rethrows non-NotFound errors", async () => {
       mockSend.mockRejectedValue(new Error("NetworkError"));
-      await expect(getS3Version()).rejects.toThrow("NetworkError");
+      await expect(getS3Version(userId)).rejects.toThrow("NetworkError");
     });
 
     it("rethrows errors without a name property", async () => {
       const err = { code: "AccessDenied", message: "Forbidden" };
       mockSend.mockRejectedValue(err);
-      await expect(getS3Version()).rejects.toBe(err);
+      await expect(getS3Version(userId)).rejects.toBe(err);
     });
   });
 
   describe("bumpS3Version", () => {
-    it("writes version to S3 with provided updatedAt", async () => {
+    const userId = "test-user-id";
+
+    it("writes version to S3 with user-prefixed key", async () => {
       mockSend.mockResolvedValue({});
-      await bumpS3Version(5, "2026-03-09T10:00:00.000Z");
+      await bumpS3Version(5, "2026-03-09T10:00:00.000Z", userId);
       expect(mockSend).toHaveBeenCalledTimes(1);
       const callArg = mockSend.mock.calls[0][0] as Record<string, unknown>;
       expect(callArg.Bucket).toBe("test-bucket");
-      expect(callArg.Key).toBe("_version");
+      expect(callArg.Key).toBe("users/test-user-id/_version");
       expect(callArg.ContentType).toBe("application/json");
       const body = JSON.parse(callArg.Body as string) as {
         version: number;
@@ -251,7 +269,7 @@ describe("S3 utilities", () => {
       mockSend
         .mockRejectedValueOnce(new Error("Temporary"))
         .mockResolvedValue({});
-      await bumpS3Version(5, "2026-03-09T10:00:00.000Z");
+      await bumpS3Version(5, "2026-03-09T10:00:00.000Z", userId);
       expect(mockSend).toHaveBeenCalledTimes(2);
     });
 
@@ -261,40 +279,45 @@ describe("S3 utilities", () => {
         .mockRejectedValueOnce(new Error("Persistent"))
         .mockRejectedValueOnce(new Error("Persistent"));
       await expect(
-        bumpS3Version(5, "2026-03-09T10:00:00.000Z")
+        bumpS3Version(5, "2026-03-09T10:00:00.000Z", userId)
       ).rejects.toThrow("Persistent");
       expect(mockSend).toHaveBeenCalledTimes(3);
     });
   });
 
   describe("deleteS3Objects", () => {
+    const userId = "test-user-id";
+
     it("returns without calling S3 when the key list is empty", async () => {
-      await deleteS3Objects([]);
+      await deleteS3Objects([], userId);
 
       expect(mockSend).not.toHaveBeenCalled();
     });
 
-    it("deletes all provided keys in a single batch", async () => {
+    it("deletes all provided keys with user prefix", async () => {
       mockSend.mockResolvedValue({});
 
-      await deleteS3Objects(["figures/a.png", "data/b.csv"]);
+      await deleteS3Objects(["figures/a.png", "data/b.csv"], userId);
 
       expect(mockSend).toHaveBeenCalledTimes(1);
       const callArg = mockSend.mock.calls[0][0] as Record<string, unknown>;
       expect(callArg.Bucket).toBe("test-bucket");
       expect(callArg.Delete).toEqual({
-        Objects: [{ Key: "figures/a.png" }, { Key: "data/b.csv" }],
+        Objects: [
+          { Key: "users/test-user-id/figures/a.png" },
+          { Key: "users/test-user-id/data/b.csv" },
+        ],
         Quiet: true,
       });
     });
 
     it("throws when S3 reports per-object delete failures", async () => {
       mockSend.mockResolvedValue({
-        Errors: [{ Key: "figures/a.png", Code: "AccessDenied" }],
+        Errors: [{ Key: "users/test-user-id/figures/a.png", Code: "AccessDenied" }],
       });
 
-      await expect(deleteS3Objects(["figures/a.png"])).rejects.toThrow(
-        "S3 delete failed for: figures/a.png (AccessDenied)"
+      await expect(deleteS3Objects(["figures/a.png"], userId)).rejects.toThrow(
+        "S3 delete failed for:"
       );
     });
 
@@ -302,7 +325,8 @@ describe("S3 utilities", () => {
       mockSend.mockResolvedValue({});
 
       await deleteS3Objects(
-        Array.from({ length: 1001 }, (_, index) => `figures/key-${index}.png`)
+        Array.from({ length: 1001 }, (_, index) => `figures/key-${index}.png`),
+        userId
       );
 
       expect(mockSend).toHaveBeenCalledTimes(2);
@@ -314,7 +338,7 @@ describe("S3 utilities", () => {
       };
       expect(firstBatch.Delete.Objects).toHaveLength(1000);
       expect(secondBatch.Delete.Objects).toEqual([
-        { Key: "figures/key-1000.png" },
+        { Key: "users/test-user-id/figures/key-1000.png" },
       ]);
     });
   });

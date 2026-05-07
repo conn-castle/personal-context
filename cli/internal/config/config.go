@@ -37,6 +37,7 @@ type Config struct {
 	ActiveProject    string `json:"active_project,omitempty"`
 	S3Endpoint       string `json:"s3_endpoint,omitempty"`
 	S3ForcePathStyle bool   `json:"s3_force_path_style,omitempty"`
+	APIKey           string `json:"api_key,omitempty"`
 }
 
 // Store reads and writes config under ~/personal-context/.pc/config.json.
@@ -150,21 +151,27 @@ func writeFileAtomically(path string, content []byte, permission os.FileMode) er
 
 // Mode resolves the configuration mode and validates cloud completeness.
 // Args: none.
-// Returns: ModeLocalOnly when all cloud fields are empty; ModeCloud when all are set; error on partial cloud config.
+// Returns: ModeLocalOnly when all cloud fields are empty; ModeCloud when core cloud fields are set; error on partial cloud config.
+// Backward compatibility: api_key is optional in Mode detection so legacy cloud configs remain readable for remediation flows.
 func (c Config) Mode() (Mode, error) {
-	values := []string{c.NeonURL, c.S3Bucket, c.S3Region, c.AWSProfile}
-	setCount := 0
-	for _, value := range values {
+	coreValues := []string{c.NeonURL, c.S3Bucket, c.S3Region, c.AWSProfile}
+	coreSetCount := 0
+	for _, value := range coreValues {
 		if strings.TrimSpace(value) != "" {
-			setCount++
+			coreSetCount++
 		}
 	}
+	apiKeySet := strings.TrimSpace(c.APIKey) != ""
 
-	if setCount == 0 {
+	if coreSetCount == 0 && !apiKeySet {
 		return ModeLocalOnly, nil
 	}
-	if setCount == len(values) {
+	if coreSetCount == len(coreValues) {
 		return ModeCloud, nil
+	}
+
+	if coreSetCount == 0 && apiKeySet {
+		return "", errors.New("invalid config: api_key requires cloud fields neon_url, s3_bucket, s3_region, and aws_profile")
 	}
 
 	return "", errors.New("invalid config: cloud mode requires neon_url, s3_bucket, s3_region, and aws_profile")

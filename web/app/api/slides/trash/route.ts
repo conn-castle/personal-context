@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { internalError } from "@/lib/api-error";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
+import { requireUser } from "@/lib/auth-helpers";
 import { bumpS3Version, deleteS3Objects } from "@/lib/s3";
 import type { PurgeTrashResponse } from "@/lib/types";
 import type { ErrorResponseBody } from "@/lib/api-error";
@@ -19,6 +20,10 @@ export async function DELETE(
     return proxyToLocal(req);
   }
 
+  const userOrError = await requireUser(req);
+  if (userOrError instanceof NextResponse) return userOrError;
+  const user = userOrError;
+
   try {
     const sql = getDb();
 
@@ -26,18 +31,18 @@ export async function DELETE(
     // statements see the same snapshot — prevents a concurrent restore from
     // causing S3 key divergence.
     const [countResult, figureKeys, dataFileKeys] = (await sql.transaction([
-      sql`SELECT COUNT(*)::int AS count FROM slides WHERE deleted_at IS NOT NULL`,
+      sql`SELECT COUNT(*)::int AS count FROM slides WHERE user_id = ${user.id} AND deleted_at IS NOT NULL`,
       sql`
         SELECT sf.s3_key FROM slide_figures sf
         JOIN slides s ON s.id = sf.slide_id
-        WHERE s.deleted_at IS NOT NULL
+        WHERE s.user_id = ${user.id} AND s.deleted_at IS NOT NULL
       `,
       sql`
         SELECT sdf.s3_key FROM slide_data_files sdf
         JOIN slides s ON s.id = sdf.slide_id
-        WHERE s.deleted_at IS NOT NULL
+        WHERE s.user_id = ${user.id} AND s.deleted_at IS NOT NULL
       `,
-      sql`DELETE FROM slides WHERE deleted_at IS NOT NULL`,
+      sql`DELETE FROM slides WHERE user_id = ${user.id} AND deleted_at IS NOT NULL`,
     ])) as [
       Record<string, unknown>[],
       Record<string, unknown>[],
@@ -54,7 +59,7 @@ export async function DELETE(
 
       if (allKeys.length > 0) {
         try {
-          await deleteS3Objects(allKeys);
+          await deleteS3Objects(allKeys, user.id);
         } catch (s3Err) {
           // Log but don't fail — DB is already consistent
           console.warn("S3 cleanup after purge failed:", s3Err);
@@ -64,7 +69,7 @@ export async function DELETE(
 
     // Get current sync version
     const versionResult = (await sql`
-      SELECT version, updated_at FROM sync_version LIMIT 1
+      SELECT version, updated_at FROM sync_version WHERE user_id = ${user.id}
     `) as { version: number; updated_at: string }[];
     const syncVersion = (versionResult[0]?.version as number) ?? 0;
     const syncUpdatedAt =
@@ -72,7 +77,7 @@ export async function DELETE(
 
     if (purgedCount > 0) {
       try {
-        await bumpS3Version(syncVersion, syncUpdatedAt);
+        await bumpS3Version(syncVersion, syncUpdatedAt, user.id);
       } catch (error) {
         console.error(
           "DELETE /api/slides/trash S3 version bump failed after Postgres commit:",

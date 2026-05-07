@@ -825,7 +825,7 @@ func TestDoctorCloudOK(t *testing.T) {
 
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return &cloudStack{Repo: cloudRepoStub{}}, nil
 	}
 
@@ -848,7 +848,7 @@ func TestDoctorCloudNotConfiguredSkipsCheck(t *testing.T) {
 
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return nil, errCloudNotConfigured
 	}
 
@@ -871,7 +871,7 @@ func TestDoctorCloudUnreachableShowsWarn(t *testing.T) {
 
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return nil, errors.New("connection refused")
 	}
 
@@ -897,7 +897,7 @@ func TestDoctorCloudOKWriteError(t *testing.T) {
 
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return &cloudStack{Repo: cloudRepoStub{}}, nil
 	}
 
@@ -915,7 +915,7 @@ func TestDoctorCloudWarnWriteError(t *testing.T) {
 
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return nil, errors.New("connection refused")
 	}
 

@@ -16,6 +16,10 @@ vi.mock("@/lib/slides-handlers", () => ({
   handlePatchSlide: (...args: unknown[]) => mockHandlePatchSlide(...args),
 }));
 
+vi.mock("@/lib/auth-helpers", () => ({
+  requireUser: vi.fn().mockResolvedValue({ id: "test-user-id", email: "test@test.com" }),
+}));
+
 import { GET, PATCH, DELETE } from "@/app/api/slides/[id]/route";
 
 /** Helper to build a route context with params promise. */
@@ -199,7 +203,8 @@ describe("PATCH /api/slides/[id]", () => {
     expect(res.status).toBe(200);
     expect(mockHandlePatchSlide).toHaveBeenCalledWith(
       "20260301-aabbccdd",
-      { notes: "updated" }
+      { notes: "updated" },
+      "test-user-id"
     );
   });
 
@@ -329,7 +334,7 @@ describe("DELETE /api/slides/[id]", () => {
     expect(body.updated_at).toBe("2026-03-09T10:00:00.000Z");
     expect(body.sync_version).toBe(6);
 
-    expect(mockBumpS3Version).toHaveBeenCalledWith(6, "2026-03-09T10:00:00.000Z");
+    expect(mockBumpS3Version).toHaveBeenCalledWith(6, "2026-03-09T10:00:00.000Z", "test-user-id");
   });
 
   it("returns 404 for nonexistent slide", async () => {
@@ -390,7 +395,7 @@ describe("DELETE /api/slides/[id]", () => {
     await DELETE(req, makeContext("20260301-aabbccdd"));
 
     expect(mockSql).toHaveBeenCalledTimes(2);
-    expect(mockBumpS3Version).toHaveBeenCalledWith(11, "2026-03-09T10:00:00.000Z");
+    expect(mockBumpS3Version).toHaveBeenCalledWith(11, "2026-03-09T10:00:00.000Z", "test-user-id");
   });
 
   it("returns 200 when S3 version bump fails after delete commits", async () => {

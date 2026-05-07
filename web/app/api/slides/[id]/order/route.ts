@@ -4,6 +4,7 @@ import { bumpS3Version } from "@/lib/s3";
 import { invalidId, notFound, badRequest, internalError } from "@/lib/api-error";
 import { isValidSlideId, isValidDate } from "@/lib/validation";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
+import { requireUser } from "@/lib/auth-helpers";
 import { generateKeyBetween } from "fractional-indexing";
 import type { ReorderInput, ReorderResponse } from "@/lib/types";
 
@@ -153,6 +154,10 @@ export async function PATCH(
     return proxyToLocal(req);
   }
 
+  const userOrError = await requireUser(req);
+  if (userOrError instanceof NextResponse) return userOrError;
+  const user = userOrError;
+
   try {
     const { id } = await context.params;
 
@@ -188,7 +193,7 @@ export async function PATCH(
     const sql = getDb();
 
     // Read current slide to get its date
-    const slideRows = (await sql`SELECT id, date, day_order FROM slides WHERE id = ${id} AND deleted_at IS NULL`) as {
+    const slideRows = (await sql`SELECT id, date, day_order FROM slides WHERE id = ${id} AND user_id = ${user.id} AND deleted_at IS NULL`) as {
       id: string;
       date: string;
       day_order: string;
@@ -201,7 +206,7 @@ export async function PATCH(
     const targetDate = input.date ?? slideRows[0].date;
 
     // Read siblings for the target date (exclude the moving slide)
-    const siblings = (await sql`SELECT id, day_order FROM slides WHERE date = ${targetDate} AND deleted_at IS NULL AND id != ${id} ORDER BY day_order ASC, id ASC`) as SiblingRow[];
+    const siblings = (await sql`SELECT id, day_order FROM slides WHERE date = ${targetDate} AND user_id = ${user.id} AND deleted_at IS NULL AND id != ${id} ORDER BY day_order ASC, id ASC`) as SiblingRow[];
 
     // Compute new fractional index
     const newOrder = computeFractionalIndex(siblings, input.position);
@@ -213,7 +218,7 @@ export async function PATCH(
     }
 
     // Update the slide
-    const updateRows = (await sql`UPDATE slides SET date = ${targetDate}, day_order = ${newOrder} WHERE id = ${id} RETURNING id, date, day_order, updated_at`) as {
+    const updateRows = (await sql`UPDATE slides SET date = ${targetDate}, day_order = ${newOrder} WHERE id = ${id} AND user_id = ${user.id} RETURNING id, date, day_order, updated_at`) as {
       id: string;
       date: string;
       day_order: string;
@@ -223,7 +228,7 @@ export async function PATCH(
     const updated = updateRows[0];
 
     // Read sync_version and bump S3
-    const versionRows = (await sql`SELECT version, updated_at FROM sync_version LIMIT 1`) as {
+    const versionRows = (await sql`SELECT version, updated_at FROM sync_version WHERE user_id = ${user.id}`) as {
       version: number;
       updated_at: string;
     }[];
@@ -231,7 +236,7 @@ export async function PATCH(
     const syncUpdatedAt = versionRows[0]?.updated_at ?? new Date().toISOString();
 
     try {
-      await bumpS3Version(syncVersion, syncUpdatedAt);
+      await bumpS3Version(syncVersion, syncUpdatedAt, user.id);
     } catch (error) {
       console.error(
         "PATCH /api/slides/[id]/order S3 version bump failed after Postgres commit:",

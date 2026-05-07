@@ -4,7 +4,7 @@ Personal Context is a local-first engineering notebook system that stores work a
 
 ## Status
 
-Phase 9 (Web UI integration) is complete. Phase 10 (Deployment, CI/CD, and Integration Testing) is next — see [Roadmap](docs/agent-layer/ROADMAP.md).
+Phase 10 (Authentication & Multi-User) is complete. Phase 11 (Deployment, CI/CD, and Integration Testing) is next — see [Roadmap](docs/agent-layer/ROADMAP.md).
 
 ## Architecture
 
@@ -47,7 +47,9 @@ personal-context/
 - pnpm (`npm i -g pnpm`)
 - Docker running for the Postgres and S3 integration suites (`testcontainers-go`)
 
-### Local-Only Setup (Development Verification)
+### Development Verification
+
+This sequence covers both local development checks and the Docker-backed cloud/integration suites used for full repo verification.
 
 ```bash
 # CLI
@@ -103,16 +105,29 @@ pc setup \
   --s3-bucket="..." \
   --s3-region="..." \
   --aws-key="..." \
-  --aws-secret="..."
+  --aws-secret="..." \
+  --api-key="pc_key_..."
 
 # Remove cloud configuration:
 pc setup --remove-cloud
 ```
 
+- First cloud bootstrap for a fresh database:
+
+```bash
+pc setup --init-cloud-schema --neon-url="..."
+```
+
+Run this once before the first web sign-in flow so the `users` and `api_keys`
+tables exist. Then enable registration, create a user in the web app, create an
+API key from that authenticated session, and run the full `pc setup` command
+above with `--api-key`.
+
 - AWS credentials are written to `~/.aws/credentials` under `[personal-context]`.
-- Cloud metadata is stored in `~/personal-context/.pc/config.json` (no secret keys in config).
+- Cloud metadata is stored in `~/personal-context/.pc/config.json` and includes the CLI API key (treat this file as sensitive).
 - Validates Neon connectivity and S3 access before persisting configuration.
 - Creates Postgres schema tables on first cloud setup.
+- `--api-key` stores a CLI authentication key (generate it from an authenticated web session via `/api/api-keys`). Required for multi-user cloud sync.
 
 ## CLI Command Reference
 
@@ -147,11 +162,52 @@ The web UI provides:
 
 - App Router + TypeScript
 - Real slide/project/sync/file API routes backed by Neon + S3 helpers
-- Three-panel Slide Browser with date-grouped navigation, 16:9 sandboxed preview, notes editing, attachment actions, and deleted-slide restore flow
+- Three-panel Slide Browser with date-grouped navigation, 16:9 sandboxed preview, notes editing, attachment actions, slide delete controls, and trash counts/purge controls in Settings
 - `useSyncManager` 4-layer polling and cursor-based pagination
 - Vitest coverage thresholds (95%) plus Playwright smoke and Slide Browser e2e coverage
 - Schema-contract module referencing canonical `schema/` artifacts
 - Local dev mode: Next.js proxies to `pc serve` when `LOCAL_BACKEND_URL` is set (no cloud credentials needed)
+
+### Authentication
+
+The web UI uses Auth.js (NextAuth v5) with email/password credentials. Two operational modes:
+
+- **Local mode** (`pc serve`): No authentication. Single-user, localhost only.
+- **Cloud mode** (Amplify/Neon): Auth.js credentials with JWT sessions (90-day expiry). Per-user data isolation (slides, S3 files, sync version).
+
+CLI authentication uses API keys generated from an authenticated web session. Store the key via `pc setup --api-key=<key>`.
+Create a key from an authenticated web session:
+
+```js
+await fetch("/api/api-keys", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ label: "CLI" }),
+}).then((r) => r.json());
+```
+
+Copy the returned `raw_key` value once and set it with `pc setup --api-key=<key>`.
+
+Set `AUTH_TRUST_HOST=true` in cloud/proxy deployments (Amplify, ingress, reverse proxy) so Auth.js trusts forwarded host/proto headers.
+
+Registration is disabled by default. Set `REGISTRATION_ENABLED=true` only while onboarding users.
+
+Production deployments must enforce upstream rate limiting (WAF/reverse proxy) for `/api/auth/*`, `/api/register`, and repeated invalid API-key attempts. The app does not include built-in auth throttling.
+
+### Legacy Pre-Auth Cloud Upgrade (Manual Path)
+
+If your cloud database was created before multi-user auth (legacy pre-auth schema), automated in-place migration is not supported. The Postgres schema bootstrap intentionally fails with:
+
+`legacy pre-auth cloud schema detected (...): in-place migration is required before applying auth-aware schema`
+
+Operator playbook for this case:
+
+1. Freeze writes to the legacy deployment and take a backup/export snapshot.
+2. Provision a fresh cloud environment with the auth-aware schema (new Neon DB + web auth config).
+3. Migrate cloud object keys to user-scoped prefixes (`users/{user_id}/...`) before cutover.
+4. Import/restore data into the new environment and validate with `pc sync`, `pc doctor`, and web sign-in before reopening writes.
+
+This migration path is intentionally manual today; treat it as a planned maintenance cutover.
 
 ### Local Dev Mode (`pc serve`)
 
@@ -174,6 +230,9 @@ cd cli && go build -o pc ./cmd/pc && ./pc serve --port 9876
 # Terminal 2:
 cd web && LOCAL_BACKEND_URL=http://127.0.0.1:9876 pnpm dev
 ```
+
+In local mode, `/login`, `/register`, and `/api/auth/*` are intentionally disabled.
+`LOCAL_BACKEND_URL` must use a loopback host (`localhost`, `127.0.0.1`, or `::1`).
 
 Prerequisites: `pc setup` must have been run (creates `~/personal-context/` and the local SQLite database). `make dev-cloud` requires non-empty `DATABASE_URL` and `S3_BUCKET` values in the shell environment or `web/.env.local`.
 

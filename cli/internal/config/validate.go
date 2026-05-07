@@ -107,5 +107,7 @@ func ValidateCloudConfig(cfg Config) error {
 	if strings.TrimSpace(cfg.AWSProfile) == "" {
 		return fmt.Errorf("aws_profile is required for cloud mode")
 	}
+	// api_key is validated at use-time by resolveCloudUserID, not here.
+	// Legacy configs may omit api_key until the user runs 'pc setup --api-key=...'.
 	return nil
 }

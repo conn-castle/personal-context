@@ -31,7 +31,8 @@ func TestSetupOptionsHasCloudFlags(t *testing.T) {
 		{"s3-region only", setupOptions{S3Region: "us-east-1"}, true},
 		{"aws-key only", setupOptions{AWSKey: "k"}, true},
 		{"aws-secret only", setupOptions{AWSSecret: "s"}, true},
-		{"all flags", setupOptions{NeonURL: "postgres://x", S3Bucket: "b", S3Region: "us-east-1", AWSKey: "k", AWSSecret: "s"}, true},
+		{"api-key only", setupOptions{APIKey: "pc_key_test"}, true},
+		{"all flags", setupOptions{NeonURL: "postgres://x", S3Bucket: "b", S3Region: "us-east-1", AWSKey: "k", AWSSecret: "s", APIKey: "pc_key_test"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -51,13 +52,13 @@ func TestSetupOptionsValidateCloudFlagsComplete(t *testing.T) {
 	}{
 		{
 			"all present",
-			setupOptions{NeonURL: "postgres://x", S3Bucket: "b", S3Region: "us-east-1", AWSKey: "k", AWSSecret: "s"},
+			setupOptions{NeonURL: "postgres://x", S3Bucket: "b", S3Region: "us-east-1", AWSKey: "k", AWSSecret: "s", APIKey: "pc_key_test"},
 			false,
 			nil,
 		},
 		{
 			"missing neon-url",
-			setupOptions{S3Bucket: "b", S3Region: "us-east-1", AWSKey: "k", AWSSecret: "s"},
+			setupOptions{S3Bucket: "b", S3Region: "us-east-1", AWSKey: "k", AWSSecret: "s", APIKey: "pc_key_test"},
 			true,
 			[]string{"--neon-url"},
 		},
@@ -65,7 +66,7 @@ func TestSetupOptionsValidateCloudFlagsComplete(t *testing.T) {
 			"missing multiple",
 			setupOptions{NeonURL: "postgres://x"},
 			true,
-			[]string{"--s3-bucket", "--s3-region", "--aws-key", "--aws-secret"},
+			[]string{"--s3-bucket", "--s3-region", "--aws-key", "--aws-secret", "--api-key"},
 		},
 	}
 	for _, tt := range tests {
@@ -101,6 +102,112 @@ func TestRunSetupRemoveCloudWithCloudFlagsError(t *testing.T) {
 	}
 }
 
+func TestRunSetupInitCloudSchemaSuccess(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	mockAllCloudDeps(t)
+
+	stdout := &bytes.Buffer{}
+	err := runSetup(
+		context.Background(),
+		stdout,
+		&bytes.Buffer{},
+		strings.NewReader(""),
+		setupOptions{
+			NeonURL:         "postgres://user:pass@host/db",
+			InitCloudSchema: true,
+		},
+	)
+	if err != nil {
+		t.Fatalf("runSetup() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Cloud Postgres schema initialized successfully") {
+		t.Fatalf("unexpected stdout = %q", stdout.String())
+	}
+
+	store, _ := config.NewStore(homeDir)
+	if _, readErr := store.Read(); !errors.Is(readErr, os.ErrNotExist) {
+		t.Fatalf("schema bootstrap should not write local config, got error %v", readErr)
+	}
+}
+
+func TestRunSetupInitCloudSchemaRequiresNeonURLOnly(t *testing.T) {
+	err := runSetup(
+		context.Background(),
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+		strings.NewReader(""),
+		setupOptions{InitCloudSchema: true},
+	)
+	if err == nil || !strings.Contains(err.Error(), "--init-cloud-schema requires --neon-url") {
+		t.Fatalf("expected missing neon-url error, got %v", err)
+	}
+
+	err = runSetup(
+		context.Background(),
+		&bytes.Buffer{},
+		&bytes.Buffer{},
+		strings.NewReader(""),
+		setupOptions{
+			NeonURL:         "postgres://user:pass@host/db",
+			S3Bucket:        "bucket",
+			InitCloudSchema: true,
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "can only be used with --neon-url") {
+		t.Fatalf("expected conflict error, got %v", err)
+	}
+}
+
+func TestRunSetupInitCloudSchemaErrors(t *testing.T) {
+	if err := runSetupInitCloudSchema(context.Background(), &bytes.Buffer{}, "http://not-postgres"); err == nil {
+		t.Fatal("expected invalid URL error")
+	}
+
+	t.Run("connectivity", func(t *testing.T) {
+		mockAllCloudDeps(t)
+		origValidate := validateNeonConnectivityFn
+		t.Cleanup(func() { validateNeonConnectivityFn = origValidate })
+		validateNeonConnectivityFn = func(context.Context, string) error {
+			return errors.New("connectivity failed")
+		}
+
+		err := runSetupInitCloudSchema(context.Background(), &bytes.Buffer{}, "postgres://user:pass@host/db")
+		if err == nil || !strings.Contains(err.Error(), "neon connectivity check failed") {
+			t.Fatalf("expected connectivity error, got %v", err)
+		}
+	})
+
+	t.Run("pool", func(t *testing.T) {
+		mockAllCloudDeps(t)
+		origPool := newPGXPoolFn
+		t.Cleanup(func() { newPGXPoolFn = origPool })
+		newPGXPoolFn = func(context.Context, string) (*pgxpool.Pool, error) {
+			return nil, errors.New("pool failed")
+		}
+
+		err := runSetupInitCloudSchema(context.Background(), &bytes.Buffer{}, "postgres://user:pass@host/db")
+		if err == nil || !strings.Contains(err.Error(), "connect to postgres for schema") {
+			t.Fatalf("expected pool error, got %v", err)
+		}
+	})
+
+	t.Run("schema", func(t *testing.T) {
+		mockAllCloudDeps(t)
+		origSchema := applyPostgresSchemaFn
+		t.Cleanup(func() { applyPostgresSchemaFn = origSchema })
+		applyPostgresSchemaFn = func(context.Context, *pgxpool.Pool) error {
+			return errors.New("schema failed")
+		}
+
+		err := runSetupInitCloudSchema(context.Background(), &bytes.Buffer{}, "postgres://user:pass@host/db")
+		if err == nil || !strings.Contains(err.Error(), "apply postgres schema") {
+			t.Fatalf("expected schema error, got %v", err)
+		}
+	})
+}
+
 // --- runSetup non-interactive cloud path ---
 
 func TestRunSetupNonInteractiveCloudSuccess(t *testing.T) {
@@ -116,6 +223,7 @@ func TestRunSetupNonInteractiveCloudSuccess(t *testing.T) {
 		S3Region:  "us-east-1",
 		AWSKey:    "AKIAIOSFODNN7EXAMPLE",
 		AWSSecret: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		APIKey:    "pc_key_valid",
 	}
 	err := runSetup(context.Background(), stdout, &bytes.Buffer{}, strings.NewReader(""), opts)
 	if err != nil {
@@ -143,6 +251,9 @@ func TestRunSetupNonInteractiveCloudSuccess(t *testing.T) {
 	}
 	if cfg.AWSProfile != awsProfileName {
 		t.Fatalf("unexpected AWSProfile = %q", cfg.AWSProfile)
+	}
+	if cfg.APIKey != "pc_key_valid" {
+		t.Fatalf("unexpected APIKey = %q", cfg.APIKey)
 	}
 
 	// Verify output.
@@ -347,6 +458,7 @@ func TestRunSetupRemoveCloudSuccess(t *testing.T) {
 		S3Bucket:      "my-bucket",
 		S3Region:      "us-east-1",
 		AWSProfile:    awsProfileName,
+		APIKey:        "pc_key_valid",
 		ActiveProject: "org/proj",
 	}
 	if err := store.Write(cloudCfg); err != nil {
@@ -493,6 +605,7 @@ func TestRunSetupRemoveCloudAWSProfileRemoveError(t *testing.T) {
 		S3Bucket:   "b",
 		S3Region:   "us-east-1",
 		AWSProfile: awsProfileName,
+		APIKey:     "pc_key_valid",
 	})
 
 	origRemove := removeAWSProfileFn
@@ -531,22 +644,35 @@ func TestRunSetupInteractiveCloudAccepted(t *testing.T) {
 
 	mockAllCloudDeps(t)
 
+	origResolve := resolveUserIDFn
+	t.Cleanup(func() { resolveUserIDFn = origResolve })
+	resolveUserIDFn = func(_ context.Context, _ *pgxpool.Pool, rawKey string) (string, error) {
+		if rawKey != "pc_key_valid" {
+			t.Fatalf("expected API key pc_key_valid, got %q", rawKey)
+		}
+		return "validated-user-id", nil
+	}
+
 	// Mock the merge preview: localRepo returns 3 slides, cloudRepo returns 5.
 	origPostgresRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = origPostgresRepo })
-	newPostgresRepoFn = func(*pgxpool.Pool) (repository.Repository, error) {
+	newPostgresRepoFn = func(_ *pgxpool.Pool, userID string) (repository.Repository, error) {
+		if userID != "validated-user-id" {
+			t.Fatalf("expected validated user ID for preview repo, got %q", userID)
+		}
 		return &mockRepoWithSlideCount{count: 5}, nil
 	}
 
 	// Interactive input: accept cloud, provide credentials, accept merge preview.
 	input := strings.Join([]string{
-		"y",                             // Configure cloud sync?
-		"postgres://user:pass@host/db",  // Neon URL
-		"my-bucket",                     // S3 bucket
-		"us-east-1",                     // S3 region
-		"AKIAIOSFODNN7EXAMPLE",          // AWS key
+		"y",                            // Configure cloud sync?
+		"postgres://user:pass@host/db", // Neon URL
+		"my-bucket",                    // S3 bucket
+		"us-east-1",                    // S3 region
+		"AKIAIOSFODNN7EXAMPLE",         // AWS key
 		"wJalrXUtnFEMI/K7MDENG/SECRET", // AWS secret
-		"y",                             // Proceed? (merge preview)
+		"pc_key_valid",                 // API key
+		"y",                            // Proceed? (merge preview)
 	}, "\n")
 
 	stdout := &bytes.Buffer{}
@@ -603,9 +729,21 @@ func TestRunSetupInteractiveMergePreviewDeclined(t *testing.T) {
 
 	mockAllCloudDeps(t)
 
+	origResolve := resolveUserIDFn
+	t.Cleanup(func() { resolveUserIDFn = origResolve })
+	resolveUserIDFn = func(_ context.Context, _ *pgxpool.Pool, rawKey string) (string, error) {
+		if rawKey != "pc_key_valid" {
+			t.Fatalf("expected API key pc_key_valid, got %q", rawKey)
+		}
+		return "validated-user-id", nil
+	}
+
 	origPostgresRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = origPostgresRepo })
-	newPostgresRepoFn = func(*pgxpool.Pool) (repository.Repository, error) {
+	newPostgresRepoFn = func(_ *pgxpool.Pool, userID string) (repository.Repository, error) {
+		if userID != "validated-user-id" {
+			t.Fatalf("expected validated user ID for preview repo, got %q", userID)
+		}
 		return &mockRepoWithSlideCount{count: 0}, nil
 	}
 
@@ -617,6 +755,7 @@ func TestRunSetupInteractiveMergePreviewDeclined(t *testing.T) {
 		"us-east-1",
 		"AKIAKEY",
 		"AKIASECRET",
+		"pc_key_valid",
 		"n", // Decline merge preview
 	}, "\n")
 
@@ -731,6 +870,31 @@ func TestRunSetupInteractiveEOFOnAWSSecret(t *testing.T) {
 	}
 }
 
+func TestRunSetupInteractiveEmptyAPIKeyFails(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	mockAllCloudDeps(t)
+
+	input := strings.Join([]string{
+		"y",
+		"postgres://user:pass@host/db",
+		"my-bucket",
+		"us-east-1",
+		"AKIAKEY",
+		"AKIASECRET",
+		"",
+	}, "\n")
+
+	err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader(input+"\n"), defaultSetupOpts())
+	if err == nil {
+		t.Fatal("expected error when interactive cloud setup API key is empty")
+	}
+	if !strings.Contains(err.Error(), "API key is required") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+}
+
 // --- runSetupRemoveCloud edge cases ---
 
 func TestRunSetupRemoveCloudConfigReadError(t *testing.T) {
@@ -829,7 +993,7 @@ func TestRunSetupCloudAWSProfileWriteError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
-		"", false,
+		"", false, "pc_key_valid",
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error when AWS profile write fails")
@@ -877,7 +1041,7 @@ func TestRunSetupCloudConfigWriteRollsBackAWSProfile(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
-		"", false,
+		"", false, "pc_key_valid",
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error when config write fails")
@@ -906,7 +1070,7 @@ func TestRunSetupCloudResolveUserHomeDirError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
-		"", false,
+		"", false, "pc_key_valid",
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error when resolveUserHomeDir fails")
@@ -935,7 +1099,7 @@ func TestRunSetupCloudExistingConfigReadError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
-		"", false,
+		"", false, "pc_key_valid",
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error when existing config is invalid")
@@ -956,14 +1120,14 @@ func TestRunSetupCloudInteractiveMergePreviewRepoError(t *testing.T) {
 
 	origPostgresRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = origPostgresRepo })
-	newPostgresRepoFn = func(*pgxpool.Pool) (repository.Repository, error) {
+	newPostgresRepoFn = func(*pgxpool.Pool, string) (repository.Repository, error) {
 		return nil, errors.New("repo failed")
 	}
 
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("y\n"),
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
-		"", false,
+		"", false, "pc_key_valid",
 		&mockRepo{}, true)
 	if err == nil {
 		t.Fatal("expected error when postgres repo creation fails in merge preview")
@@ -978,7 +1142,7 @@ func TestRunSetupCloudInteractiveLocalSlidesCountError(t *testing.T) {
 
 	origPostgresRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = origPostgresRepo })
-	newPostgresRepoFn = func(*pgxpool.Pool) (repository.Repository, error) {
+	newPostgresRepoFn = func(*pgxpool.Pool, string) (repository.Repository, error) {
 		return &mockRepo{}, nil
 	}
 
@@ -986,7 +1150,7 @@ func TestRunSetupCloudInteractiveLocalSlidesCountError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("y\n"),
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
-		"", false,
+		"", false, "pc_key_valid",
 		localRepo, true)
 	if err == nil {
 		t.Fatal("expected error when local slide count fails")
@@ -1004,7 +1168,7 @@ func TestRunSetupCloudInteractiveCloudSlidesCountError(t *testing.T) {
 
 	origPostgresRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = origPostgresRepo })
-	newPostgresRepoFn = func(*pgxpool.Pool) (repository.Repository, error) {
+	newPostgresRepoFn = func(*pgxpool.Pool, string) (repository.Repository, error) {
 		return &mockRepoWithListSlidesError{err: errors.New("cloud db error")}, nil
 	}
 
@@ -1013,7 +1177,7 @@ func TestRunSetupCloudInteractiveCloudSlidesCountError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("y\n"),
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
-		"", false,
+		"", false, "pc_key_valid",
 		localRepo, true)
 	if err == nil {
 		t.Fatal("expected error when cloud slide count fails")
@@ -1031,7 +1195,7 @@ func TestRunSetupCloudInteractiveConfirmReadError(t *testing.T) {
 
 	origPostgresRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = origPostgresRepo })
-	newPostgresRepoFn = func(*pgxpool.Pool) (repository.Repository, error) {
+	newPostgresRepoFn = func(*pgxpool.Pool, string) (repository.Repository, error) {
 		return &mockRepoWithSlideCount{count: 0}, nil
 	}
 
@@ -1045,7 +1209,7 @@ func TestRunSetupCloudInteractiveConfirmReadError(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader(""),
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
-		"", false,
+		"", false, "pc_key_valid",
 		localRepo, true)
 	if err == nil {
 		t.Fatal("expected error when confirmation prompt fails")
@@ -1062,7 +1226,7 @@ func TestRunSetupCloudEmptyAWSKey(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "   ", "SECRET",
-		"", false,
+		"", false, "pc_key_valid",
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error for empty AWS key")
@@ -1167,7 +1331,7 @@ func TestRunSetupCloudInvalidS3Bucket(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "A", "us-east-1", "KEY", "SECRET",
-		"", false,
+		"", false, "pc_key_valid",
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error for invalid S3 bucket")
@@ -1181,7 +1345,7 @@ func TestRunSetupCloudInvalidS3Region(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "invalid", "KEY", "SECRET",
-		"", false,
+		"", false, "pc_key_valid",
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error for invalid S3 region")
@@ -1195,10 +1359,84 @@ func TestRunSetupCloudEmptyAWSSecret(t *testing.T) {
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "   ",
-		"", false,
+		"", false, "pc_key_valid",
 		nil, false)
 	if err == nil {
 		t.Fatal("expected error for empty AWS secret")
+	}
+}
+
+func TestRunSetupCloudEmptyAPIKey(t *testing.T) {
+	homeDir := setupHomeWithConfig(t)
+	store, _ := config.NewStore(homeDir)
+
+	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
+		homeDir, store,
+		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
+		"", false, "   ",
+		nil, false)
+	if err == nil {
+		t.Fatal("expected error for empty API key")
+	}
+	if !strings.Contains(err.Error(), "API key is required") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+}
+
+func TestRunSetupCloudAPIKeyValidationError(t *testing.T) {
+	homeDir := setupHomeWithConfig(t)
+	store, _ := config.NewStore(homeDir)
+
+	mockAllCloudDeps(t)
+
+	origResolve := resolveUserIDFn
+	t.Cleanup(func() { resolveUserIDFn = origResolve })
+	resolveUserIDFn = func(context.Context, *pgxpool.Pool, string) (string, error) {
+		return "", errors.New("key not found")
+	}
+
+	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, nil,
+		homeDir, store,
+		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
+		"", false, "pc_key_invalid",
+		nil, false)
+	if err == nil {
+		t.Fatal("expected error for invalid API key")
+	}
+	if !strings.Contains(err.Error(), "validate API key") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+}
+
+func TestRunSetupCloudAPIKeyValidationSuccess(t *testing.T) {
+	homeDir := setupHomeWithConfig(t)
+	store, _ := config.NewStore(homeDir)
+
+	mockAllCloudDeps(t)
+
+	origResolve := resolveUserIDFn
+	t.Cleanup(func() { resolveUserIDFn = origResolve })
+	resolveUserIDFn = func(context.Context, *pgxpool.Pool, string) (string, error) {
+		return "validated-user-id", nil
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runSetupCloud(context.Background(), stdout, &bytes.Buffer{}, nil,
+		homeDir, store,
+		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
+		"", false, "pc_key_valid",
+		nil, false)
+	if err != nil {
+		t.Fatalf("runSetupCloud() error = %v", err)
+	}
+
+	// Verify API key was stored in config.
+	cfg, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if cfg.APIKey != "pc_key_valid" {
+		t.Fatalf("expected api_key %q, got %q", "pc_key_valid", cfg.APIKey)
 	}
 }
 
@@ -1212,6 +1450,7 @@ func fullCloudOpts() setupOptions {
 		S3Region:  "us-east-1",
 		AWSKey:    "AKIAIOSFODNN7EXAMPLE",
 		AWSSecret: "wJalrXUtnFEMI/K7MDENG/SECRET",
+		APIKey:    "pc_key_valid",
 	}
 }
 
@@ -1234,6 +1473,12 @@ func mockAllCloudDeps(t *testing.T) {
 	origPool := newPGXPoolFn
 	t.Cleanup(func() { newPGXPoolFn = origPool })
 	newPGXPoolFn = func(context.Context, string) (*pgxpool.Pool, error) { return nil, nil }
+
+	origResolveUserID := resolveUserIDFn
+	t.Cleanup(func() { resolveUserIDFn = origResolveUserID })
+	resolveUserIDFn = func(context.Context, *pgxpool.Pool, string) (string, error) {
+		return "validated-user-id", nil
+	}
 
 	origClose := closePGXPoolFn
 	t.Cleanup(func() { closePGXPoolFn = origClose })

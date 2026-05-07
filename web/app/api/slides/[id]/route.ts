@@ -10,6 +10,7 @@ import {
 import type { ErrorResponseBody } from "@/lib/api-error";
 import { isValidSlideId } from "@/lib/validation";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
+import { requireUser } from "@/lib/auth-helpers";
 import type { SlideDetail, SlideFile, DeleteResponse } from "@/lib/types";
 import { handlePatchSlide } from "@/lib/slides-handlers";
 
@@ -21,12 +22,16 @@ type RouteContext = { params: Promise<{ id: string }> };
  * Returns a single slide with its figures and data files.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: RouteContext
 ): Promise<NextResponse<{ slide: SlideDetail } | ErrorResponseBody> | Response> {
   if (isLocalMode()) {
-    return proxyToLocal(_req);
+    return proxyToLocal(req);
   }
+
+  const userOrError = await requireUser(req);
+  if (userOrError instanceof NextResponse) return userOrError;
+  const user = userOrError;
 
   try {
     const { id } = await context.params;
@@ -41,7 +46,7 @@ export async function GET(
       SELECT id, date, day_order, html_content, notes, project_id,
              git_remote_url, git_hash, created_at, updated_at, deleted_at
       FROM slides
-      WHERE id = ${id}
+      WHERE id = ${id} AND user_id = ${user.id}
     `) as Record<string, unknown>[];
 
     if (slideRows.length === 0) {
@@ -117,6 +122,10 @@ export async function PATCH(
     return proxyToLocal(req);
   }
 
+  const userOrError = await requireUser(req);
+  if (userOrError instanceof NextResponse) return userOrError;
+  const user = userOrError;
+
   try {
     const { id } = await context.params;
 
@@ -136,7 +145,7 @@ export async function PATCH(
       return badRequest("Invalid JSON body");
     }
 
-    return handlePatchSlide(id, body);
+    return handlePatchSlide(id, body, user.id);
   } catch (err) {
     console.error("PATCH /api/slides/[id] error:", err);
     return internalError("Failed to update slide");
@@ -150,12 +159,16 @@ export async function PATCH(
  * Bumps the S3 sync version after the Postgres write succeeds.
  */
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   context: RouteContext
 ): Promise<NextResponse<DeleteResponse | ErrorResponseBody> | Response> {
   if (isLocalMode()) {
-    return proxyToLocal(_req);
+    return proxyToLocal(req);
   }
+
+  const userOrError = await requireUser(req);
+  if (userOrError instanceof NextResponse) return userOrError;
+  const user = userOrError;
 
   try {
     const { id } = await context.params;
@@ -169,7 +182,7 @@ export async function DELETE(
     const rows = (await sql`
       UPDATE slides
       SET deleted_at = NOW()
-      WHERE id = ${id} AND deleted_at IS NULL
+      WHERE id = ${id} AND user_id = ${user.id} AND deleted_at IS NULL
       RETURNING id, deleted_at, updated_at
     `) as Record<string, unknown>[];
 
@@ -179,14 +192,14 @@ export async function DELETE(
 
     const row = rows[0];
 
-    const versionRows = (await sql`SELECT version, updated_at FROM sync_version LIMIT 1`) as {
+    const versionRows = (await sql`SELECT version, updated_at FROM sync_version WHERE user_id = ${user.id}`) as {
       version: number;
       updated_at: string;
     }[];
     const syncVersion = versionRows[0]?.version ?? 0;
     const syncUpdatedAt = versionRows[0]?.updated_at ?? new Date().toISOString();
     try {
-      await bumpS3Version(syncVersion, syncUpdatedAt);
+      await bumpS3Version(syncVersion, syncUpdatedAt, user.id);
     } catch (error) {
       console.error(
         "DELETE /api/slides/[id] S3 version bump failed after Postgres commit:",

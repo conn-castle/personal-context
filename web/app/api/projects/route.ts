@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { internalError } from "@/lib/api-error";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
+import { requireUser } from "@/lib/auth-helpers";
 import type { ProjectsResponse } from "@/lib/types";
 import type { ErrorResponseBody } from "@/lib/api-error";
 
@@ -11,19 +12,22 @@ import type { ErrorResponseBody } from "@/lib/api-error";
  * Returns distinct project IDs from non-deleted slides.
  */
 export async function GET(
-  _req: NextRequest
+  req: NextRequest
 ): Promise<NextResponse<ProjectsResponse | ErrorResponseBody> | Response> {
   if (isLocalMode()) {
-    return proxyToLocal(_req);
+    return proxyToLocal(req);
   }
 
+  const userOrError = await requireUser(req);
+  if (userOrError instanceof NextResponse) return userOrError;
+  const user = userOrError;
+
   try {
-    void _req;
     const sql = getDb();
     const rows = (await sql`
       SELECT DISTINCT project_id
       FROM slides
-      WHERE deleted_at IS NULL AND project_id IS NOT NULL
+      WHERE user_id = ${user.id} AND deleted_at IS NULL AND project_id IS NOT NULL
       ORDER BY project_id
     `) as Record<string, unknown>[];
 

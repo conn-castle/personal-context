@@ -1,5 +1,28 @@
+CREATE TABLE users (
+    id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+    email           TEXT NOT NULL UNIQUE,
+    name            TEXT,
+    password_hash   TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE api_keys (
+    id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    key_hash        TEXT NOT NULL UNIQUE,
+    label           TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at    TIMESTAMPTZ,
+    revoked_at      TIMESTAMPTZ
+);
+
+CREATE INDEX idx_api_keys_user ON api_keys (user_id);
+CREATE INDEX idx_api_keys_hash ON api_keys (key_hash) WHERE revoked_at IS NULL;
+
 CREATE TABLE slides (
     id              TEXT PRIMARY KEY CHECK (id ~ '^\d{8}-[0-9a-f]{8}$'),
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
     date            DATE NOT NULL,
     day_order       TEXT NOT NULL DEFAULT 'n',
     html_content    TEXT NOT NULL,
@@ -12,6 +35,7 @@ CREATE TABLE slides (
     deleted_at      TIMESTAMPTZ
 );
 
+CREATE INDEX idx_slides_user ON slides (user_id);
 CREATE INDEX idx_slides_date ON slides (date, day_order, id);
 CREATE INDEX idx_slides_project ON slides (project_id) WHERE project_id IS NOT NULL;
 CREATE INDEX idx_slides_updated ON slides (updated_at);
@@ -52,17 +76,29 @@ CREATE TABLE templates (
 );
 
 CREATE TABLE sync_version (
-    id              INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    user_id         TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     version         BIGINT NOT NULL DEFAULT 0,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO sync_version (version) VALUES (0);
-
 CREATE OR REPLACE FUNCTION bump_sync_version()
 RETURNS TRIGGER AS $$
+DECLARE
+    _user_id TEXT;
 BEGIN
-    UPDATE sync_version SET version = version + 1, updated_at = NOW() WHERE id = 1;
+    IF TG_TABLE_NAME = 'slides' THEN
+        _user_id := COALESCE(NEW.user_id, OLD.user_id);
+    ELSIF TG_TABLE_NAME IN ('slide_figures', 'slide_data_files') THEN
+        SELECT user_id INTO _user_id FROM slides WHERE id = COALESCE(NEW.slide_id, OLD.slide_id);
+    ELSIF TG_TABLE_NAME = 'templates' THEN
+        UPDATE sync_version SET version = version + 1, updated_at = NOW();
+        RETURN COALESCE(NEW, OLD);
+    END IF;
+    IF _user_id IS NOT NULL THEN
+        INSERT INTO sync_version (user_id, version, updated_at)
+        VALUES (_user_id, 1, NOW())
+        ON CONFLICT (user_id) DO UPDATE SET version = sync_version.version + 1, updated_at = NOW();
+    END IF;
     RETURN COALESCE(NEW, OLD);
 END;
 $$ LANGUAGE plpgsql;
@@ -158,6 +194,10 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER users_auto_updated_at
+    BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
 
 CREATE TRIGGER slides_auto_updated_at
     BEFORE UPDATE ON slides

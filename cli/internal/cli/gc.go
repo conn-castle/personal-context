@@ -57,7 +57,7 @@ func runGC(ctx context.Context, stdout io.Writer, stderr io.Writer) error {
 
 	// Open cloud stack if configured (hard-delete from cloud first to prevent sync re-creation).
 	var cloudRepo repository.Repository
-	cloud, cloudErr := openCloudStackFn(ctx, homeDir)
+	cloud, cloudErr := openCloudStackFn(ctx, homeDir, "")
 	switch {
 	case cloudErr == nil:
 		defer func() { _ = cloud.Close() }()

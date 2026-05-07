@@ -49,6 +49,35 @@ func TestRunFetchMultipleModeSelectors(t *testing.T) {
 	}
 }
 
+func TestNewFetchCommandParsesFlagsAndRunsFetch(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+	outputDir := t.TempDir()
+
+	proj := "org/proj"
+	mockCloudStackForFetch(t, &fetchMockConfig{
+		slidesByProject: map[string][]repository.Slide{
+			proj: {{ID: "s1", Date: "2025-01-01", ProjectID: &proj}},
+		},
+		dataFiles: map[string][]repository.SlideDataFile{
+			"s1": {{ID: 1, SlideID: "s1", Filename: "a.txt", S3Key: "data/s1/a.txt"}},
+		},
+		s3Data: map[string]string{"data/s1/a.txt": "alpha"},
+	})
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd := newFetchCommand(stdout, stderr)
+	cmd.SetArgs([]string{"--project", proj, "--output", outputDir})
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("ExecuteContext() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Downloaded 1 file(s)") {
+		t.Fatalf("stdout = %q, want download summary", stdout.String())
+	}
+}
+
 // --- Cloud not configured ---
 
 func TestRunFetchCloudNotConfigured(t *testing.T) {
@@ -57,7 +86,7 @@ func TestRunFetchCloudNotConfigured(t *testing.T) {
 
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return nil, errCloudNotConfigured
 	}
 
@@ -76,7 +105,7 @@ func TestRunFetchCloudOpenError(t *testing.T) {
 
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return nil, errors.New("connection failed")
 	}
 
@@ -529,7 +558,7 @@ func mockCloudStackForFetch(t *testing.T, cfg *fetchMockConfig) {
 
 	repo := &fetchMockRepo{cfg: cfg}
 
-	openCloudStackFn = func(_ context.Context, _ string) (*cloudStack, error) {
+	openCloudStackFn = func(_ context.Context, _, _ string) (*cloudStack, error) {
 		return &cloudStack{
 			Repo: repo,
 		}, nil

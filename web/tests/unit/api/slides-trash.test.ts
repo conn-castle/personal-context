@@ -5,6 +5,10 @@ const mockTransaction = vi.fn();
 const mockSql = Object.assign(vi.fn(), { transaction: mockTransaction });
 const mockBumpS3Version = vi.fn();
 const mockDeleteS3Objects = vi.fn();
+const { mockIsLocalMode, mockProxyToLocal } = vi.hoisted(() => ({
+  mockIsLocalMode: vi.fn(),
+  mockProxyToLocal: vi.fn(),
+}));
 vi.mock("@/lib/db", () => ({
   getDb: () => mockSql,
 }));
@@ -13,6 +17,15 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/s3", () => ({
   bumpS3Version: (...args: unknown[]) => mockBumpS3Version(...args),
   deleteS3Objects: (...args: unknown[]) => mockDeleteS3Objects(...args),
+}));
+
+vi.mock("@/lib/auth-helpers", () => ({
+  requireUser: vi.fn().mockResolvedValue({ id: "test-user-id", email: "test@test.com" }),
+}));
+
+vi.mock("@/lib/local-proxy", () => ({
+  isLocalMode: mockIsLocalMode,
+  proxyToLocal: mockProxyToLocal,
 }));
 
 import { DELETE } from "@/app/api/slides/trash/route";
@@ -48,6 +61,24 @@ describe("DELETE /api/slides/trash", () => {
     mockDeleteS3Objects.mockReset();
     mockBumpS3Version.mockResolvedValue(undefined);
     mockDeleteS3Objects.mockResolvedValue(undefined);
+    mockIsLocalMode.mockReset();
+    mockIsLocalMode.mockReturnValue(false);
+    mockProxyToLocal.mockReset();
+  });
+
+  it("proxies to the local backend in local mode", async () => {
+    const proxied = new Response("proxied", { status: 202 });
+    mockIsLocalMode.mockReturnValueOnce(true);
+    mockProxyToLocal.mockResolvedValueOnce(proxied);
+
+    const req = new NextRequest("http://localhost/api/slides/trash", {
+      method: "DELETE",
+    });
+    const res = await DELETE(req);
+
+    expect(res).toBe(proxied);
+    expect(mockProxyToLocal).toHaveBeenCalledWith(req);
+    expect(mockSql).not.toHaveBeenCalled();
   });
 
   it("purges trashed slides and returns count", async () => {
@@ -65,10 +96,11 @@ describe("DELETE /api/slides/trash", () => {
     const body = await res.json();
     expect(body.purged_count).toBe(2);
     expect(body.sync_version).toBe(5);
-    expect(mockDeleteS3Objects).toHaveBeenCalledWith(["fig1", "data1"]);
+    expect(mockDeleteS3Objects).toHaveBeenCalledWith(["fig1", "data1"], "test-user-id");
     expect(mockBumpS3Version).toHaveBeenCalledWith(
       5,
-      "2026-03-11T12:00:00.000Z"
+      "2026-03-11T12:00:00.000Z",
+      "test-user-id"
     );
   });
 
@@ -126,7 +158,8 @@ describe("DELETE /api/slides/trash", () => {
     expect(mockDeleteS3Objects).not.toHaveBeenCalled();
     expect(mockBumpS3Version).toHaveBeenCalledWith(
       7,
-      "2026-03-11T12:10:00.000Z"
+      "2026-03-11T12:10:00.000Z",
+      "test-user-id"
     );
   });
 

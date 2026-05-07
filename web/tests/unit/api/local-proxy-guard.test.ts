@@ -27,6 +27,10 @@ vi.mock("@/lib/s3", () => ({
   deleteS3Objects: vi.fn(),
 }));
 
+vi.mock("@/lib/auth-helpers", () => ({
+  requireUser: vi.fn().mockResolvedValue({ id: "test-user-id", email: "test@test.com" }),
+}));
+
 import { proxyToLocal } from "@/lib/local-proxy";
 import { GET as projectsGET } from "@/app/api/projects/route";
 import { GET as slidesGET } from "@/app/api/slides/route";

@@ -24,6 +24,27 @@ done
 
 errors=0
 
+# ─── Postgres-only exceptions ─────────────────────────────────────────────────
+# Tables, columns, and indexes that exist only in the Postgres schema (multi-user
+# auth support). SQLite is single-user (local mode) and has no equivalent.
+POSTGRES_ONLY_TABLES="api_keys users"
+POSTGRES_ONLY_COLUMNS_slides="user_id"
+POSTGRES_ONLY_COLUMNS_sync_version="user_id"
+SQLITE_ONLY_COLUMNS_sync_version="id"
+POSTGRES_ONLY_INDEXES="idx_api_keys_hash idx_api_keys_user idx_slides_user"
+
+# Helper: remove Postgres-only entries from a newline-separated list.
+filter_pg_only() {
+  local list="$1"
+  shift
+  local excludes=("$@")
+  local result="$list"
+  for ex in "${excludes[@]}"; do
+    result=$(echo "$result" | grep -vxF "$ex")
+  done
+  echo "$result"
+}
+
 # ─── Extract table names ───────────────────────────────────────────────────────
 # Matches: CREATE TABLE [IF NOT EXISTS] <name> (
 extract_tables() {
@@ -33,16 +54,20 @@ extract_tables() {
     | sort
 }
 
-pg_tables=$(extract_tables "$POSTGRES_SCHEMA")
+pg_tables_raw=$(extract_tables "$POSTGRES_SCHEMA")
 sq_tables=$(extract_tables "$SQLITE_SCHEMA")
+
+# Filter Postgres-only tables before comparison
+# shellcheck disable=SC2086
+pg_tables=$(filter_pg_only "$pg_tables_raw" $POSTGRES_ONLY_TABLES)
 
 if [[ "$pg_tables" != "$sq_tables" ]]; then
   echo "schema equivalence FAILED: table lists differ" >&2
-  echo "  Postgres: $(echo "$pg_tables" | tr '\n' ', ')" >&2
-  echo "  SQLite:   $(echo "$sq_tables" | tr '\n' ', ')" >&2
+  echo "  Postgres (filtered): $(echo "$pg_tables" | tr '\n' ', ')" >&2
+  echo "  SQLite:              $(echo "$sq_tables" | tr '\n' ', ')" >&2
   errors=$((errors + 1))
 else
-  echo "tables: OK ($(echo "$pg_tables" | wc -l | tr -d ' ') tables)"
+  echo "tables: OK ($(echo "$pg_tables" | wc -l | tr -d ' ') shared tables, $POSTGRES_ONLY_TABLES Postgres-only)"
 fi
 
 # ─── Extract columns per table ────────────────────────────────────────────────
@@ -107,14 +132,37 @@ for table in $pg_tables; do
   pg_cols=$(extract_columns "$POSTGRES_SCHEMA" "$table")
   sq_cols=$(extract_columns "$SQLITE_SCHEMA" "$table")
 
+  # Filter Postgres-only columns for this table
+  varname="POSTGRES_ONLY_COLUMNS_${table}"
+  pg_only_cols="${!varname:-}"
+  if [[ -n "$pg_only_cols" ]]; then
+    # shellcheck disable=SC2086
+    pg_cols=$(filter_pg_only "$pg_cols" $pg_only_cols)
+  fi
+
+  # Filter SQLite-only columns for this table
+  varname="SQLITE_ONLY_COLUMNS_${table}"
+  sq_only_cols="${!varname:-}"
+  if [[ -n "$sq_only_cols" ]]; then
+    # shellcheck disable=SC2086
+    sq_cols=$(filter_pg_only "$sq_cols" $sq_only_cols)
+  fi
+
   if [[ "$pg_cols" != "$sq_cols" ]]; then
     echo "schema equivalence FAILED: columns differ for table '$table'" >&2
-    echo "  Postgres: $(echo "$pg_cols" | tr '\n' ', ')" >&2
-    echo "  SQLite:   $(echo "$sq_cols" | tr '\n' ', ')" >&2
+    echo "  Postgres (filtered): $(echo "$pg_cols" | tr '\n' ', ')" >&2
+    echo "  SQLite (filtered):   $(echo "$sq_cols" | tr '\n' ', ')" >&2
     errors=$((errors + 1))
   else
     col_count=$(echo "$pg_cols" | wc -l | tr -d ' ')
-    echo "columns ($table): OK ($col_count columns)"
+    extra=""
+    if [[ -n "$pg_only_cols" ]]; then
+      extra=" (+$pg_only_cols Postgres-only)"
+    fi
+    if [[ -n "$sq_only_cols" ]]; then
+      extra="$extra (+$sq_only_cols SQLite-only)"
+    fi
+    echo "columns ($table): OK ($col_count shared columns$extra)"
   fi
 done
 
@@ -127,17 +175,22 @@ extract_indexes() {
     | sort
 }
 
-pg_indexes=$(extract_indexes "$POSTGRES_SCHEMA")
+pg_indexes_raw=$(extract_indexes "$POSTGRES_SCHEMA")
 sq_indexes=$(extract_indexes "$SQLITE_SCHEMA")
+
+# Filter Postgres-only indexes before comparison
+# shellcheck disable=SC2086
+pg_indexes=$(filter_pg_only "$pg_indexes_raw" $POSTGRES_ONLY_INDEXES)
 
 if [[ "$pg_indexes" != "$sq_indexes" ]]; then
   echo "schema equivalence FAILED: index lists differ" >&2
-  echo "  Postgres: $(echo "$pg_indexes" | tr '\n' ', ')" >&2
-  echo "  SQLite:   $(echo "$sq_indexes" | tr '\n' ', ')" >&2
+  echo "  Postgres (filtered): $(echo "$pg_indexes" | tr '\n' ', ')" >&2
+  echo "  SQLite:              $(echo "$sq_indexes" | tr '\n' ', ')" >&2
   errors=$((errors + 1))
 else
   idx_count=$(echo "$pg_indexes" | wc -l | tr -d ' ')
-  echo "indexes: OK ($idx_count indexes)"
+  pg_only_count=$(echo "$POSTGRES_ONLY_INDEXES" | wc -w | tr -d ' ')
+  echo "indexes: OK ($idx_count shared indexes, $pg_only_count Postgres-only)"
 fi
 
 # ─── Extract UNIQUE constraints ───────────────────────────────────────────────

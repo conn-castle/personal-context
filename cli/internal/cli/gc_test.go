@@ -33,7 +33,7 @@ func TestGCCloudNotConfiguredStillDeletesLocally(t *testing.T) {
 
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return nil, errCloudNotConfigured
 	}
 
@@ -72,7 +72,7 @@ func TestGCCloudUnreachableWarnsOnStderr(t *testing.T) {
 
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return nil, errors.New("connection refused")
 	}
 
@@ -116,7 +116,7 @@ func TestGCCloudDeletesFromCloudRepo(t *testing.T) {
 			return nil
 		},
 	}
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return &cloudStack{Repo: cloudMock}, nil
 	}
 
@@ -156,7 +156,7 @@ func TestGCCloudDeleteNotFoundIsIgnored(t *testing.T) {
 			return repository.ErrNotFound
 		},
 	}
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return &cloudStack{Repo: cloudMock}, nil
 	}
 
@@ -194,7 +194,7 @@ func TestGCCloudDeleteErrorSkipsSlide(t *testing.T) {
 			return errors.New("cloud db error")
 		},
 	}
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return &cloudStack{Repo: cloudMock}, nil
 	}
 
@@ -239,7 +239,7 @@ func TestGCAutoSyncCalledAfterDeletion(t *testing.T) {
 
 	origCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origCloud })
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return nil, errCloudNotConfigured
 	}
 

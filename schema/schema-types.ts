@@ -1,5 +1,5 @@
 // =============================================================================
-// Personal Context — Schema Types (v7)
+// Personal Context — Schema Types (v8)
 // =============================================================================
 //
 // TIMEZONE RULE: All timestamps are UTC (ISO 8601 with Z suffix).
@@ -15,11 +15,35 @@
 // Project uses slash convention for hierarchy: "org/project".
 
 // -----------------------------------------------------------------------------
-// Database row types (same schema for Postgres and SQLite)
+// Authentication types (Postgres only — no SQLite equivalent)
+// -----------------------------------------------------------------------------
+
+interface User {
+  id: string;                // UUID as text
+  email: string;
+  name: string | null;
+  password_hash: string;
+  created_at: string;        // ISO 8601 UTC
+  updated_at: string;        // ISO 8601 UTC
+}
+
+interface ApiKey {
+  id: string;                // UUID as text
+  user_id: string;           // FK to users.id
+  key_hash: string;          // SHA-256 hash of the raw key
+  label: string;             // user-provided description
+  created_at: string;        // ISO 8601 UTC
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+// -----------------------------------------------------------------------------
+// Database row types (shared schema — Postgres adds user_id on slides/sync_version)
 // -----------------------------------------------------------------------------
 
 interface Slide {
   id: string;                // "20250304-a3f2b7e1"
+  user_id?: string;          // Postgres only; absent in SQLite
   date: string;              // "2025-03-04" (local calendar date, no timezone)
   day_order: string;         // fractional index, lexicographic sort within date
   html_content: string;      // raw HTML
@@ -63,7 +87,8 @@ interface Template {
 }
 
 interface SyncVersion {
-  id: 1;                     // always 1, single-row table
+  id?: 1;                    // SQLite only: always 1 (singleton).
+  user_id?: string;          // Postgres only: per-user PK (FK to users.id)
   version: number;
   updated_at: string;        // ISO 8601 UTC
 }
@@ -137,12 +162,13 @@ interface DataFileExport {
 // ├── figures/{slide_id}/{filename}
 // └── data/{slide_id}/{filename}
 //
-// S3 bucket structure:
+// S3 bucket structure (user-scoped in cloud mode):
 //
 // s3://personal-context-prod/
-// ├── figures/{slide_id}/{filename}
-// ├── data/{slide_id}/{filename}
-// └── _version
+// └── users/{user_id}/
+//     ├── figures/{slide_id}/{filename}
+//     ├── data/{slide_id}/{filename}
+//     └── _version
 
 // -----------------------------------------------------------------------------
 // Example: slides/20250304-a3f2b7e1/metadata.json

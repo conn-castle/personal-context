@@ -123,7 +123,7 @@ func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, slideID string
 		return err
 	}
 
-	cloud, err := openCloudStackFn(ctx, homeDir)
+	cloud, err := openCloudStackFn(ctx, homeDir, "")
 	if err != nil {
 		if errors.Is(err, errCloudNotConfigured) {
 			return fmt.Errorf("cloud is not configured; run 'pc setup' first")

@@ -4,6 +4,7 @@ import { getPresignedUrl } from "@/lib/s3";
 import { invalidId, notFound, badRequest, internalError } from "@/lib/api-error";
 import { isValidSlideId, isValidFilename } from "@/lib/validation";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
+import { requireUser } from "@/lib/auth-helpers";
 import type { FileUrlResponse } from "@/lib/types";
 
 // Neon driver supports both tagged-template and function call forms.
@@ -34,12 +35,16 @@ const FILE_TYPE_TABLE: Record<FileType, string> = {
  * @returns Presigned URL and expiration, or an error.
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: RouteContext
 ): Promise<NextResponse | Response> {
   if (isLocalMode()) {
-    return proxyToLocal(_req);
+    return proxyToLocal(req);
   }
+
+  const userOrError = await requireUser(req);
+  if (userOrError instanceof NextResponse) return userOrError;
+  const user = userOrError;
 
   try {
     const { slideId, path } = await context.params;
@@ -85,9 +90,10 @@ export async function GET(
     }
 
     // Resolve the canonical storage key from the DB row.
+    // Join with slides to verify ownership.
     const rows = await sql(
-      `SELECT s3_key FROM ${table} WHERE slide_id = $1 AND filename = $2`,
-      [slideId, filename]
+      `SELECT f.s3_key FROM ${table} f JOIN slides s ON s.id = f.slide_id WHERE f.slide_id = $1 AND f.filename = $2 AND s.user_id = $3`,
+      [slideId, filename, user.id]
     );
 
     if (rows.length === 0) {
@@ -96,7 +102,7 @@ export async function GET(
 
     // Generate presigned URL
     const s3Key = rows[0].s3_key as string;
-    const { url, expires_at } = await getPresignedUrl(s3Key);
+    const { url, expires_at } = await getPresignedUrl(s3Key, user.id);
 
     const response: FileUrlResponse = { url, expires_at };
     return NextResponse.json(response);

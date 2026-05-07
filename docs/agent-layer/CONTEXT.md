@@ -26,7 +26,7 @@ Do not duplicate information that belongs in other memory files:
 
 <!-- ENTRIES START -->
 
-> **Status:** Phase 9 (web UI integration) is complete. Phase 10 (Deployment, CI/CD, and Integration Testing) is next. See ROADMAP.md.
+> **Status:** Phase 10 (Authentication & Multi-User) is complete. See ROADMAP.md.
 
 ## Project Overview
 
@@ -67,18 +67,20 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 
 ### Source of Truth
 - **Cloud configured**: Neon Postgres + S3 is cloud source of truth. Web UI reads/writes here via Next.js API routes.
-- **Local dev mode** (`pc serve`): Go HTTP server implements the same REST API using local SQLite + filesystem. Next.js API routes proxy to Go when `LOCAL_BACKEND_URL` is set. Web UI works identically in both modes.
+- **Local dev mode** (`pc serve`): Go HTTP server implements the same REST API using local SQLite + filesystem. Next.js API routes proxy to Go when `LOCAL_BACKEND_URL` is set. Local mode is single-user and intentionally disables `/login`, `/register`, and `/api/auth/*`.
 - **Local-only mode** (CLI only): Local SQLite + local files. No web UI.
 
-## Data Model (5 Tables)
+## Data Model (7 Tables)
 
 | Table | PK | Purpose |
 |-------|-----|---------|
-| `slides` | `id` TEXT (`YYYYMMDD-8hex`) | HTML content, notes, project_id, git_remote_url, git_hash, date, day_order, soft delete |
+| `users` | `id` TEXT (UUID) | User accounts: email, name, password_hash. Postgres only. |
+| `api_keys` | `id` TEXT (UUID) | CLI auth keys: user_id FK, key_hash (SHA-256), label, last_used_at, revoked_at. Postgres only. |
+| `slides` | `id` TEXT (`YYYYMMDD-8hex`) | HTML content, notes, project_id, git_remote_url, git_hash, date, day_order, user_id (Postgres), soft delete |
 | `slide_figures` | `id` auto-increment | Image refs: filename, s3_key, alt_text. FK -> slides CASCADE |
 | `slide_data_files` | `id` auto-increment | Data file refs: filename, s3_key, size, SHA-256 hash, description. FK -> slides CASCADE |
 | `templates` | `name` TEXT | HTML templates for slide creation. Hardcoded, seeded by `pc setup` |
-| `sync_version` | `id` (always 1) | Single-row version counter, auto-incremented by triggers |
+| `sync_version` | `user_id` TEXT (Postgres) / `id` (SQLite) | Per-user version counter (Postgres), singleton (SQLite). Auto-incremented by triggers |
 
 ### Key Fields and Invariants
 - **Slide ID**: `{YYYYMMDD}-{8-random-hex}` from `crypto/rand` (e.g., `20250304-a3f2b7e1`). Date prefix matches the slide's `date` field (UTC-normalized).
@@ -164,7 +166,7 @@ On version change: query Neon for slides with `updated_at >= last_known_timestam
 ```
 ~/personal-context/
 ├── .pc/
-│   ├── config.json           # Neon URL, S3 bucket/region, aws_profile name, active project, optional s3_endpoint/s3_force_path_style (0600, no AWS keys). Cloud mode detected by presence of neon_url + aws_profile.
+│   ├── config.json           # Neon URL, S3 bucket/region, aws_profile name, active project, api_key, optional s3_endpoint/s3_force_path_style (0600, no AWS keys). Cloud mode detected by presence of neon_url + aws_profile.
 │   ├── pc.db                 # local SQLite
 │   ├── last_sync             # timestamp of last cloud sync
 │   └── sync.lock             # file lock for concurrent sync prevention
@@ -175,9 +177,10 @@ On version change: query Neon for slides with `updated_at >= last_known_timestam
 ### S3
 ```
 s3://personal-context-prod/
-├── figures/{slide_id}/{filename}
-├── data/{slide_id}/{filename}
-└── _version                    # sync heartbeat
+└── users/{user_id}/
+    ├── figures/{slide_id}/{filename}
+    ├── data/{slide_id}/{filename}
+    └── _version                # per-user sync heartbeat
 ```
 
 ### Git Export
@@ -204,6 +207,37 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 | Storage (cloud) | AWS S3 (Intelligent-Tiering, us-east-1). Presigned URLs for web downloads |
 | Storage (local) | Local filesystem |
 | Backup | GitHub nightly export + Git LFS |
+
+## Authentication & Multi-User
+
+### Two Operational Modes
+1. **Local only** — CLI + SQLite, no auth, no `user_id`. `pc serve` + Next.js with `LOCAL_BACKEND_URL`.
+2. **Web (cloud)** — Auth.js v5 (Credentials provider), per-user data isolation. JWT sessions (90-day maxAge, no DB hit per request).
+
+### Auth Flow
+- **Web UI**: Auth.js Credentials provider → email/password → JWT session.
+- **CLI**: API keys (`pc_key_<uuid>`) stored in `config.json`. SHA-256 hash stored in `api_keys` table. CLI resolves `user_id` via `resolveUserIDFromAPIKey` → queries `api_keys WHERE key_hash = $1 AND revoked_at IS NULL`.
+- **API routes**: `requireUser(req)` checks Bearer token first (API key auth for CLI), then falls back to Auth.js session (web UI). Returns `{ id, email }` or 401.
+- **Local mode**: `isLocalMode()` returns true → proxy to Go server → no auth check.
+
+### Per-User Data Isolation
+- `slides.user_id` FK → `users.id` (Postgres only). SQLite has no `user_id` column.
+- `sync_version` scoped per-user (PK = `user_id`).
+- S3 keys prefixed with `users/{user_id}/` at call site. `s3_key` column unchanged in DB.
+- All API routes and repository queries filter by `user_id`.
+
+### Auth Database
+- `users` table: `id`, `email`, `name`, `password_hash`, `created_at`, `updated_at`.
+- `api_keys` table: `id`, `user_id`, `key_hash` (SHA-256), `label`, `created_at`, `last_used_at`, `revoked_at`.
+- Auth queries use standard `pg` Pool (`web/lib/db-pool.ts`), NOT `@neondatabase/serverless`. Zero Neon lock-in for auth.
+- Fresh cloud databases are bootstrapped with `pc setup --init-cloud-schema --neon-url=...` before the first web registration/API-key flow.
+
+### Auth Endpoints
+- `POST /api/register` — creates user (gated by `REGISTRATION_ENABLED` env var).
+- `GET/POST /api/auth/[...nextauth]` — Auth.js route handler.
+- `GET /api/api-keys` — list keys for authenticated user.
+- `POST /api/api-keys` — create key (returns raw key once).
+- `DELETE /api/api-keys/[id]` — revoke key.
 
 ### Go Repository Pattern
 - `Repository` interface with separate SQLite and Postgres implementations.
@@ -391,7 +425,13 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `GET /api/info` — application mode and version
 - `GET /api/stats` — total slides, total projects, trashed slide count
 - `DELETE /api/slides/trash` — bulk purge all soft-deleted slides
+- `POST /api/register` — create user account (gated by `REGISTRATION_ENABLED`)
+- `GET/POST /api/auth/[...nextauth]` — Auth.js route handler
+- `GET /api/api-keys` — list API keys for authenticated user
+- `POST /api/api-keys` — create API key
+- `DELETE /api/api-keys/[id]` — revoke API key
 - No slide creation endpoint (CLI only)
+- All data routes require authentication (Bearer token or session). Local mode bypasses auth.
 
 ### API payload shapes
 

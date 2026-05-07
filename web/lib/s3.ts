@@ -6,6 +6,16 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
+/**
+ * Returns the per-user S3 key prefix.
+ *
+ * @param userId - The authenticated user's ID.
+ * @returns The prefix string (e.g. "users/{userId}/").
+ */
+function userPrefix(userId: string): string {
+  return `users/${userId}/`;
+}
+
 const VERSION_KEY = "_version";
 const DEFAULT_PRESIGN_EXPIRY_SECONDS = 3600;
 const S3_VERSION_RETRY_COUNT = 3;
@@ -88,12 +98,14 @@ function getConfiguredPresignExpirySeconds(): number {
 /**
  * Generates a presigned GET URL for an S3 object.
  *
- * @param s3Key - The S3 object key.
+ * @param s3Key - The S3 object key (without user prefix).
+ * @param userId - The user ID for per-user namespacing.
  * @param expirySeconds - URL expiration in seconds (default 3600).
  * @returns Presigned URL and expiration timestamp.
  */
 export async function getPresignedUrl(
   s3Key: string,
+  userId: string,
   expirySeconds?: number
 ): Promise<{ url: string; expires_at: string }> {
   const client = getS3Client();
@@ -101,7 +113,8 @@ export async function getPresignedUrl(
   const resolvedExpirySeconds =
     expirySeconds ?? getConfiguredPresignExpirySeconds();
 
-  const command = new GetObjectCommand({ Bucket: bucket, Key: s3Key });
+  const fullKey = `${userPrefix(userId)}${s3Key}`;
+  const command = new GetObjectCommand({ Bucket: bucket, Key: fullKey });
   const url = await getSignedUrl(client, command, {
     expiresIn: resolvedExpirySeconds,
   });
@@ -116,17 +129,19 @@ export async function getPresignedUrl(
  * Reads the sync version from S3 `_version` key.
  * Returns version 0 if the key does not exist (Decision b3c4d5p).
  *
+ * @param userId - The user ID for per-user namespacing.
  * @returns The current version and its updated_at timestamp.
  */
-export async function getS3Version(): Promise<{
+export async function getS3Version(userId: string): Promise<{
   version: number;
   updated_at: string;
 }> {
   const client = getS3Client();
   const bucket = getS3Bucket();
+  const fullKey = `${userPrefix(userId)}${VERSION_KEY}`;
 
   try {
-    const command = new GetObjectCommand({ Bucket: bucket, Key: VERSION_KEY });
+    const command = new GetObjectCommand({ Bucket: bucket, Key: fullKey });
     const response = await client.send(command);
     const body = await response.Body?.transformToString();
     if (!body) return { version: 0, updated_at: "" };
@@ -157,14 +172,17 @@ export async function getS3Version(): Promise<{
  *
  * @param version - The version number to write.
  * @param updatedAt - The DB timestamp to use as updated_at (avoids clock divergence with Postgres).
+ * @param userId - The user ID for per-user namespacing.
  * @throws After all retry attempts fail.
  */
 export async function bumpS3Version(
   version: number,
-  updatedAt: string
+  updatedAt: string,
+  userId: string
 ): Promise<void> {
   const client = getS3Client();
   const bucket = getS3Bucket();
+  const fullKey = `${userPrefix(userId)}${VERSION_KEY}`;
   const body = JSON.stringify({
     version,
     updated_at: updatedAt,
@@ -175,7 +193,7 @@ export async function bumpS3Version(
     try {
       const command = new PutObjectCommand({
         Bucket: bucket,
-        Key: VERSION_KEY,
+        Key: fullKey,
         Body: body,
         ContentType: "application/json",
       });
@@ -199,22 +217,24 @@ export async function bumpS3Version(
  * Uses the DeleteObjects API which supports up to 1000 keys per call.
  * Keys are batched automatically if the count exceeds the API limit.
  *
- * @param keys - The S3 object keys to delete.
+ * @param keys - The S3 object keys to delete (without user prefix).
+ * @param userId - The user ID for per-user namespacing.
  * @throws If the S3 DeleteObjects call fails.
  */
-export async function deleteS3Objects(keys: string[]): Promise<void> {
+export async function deleteS3Objects(keys: string[], userId: string): Promise<void> {
   if (keys.length === 0) return;
 
   const client = getS3Client();
   const bucket = getS3Bucket();
   const BATCH_SIZE = 1000;
+  const prefix = userPrefix(userId);
 
   for (let i = 0; i < keys.length; i += BATCH_SIZE) {
     const batch = keys.slice(i, i + BATCH_SIZE);
     const command = new DeleteObjectsCommand({
       Bucket: bucket,
       Delete: {
-        Objects: batch.map((key) => ({ Key: key })),
+        Objects: batch.map((key) => ({ Key: `${prefix}${key}` })),
         Quiet: true,
       },
     });

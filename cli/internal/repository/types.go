@@ -5,6 +5,7 @@ import "time"
 // Slide is a row from the slides table.
 type Slide struct {
 	ID           string
+	UserID       string // Postgres only; empty in SQLite (local mode)
 	Date         string
 	DayOrder     string
 	HTMLContent  string
@@ -48,9 +49,11 @@ type Template struct {
 	UpdatedAt   time.Time
 }
 
-// SyncVersion is the single row from sync_version.
+// SyncVersion is a row from sync_version.
+// SQLite: singleton (id=1). Postgres: per-user (user_id is PK).
 type SyncVersion struct {
-	ID        int
+	ID        int    // SQLite: always 1. Postgres: unused (0).
+	UserID    string // Postgres: user_id PK. SQLite: empty.
 	Version   int64
 	UpdatedAt time.Time
 }
