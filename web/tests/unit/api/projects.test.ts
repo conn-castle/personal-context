@@ -63,10 +63,10 @@ describe("GET /api/projects", () => {
     expect(mockSql).not.toHaveBeenCalled();
   });
 
-  it("returns distinct project IDs", async () => {
+  it("returns active registry project IDs", async () => {
     mockSql.mockResolvedValue([
-      { project_id: "org/alpha" },
-      { project_id: "org/beta" },
+      { id: "org/alpha" },
+      { id: "org/beta" },
     ]);
 
     const req = new NextRequest("http://localhost/api/projects");
@@ -77,8 +77,8 @@ describe("GET /api/projects", () => {
     expect(body.projects).toEqual(["org/alpha", "org/beta"]);
   });
 
-  it("excludes deleted slides from project list", async () => {
-    mockSql.mockResolvedValue([{ project_id: "org/active" }]);
+  it("lists projects from the registry instead of slide rows", async () => {
+    mockSql.mockResolvedValue([{ id: "org/active" }]);
 
     const req = new NextRequest("http://localhost/api/projects");
     const res = await GET(req);
@@ -87,12 +87,12 @@ describe("GET /api/projects", () => {
     const body = await res.json();
     expect(body.projects).toEqual(["org/active"]);
 
-    // Verify the SQL query filters deleted_at IS NULL
     const callArgs = mockSql.mock.calls[0];
-    // Tagged template: first arg is TemplateStringsArray
     const queryParts = callArgs[0] as TemplateStringsArray;
     const fullQuery = queryParts.join("");
-    expect(fullQuery).toContain("deleted_at IS NULL");
+    expect(fullQuery).toContain("FROM projects");
+    expect(fullQuery).toContain("archived_at IS NULL");
+    expect(fullQuery).not.toContain("FROM slides");
   });
 
   it("returns empty array when no projects exist", async () => {

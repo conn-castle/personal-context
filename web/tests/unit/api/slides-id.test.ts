@@ -40,6 +40,8 @@ describe("GET /api/slides/[id]", () => {
       html_content: "<p>hello</p>",
       notes: "some notes",
       project_id: "org/proj",
+      source_device_id: "device-a",
+      source_ref: "vault://record",
       git_remote_url: "https://github.com/org/repo",
       git_hash: "a".repeat(40),
       created_at: "2026-03-01T10:00:00.000Z",
@@ -81,6 +83,8 @@ describe("GET /api/slides/[id]", () => {
     const body = await res.json();
     expect(body.slide.id).toBe("20260301-aabbccdd");
     expect(body.slide.html_content).toBe("<p>hello</p>");
+    expect(body.slide.source_device_id).toBe("device-a");
+    expect(body.slide.source_ref).toBe("vault://record");
     expect(body.slide.figures).toHaveLength(1);
     expect(body.slide.figures[0].filename).toBe("chart.png");
     expect(body.slide.data_files).toHaveLength(1);
@@ -96,7 +100,9 @@ describe("GET /api/slides/[id]", () => {
       day_order: "a0",
       html_content: "<p>hello</p>",
       notes: null,
-      project_id: null,
+      project_id: "org/proj",
+      source_device_id: "device-a",
+      source_ref: null,
       git_remote_url: null,
       git_hash: null,
       created_at: "2026-03-01T10:00:00.000Z",
@@ -141,6 +147,39 @@ describe("GET /api/slides/[id]", () => {
     expect(body.slide.data_files[0].size).toBeUndefined();
     expect(body.slide.data_files[0].hash).toBeUndefined();
     expect(body.slide.data_files[0].alt_text).toBeUndefined();
+  });
+
+  it("returns null HTML for notes/data-only records", async () => {
+    const slideRow = {
+      id: "20260301-aabbccdd",
+      date: "2026-03-01",
+      day_order: "a0",
+      html_content: null,
+      notes: "notes-first record",
+      project_id: "org/proj",
+      source_device_id: "device-a",
+      source_ref: null,
+      git_remote_url: null,
+      git_hash: null,
+      created_at: "2026-03-01T10:00:00.000Z",
+      updated_at: "2026-03-01T14:00:00.000Z",
+      deleted_at: null,
+    };
+
+    mockSql
+      .mockResolvedValueOnce([slideRow])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+
+    const req = new NextRequest(
+      "http://localhost/api/slides/20260301-aabbccdd"
+    );
+    const res = await GET(req, makeContext("20260301-aabbccdd"));
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.slide.html_content).toBeNull();
+    expect(body.slide.source_device_id).toBe("device-a");
   });
 
   it("returns 404 for nonexistent slide ID", async () => {

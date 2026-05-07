@@ -70,13 +70,15 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - **Local dev mode** (`pc serve`): Go HTTP server implements the same REST API using local SQLite + filesystem. Next.js API routes proxy to Go when `LOCAL_BACKEND_URL` is set. Local mode is single-user and intentionally disables `/login`, `/register`, and `/api/auth/*`.
 - **Local-only mode** (CLI only): Local SQLite + local files. No web UI.
 
-## Data Model (7 Tables)
+## Data Model (9 Tables)
 
 | Table | PK | Purpose |
 |-------|-----|---------|
 | `users` | `id` TEXT (UUID) | User accounts: email, name, password_hash. Postgres only. |
 | `api_keys` | `id` TEXT (UUID) | CLI auth keys: user_id FK, key_hash (SHA-256), label, last_used_at, revoked_at. Postgres only. |
-| `slides` | `id` TEXT (`YYYYMMDD-8hex`) | HTML content, notes, project_id, git_remote_url, git_hash, date, day_order, user_id (Postgres), soft delete |
+| `projects` | `id` TEXT (`user_id`, `id` in Postgres) | Project registry with archived state. |
+| `devices` | `id` TEXT (`user_id`, `id` in Postgres) | Source-device registry with archived state. |
+| `slides` | `id` TEXT (`YYYYMMDD-8hex`) | Optional HTML content, notes, project_id, source_device_id, source_ref, git fields, date, day_order, user_id (Postgres), soft delete |
 | `slide_figures` | `id` auto-increment | Image refs: filename, s3_key, alt_text. FK -> slides CASCADE |
 | `slide_data_files` | `id` auto-increment | Data file refs: filename, s3_key, size, SHA-256 hash, description. FK -> slides CASCADE |
 | `templates` | `name` TEXT | HTML templates for slide creation. Hardcoded, seeded by `pc setup` |
@@ -86,7 +88,10 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - **Slide ID**: `{YYYYMMDD}-{8-random-hex}` from `crypto/rand` (e.g., `20250304-a3f2b7e1`). Date prefix matches the slide's `date` field (UTC-normalized).
 - **Sort key**: `ORDER BY (date, day_order, id)` — always deterministic.
 - **day_order**: Fractional index string (Figma's algorithm, safe characters only). Lexicographic sort. Reordering updates only the moved slide.
-- **project_id**: Slash-convention string (e.g., `"happy-ai/sleep-staging"`). No project table in MVP.
+- **project_id**: Required slash-convention string (e.g., `"happy-ai/sleep-staging"`) that references a non-archived project registry row for new writes.
+- **source_device_id**: Required source-device registry ID for record provenance; new writes reject archived or missing devices.
+- **source_ref**: Optional opaque provenance string. Do not URI-validate it in the first pass.
+- **html_content**: Optional. `NULL` means `slide.html` was absent and the web UI renders a notes/data-only state instead of an iframe. Empty or whitespace-only `slide.html` remains a non-null string.
 - **s3_key**: Canonical relative path (e.g., `figures/20250304-a3f2b7e1/loss-curve.png`). Same value for both S3 and local filesystem, regardless of mode.
 - **git_remote_url**: Optional. Git remote URL (e.g., `https://github.com/org/repo`). Set via `metadata.json` only — no CLI flags. Displayed as clickable link in web UI.
 - **git_hash**: Optional. Full 40-character SHA-1 commit hash. Set via `metadata.json` only. In web UI, linkable to `{git_remote_url}/commit/{git_hash}` when both present.
@@ -424,9 +429,9 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `GET /api/sync/changes?since=<ISO>` — changed slides
 - `GET /api/files/[slide_id]/data/[filename]` — presigned download URL
 - `GET /api/files/[slide_id]/figures/[filename]` — presigned figure URL
-- `GET /api/projects` — distinct project_ids
+- `GET /api/projects` — active registry project IDs
 - `GET /api/info` — application mode and version
-- `GET /api/stats` — total slides, total projects, trashed slide count
+- `GET /api/stats` — total active slides, active registry projects, trashed slide count
 - `DELETE /api/slides/trash` — bulk purge all soft-deleted slides
 - `POST /api/register` — create user account (gated by `REGISTRATION_ENABLED`)
 - `GET/POST /api/auth/[...nextauth]` — Auth.js route handler
@@ -514,7 +519,7 @@ type SlideDetail = {
   - Request:
     ```ts
     {
-      project_id?: string | null;
+      project_id?: string;
       notes?: string | null;
       git_remote_url?: string | null;
       git_hash?: string | null;

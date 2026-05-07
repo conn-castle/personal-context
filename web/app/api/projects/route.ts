@@ -9,7 +9,7 @@ import type { ErrorResponseBody } from "@/lib/api-error";
 /**
  * GET /api/projects
  *
- * Returns distinct project IDs from non-deleted slides.
+ * Returns active project IDs from the registry.
  */
 export async function GET(
   req: NextRequest
@@ -25,13 +25,13 @@ export async function GET(
   try {
     const sql = getDb();
     const rows = (await sql`
-      SELECT DISTINCT project_id
-      FROM slides
-      WHERE user_id = ${user.id} AND deleted_at IS NULL AND project_id IS NOT NULL
-      ORDER BY project_id
+      SELECT id
+      FROM projects
+      WHERE user_id = ${user.id} AND archived_at IS NULL
+      ORDER BY id
     `) as Record<string, unknown>[];
 
-    const projects = rows.map((row) => row.project_id as string);
+    const projects = rows.map((row) => row.id as string);
 
     return NextResponse.json({ projects });
   } catch (err) {

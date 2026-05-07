@@ -22,7 +22,9 @@ describe("GET /api/slides", () => {
     date: "2025-03-04",
     day_order: "a0",
     html_content: "<p>Test content</p>",
-    project_id: null,
+    project_id: "org/proj",
+    source_device_id: "device-a",
+    source_ref: null,
     updated_at: "2025-03-04T10:00:00.000Z",
     deleted_at: null,
     figure_count: 2,
@@ -145,6 +147,27 @@ describe("GET /api/slides", () => {
     const body = await res.json();
     expect(body.items).toHaveLength(1);
     expect(body.items[0].project_id).toBe("org/alpha");
+  });
+
+  it("returns nullable HTML and source metadata", async () => {
+    mockSql.mockResolvedValue([
+      makeSlideSummary({
+        html_content: null,
+        project_id: "org/alpha",
+        source_device_id: "laptop",
+        source_ref: "obsidian://daily-note",
+      }),
+    ]);
+
+    const req = new NextRequest("http://localhost/api/slides");
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items[0].html_content).toBeNull();
+    expect(body.items[0].project_id).toBe("org/alpha");
+    expect(body.items[0].source_device_id).toBe("laptop");
+    expect(body.items[0].source_ref).toBe("obsidian://daily-note");
   });
 
   it("filters deleted slides when deleted=true", async () => {

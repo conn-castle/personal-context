@@ -390,19 +390,11 @@ func validatePatchBody(body map[string]any) (map[string]any, string) {
 	normalized := make(map[string]any, len(body))
 
 	if value, ok := body["project_id"]; ok {
-		if value == nil {
-			normalized["project_id"] = nil
-		} else {
-			projectID, ok := value.(string)
-			if !ok {
-				return nil, "project_id must be a string or null"
-			}
-			if projectID == "" {
-				normalized["project_id"] = nil
-			} else {
-				normalized["project_id"] = projectID
-			}
+		projectID, ok := value.(string)
+		if !ok || strings.TrimSpace(projectID) == "" {
+			return nil, "project_id must be a non-empty string"
 		}
+		normalized["project_id"] = projectID
 	}
 
 	if value, ok := body["notes"]; ok {
@@ -1120,15 +1112,17 @@ func (s *Server) handleReorderSlide(w http.ResponseWriter, r *http.Request) {
 
 	// Update via read-then-merge
 	updateInput := repository.UpdateSlideInput{
-		ID:           existing.ID,
-		Date:         targetDate,
-		DayOrder:     newOrder,
-		HTMLContent:  existing.HTMLContent,
-		Notes:        existing.Notes,
-		ProjectID:    existing.ProjectID,
-		GitRemoteURL: existing.GitRemoteURL,
-		GitHash:      existing.GitHash,
-		DeletedAt:    existing.DeletedAt,
+		ID:             existing.ID,
+		Date:           targetDate,
+		DayOrder:       newOrder,
+		HTMLContent:    existing.HTMLContent,
+		Notes:          existing.Notes,
+		ProjectID:      existing.ProjectID,
+		SourceDeviceID: existing.SourceDeviceID,
+		SourceRef:      existing.SourceRef,
+		GitRemoteURL:   existing.GitRemoteURL,
+		GitHash:        existing.GitHash,
+		DeletedAt:      existing.DeletedAt,
 	}
 
 	updated, err := s.repo.UpdateSlide(ctx, updateInput)

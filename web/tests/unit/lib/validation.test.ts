@@ -161,20 +161,16 @@ describe("validateSlideUpdateInput", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("accepts null project_id", () => {
+  it("rejects null project_id", () => {
     const result = validateSlideUpdateInput({ project_id: null });
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
   });
 
-  it("normalizes empty string project_id to null in returned data", () => {
+  it("rejects empty string project_id", () => {
     const body: Record<string, unknown> = { project_id: "" };
     const result = validateSlideUpdateInput(body);
-    expect(result.valid).toBe(true);
-    if (result.valid) {
-      expect(result.data.project_id).toBeNull();
-      // Original body must not be mutated
-      expect(body.project_id).toBe("");
-    }
+    expect(result.valid).toBe(false);
+    expect(body.project_id).toBe("");
   });
 
   it("rejects non-string project_id", () => {

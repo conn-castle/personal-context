@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils";
 import type { SlideSummary } from "@/lib/types";
 import { ScaledSlideFrame } from "@/components/scaled-slide-frame";
-import { Image as ImageIcon, FileDown } from "lucide-react";
+import { FileDown, FileText, Image as ImageIcon } from "lucide-react";
 
 interface SlideThumbnailProps {
   slide: SlideSummary;
@@ -30,11 +30,17 @@ export function SlideThumbnail({
     >
       {/* 16:9 aspect ratio container */}
       <div className="relative aspect-video bg-slide-bg rounded-md overflow-hidden">
-        {/* Slide preview using ScaledSlideFrame */}
-        <ScaledSlideFrame
-          htmlContent={slide.html_content}
-          className="pointer-events-none"
-        />
+        {slide.html_content === null ? (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-muted/40 text-muted-foreground">
+            <FileText className="h-5 w-5" />
+            <span className="text-[11px] font-medium">Notes/data</span>
+          </div>
+        ) : (
+          <ScaledSlideFrame
+            htmlContent={slide.html_content}
+            className="pointer-events-none"
+          />
+        )}
 
         {/* Indicators */}
         <div className="absolute bottom-1 right-1 flex gap-1">

@@ -47,7 +47,8 @@ export async function GET(
     const serverNow = serverNowResult[0].server_now as string;
 
     const items = (await sql.query(
-      `SELECT s.id, s.date, s.day_order, s.html_content, s.project_id, s.updated_at, s.deleted_at,
+      `SELECT s.id, s.date, s.day_order, s.html_content, s.project_id,
+           s.source_device_id, s.source_ref, s.updated_at, s.deleted_at,
            COALESCE(fc.figure_count, 0) AS figure_count,
            COALESCE(dc.data_file_count, 0) AS data_file_count
          FROM slides s
@@ -70,8 +71,10 @@ export async function GET(
       id: row.id as string,
       date: row.date as string,
       day_order: row.day_order as string,
-      html_content: row.html_content as string,
-      project_id: (row.project_id as string | null) ?? null,
+      html_content: (row.html_content as string | null) ?? null,
+      project_id: row.project_id as string,
+      source_device_id: row.source_device_id as string,
+      source_ref: (row.source_ref as string | null) ?? null,
       updated_at: row.updated_at as string,
       deleted_at: (row.deleted_at as string | null) ?? null,
       figure_count: Number(row.figure_count),

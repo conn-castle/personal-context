@@ -29,7 +29,9 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     day_order: "a0",
     html_content: "<p>Hello</p>",
     notes: null,
-    project_id: null,
+    project_id: "org/proj",
+    source_device_id: "device-a",
+    source_ref: null,
     git_remote_url: null,
     git_hash: null,
     created_at: "2025-03-04T08:00:00.000Z",
@@ -76,8 +78,26 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.slide.project_id).toBe("org/alpha");
+    expect(body.slide.source_device_id).toBe("device-a");
     expect(body.sync_version).toBe(5);
     expect(mockBumpS3Version).toHaveBeenCalledWith(5, "2025-03-04T10:00:00.000Z", "test-user-id");
+  });
+
+  it("returns nullable HTML and source ref from the updated row", async () => {
+    mockSql.mockResolvedValueOnce([
+      makeSlideRow({ html_content: null, source_ref: "vault://record" }),
+    ]);
+    mockSql.mockResolvedValueOnce([{ version: 5, updated_at: "2025-03-04T10:00:00.000Z" }]);
+    mockSql.mockResolvedValueOnce([]);
+    mockSql.mockResolvedValueOnce([]);
+
+    const res = await handlePatchSlide(slideId, { notes: "updated" }, testUserId);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.slide.html_content).toBeNull();
+    expect(body.slide.source_device_id).toBe("device-a");
+    expect(body.slide.source_ref).toBe("vault://record");
   });
 
   it("updates notes and normalizes empty string to null", async () => {

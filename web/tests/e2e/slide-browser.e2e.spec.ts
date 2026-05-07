@@ -54,17 +54,6 @@ const SLIDE_A_HTML = [
   "</div>",
 ].join("");
 
-const SLIDE_B_HTML = [
-  '<div style="display:flex;flex-direction:column;justify-content:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif">',
-  '<h1 style="font-size:72px;font-weight:700;color:#1a1a2e;margin-bottom:48px">Methodology</h1>',
-  '<ul style="font-size:32px;color:#4a4a6a;line-height:2;list-style:disc;padding-left:48px">',
-  "<li>Baseline comparison using standard SGD optimizer</li>",
-  "<li>Test group with adaptive learning rate schedule</li>",
-  "<li>Control for hardware variance across GPU clusters</li>",
-  "</ul>",
-  "</div>",
-].join("");
-
 const SLIDE_C_HTML = [
   '<div style="display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif;text-align:center">',
   '<div style="font-size:20px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:4px;margin-bottom:24px">org/beta</div>',
@@ -86,6 +75,8 @@ const SLIDE_A = {
   day_order: "a0",
   html_content: SLIDE_A_HTML,
   project_id: "org/alpha",
+  source_device_id: "device-a",
+  source_ref: "vault://experiment",
   updated_at: dateIso(_now, "10:00:00Z"),
   deleted_at: null,
   figure_count: 2,
@@ -96,8 +87,10 @@ const SLIDE_B = {
   id: `${TODAY_ID}-11223344`,
   date: TODAY_DATE,
   day_order: "a1",
-  html_content: SLIDE_B_HTML,
-  project_id: null,
+  html_content: null,
+  project_id: "org/beta",
+  source_device_id: "device-a",
+  source_ref: "obsidian://methodology",
   updated_at: dateIso(_now, "09:00:00Z"),
   deleted_at: null,
   figure_count: 0,
@@ -110,6 +103,8 @@ const SLIDE_C = {
   day_order: "a0",
   html_content: SLIDE_C_HTML,
   project_id: "org/beta",
+  source_device_id: "device-b",
+  source_ref: null,
   updated_at: dateIso(_yesterday, "12:00:00Z"),
   deleted_at: null,
   figure_count: 1,
@@ -123,6 +118,8 @@ const SLIDE_A_DETAIL = {
   html_content: SLIDE_A_HTML,
   notes: "# Important\n\nThese are **bold** notes.",
   project_id: "org/alpha",
+  source_device_id: "device-a",
+  source_ref: "vault://experiment",
   git_remote_url: "https://github.com/org/repo",
   git_hash: "abc1234def5678",
   created_at: dateIso(_now, "08:00:00Z"),
@@ -137,12 +134,34 @@ const SLIDE_A_DETAIL = {
   ],
 };
 
+const SLIDE_B_DETAIL = {
+  id: `${TODAY_ID}-11223344`,
+  date: TODAY_DATE,
+  day_order: "a1",
+  html_content: null,
+  notes: "# Methodology\n\nNotes-first record with supporting data.",
+  project_id: "org/beta",
+  source_device_id: "device-a",
+  source_ref: "obsidian://methodology",
+  git_remote_url: null,
+  git_hash: null,
+  created_at: dateIso(_now, "08:30:00Z"),
+  updated_at: dateIso(_now, "09:00:00Z"),
+  deleted_at: null,
+  figures: [],
+  data_files: [
+    { filename: "methodology.json", s3_key: `slides/${TODAY_ID}-11223344/data/methodology.json`, size: 1024, description: "Method notes" },
+  ],
+};
+
 const DELETED_SLIDE = {
   id: `${TWO_DAYS_AGO_ID}-deadbeef`,
   date: TWO_DAYS_AGO_DATE,
   day_order: "a0",
   html_content: DELETED_SLIDE_HTML,
-  project_id: null,
+  project_id: "org/alpha",
+  source_device_id: "device-a",
+  source_ref: null,
   updated_at: dateIso(_twoDaysAgo, "12:00:00Z"),
   deleted_at: dateIso(_twoDaysAgo, "14:00:00Z"),
   figure_count: 0,
@@ -155,7 +174,9 @@ const DELETED_SLIDE_DETAIL = {
   day_order: "a0",
   html_content: DELETED_SLIDE_HTML,
   notes: null,
-  project_id: null,
+  project_id: "org/alpha",
+  source_device_id: "device-a",
+  source_ref: null,
   git_remote_url: null,
   git_hash: null,
   created_at: dateIso(_twoDaysAgo, "08:00:00Z"),
@@ -273,6 +294,15 @@ async function setupMockApi(page: Page, overrides?: {
         }),
       });
     }
+  });
+
+  await page.route(`**/api/slides/${TODAY_ID}-11223344`, async (route: Route) => {
+    calls.push({ method: route.request().method(), url: route.request().url() });
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ slide: SLIDE_B_DETAIL }),
+    });
   });
 
   // Mock /api/slides/[id] for deleted slide
@@ -437,6 +467,24 @@ test.describe("Slide Browser", () => {
     await expect(page.getByText("results.csv")).toBeVisible();
     await expect(page.getByText("2.0 KB")).toBeVisible();
     await expect(page.getByText("Experiment results")).toBeVisible();
+  });
+
+  test("notes/data-only records render fallback instead of an iframe @e2e", async ({
+    page,
+  }) => {
+    await setupMockApi(page);
+    await page.goto("/");
+    await expect(page.getByText("3 slides")).toBeVisible();
+
+    await page.getByText("Notes/data").first().click();
+
+    const viewer = page.getByTestId("slide-viewer");
+    await expect(viewer.getByText("Notes/data-only record")).toBeVisible();
+    await expect(viewer.getByText("Notes-first record with supporting data.")).toBeVisible();
+    await expect(viewer.getByText("1 data file")).toBeVisible();
+    await expect(
+      page.locator('[data-testid="slide-viewer"] iframe[title="Slide content"]')
+    ).toHaveCount(0);
   });
 
   test("edit slide: edit notes and save persists via PATCH @e2e", async ({
