@@ -127,10 +127,10 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Reason: Covers 7 error paths (one per command) that cannot be reached via environment manipulation. Alternative (interface-based DI) would require threading a dependency through every command function for a single test concern.
     Tradeoffs: Unsafe with t.Parallel (tests must restore original via t.Cleanup). Acceptable since cli package tests are not parallel. See ISSUES.md b2c3d4.
 
-- Decision 2026-03-05 y5z6a7: Phase 1 Playwright gate is DB-free smoke only
-    Decision: Phase 1 Playwright verification runs a DB-free smoke test (`pnpm test:e2e:smoke`) against a static app route via `playwright.config` `webServer`.
-    Reason: Full DB-backed e2e setup belongs to later phases; Phase 1 needs reproducible e2e wiring without introducing fake backend logic.
-    Tradeoffs: Phase 1 e2e only proves browser/server wiring, not data workflows; richer e2e scenarios remain required in later roadmap phases.
+- Decision 2026-03-05 y5z6a7: Playwright browser e2e runs in local mode with mocked APIs
+    Decision: Playwright browser verification starts Next.js with `LOCAL_BACKEND_URL=http://127.0.0.1:9876` and uses `page.route()` interception for mocked API workflows.
+    Reason: Browser e2e should verify UI/browser wiring without cloud credentials or auth sessions; cloud behavior is covered by API/unit tests and CLI cloud integration tests.
+    Tradeoffs: Mocked browser e2e does not prove the hosted cloud auth flow end to end; cloud data behavior is covered below the browser layer.
 
 - Decision 2026-03-07 a1b2c3: S3 client constructor accepts pre-configured *s3.Client
     Decision: `s3client.New()` accepts a pre-configured `*s3.Client` and bucket name (same DI pattern as Postgres repo accepting `*pgxpool.Pool`).

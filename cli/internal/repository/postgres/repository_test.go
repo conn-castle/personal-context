@@ -538,6 +538,36 @@ func TestApplySchemaRejectsLegacyPreAuthCloudSchema(t *testing.T) {
 	}
 }
 
+func TestApplySchemaIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	schemaCounter++
+	schemaName := fmt.Sprintf("idempotent_%d_%d", time.Now().UnixNano(), schemaCounter)
+
+	adminPool, err := pgxpool.New(ctx, sharedContainer.connStr)
+	if err != nil {
+		t.Fatalf("pgxpool.New() error = %v", err)
+	}
+	if _, err := adminPool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA %s", schemaName)); err != nil {
+		adminPool.Close()
+		t.Fatalf("CREATE SCHEMA error = %v", err)
+	}
+	adminPool.Close()
+
+	connStr := sharedContainer.connStr + fmt.Sprintf("&search_path=%s", schemaName)
+	pool, err := pgxpool.New(ctx, connStr)
+	if err != nil {
+		t.Fatalf("pgxpool.New(search_path) error = %v", err)
+	}
+	defer pool.Close()
+
+	if err := ApplySchema(ctx, pool); err != nil {
+		t.Fatalf("first ApplySchema() error = %v", err)
+	}
+	if err := ApplySchema(ctx, pool); err != nil {
+		t.Fatalf("second ApplySchema() should be safe after bootstrap, got %v", err)
+	}
+}
+
 func TestSchemaRejectsNegativeSlideDataFileSize(t *testing.T) {
 	repo, pool := newConcreteRepo(t)
 	ctx := context.Background()

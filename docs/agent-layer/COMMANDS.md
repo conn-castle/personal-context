@@ -171,7 +171,7 @@ pnpm test:e2e:smoke
 ```
 Run from: `web/`
 Prerequisites: `pnpm exec playwright install` for browser binaries.
-Notes: Verifies the SlideBrowser "Personal Context" heading renders on the home page.
+Notes: `playwright.config.ts` starts Next.js with `LOCAL_BACKEND_URL=http://127.0.0.1:9876`, so this runs in local mode and bypasses cloud auth while the test mocks API responses.
 
 - Run Playwright Slide Browser e2e tests
 ```bash
@@ -179,7 +179,7 @@ pnpm test:e2e:slide-browser
 ```
 Run from: `web/`
 Prerequisites: `pnpm exec playwright install` for browser binaries.
-Notes: Uses `page.route()` API interception — no real backend needed. Tests browse, filter, detail, edit, delete/restore, sync version, error states, pagination.
+Notes: Uses `page.route()` API interception under local mode — no real backend needed. Tests browse, filter, detail, edit, delete/restore, sync version, error states, pagination.
 
 - Run Playwright markdown rendering e2e tests
 ```bash

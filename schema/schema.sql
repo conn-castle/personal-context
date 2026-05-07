@@ -33,7 +33,7 @@
 -- Authentication tables (Postgres only — no SQLite equivalent)
 -- =============================================================================
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
     email           TEXT NOT NULL UNIQUE,
     name            TEXT,
@@ -42,7 +42,7 @@ CREATE TABLE users (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE api_keys (
+CREATE TABLE IF NOT EXISTS api_keys (
     id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
     user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     key_hash        TEXT NOT NULL UNIQUE,    -- SHA-256 hash of the raw key
@@ -52,14 +52,14 @@ CREATE TABLE api_keys (
     revoked_at      TIMESTAMPTZ
 );
 
-CREATE INDEX idx_api_keys_user ON api_keys (user_id);
-CREATE INDEX idx_api_keys_hash ON api_keys (key_hash) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys (user_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys (key_hash) WHERE revoked_at IS NULL;
 
 -- =============================================================================
 -- Application tables
 -- =============================================================================
 
-CREATE TABLE slides (
+CREATE TABLE IF NOT EXISTS slides (
     id              TEXT PRIMARY KEY CHECK (id ~ '^\d{8}-[0-9a-f]{8}$'),
     user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,  -- Postgres only; absent in SQLite
     date            DATE NOT NULL,                  -- local date when slide was created/assigned
@@ -74,13 +74,13 @@ CREATE TABLE slides (
     deleted_at      TIMESTAMPTZ                     -- NULL = active, non-NULL = soft deleted
 );
 
-CREATE INDEX idx_slides_user ON slides (user_id);
-CREATE INDEX idx_slides_date ON slides (date, day_order, id);
-CREATE INDEX idx_slides_project ON slides (project_id) WHERE project_id IS NOT NULL;
-CREATE INDEX idx_slides_updated ON slides (updated_at);
-CREATE INDEX idx_slides_deleted ON slides (deleted_at) WHERE deleted_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_slides_user ON slides (user_id);
+CREATE INDEX IF NOT EXISTS idx_slides_date ON slides (date, day_order, id);
+CREATE INDEX IF NOT EXISTS idx_slides_project ON slides (project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_slides_updated ON slides (updated_at);
+CREATE INDEX IF NOT EXISTS idx_slides_deleted ON slides (deleted_at) WHERE deleted_at IS NOT NULL;
 
-CREATE TABLE slide_figures (
+CREATE TABLE IF NOT EXISTS slide_figures (
     id              SERIAL PRIMARY KEY,
     slide_id        TEXT NOT NULL REFERENCES slides(id) ON DELETE CASCADE,
     filename        TEXT NOT NULL CHECK (length(filename) > 0 AND position('/' in filename) = 0),
@@ -90,7 +90,7 @@ CREATE TABLE slide_figures (
     UNIQUE (slide_id, filename)
 );
 
-CREATE INDEX idx_figures_slide ON slide_figures (slide_id);
+CREATE INDEX IF NOT EXISTS idx_figures_slide ON slide_figures (slide_id);
 
 -- INVARIANT: Child rows (slide_figures, slide_data_files) are only modified as
 -- part of a parent slide operation (pc add, pc edit, sync). Never independently.
@@ -100,7 +100,7 @@ CREATE INDEX idx_figures_slide ON slide_figures (slide_id);
 -- If independent child modification commands are ever added, a cross-table
 -- trigger to bump parent slide updated_at should be added at that time.
 
-CREATE TABLE slide_data_files (
+CREATE TABLE IF NOT EXISTS slide_data_files (
     id              SERIAL PRIMARY KEY,
     slide_id        TEXT NOT NULL REFERENCES slides(id) ON DELETE CASCADE,
     filename        TEXT NOT NULL CHECK (length(filename) > 0 AND position('/' in filename) = 0),
@@ -112,9 +112,9 @@ CREATE TABLE slide_data_files (
     UNIQUE (slide_id, filename)
 );
 
-CREATE INDEX idx_data_files_slide ON slide_data_files (slide_id);
+CREATE INDEX IF NOT EXISTS idx_data_files_slide ON slide_data_files (slide_id);
 
-CREATE TABLE templates (
+CREATE TABLE IF NOT EXISTS templates (
     name            TEXT PRIMARY KEY,
     html_content    TEXT NOT NULL,
     description     TEXT,
@@ -122,7 +122,7 @@ CREATE TABLE templates (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE sync_version (
+CREATE TABLE IF NOT EXISTS sync_version (
     user_id         TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,  -- per-user; SQLite uses id=1 singleton
     version         BIGINT NOT NULL DEFAULT 0,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -153,10 +153,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS slides_sync_bump_after_insert ON slides;
 CREATE TRIGGER slides_sync_bump_after_insert
     AFTER INSERT ON slides
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS slides_sync_bump_after_update ON slides;
 CREATE TRIGGER slides_sync_bump_after_update
     AFTER UPDATE ON slides
     FOR EACH ROW
@@ -173,14 +175,17 @@ CREATE TRIGGER slides_sync_bump_after_update
     )
     EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS slides_sync_bump_after_delete ON slides;
 CREATE TRIGGER slides_sync_bump_after_delete
     AFTER DELETE ON slides
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS figures_sync_bump_after_insert ON slide_figures;
 CREATE TRIGGER figures_sync_bump_after_insert
     AFTER INSERT ON slide_figures
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS figures_sync_bump_after_update ON slide_figures;
 CREATE TRIGGER figures_sync_bump_after_update
     AFTER UPDATE ON slide_figures
     FOR EACH ROW
@@ -192,14 +197,17 @@ CREATE TRIGGER figures_sync_bump_after_update
     )
     EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS figures_sync_bump_after_delete ON slide_figures;
 CREATE TRIGGER figures_sync_bump_after_delete
     AFTER DELETE ON slide_figures
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS data_files_sync_bump_after_insert ON slide_data_files;
 CREATE TRIGGER data_files_sync_bump_after_insert
     AFTER INSERT ON slide_data_files
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS data_files_sync_bump_after_update ON slide_data_files;
 CREATE TRIGGER data_files_sync_bump_after_update
     AFTER UPDATE ON slide_data_files
     FOR EACH ROW
@@ -213,14 +221,17 @@ CREATE TRIGGER data_files_sync_bump_after_update
     )
     EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS data_files_sync_bump_after_delete ON slide_data_files;
 CREATE TRIGGER data_files_sync_bump_after_delete
     AFTER DELETE ON slide_data_files
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS templates_sync_bump_after_insert ON templates;
 CREATE TRIGGER templates_sync_bump_after_insert
     AFTER INSERT ON templates
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS templates_sync_bump_after_update ON templates;
 CREATE TRIGGER templates_sync_bump_after_update
     AFTER UPDATE ON templates
     FOR EACH ROW
@@ -231,6 +242,7 @@ CREATE TRIGGER templates_sync_bump_after_update
     )
     EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS templates_sync_bump_after_delete ON templates;
 CREATE TRIGGER templates_sync_bump_after_delete
     AFTER DELETE ON templates
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
@@ -253,14 +265,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS users_auto_updated_at ON users;
 CREATE TRIGGER users_auto_updated_at
     BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
 
+DROP TRIGGER IF EXISTS slides_auto_updated_at ON slides;
 CREATE TRIGGER slides_auto_updated_at
     BEFORE UPDATE ON slides
     FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
 
+DROP TRIGGER IF EXISTS templates_auto_updated_at ON templates;
 CREATE TRIGGER templates_auto_updated_at
     BEFORE UPDATE ON templates
     FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
