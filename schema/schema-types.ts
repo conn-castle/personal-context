@@ -168,8 +168,7 @@ interface DataFileExport {
 //     │   ├── notes.md           ← notes (only if has_notes)
 //     │   └── figures/           ← Git LFS
 //     │       └── loss-curve.png
-//     └── 20250304-b7e1c9d3/
-//         ├── metadata.json
+//     └── 20250304-b7e1c9d3/   ← html_content omitted; only metadata.json
 //         └── metadata.json
 //
 // Local filesystem structure:

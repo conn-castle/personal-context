@@ -27,6 +27,12 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-05-07 m1g2r3a: No upgrade path for SQLite/Postgres DBs predating registry-provenance
+    Priority: High. Area: cli/internal/sqlite, cli/internal/repository/postgres
+    Description: PR #14 added required `slides.source_device_id`/`source_ref` columns and tightened `project_id`/`source_device_id` to NOT NULL with FKs to new `projects`/`devices` registries. New columns are declared only in the `CREATE TABLE IF NOT EXISTS slides` blocks; the migration runner records a single canonical schema version, so already-provisioned databases keep the old layout while repository code unconditionally reads/writes the new columns. There is also no obvious backfill source for existing rows (no canonical device value), so the work is policy + infra, not just DDL.
+    Next step: Decide migration policy (re-init vs. backfill prompt vs. user-provided default device) and either (a) extend the migration runner to support multi-step migrations and ship `002_*` ALTER scripts that backfill from the chosen policy, or (b) add a startup compatibility check that fails fast with a clear remediation message.
+    Notes: Raised by automated review on PR #14 (Codex P1, both engines). Blocks any deployment with pre-PR data.
+
 - Issue 2026-03-11 t1u2v3a: Seed idempotency is fragile when user edits tutorial slide HTML
     Priority: Low. Area: cli/internal/cli/seed.go
     Description: `runSeed` uses HTML content as the identity key for existing tutorial slides (`existingByHTML`). If a user edits the HTML of a seeded slide, `runSeed` will not recognise it as existing and will create a duplicate on the next run. Stable IDs would require schema changes (a `seed_key` column or similar) and migration support.
