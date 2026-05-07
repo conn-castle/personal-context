@@ -178,9 +178,9 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: Changes are not instant (seconds of latency); acceptable for single-user CLI-to-web workflow.
 
 - Decision 2026-05-07 v9w0x1: sync_version is per-user with tenant-scoped S3 version objects
-    Decision: In cloud mode, `sync_version` is keyed by `user_id` and S3 version objects live under `users/{user_id}/_version`; SQLite remains a local singleton.
-    Reason: Multi-user cloud mode needs each user's polling cursor to advance only for that user's slide mutations while preserving the simple single-version polling model within each tenant.
-    Tradeoffs: Fresh cloud bootstrap must create users/auth tables before API keys can be generated, and all cloud callers must carry user scope into Postgres and S3.
+    Decision: In cloud mode, `sync_version` is keyed by `user_id` and S3 version objects live under `users/{user_id}/_version`; SQLite remains a local singleton. Shared template changes create or bump every existing user's `sync_version` row.
+    Reason: Multi-user cloud mode needs each user's polling cursor to advance only for that user's slide mutations while preserving the simple single-version polling model within each tenant. Templates are shared, so every existing user's cursor must advance when templates change, including users who have not yet made slide mutations.
+    Tradeoffs: Fresh cloud bootstrap must create users/auth tables before API keys can be generated, and all cloud callers must carry user scope into Postgres and S3. Template changes touch all users; a separate shared-resource cursor would scale better for frequent template edits but would require widening the client polling contract.
 
 - Decision 2026-03-09 x9y0z1: react-resizable-panels v4 sizes must use string percentages
     Decision: All `defaultSize`, `minSize`, `maxSize` props in `spreadsheet-viewer.tsx` use string percentages (e.g., `"18%"`) not bare numbers.

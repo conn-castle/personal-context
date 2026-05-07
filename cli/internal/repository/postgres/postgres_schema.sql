@@ -91,7 +91,12 @@ BEGIN
     ELSIF TG_TABLE_NAME IN ('slide_figures', 'slide_data_files') THEN
         SELECT user_id INTO _user_id FROM slides WHERE id = COALESCE(NEW.slide_id, OLD.slide_id);
     ELSIF TG_TABLE_NAME = 'templates' THEN
-        UPDATE sync_version SET version = version + 1, updated_at = NOW();
+        INSERT INTO sync_version (user_id, version, updated_at)
+        SELECT u.id, 1, NOW()
+        FROM users AS u
+        ON CONFLICT (user_id) DO UPDATE
+        SET version = sync_version.version + 1,
+            updated_at = NOW();
         RETURN COALESCE(NEW, OLD);
     END IF;
     IF _user_id IS NOT NULL THEN

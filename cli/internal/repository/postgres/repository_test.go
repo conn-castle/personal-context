@@ -675,6 +675,94 @@ func TestFigureAndDataFileNoOpUpdatesDoNotBumpSyncVersion(t *testing.T) {
 	}
 }
 
+func TestTemplateChangesCreateSyncRowsForAllUsers(t *testing.T) {
+	_, pool := newConcreteRepo(t)
+	ctx := context.Background()
+
+	mustCreateUser(t, pool, "template-sync-user", "template-sync-user@test.com")
+
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO templates (name, html_content, description) VALUES ($1, $2, $3)`,
+		"template-sync",
+		"<section>v1</section>",
+		"shared template",
+	); err != nil {
+		t.Fatalf("insert template: %v", err)
+	}
+
+	rows, err := pool.Query(ctx, `SELECT user_id, version FROM sync_version ORDER BY user_id`)
+	if err != nil {
+		t.Fatalf("query sync_version after template insert: %v", err)
+	}
+	versions := map[string]int64{}
+	for rows.Next() {
+		var userID string
+		var version int64
+		if err := rows.Scan(&userID, &version); err != nil {
+			rows.Close()
+			t.Fatalf("scan sync_version after template insert: %v", err)
+		}
+		versions[userID] = version
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate sync_version after template insert: %v", err)
+	}
+	rows.Close()
+
+	wantAfterInsert := map[string]int64{
+		"template-sync-user": 1,
+		"test-user-concrete": 1,
+	}
+	if len(versions) != len(wantAfterInsert) {
+		t.Fatalf("sync_version after template insert = %v, want %v", versions, wantAfterInsert)
+	}
+	for userID, want := range wantAfterInsert {
+		if got := versions[userID]; got != want {
+			t.Fatalf("sync_version[%q] after template insert = %d, want %d; all versions = %v", userID, got, want, versions)
+		}
+	}
+
+	if _, err := pool.Exec(ctx,
+		`UPDATE templates SET html_content = $1 WHERE name = $2`,
+		"<section>v2</section>",
+		"template-sync",
+	); err != nil {
+		t.Fatalf("update template: %v", err)
+	}
+
+	rows, err = pool.Query(ctx, `SELECT user_id, version FROM sync_version ORDER BY user_id`)
+	if err != nil {
+		t.Fatalf("query sync_version after template update: %v", err)
+	}
+	versions = map[string]int64{}
+	for rows.Next() {
+		var userID string
+		var version int64
+		if err := rows.Scan(&userID, &version); err != nil {
+			rows.Close()
+			t.Fatalf("scan sync_version after template update: %v", err)
+		}
+		versions[userID] = version
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate sync_version after template update: %v", err)
+	}
+	rows.Close()
+
+	wantAfterUpdate := map[string]int64{
+		"template-sync-user": 2,
+		"test-user-concrete": 2,
+	}
+	if len(versions) != len(wantAfterUpdate) {
+		t.Fatalf("sync_version after template update = %v, want %v", versions, wantAfterUpdate)
+	}
+	for userID, want := range wantAfterUpdate {
+		if got := versions[userID]; got != want {
+			t.Fatalf("sync_version[%q] after template update = %d, want %d; all versions = %v", userID, got, want, versions)
+		}
+	}
+}
+
 func TestErrorPathsWithClosedPool(t *testing.T) {
 	repo, pool := newConcreteRepo(t)
 	ctx := context.Background()
