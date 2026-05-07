@@ -1094,7 +1094,7 @@ func TestPatchSlide_RejectsProjectIDWithWhitespace(t *testing.T) {
 		if resp.StatusCode != 400 {
 			t.Fatalf("expected 400 for %s, got %d", body, resp.StatusCode)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 }
 
