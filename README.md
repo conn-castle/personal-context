@@ -47,6 +47,20 @@ personal-context/
 - pnpm (`npm i -g pnpm`)
 - Docker running for the Postgres and S3 integration suites (`testcontainers-go`)
 
+### Release Installation
+
+The release pipeline targets the Conn Castle Homebrew tap with formula name `personal-context` and binary name `pc`. The formula description is `Personal structured vault for searchable knowledge, data, files, and slides`.
+
+Once the first Homebrew release is published:
+
+```bash
+brew install conn-castle/tap/personal-context
+```
+
+Release steps are documented in [docs/RELEASE.md](docs/RELEASE.md).
+
+Personal Context is licensed under the PolyForm Noncommercial License 1.0.0. Commercial use requires separate permission from the licensor.
+
 ### Development Verification
 
 This sequence covers both local development checks and the Docker-backed cloud/integration suites used for full repo verification.

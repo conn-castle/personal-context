@@ -11,6 +11,8 @@ ROOT    := $(shell pwd)
 CLI_DIR := $(ROOT)/cli
 WEB_DIR := $(ROOT)/web
 WEB_CLOUD_ENV_CHECK := { [ -n "$$DATABASE_URL" ] && [ -n "$$S3_BUCKET" ]; } || { [ -f $(WEB_DIR)/.env.local ] && grep -Eq '^DATABASE_URL=.+' $(WEB_DIR)/.env.local 2>/dev/null && grep -Eq '^S3_BUCKET=.+' $(WEB_DIR)/.env.local 2>/dev/null; }
+PC_VERSION ?= dev
+DIST_DIR ?= dist
 
 # ---------------------------------------------------------------------------
 # Help (auto-generated from ## comments)
@@ -102,6 +104,33 @@ clean: ## Remove build artifacts
 	@rm -f $(CLI_DIR)/pc
 	@rm -rf $(WEB_DIR)/.next
 	@echo "✓ Clean"
+
+.PHONY: test-release
+test-release: ## Run release artifact tests
+	@./scripts/test-release.sh
+
+.PHONY: release-changelog-check
+release-changelog-check: ## Validate CHANGELOG.md has release notes (set RELEASE_TAG=vX.Y.Z)
+	@if [[ -z "$${RELEASE_TAG:-}" ]]; then \
+		echo "RELEASE_TAG is required (example: make release-changelog-check RELEASE_TAG=v0.1.0)" >&2; \
+		exit 1; \
+	fi
+	@if ! [[ "$${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$$ ]]; then \
+		echo "RELEASE_TAG must be a stable tag in vX.Y.Z format (got: $${RELEASE_TAG})" >&2; \
+		exit 1; \
+	fi
+	@TAG_RE=$$(printf '%s\n' "$${RELEASE_TAG}" | sed 's/\./\\./g'); \
+	if ! grep -Eq "^## $${TAG_RE} - [0-9]{4}-[0-9]{2}-[0-9]{2}$$" CHANGELOG.md; then \
+		echo "CHANGELOG.md missing release section: ## $${RELEASE_TAG} - YYYY-MM-DD" >&2; \
+		exit 1; \
+	fi
+
+.PHONY: release-preflight
+release-preflight: test-release release-changelog-check ## Validate release readiness (set RELEASE_TAG=vX.Y.Z)
+
+.PHONY: release-dist
+release-dist: test-release ## Build release artifacts (cross-compile)
+	@PC_VERSION="$(PC_VERSION)" DIST_DIR="$(DIST_DIR)" ./scripts/build-release.sh
 
 # ---------------------------------------------------------------------------
 # Schema

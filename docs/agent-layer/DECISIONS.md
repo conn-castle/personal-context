@@ -226,3 +226,8 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: Records may omit `slide.html` (`html_content = NULL`), but every record must carry explicit registered `project_id` and `source_device_id`; `active_project` config is ignored by write paths.
     Reason: Notes/data-first vault records need to round-trip without fabricated HTML while retaining auditable provenance across SQLite, Postgres, sync, and git export/import.
     Tradeoffs: Existing folders and scripts must register/pass project and device values explicitly; this removes convenient hidden assignment but prevents silent misclassification.
+
+- Decision 2026-05-07 c6d7e8: Source-available noncommercial release license
+    Decision: License Personal Context under PolyForm Noncommercial 1.0.0 (`PolyForm-Noncommercial-1.0.0`) and describe the Homebrew formula as `Personal structured vault for searchable knowledge, data, files, and slides`.
+    Reason: The repo is public for Homebrew releases, but the owner wants to retain commercial rights and prevent third-party commercial use without separate permission.
+    Tradeoffs: This is source-available, not open source by OSI criteria; some package ecosystems and commercial users may reject or require legal review before use.

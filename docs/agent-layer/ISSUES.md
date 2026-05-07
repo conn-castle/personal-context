@@ -154,8 +154,8 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Next step: Either use `syncengine` map helpers or add explicit duplicate detection in `conflict.go`.
 
 - Issue 2026-03-08 o1p2q3: GitHub Actions pinned to mutable version tags
-    Priority: Medium. Area: .github/workflows/ci.yml
-    Description: All GitHub Actions use major version tags (`@v4`, `@v5`, `@v8`) rather than full commit SHAs. Third-party actions like `golangci/golangci-lint-action@v8` carry supply-chain risk.
+    Priority: Medium. Area: .github/workflows
+    Description: GitHub Actions use major version tags (`@v4`, `@v5`, `@v6`, `@v8`) rather than full commit SHAs. Third-party actions like `golangci/golangci-lint-action@v8` carry supply-chain risk.
     Next step: Pin all actions to full commit SHAs with version comments.
 
 - Issue 2026-03-08 p3q4r5: CI web job runs tests twice (pnpm test then pnpm test:coverage)

@@ -129,6 +129,7 @@ Incomplete:
 - [ ] Deploy to AWS Amplify
 - [ ] Configure Amplify env vars and IAM role for S3
 - [ ] Set up full CI pipeline: Go test + coverage + lint, Next.js test + coverage + build + lint, Playwright e2e, coverage gates (>95% both)
+- [x] Add GitHub Release and Homebrew tap automation for the `pc` CLI
 - [ ] Create nightly export GitHub Action (example in docs/, real in data repo)
 - [ ] Write full system e2e tests (CLI + cloud + web UI together):
     - CLI creates slide with figures -> `pc sync` -> web UI Playwright test verifies slide appears with figures

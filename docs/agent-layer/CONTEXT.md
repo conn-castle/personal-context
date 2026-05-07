@@ -49,6 +49,10 @@ Separate **data repo**: nightly git export of slide data (metadata.json, slide.h
 - Workflow downloads the `pc` binary from code-repo releases, then runs `pc export --from-cloud --path . --github-remote origin`.
 - The code repository stores an example workflow under `docs/` for users to copy into their data repo.
 
+CLI releases are published from stable `vX.Y.Z` tags. The release workflow builds macOS/Linux `pc` artifacts, publishes a GitHub Release, and opens a PR against `conn-castle/homebrew-tap` for `Formula/personal-context.rb`. The Homebrew formula name is `personal-context`; the installed binary remains `pc`; the formula description is `Personal structured vault for searchable knowledge, data, files, and slides`.
+
+The project license is PolyForm Noncommercial 1.0.0 (`PolyForm-Noncommercial-1.0.0`). Commercial use requires separate permission from the licensor.
+
 ## Architecture: Three Data States
 
 ```
