@@ -78,6 +78,32 @@ func buildSnapshot(
 			HTMLContent: template.HTMLContent,
 		})
 	}
+	projects, err := slideRepo.ListProjects(ctx, true)
+	if err != nil {
+		return gitsnapshot.Snapshot{}, fmt.Errorf("list projects: %w", err)
+	}
+	snapshot.Projects = make([]gitsnapshot.RegistryEntry, 0, len(projects))
+	for _, project := range projects {
+		snapshot.Projects = append(snapshot.Projects, gitsnapshot.RegistryEntry{
+			ID:         project.ID,
+			CreatedAt:  project.CreatedAt,
+			UpdatedAt:  project.UpdatedAt,
+			ArchivedAt: project.ArchivedAt,
+		})
+	}
+	devices, err := slideRepo.ListDevices(ctx, true)
+	if err != nil {
+		return gitsnapshot.Snapshot{}, fmt.Errorf("list devices: %w", err)
+	}
+	snapshot.Devices = make([]gitsnapshot.RegistryEntry, 0, len(devices))
+	for _, device := range devices {
+		snapshot.Devices = append(snapshot.Devices, gitsnapshot.RegistryEntry{
+			ID:         device.ID,
+			CreatedAt:  device.CreatedAt,
+			UpdatedAt:  device.UpdatedAt,
+			ArchivedAt: device.ArchivedAt,
+		})
+	}
 
 	slides, err := slideRepo.ListSlides(ctx, repository.ListSlidesFilter{})
 	if err != nil {
@@ -119,18 +145,20 @@ func buildSnapshot(
 		}
 
 		snapshot.Slides = append(snapshot.Slides, gitsnapshot.Slide{
-			ID:           slide.ID,
-			Date:         slide.Date,
-			DayOrder:     slide.DayOrder,
-			ProjectID:    slide.ProjectID,
-			GitRemoteURL: slide.GitRemoteURL,
-			GitHash:      slide.GitHash,
-			HTMLContent:  slide.HTMLContent,
-			Notes:        slide.Notes,
-			Figures:      exportFigures,
-			DataFiles:    exportDataFiles,
-			CreatedAt:    slide.CreatedAt,
-			UpdatedAt:    slide.UpdatedAt,
+			ID:             slide.ID,
+			Date:           slide.Date,
+			DayOrder:       slide.DayOrder,
+			ProjectID:      slide.ProjectID,
+			SourceDeviceID: slide.SourceDeviceID,
+			SourceRef:      slide.SourceRef,
+			GitRemoteURL:   slide.GitRemoteURL,
+			GitHash:        slide.GitHash,
+			HTMLContent:    slide.HTMLContent,
+			Notes:          slide.Notes,
+			Figures:        exportFigures,
+			DataFiles:      exportDataFiles,
+			CreatedAt:      slide.CreatedAt,
+			UpdatedAt:      slide.UpdatedAt,
 		})
 	}
 	return snapshot, nil
@@ -142,6 +170,26 @@ func importSnapshotIntoStack(ctx context.Context, stack *localStack, snapshot gi
 	for _, template := range snapshot.Templates {
 		if err := upsertTemplate(ctx, stack.Repo, template); err != nil {
 			return stats, err
+		}
+	}
+	for _, project := range snapshot.Projects {
+		if _, err := stack.Repo.UpsertProjectForImport(ctx, repository.Project{
+			ID:         project.ID,
+			CreatedAt:  project.CreatedAt,
+			UpdatedAt:  project.UpdatedAt,
+			ArchivedAt: project.ArchivedAt,
+		}); err != nil {
+			return stats, fmt.Errorf("upsert project %s: %w", project.ID, err)
+		}
+	}
+	for _, device := range snapshot.Devices {
+		if _, err := stack.Repo.UpsertDeviceForImport(ctx, repository.Device{
+			ID:         device.ID,
+			CreatedAt:  device.CreatedAt,
+			UpdatedAt:  device.UpdatedAt,
+			ArchivedAt: device.ArchivedAt,
+		}); err != nil {
+			return stats, fmt.Errorf("upsert device %s: %w", device.ID, err)
 		}
 	}
 
@@ -200,16 +248,18 @@ func createImportedSlide(ctx context.Context, stack *localStack, slide gitsnapsh
 	createdAt := slide.CreatedAt.UTC()
 	updatedAt := slide.UpdatedAt.UTC()
 	if _, err := stack.Repo.CreateSlide(ctx, repository.CreateSlideInput{
-		ID:           slide.ID,
-		Date:         slide.Date,
-		DayOrder:     slide.DayOrder,
-		HTMLContent:  slide.HTMLContent,
-		Notes:        slide.Notes,
-		ProjectID:    slide.ProjectID,
-		GitRemoteURL: slide.GitRemoteURL,
-		GitHash:      slide.GitHash,
-		CreatedAt:    &createdAt,
-		UpdatedAt:    &updatedAt,
+		ID:             slide.ID,
+		Date:           slide.Date,
+		DayOrder:       slide.DayOrder,
+		HTMLContent:    slide.HTMLContent,
+		Notes:          slide.Notes,
+		ProjectID:      slide.ProjectID,
+		SourceDeviceID: slide.SourceDeviceID,
+		SourceRef:      slide.SourceRef,
+		GitRemoteURL:   slide.GitRemoteURL,
+		GitHash:        slide.GitHash,
+		CreatedAt:      &createdAt,
+		UpdatedAt:      &updatedAt,
 	}); err != nil {
 		return fmt.Errorf("create slide %s: %w", slide.ID, err)
 	}
@@ -222,15 +272,17 @@ func createImportedSlide(ctx context.Context, stack *localStack, slide gitsnapsh
 func updateImportedSlide(ctx context.Context, stack *localStack, slide gitsnapshot.Slide) error {
 	updatedAt := slide.UpdatedAt.UTC()
 	if _, err := stack.Repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-		ID:           slide.ID,
-		Date:         slide.Date,
-		DayOrder:     slide.DayOrder,
-		HTMLContent:  slide.HTMLContent,
-		Notes:        slide.Notes,
-		ProjectID:    slide.ProjectID,
-		GitRemoteURL: slide.GitRemoteURL,
-		GitHash:      slide.GitHash,
-		UpdatedAt:    &updatedAt,
+		ID:             slide.ID,
+		Date:           slide.Date,
+		DayOrder:       slide.DayOrder,
+		HTMLContent:    slide.HTMLContent,
+		Notes:          slide.Notes,
+		ProjectID:      slide.ProjectID,
+		SourceDeviceID: slide.SourceDeviceID,
+		SourceRef:      slide.SourceRef,
+		GitRemoteURL:   slide.GitRemoteURL,
+		GitHash:        slide.GitHash,
+		UpdatedAt:      &updatedAt,
 	}); err != nil {
 		return fmt.Errorf("update slide %s: %w", slide.ID, err)
 	}

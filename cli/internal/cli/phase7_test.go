@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +26,7 @@ func TestExportCommandWritesSnapshot(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte(`<html><img src="figures/plot.png"></html>`), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir)
 	if err := os.WriteFile(filepath.Join(inputDir, "figures", "plot.png"), []byte("plot-bytes"), 0o644); err != nil {
 		t.Fatalf("write figure: %v", err)
 	}
@@ -70,7 +72,7 @@ func TestImportCommandAppliesSnapshot(t *testing.T) {
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
-			HTMLContent: "<html><body>imported</body></html>",
+			HTMLContent: strPtr("<html><body>imported</body></html>"),
 			CreatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 			UpdatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 		}},
@@ -102,6 +104,7 @@ func TestRestoreDBCommandReportsBackupPath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>before restore</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir)
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
 	addCmd.SetArgs([]string{"add", inputDir})
@@ -116,7 +119,7 @@ func TestRestoreDBCommandReportsBackupPath(t *testing.T) {
 			ID:          "20260309-ccccdddd",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
-			HTMLContent: "<html><body>restored</body></html>",
+			HTMLContent: strPtr("<html><body>restored</body></html>"),
 			CreatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 			UpdatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 		}},
@@ -145,6 +148,7 @@ func TestVerifyCommandLocalRoundTrip(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte(`<html><img src="figures/verify.png"></html>`), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir)
 	if err := os.WriteFile(filepath.Join(inputDir, "notes.md"), []byte("verify notes"), 0o644); err != nil {
 		t.Fatalf("write notes.md: %v", err)
 	}
@@ -162,6 +166,87 @@ func TestVerifyCommandLocalRoundTrip(t *testing.T) {
 	verifyCmd.SetArgs([]string{"verify"})
 	if err := verifyCmd.Execute(); err != nil {
 		t.Fatalf("verify: %v", err)
+	}
+}
+
+func TestVerifyFromCloudNotConfigured(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+	runSetupCommandForTest(t, homeDir)
+
+	stdout := &bytes.Buffer{}
+	err := runVerify(context.Background(), stdout, &bytes.Buffer{}, true)
+	if err == nil || !strings.Contains(err.Error(), "cloud is not configured") {
+		t.Fatalf("runVerify(fromCloud) error = %v", err)
+	}
+}
+
+func TestRestoreDBRejectsInvalidSnapshotBeforeHomeResolution(t *testing.T) {
+	original := resolveHomeDirFn
+	t.Cleanup(func() { resolveHomeDirFn = original })
+	resolveHomeDirFn = func() (string, error) {
+		return "", errors.New("home should not be resolved")
+	}
+	err := runRestoreDB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "read restore snapshot") {
+		t.Fatalf("runRestoreDB() error = %v", err)
+	}
+}
+
+func TestRestoreDBSurfacesEnvironmentCreationFailure(t *testing.T) {
+	snapshotDir := t.TempDir()
+	writeSnapshotForCLITest(t, snapshotDir, gitsnapshot.Snapshot{})
+
+	homeFile := filepath.Join(t.TempDir(), "home-file")
+	if err := os.WriteFile(homeFile, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write home blocker: %v", err)
+	}
+	t.Setenv(pcHomeEnvVar, homeFile)
+
+	err := runRestoreDB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, snapshotDir)
+	if err == nil {
+		t.Fatal("expected environment creation error")
+	}
+	if !strings.Contains(err.Error(), "create .pc directory") {
+		t.Fatalf("runRestoreDB() error = %v, want .pc directory context", err)
+	}
+}
+
+func TestRestoreDBSurfacesHomeResolutionFailure(t *testing.T) {
+	snapshotDir := t.TempDir()
+	writeSnapshotForCLITest(t, snapshotDir, gitsnapshot.Snapshot{})
+
+	original := resolveHomeDirFn
+	t.Cleanup(func() { resolveHomeDirFn = original })
+	resolveHomeDirFn = func() (string, error) {
+		return "", errors.New("home unavailable")
+	}
+
+	err := runRestoreDB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, snapshotDir)
+	if err == nil || !strings.Contains(err.Error(), "home unavailable") {
+		t.Fatalf("runRestoreDB() error = %v, want home resolution failure", err)
+	}
+}
+
+func TestRestoreDBSurfacesCurrentSnapshotFailure(t *testing.T) {
+	homeDir := setupEnv(t)
+	slideID := addSlideWithContent(
+		t,
+		`<html><body><img src="figures/missing.png"></body></html>`,
+		"",
+		"",
+		map[string][]byte{"missing.png": []byte("figure")},
+		nil,
+	)
+	if err := os.Remove(filepath.Join(basePath(homeDir), "figures", slideID, "missing.png")); err != nil {
+		t.Fatalf("remove local figure: %v", err)
+	}
+	snapshotDir := t.TempDir()
+	writeSnapshotForCLITest(t, snapshotDir, gitsnapshot.Snapshot{})
+
+	err := runRestoreDB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, snapshotDir)
+	if err == nil || !strings.Contains(err.Error(), "read local figure") {
+		t.Fatalf("runRestoreDB() error = %v, want current snapshot failure", err)
 	}
 }
 
@@ -187,7 +272,7 @@ func TestImportSnapshotIntoStackCreatesAndUpdatesSlides(t *testing.T) {
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
-			HTMLContent: "<html><body>created</body></html>",
+			HTMLContent: strPtr("<html><body>created</body></html>"),
 			Notes:       &notes,
 			Figures: []gitsnapshot.Figure{{
 				Filename: "plot.png",
@@ -205,7 +290,7 @@ func TestImportSnapshotIntoStackCreatesAndUpdatesSlides(t *testing.T) {
 		}},
 	}
 
-	stats, err := importSnapshotIntoStack(ctx, stack, createSnapshot)
+	stats, err := importSnapshotIntoStack(ctx, stack, withCLISnapshotDefaults(createSnapshot))
 	if err != nil {
 		t.Fatalf("importSnapshotIntoStack(create): %v", err)
 	}
@@ -227,7 +312,7 @@ func TestImportSnapshotIntoStackCreatesAndUpdatesSlides(t *testing.T) {
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-10",
 			DayOrder:    "b0",
-			HTMLContent: "<html><body>updated</body></html>",
+			HTMLContent: strPtr("<html><body>updated</body></html>"),
 			Notes:       &newNotes,
 			Figures: []gitsnapshot.Figure{{
 				Filename: "fresh.png",
@@ -245,7 +330,7 @@ func TestImportSnapshotIntoStackCreatesAndUpdatesSlides(t *testing.T) {
 		}},
 	}
 
-	stats, err = importSnapshotIntoStack(ctx, stack, updateSnapshot)
+	stats, err = importSnapshotIntoStack(ctx, stack, withCLISnapshotDefaults(updateSnapshot))
 	if err != nil {
 		t.Fatalf("importSnapshotIntoStack(update): %v", err)
 	}
@@ -257,8 +342,8 @@ func TestImportSnapshotIntoStackCreatesAndUpdatesSlides(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSlideByID: %v", err)
 	}
-	if slide.HTMLContent != "<html><body>updated</body></html>" {
-		t.Fatalf("slide html = %q", slide.HTMLContent)
+	if slide.HTMLContent == nil || *slide.HTMLContent != "<html><body>updated</body></html>" {
+		t.Fatalf("slide html = %v", slide.HTMLContent)
 	}
 	figures, err := stack.Repo.ListSlideFiguresBySlideID(ctx, slide.ID)
 	if err != nil {
@@ -358,6 +443,7 @@ func TestBuildCloudSnapshotAndCloudPhase7Commands(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html><body>cloud-backed</body></html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir)
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	addCmd.SetArgs([]string{"add", inputDir})
 	if err := addCmd.Execute(); err != nil {
@@ -415,11 +501,40 @@ func runSetupCommandForTest(t *testing.T, homeDir string) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("setup: %v (stdout=%q stderr=%q)", err, stdout.String(), stderr.String())
 	}
+	ensureRegisteredProjectAndDevice(t, "test/default-project", "test-device")
 }
 
 func writeSnapshotForCLITest(t *testing.T, root string, snapshot gitsnapshot.Snapshot) {
 	t.Helper()
+	snapshot = withCLISnapshotDefaults(snapshot)
 	if err := gitsnapshot.Write(root, snapshot); err != nil {
 		t.Fatalf("write snapshot: %v", err)
 	}
+}
+
+func withCLISnapshotDefaults(snapshot gitsnapshot.Snapshot) gitsnapshot.Snapshot {
+	defaultCreatedAt := time.Date(2026, 3, 9, 0, 0, 0, 0, time.UTC)
+	if len(snapshot.Projects) == 0 {
+		snapshot.Projects = []gitsnapshot.RegistryEntry{{
+			ID:        "test/default-project",
+			CreatedAt: defaultCreatedAt,
+			UpdatedAt: defaultCreatedAt,
+		}}
+	}
+	if len(snapshot.Devices) == 0 {
+		snapshot.Devices = []gitsnapshot.RegistryEntry{{
+			ID:        "test-device",
+			CreatedAt: defaultCreatedAt,
+			UpdatedAt: defaultCreatedAt,
+		}}
+	}
+	for i := range snapshot.Slides {
+		if snapshot.Slides[i].ProjectID == "" {
+			snapshot.Slides[i].ProjectID = "test/default-project"
+		}
+		if snapshot.Slides[i].SourceDeviceID == "" {
+			snapshot.Slides[i].SourceDeviceID = "test-device"
+		}
+	}
+	return snapshot
 }

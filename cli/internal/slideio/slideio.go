@@ -17,26 +17,30 @@ import (
 
 // SlideInput holds parsed data from an input folder for pc add / pc edit.
 type SlideInput struct {
-	HTMLContent  string
-	Notes        *string
-	ProjectID    *string
-	GitRemoteURL *string
-	GitHash      *string
-	Figures      []string // absolute paths to figure files
-	DataFiles    []string // absolute paths to data files
+	HTMLContent    *string
+	Notes          *string
+	ProjectID      *string
+	SourceDeviceID *string
+	SourceRef      *string
+	GitRemoteURL   *string
+	GitHash        *string
+	Figures        []string // absolute paths to figure files
+	DataFiles      []string // absolute paths to data files
 }
 
 // metadata is the JSON structure for metadata.json.
 type metadata struct {
-	ProjectID    *string `json:"project_id"`
-	GitRemoteURL *string `json:"git_remote_url"`
-	GitHash      *string `json:"git_hash"`
+	ProjectID      *string `json:"project_id"`
+	SourceDeviceID *string `json:"source_device_id"`
+	SourceRef      *string `json:"source_ref"`
+	GitRemoteURL   *string `json:"git_remote_url"`
+	GitHash        *string `json:"git_hash"`
 }
 
 var figSrcPattern = regexp.MustCompile(`(?i)src\s*=\s*["']figures/([^"']+)["']`)
 
 // ParseInputFolder reads and validates a slide input folder.
-// The folder must contain slide.html; metadata.json, notes.md, figures/, data/ are optional.
+// metadata.json, slide.html, notes.md, figures/, data/ are optional.
 // Args: dir is the path to the input folder (absolute or relative).
 // Returns: parsed slide input or an error for missing/invalid content.
 func ParseInputFolder(dir string) (SlideInput, error) {
@@ -52,14 +56,14 @@ func ParseInputFolder(dir string) (SlideInput, error) {
 		return SlideInput{}, fmt.Errorf("input path is not a directory: %s", dir)
 	}
 
-	htmlBytes, err := os.ReadFile(filepath.Join(dir, "slide.html"))
-	if err != nil {
-		return SlideInput{}, fmt.Errorf("read slide.html: %w (slide.html is required)", err)
-	}
-	htmlContent := string(htmlBytes)
-
 	var input SlideInput
-	input.HTMLContent = htmlContent
+	htmlBytes, err := os.ReadFile(filepath.Join(dir, "slide.html"))
+	if err == nil {
+		htmlContent := string(htmlBytes)
+		input.HTMLContent = &htmlContent
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return SlideInput{}, fmt.Errorf("read slide.html: %w", err)
+	}
 
 	// Parse notes.md
 	notesPath := filepath.Join(dir, "notes.md")
@@ -77,6 +81,8 @@ func ParseInputFolder(dir string) (SlideInput, error) {
 			return SlideInput{}, fmt.Errorf("parse metadata.json: %w", err)
 		}
 		input.ProjectID = meta.ProjectID
+		input.SourceDeviceID = meta.SourceDeviceID
+		input.SourceRef = meta.SourceRef
 		input.GitRemoteURL = meta.GitRemoteURL
 		input.GitHash = meta.GitHash
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -110,8 +116,10 @@ func ParseInputFolder(dir string) (SlideInput, error) {
 	}
 
 	// Validate figure references in HTML
-	if err := validateFigureRefs(htmlContent, input.Figures); err != nil {
-		return SlideInput{}, err
+	if input.HTMLContent != nil {
+		if err := validateFigureRefs(*input.HTMLContent, input.Figures); err != nil {
+			return SlideInput{}, err
+		}
 	}
 
 	return input, nil

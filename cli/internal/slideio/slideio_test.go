@@ -17,8 +17,8 @@ func TestParseInputFolderMinimal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseInputFolder() error = %v", err)
 	}
-	if input.HTMLContent != "<h1>Hello</h1>" {
-		t.Fatalf("unexpected HTML: %q", input.HTMLContent)
+	if input.HTMLContent == nil || *input.HTMLContent != "<h1>Hello</h1>" {
+		t.Fatalf("unexpected HTML: %v", input.HTMLContent)
 	}
 	if input.Notes != nil {
 		t.Fatalf("expected nil notes, got %q", *input.Notes)
@@ -83,9 +83,12 @@ func TestParseInputFolderMissingSlideHTML(t *testing.T) {
 	dir := t.TempDir()
 	// No slide.html
 
-	_, err := ParseInputFolder(dir)
-	if err == nil {
-		t.Fatal("expected error for missing slide.html")
+	input, err := ParseInputFolder(dir)
+	if err != nil {
+		t.Fatalf("ParseInputFolder() error = %v", err)
+	}
+	if input.HTMLContent != nil {
+		t.Fatalf("expected nil HTMLContent, got %q", *input.HTMLContent)
 	}
 }
 

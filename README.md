@@ -135,7 +135,7 @@ above with `--api-key`.
 
 - `pc --help`, `pc --version`
 - `pc setup` — initialize local environment (directories, SQLite, templates)
-- `pc add <path>` — create slide from folder (slide.html required, metadata.json for project/git fields)
+- `pc add <path>` — create record from folder (`slide.html` optional; `metadata.json` or flags must provide registered `project_id` and `source_device_id`)
 - `pc show <id>` — display slide metadata, notes, figures, data files (`--format text|json`)
 - `pc edit <id> <path>` — full replacement of content, notes, figures, data files
 - `pc delete <id>` — soft-delete a slide
@@ -144,11 +144,12 @@ above with `--api-key`.
 - `pc search <query>` — search slides by content, notes, or project (`--format table|ids|json`, `--limit`, `--project`, `--deleted`)
 - `pc trash` — list soft-deleted slides
 - `pc gc` — hard-delete trash older than 30 days (cascades child rows, removes files; cloud-aware: deletes from cloud first to prevent sync re-creation)
-- `pc project set|clear|list` — manage active project (active project used by `pc add` when no `--project` flag)
+- `pc project list|add|archive|restore` — manage the project registry
+- `pc device list|register|archive|restore` — manage the source-device registry
 - `pc doctor` — check system health (DB, orphans, missing files; cloud connectivity if configured)
 - `pc sync` — bidirectional sync between local SQLite and cloud Postgres/S3 (requires cloud configuration)
 - `pc fetch <slide_id>` — download data files from cloud S3 (`--project`, `--recent 3d/2w/1m/1y`, `--output`)
-- `pc export --path <dir>` — write deterministic git snapshot folders (`templates/`, `slides/`); `--from-cloud` reads slides/assets from Postgres/S3
+- `pc export --path <dir>` — write deterministic git snapshot state (`projects.json`, `devices.json`, `templates/`, `slides/`); `--from-cloud` reads slides/assets from Postgres/S3
 - `pc import <path>` — merge a git snapshot into local SQLite using `updated_at` rules (`same/older -> skip`, `newer -> replace`)
 - `pc restore-db <path>` — replace local SQLite state from a git snapshot and create an auto-backup snapshot first under `~/personal-context/.pc/backups/`
 - `pc verify` — run a local Tier 2 round-trip verification; `pc verify --from-cloud` verifies the cloud-rooted round-trip path

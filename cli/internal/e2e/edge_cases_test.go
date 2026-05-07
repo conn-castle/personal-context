@@ -55,8 +55,8 @@ func TestEdgeCaseMinimalSlide(t *testing.T) {
 	if result["notes"] != nil {
 		t.Fatalf("expected notes to be null, got %v", result["notes"])
 	}
-	if result["project_id"] != nil {
-		t.Fatalf("expected project_id to be null, got %v", result["project_id"])
+	if result["project_id"] != "test/default-project" {
+		t.Fatalf("expected default fixture project_id, got %v", result["project_id"])
 	}
 	if result["git_remote_url"] != nil {
 		t.Fatalf("expected git_remote_url to be null, got %v", result["git_remote_url"])
@@ -119,7 +119,7 @@ func TestEdgeCaseSpecialCharactersInFilenames(t *testing.T) {
 	inputDir := createInputFolder(t, inputFolderOpts{
 		HTMLContent: `<html><img src="figures/my figure.png"><img src="figures/data-chart_v2.png"></html>`,
 		Figures: map[string][]byte{
-			"my figure.png":    []byte("fig-with-space"),
+			"my figure.png":     []byte("fig-with-space"),
 			"data-chart_v2.png": []byte("fig-with-hyphen-underscore"),
 		},
 		DataFiles: map[string][]byte{

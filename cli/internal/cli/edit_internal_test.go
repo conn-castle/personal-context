@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/conn-castle/personal-context/cli/internal/repository"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -36,6 +38,117 @@ func TestStageReplacementFileSuccess(t *testing.T) {
 	}
 	if string(content) != "hello" {
 		t.Fatalf("unexpected staged content: %q", string(content))
+	}
+}
+
+func TestRunEditRejectsArchivedProjectBeforeMutation(t *testing.T) {
+	setupEnv(t)
+	id := addSlideWithContent(t, "<html><body>before</body></html>", "", "", nil, nil)
+
+	editDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html><body>after</body></html>"), 0o644); err != nil {
+		t.Fatalf("write slide.html: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(editDir, "metadata.json"), []byte(`{"project_id":"archived-edit-project","source_device_id":"test-device"}`), 0o644); err != nil {
+		t.Fatalf("write metadata.json: %v", err)
+	}
+	ensureRegisteredProjectAndDevice(t, "archived-edit-project", "test-device")
+
+	homeDir, err := resolveHomeDir()
+	if err != nil {
+		t.Fatalf("resolve home: %v", err)
+	}
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		t.Fatalf("open stack: %v", err)
+	}
+	if _, err := stack.Repo.ArchiveProject(context.Background(), "archived-edit-project"); err != nil {
+		t.Fatalf("archive project: %v", err)
+	}
+	if err := stack.Close(); err != nil {
+		t.Fatalf("close stack: %v", err)
+	}
+
+	err = runEdit(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, id, editDir)
+	if err == nil {
+		t.Fatal("expected archived project error")
+	}
+	if !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("runEdit() error = %v, want archived project", err)
+	}
+}
+
+func TestEditSupportRepositoryErrorBranches(t *testing.T) {
+	ctx := context.Background()
+
+	listDataErr := fmt.Errorf("list data failed")
+	if _, err := loadExistingEditAssets(ctx, &mockRepo{
+		listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+			return []repository.SlideFigure{{ID: 1, Filename: "fig.png"}}, nil
+		},
+		listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
+			return nil, listDataErr
+		},
+	}, "slide-a"); err == nil || !strings.Contains(err.Error(), "list old data files") {
+		t.Fatalf("loadExistingEditAssets() error = %v, want data file list context", err)
+	}
+
+	updateFigureErr := fmt.Errorf("update figure failed")
+	if _, err := upsertEditFigureRecords(ctx, &mockRepo{
+		updateFigureFn: func(context.Context, repository.UpdateSlideFigureInput) (repository.SlideFigure, error) {
+			return repository.SlideFigure{}, updateFigureErr
+		},
+	}, []repository.CreateSlideFigureInput{{Filename: "fig.png"}}, map[string]repository.SlideFigure{
+		"fig.png": {ID: 1, Filename: "fig.png"},
+	}, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "update figure record") {
+		t.Fatalf("upsertEditFigureRecords(update) error = %v", err)
+	}
+
+	createFigureErr := fmt.Errorf("create figure failed")
+	if _, err := upsertEditFigureRecords(ctx, &mockRepo{
+		createFigureFn: func(context.Context, repository.CreateSlideFigureInput) (repository.SlideFigure, error) {
+			return repository.SlideFigure{}, createFigureErr
+		},
+	}, []repository.CreateSlideFigureInput{{Filename: "new.png"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "create figure record") {
+		t.Fatalf("upsertEditFigureRecords(create) error = %v", err)
+	}
+
+	updateDataErr := fmt.Errorf("update data failed")
+	if _, err := upsertEditDataFileRecords(ctx, &mockRepo{
+		updateDataFileFn: func(context.Context, repository.UpdateSlideDataFileInput) (repository.SlideDataFile, error) {
+			return repository.SlideDataFile{}, updateDataErr
+		},
+	}, []repository.CreateSlideDataFileInput{{Filename: "data.csv"}}, map[string]repository.SlideDataFile{
+		"data.csv": {ID: 1, Filename: "data.csv"},
+	}, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "update data file record") {
+		t.Fatalf("upsertEditDataFileRecords(update) error = %v", err)
+	}
+
+	createDataErr := fmt.Errorf("create data failed")
+	if _, err := upsertEditDataFileRecords(ctx, &mockRepo{
+		createDataFileFn: func(context.Context, repository.CreateSlideDataFileInput) (repository.SlideDataFile, error) {
+			return repository.SlideDataFile{}, createDataErr
+		},
+	}, []repository.CreateSlideDataFileInput{{Filename: "data.csv"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "create data file record") {
+		t.Fatalf("upsertEditDataFileRecords(create) error = %v", err)
+	}
+
+	deleteFigureErr := fmt.Errorf("delete figure failed")
+	if _, err := deleteRemovedEditFigures(ctx, &mockRepo{
+		deleteFigureFn: func(context.Context, int64) error {
+			return deleteFigureErr
+		},
+	}, []repository.SlideFigure{{ID: 1, Filename: "old.png"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "delete old figure record") {
+		t.Fatalf("deleteRemovedEditFigures() error = %v", err)
+	}
+
+	deleteDataErr := fmt.Errorf("delete data failed")
+	if _, err := deleteRemovedEditDataFiles(ctx, &mockRepo{
+		deleteDataFileFn: func(context.Context, int64) error {
+			return deleteDataErr
+		},
+	}, []repository.SlideDataFile{{ID: 1, Filename: "old.csv"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "delete old data file record") {
+		t.Fatalf("deleteRemovedEditDataFiles() error = %v", err)
 	}
 }
 
@@ -77,6 +190,7 @@ func TestRunEditRollsBackSlideOnStageFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html><body>after</body></html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, editDir)
 	dataDir := filepath.Join(editDir, "data")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatalf("mkdir data: %v", err)
@@ -124,6 +238,7 @@ func TestRunEditFailsWhenCommitRenameTargetIsDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><img src="figures/bad.png"></html>`), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, editDir)
 	figuresDir := filepath.Join(editDir, "figures")
 	if err := os.MkdirAll(figuresDir, 0o755); err != nil {
 		t.Fatalf("mkdir figures: %v", err)
@@ -177,6 +292,7 @@ func TestRunEditRollsBackDataFileRowOnCommitFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html><body>after</body></html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, editDir)
 	dataDir := filepath.Join(editDir, "data")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatalf("mkdir data dir: %v", err)
@@ -220,6 +336,7 @@ func TestRunEditRestoresEarlierCommittedFilesWhenLaterCommitFails(t *testing.T) 
 	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><img src="figures/a.png"><img src="figures/b.png"></html>`), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, editDir)
 	figuresDir := filepath.Join(editDir, "figures")
 	if err := os.MkdirAll(figuresDir, 0o755); err != nil {
 		t.Fatalf("mkdir figures: %v", err)
@@ -286,6 +403,7 @@ END;
 	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><img src="figures/keep.png"></html>`), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, editDir)
 	figuresDir := filepath.Join(editDir, "figures")
 	if err := os.MkdirAll(figuresDir, 0o755); err != nil {
 		t.Fatalf("mkdir figures: %v", err)
@@ -384,6 +502,7 @@ END;
 	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><body>updated</body></html>`), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, editDir)
 	dataDir := filepath.Join(editDir, "data")
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatalf("mkdir data dir: %v", err)
@@ -437,6 +556,7 @@ func TestRunEditReconcilesCreateUpdateAndDeletePaths(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><img src="figures/keep.png"><img src="figures/new.png"></html>`), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, editDir)
 
 	figuresDir := filepath.Join(editDir, "figures")
 	if err := os.MkdirAll(figuresDir, 0o755); err != nil {

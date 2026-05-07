@@ -4,18 +4,36 @@ import "time"
 
 // Slide is a row from the slides table.
 type Slide struct {
-	ID           string
-	UserID       string // Postgres only; empty in SQLite (local mode)
-	Date         string
-	DayOrder     string
-	HTMLContent  string
-	Notes        *string
-	ProjectID    *string
-	GitRemoteURL *string
-	GitHash      *string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
+	ID             string
+	UserID         string // Postgres only; empty in SQLite (local mode)
+	Date           string
+	DayOrder       string
+	HTMLContent    *string
+	Notes          *string
+	ProjectID      string
+	SourceDeviceID string
+	SourceRef      *string
+	GitRemoteURL   *string
+	GitHash        *string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeletedAt      *time.Time
+}
+
+// Project is a project registry row.
+type Project struct {
+	ID         string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	ArchivedAt *time.Time
+}
+
+// Device is a source-device registry row.
+type Device struct {
+	ID         string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	ArchivedAt *time.Time
 }
 
 // SlideFigure is a row from the slide_figures table.
@@ -58,33 +76,45 @@ type SyncVersion struct {
 	UpdatedAt time.Time
 }
 
+// CreateRegistryInput contains fields for creating project/device registry rows.
+type CreateRegistryInput struct {
+	ID         string
+	CreatedAt  *time.Time
+	UpdatedAt  *time.Time
+	ArchivedAt *time.Time
+}
+
 // CreateSlideInput contains required and optional fields for inserts.
 type CreateSlideInput struct {
-	ID           string
-	Date         string
-	DayOrder     string
-	HTMLContent  string
-	Notes        *string
-	ProjectID    *string
-	GitRemoteURL *string
-	GitHash      *string
-	CreatedAt    *time.Time
-	UpdatedAt    *time.Time
-	DeletedAt    *time.Time
+	ID             string
+	Date           string
+	DayOrder       string
+	HTMLContent    *string
+	Notes          *string
+	ProjectID      string
+	SourceDeviceID string
+	SourceRef      *string
+	GitRemoteURL   *string
+	GitHash        *string
+	CreatedAt      *time.Time
+	UpdatedAt      *time.Time
+	DeletedAt      *time.Time
 }
 
 // UpdateSlideInput contains mutable slide fields.
 type UpdateSlideInput struct {
-	ID           string
-	Date         string
-	DayOrder     string
-	HTMLContent  string
-	Notes        *string
-	ProjectID    *string
-	GitRemoteURL *string
-	GitHash      *string
-	UpdatedAt    *time.Time
-	DeletedAt    *time.Time
+	ID             string
+	Date           string
+	DayOrder       string
+	HTMLContent    *string
+	Notes          *string
+	ProjectID      string
+	SourceDeviceID string
+	SourceRef      *string
+	GitRemoteURL   *string
+	GitHash        *string
+	UpdatedAt      *time.Time
+	DeletedAt      *time.Time
 }
 
 // ListSlidesFilter controls slide-list query behavior.

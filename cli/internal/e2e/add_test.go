@@ -10,6 +10,8 @@ import (
 func TestAddMinimalSlide(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
+	runPCSuccess(t, homeDir, "project", "add", "test/default-project")
+	runPCSuccess(t, homeDir, "device", "register", "test-device")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
@@ -35,9 +37,12 @@ func TestAddMissingSlideHTML(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	emptyDir := t.TempDir()
-	stderr := runPCFailure(t, homeDir, "add", emptyDir)
-	if !strings.Contains(stderr, "slide.html") {
-		t.Fatalf("expected slide.html error, got %q", stderr)
+	if err := os.WriteFile(filepath.Join(emptyDir, "metadata.json"), []byte(`{"project_id":"test/default-project","source_device_id":"test-device"}`), 0o644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	stdout := runPCSuccess(t, homeDir, "add", emptyDir)
+	if strings.TrimSpace(stdout) == "" {
+		t.Fatal("expected slide ID for folder without slide.html")
 	}
 }
 
@@ -67,29 +72,24 @@ func TestAddWithMetadataJSON(t *testing.T) {
 	}
 }
 
-func TestAddProjectFlagOverridesMetadata(t *testing.T) {
+func TestAddProjectFlagMustMatchMetadata(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
 	inputDir := createInputFolder(t, inputFolderOpts{
 		MetadataJSON: `{"project_id":"from-metadata"}`,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", "--project", "from-flag", inputDir)
-	slideID := strings.TrimSpace(stdout)
-
-	db := openTestDB(t, homeDir)
-	var projectID string
-	if err := db.QueryRow("SELECT project_id FROM slides WHERE id = ?", slideID).Scan(&projectID); err != nil {
-		t.Fatalf("query slide: %v", err)
-	}
-	if projectID != "from-flag" {
-		t.Fatalf("expected project_id=from-flag, got %q", projectID)
+	stderr := runPCFailure(t, homeDir, "add", "--project", "from-flag", inputDir)
+	if !strings.Contains(stderr, "project_id conflict") {
+		t.Fatalf("expected project conflict, got %q", stderr)
 	}
 }
 
 func TestAddWithDateFlag(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
+	runPCSuccess(t, homeDir, "project", "add", "test/default-project")
+	runPCSuccess(t, homeDir, "device", "register", "test-device")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
 	stdout := runPCSuccess(t, homeDir, "add", "--date", "2025-06-15", inputDir)
@@ -217,6 +217,8 @@ func TestAddPositionFirst(t *testing.T) {
 func TestAddInvalidDate(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
+	runPCSuccess(t, homeDir, "project", "add", "test/default-project")
+	runPCSuccess(t, homeDir, "device", "register", "test-device")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
 	stderr := runPCFailure(t, homeDir, "add", "--date", "not-a-date", inputDir)

@@ -85,7 +85,7 @@ func TestResolveBundleExactEditTieReturnsNone(t *testing.T) {
 
 	local := newBundle("20260308-a1b2c3d4", base, nil)
 	cloud := newBundle("20260308-a1b2c3d4", base, nil)
-	cloud.Slide.HTMLContent = "<h1>cloud</h1>"
+	cloud.Slide.HTMLContent = strPtr("<h1>cloud</h1>")
 
 	_, winner, err := ResolveBundle(local, cloud)
 	if err != nil {
@@ -516,7 +516,7 @@ func newBundle(id string, updatedAt time.Time, deletedAt *time.Time) SlideBundle
 	return SlideBundle{
 		Slide: repository.Slide{
 			ID:          id,
-			HTMLContent: "<h1>local</h1>",
+			HTMLContent: strPtr("<h1>local</h1>"),
 			UpdatedAt:   updatedAt,
 			DeletedAt:   deletedAt,
 		},

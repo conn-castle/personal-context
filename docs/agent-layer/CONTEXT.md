@@ -166,7 +166,7 @@ On version change: query Neon for slides with `updated_at >= last_known_timestam
 ```
 ~/personal-context/
 ├── .pc/
-│   ├── config.json           # Neon URL, S3 bucket/region, aws_profile name, active project, api_key, optional s3_endpoint/s3_force_path_style (0600, no AWS keys). Cloud mode detected by presence of neon_url + aws_profile.
+│   ├── config.json           # Neon URL, S3 bucket/region, aws_profile name, api_key, optional s3_endpoint/s3_force_path_style (0600, no AWS keys). Stale active_project may exist but is ignored by write paths. Cloud mode detected by presence of neon_url + aws_profile.
 │   ├── pc.db                 # local SQLite
 │   ├── last_sync             # timestamp of last cloud sync
 │   └── sync.lock             # file lock for concurrent sync prevention
@@ -186,10 +186,12 @@ s3://personal-context-prod/
 ### Git Export
 ```
 personal-context-data/
+├── projects.json
+├── devices.json
 ├── templates/*.html
 └── slides/{slide_id}/
     ├── metadata.json           # SlideExport (no HTML, no notes text)
-    ├── slide.html              # html_content
+    ├── slide.html              # optional; absent means html_content is NULL
     ├── notes.md                # only if has_notes
     └── figures/                # Git LFS
 ```
@@ -269,7 +271,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `pc doctor` — health checks (DB readability, orphaned figure/data directories, missing local figure/data files; cloud connectivity WARN if configured but unreachable)
 
 ### Slide CRUD
-- `pc add <path>` — create slide from folder (`slide.html` required, `metadata.json` for project_id/git_remote_url/git_hash)
+- `pc add <path>` — create record from folder (`slide.html` optional; project/device provenance required through flags or metadata)
 - `pc edit <id> <path>` — full replacement of content, notes, figures, data files, git fields (`updated_at` auto-bumped by trigger)
 - `pc delete <id>` — soft-delete
 - `pc restore <id>` — un-delete
@@ -280,9 +282,10 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `pc trash` — list soft-deleted slides
 - `pc gc` — hard-delete trash > 30 days (cloud-first if configured: deletes from Neon before local to prevent sync re-creation, warns if cloud unreachable, removes local figure/data files, runs auto-sync)
 
-### Search & Projects
+### Search & Registries
 - `pc search <query>` — LIKE/ILIKE on html_content, notes, project_id (not git fields)
-- `pc project set|clear|list` — manage active project
+- `pc project list|add|archive|restore` — manage registered projects
+- `pc device list|register|archive|restore` — manage registered source devices
 
 ### Local Dev Server
 - `pc serve` — start Go HTTP server on `127.0.0.1:<port>` implementing the web API against local SQLite + filesystem. Used with `next dev` for local web UI development without cloud credentials.
@@ -445,8 +448,10 @@ type SlideSummary = {
   id: string;
   date: string; // YYYY-MM-DD
   day_order: string;
-  html_content: string;
-  project_id: string | null;
+  html_content: string | null;
+  project_id: string;
+  source_device_id: string;
+  source_ref: string | null;
   updated_at: string; // ISO 8601 UTC
   deleted_at: string | null;
   figure_count: number;
@@ -466,9 +471,11 @@ type SlideDetail = {
   id: string;
   date: string;
   day_order: string;
-  html_content: string;
+  html_content: string | null;
   notes: string | null;
-  project_id: string | null;
+  project_id: string;
+  source_device_id: string;
+  source_ref: string | null;
   git_remote_url: string | null;
   git_hash: string | null;
   created_at: string;

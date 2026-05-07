@@ -24,14 +24,14 @@ func TestLocalDemoWorkflow(t *testing.T) {
 	projectID := "demo/local"
 
 	runPCSuccess(t, homeDir, "setup")
-	runPCSuccess(t, homeDir, "project", "set", projectID)
 
 	slideIDs := make(map[int]string, 10)
 
 	for i := 1; i <= 10; i++ {
 		folder := createInputFolder(t, inputFolderOpts{
-			HTMLContent: demoSlideHTML(i),
-			Notes:       demoSlideNotes(i),
+			HTMLContent:  demoSlideHTML(i),
+			Notes:        demoSlideNotes(i),
+			MetadataJSON: `{"project_id":"` + projectID + `","source_device_id":"test-device"}`,
 		})
 		slideIDs[i] = strings.TrimSpace(runPCSuccess(t, homeDir, "add", "--date", dateValue, folder))
 	}
@@ -217,7 +217,7 @@ func assertProjectApplied(t *testing.T, db *sql.DB, projectID string) {
 		t.Fatalf("count slides without project: %v", err)
 	}
 	if nullProjects != 0 {
-		t.Fatalf("expected all slides to inherit active project, found %d NULL project_id rows", nullProjects)
+		t.Fatalf("expected all slides to have explicit project provenance, found %d NULL project_id rows", nullProjects)
 	}
 
 	var mismatchedProjects int

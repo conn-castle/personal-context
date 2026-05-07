@@ -58,6 +58,13 @@ func runEdit(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 	if err != nil {
 		return err
 	}
+	projectID, deviceID, sourceRef, err := resolveRecordProvenance(input.ProjectID, input.SourceDeviceID, input.SourceRef, "", "", "")
+	if err != nil {
+		return err
+	}
+	if err := validateActiveProjectAndDevice(ctx, stack.Repo, projectID, deviceID); err != nil {
+		return err
+	}
 
 	existingAssets, err := loadExistingEditAssets(ctx, stack.Repo, id)
 	if err != nil {
@@ -76,15 +83,17 @@ func runEdit(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 
 	// Update slide (full replacement, preserve immutable fields)
 	if _, err := stack.Repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-		ID:           id,
-		Date:         existing.Date,
-		DayOrder:     existing.DayOrder,
-		HTMLContent:  input.HTMLContent,
-		Notes:        input.Notes,
-		ProjectID:    input.ProjectID,
-		GitRemoteURL: input.GitRemoteURL,
-		GitHash:      input.GitHash,
-		DeletedAt:    existing.DeletedAt,
+		ID:             id,
+		Date:           existing.Date,
+		DayOrder:       existing.DayOrder,
+		HTMLContent:    input.HTMLContent,
+		Notes:          input.Notes,
+		ProjectID:      projectID,
+		SourceDeviceID: deviceID,
+		SourceRef:      sourceRef,
+		GitRemoteURL:   input.GitRemoteURL,
+		GitHash:        input.GitHash,
+		DeletedAt:      existing.DeletedAt,
 	}); err != nil {
 		return fmt.Errorf("update slide: %w", err)
 	}

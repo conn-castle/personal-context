@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,6 +85,38 @@ func TestSetupOptionsValidateCloudFlagsComplete(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDefaultValidateS3AccessUsesEndpointAndPathStyle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			t.Fatalf("method = %s, want HEAD", r.Method)
+		}
+		if r.URL.Path != "/test-bucket" {
+			t.Fatalf("path = %s, want /test-bucket", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	if err := validateS3AccessFn(context.Background(), "test-bucket", "us-east-1", "access", "secret", server.URL, true); err != nil {
+		t.Fatalf("validateS3AccessFn() error = %v", err)
+	}
+}
+
+func TestDefaultValidateS3AccessReportsHeadBucketError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "denied", http.StatusForbidden)
+	}))
+	t.Cleanup(server.Close)
+
+	err := validateS3AccessFn(context.Background(), "test-bucket", "us-east-1", "access", "secret", server.URL, true)
+	if err == nil {
+		t.Fatal("expected HeadBucket error")
+	}
+	if !strings.Contains(err.Error(), `check bucket "test-bucket"`) {
+		t.Fatalf("error = %v, want bucket context", err)
 	}
 }
 

@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -219,6 +221,95 @@ func TestSeedCreateSlideError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when sync_version table is missing (trigger fails)")
 	}
+}
+
+func TestSeedProjectLookupError(t *testing.T) {
+	homeDir := setupEnv(t)
+	corruptTable(t, homeDir, "projects")
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &stdout, Stderr: &stderr})
+	cmd.SetArgs([]string{"seed"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when projects table is corrupted")
+	}
+	if !strings.Contains(err.Error(), "get seed project") {
+		t.Fatalf("seed error = %v, want seed project lookup context", err)
+	}
+}
+
+func TestSeedDeviceLookupError(t *testing.T) {
+	homeDir := setupEnv(t)
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		t.Fatalf("open stack: %v", err)
+	}
+	if _, err := stack.Repo.CreateProject(context.Background(), repository.CreateRegistryInput{ID: "personal-context/tutorial"}); err != nil {
+		t.Fatalf("create tutorial project: %v", err)
+	}
+	if err := stack.Close(); err != nil {
+		t.Fatalf("close stack: %v", err)
+	}
+	corruptTable(t, homeDir, "devices")
+
+	var stdout, stderr bytes.Buffer
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &stdout, Stderr: &stderr})
+	cmd.SetArgs([]string{"seed"})
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when devices table is corrupted")
+	}
+	if !strings.Contains(err.Error(), "get seed device") {
+		t.Fatalf("seed error = %v, want seed device lookup context", err)
+	}
+}
+
+func TestSeedRegistryCreateErrors(t *testing.T) {
+	setupEnv(t)
+
+	t.Run("project", func(t *testing.T) {
+		createErr := errors.New("create project failed")
+		origNewSQLiteRepoFn := newSQLiteRepoFn
+		newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
+			return &mockRepo{
+				createProjectFn: func(context.Context, repository.CreateRegistryInput) (repository.Project, error) {
+					return repository.Project{}, createErr
+				},
+			}, nil
+		}
+		t.Cleanup(func() { newSQLiteRepoFn = origNewSQLiteRepoFn })
+
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs([]string{"seed"})
+		err := cmd.Execute()
+		if !errors.Is(err, createErr) || !strings.Contains(err.Error(), "create seed project") {
+			t.Fatalf("seed error = %v, want create seed project", err)
+		}
+	})
+
+	t.Run("device", func(t *testing.T) {
+		createErr := errors.New("create device failed")
+		origNewSQLiteRepoFn := newSQLiteRepoFn
+		newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
+			return &mockRepo{
+				getProjectByIDFn: func(context.Context, string) (repository.Project, error) {
+					return repository.Project{ID: "personal-context/tutorial"}, nil
+				},
+				createDeviceFn: func(context.Context, repository.CreateRegistryInput) (repository.Device, error) {
+					return repository.Device{}, createErr
+				},
+			}, nil
+		}
+		t.Cleanup(func() { newSQLiteRepoFn = origNewSQLiteRepoFn })
+
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs([]string{"seed"})
+		err := cmd.Execute()
+		if !errors.Is(err, createErr) || !strings.Contains(err.Error(), "create seed device") {
+			t.Fatalf("seed error = %v, want create seed device", err)
+		}
+	})
 }
 
 func TestSeedTitle(t *testing.T) {

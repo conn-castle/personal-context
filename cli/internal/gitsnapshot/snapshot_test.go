@@ -20,16 +20,27 @@ func TestWriteReadAndManifestRoundTrip(t *testing.T) {
 			{Name: "single-image", HTMLContent: "<html>single-image</html>"},
 			{Name: "text-only", HTMLContent: "<html>text-only</html>"},
 		},
+		Projects: []RegistryEntry{{
+			ID:        "phase7/unit",
+			CreatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC),
+			UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC),
+		}},
+		Devices: []RegistryEntry{{
+			ID:        "device/unit",
+			CreatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC),
+			UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC),
+		}},
 		Slides: []Slide{
 			{
-				ID:           "20260309-aaaabbbb",
-				Date:         "2026-03-09",
-				DayOrder:     "a0",
-				ProjectID:    strPtrSnapshot("phase7/unit"),
-				GitRemoteURL: strPtrSnapshot("https://github.com/org/repo"),
-				GitHash:      strPtrSnapshot(strings.Repeat("a", 40)),
-				HTMLContent:  "<html><body><img src=\"figures/plot.png\"></body></html>",
-				Notes:        &notes,
+				ID:             "20260309-aaaabbbb",
+				Date:           "2026-03-09",
+				DayOrder:       "a0",
+				ProjectID:      "phase7/unit",
+				SourceDeviceID: "device/unit",
+				GitRemoteURL:   strPtrSnapshot("https://github.com/org/repo"),
+				GitHash:        strPtrSnapshot(strings.Repeat("a", 40)),
+				HTMLContent:    strPtrSnapshot("<html><body><img src=\"figures/plot.png\"></body></html>"),
+				Notes:          &notes,
 				Figures: []Figure{{
 					Filename: "plot.png",
 					S3Key:    "figures/20260309-aaaabbbb/plot.png",
@@ -47,14 +58,16 @@ func TestWriteReadAndManifestRoundTrip(t *testing.T) {
 				UpdatedAt: time.Date(2026, 3, 9, 12, 30, 0, 456000000, time.UTC),
 			},
 			{
-				ID:          "20260309-ccccdddd",
-				Date:        "2026-03-09",
-				DayOrder:    "b0",
-				HTMLContent: "<html><body>minimal</body></html>",
-				Figures:     []Figure{},
-				DataFiles:   []DataFile{},
-				CreatedAt:   time.Date(2026, 3, 9, 13, 0, 0, 0, time.UTC),
-				UpdatedAt:   time.Date(2026, 3, 9, 13, 0, 0, 0, time.UTC),
+				ID:             "20260309-ccccdddd",
+				Date:           "2026-03-09",
+				DayOrder:       "b0",
+				ProjectID:      "phase7/unit",
+				SourceDeviceID: "device/unit",
+				HTMLContent:    strPtrSnapshot("<html><body>minimal</body></html>"),
+				Figures:        []Figure{},
+				DataFiles:      []DataFile{},
+				CreatedAt:      time.Date(2026, 3, 9, 13, 0, 0, 0, time.UTC),
+				UpdatedAt:      time.Date(2026, 3, 9, 13, 0, 0, 0, time.UTC),
 			},
 		},
 	}
@@ -112,11 +125,14 @@ func TestReadRejectsGitLFSPointerFigures(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "templates", "text-only.html"), []byte("<html>template</html>"), 0o644); err != nil {
 		t.Fatalf("write template: %v", err)
 	}
+	writeDefaultSnapshotRegistries(t, root)
 	metadata := `{
   "format_version": 1,
   "id": "20260309-aaaabbbb",
   "date": "2026-03-09",
   "day_order": "a0",
+  "project_id": "phase7/unit",
+  "source_device_id": "device/unit",
   "has_notes": false,
   "figures": [
     {
@@ -163,11 +179,14 @@ func TestReadRejectsGitLFSPointerWithCRLF(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "templates", "text-only.html"), []byte("<html>template</html>"), 0o644); err != nil {
 		t.Fatalf("write template: %v", err)
 	}
+	writeDefaultSnapshotRegistries(t, root)
 	metadata := `{
   "format_version": 1,
   "id": "20260309-aaaabbbb",
   "date": "2026-03-09",
   "day_order": "a0",
+  "project_id": "phase7/unit",
+  "source_device_id": "device/unit",
   "has_notes": false,
   "figures": [
     {
@@ -217,7 +236,7 @@ func TestWriteRejectsInvalidPathSegments(t *testing.T) {
 			ID:          "bad/name",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
-			HTMLContent: "x",
+			HTMLContent: strPtrSnapshot("x"),
 			CreatedAt:   time.Now().UTC(),
 			UpdatedAt:   time.Now().UTC(),
 		}},
@@ -232,7 +251,7 @@ func TestWriteRejectsInvalidPathSegments(t *testing.T) {
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
-			HTMLContent: "x",
+			HTMLContent: strPtrSnapshot("x"),
 			CreatedAt:   time.Now().UTC(),
 			UpdatedAt:   time.Now().UTC(),
 			DataFiles: []DataFile{{
@@ -256,7 +275,7 @@ func TestWriteRejectsInvalidPathSegments(t *testing.T) {
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
-			HTMLContent: "x",
+			HTMLContent: strPtrSnapshot("x"),
 			CreatedAt:   time.Now().UTC(),
 			UpdatedAt:   time.Now().UTC(),
 			DataFiles: []DataFile{{
@@ -496,6 +515,25 @@ func strPtrSnapshot(value string) *string {
 	return &value
 }
 
+func writeDefaultSnapshotRegistries(t *testing.T, root string) {
+	t.Helper()
+	ts := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	if err := writeRegistryFile(filepath.Join(root, "projects.json"), []RegistryEntry{{
+		ID:        "phase7/unit",
+		CreatedAt: ts,
+		UpdatedAt: ts,
+	}}); err != nil {
+		t.Fatalf("write projects.json: %v", err)
+	}
+	if err := writeRegistryFile(filepath.Join(root, "devices.json"), []RegistryEntry{{
+		ID:        "device/unit",
+		CreatedAt: ts,
+		UpdatedAt: ts,
+	}}); err != nil {
+		t.Fatalf("write devices.json: %v", err)
+	}
+}
+
 func writeMinimalSnapshotTree(t *testing.T, root string, metadata string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(root, "templates"), 0o755); err != nil {
@@ -507,8 +545,37 @@ func writeMinimalSnapshotTree(t *testing.T, root string, metadata string) {
 	if err := os.WriteFile(filepath.Join(root, "templates", "text-only.html"), []byte("<html>template</html>"), 0o644); err != nil {
 		t.Fatalf("write template: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "metadata.json"), []byte(metadata), 0o644); err != nil {
+	var metadataMap map[string]any
+	if err := json.Unmarshal([]byte(metadata), &metadataMap); err != nil {
+		t.Fatalf("parse metadata fixture: %v", err)
+	}
+	if _, ok := metadataMap["project_id"]; !ok {
+		metadataMap["project_id"] = "phase7/unit"
+	}
+	if _, ok := metadataMap["source_device_id"]; !ok {
+		metadataMap["source_device_id"] = "device/unit"
+	}
+	metadataBytes, err := json.MarshalIndent(metadataMap, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal metadata fixture: %v", err)
+	}
+	metadataBytes = append(metadataBytes, '\n')
+	if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "metadata.json"), metadataBytes, 0o644); err != nil {
 		t.Fatalf("write metadata.json: %v", err)
+	}
+	if err := writeRegistryFile(filepath.Join(root, "projects.json"), []RegistryEntry{{
+		ID:        "phase7/unit",
+		CreatedAt: time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+	}}); err != nil {
+		t.Fatalf("write projects.json: %v", err)
+	}
+	if err := writeRegistryFile(filepath.Join(root, "devices.json"), []RegistryEntry{{
+		ID:        "device/unit",
+		CreatedAt: time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+	}}); err != nil {
+		t.Fatalf("write devices.json: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "slide.html"), []byte("<html>slide</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
@@ -549,7 +616,7 @@ func TestWriteRejectsInvalidInputs(t *testing.T) {
 					ID:          "bad/id",
 					Date:        "2026-03-09",
 					DayOrder:    "a0",
-					HTMLContent: "<html>bad</html>",
+					HTMLContent: strPtrSnapshot("<html>bad</html>"),
 					CreatedAt:   now,
 					UpdatedAt:   now,
 				}},
@@ -563,7 +630,7 @@ func TestWriteRejectsInvalidInputs(t *testing.T) {
 					ID:          "20260309-aaaabbbb",
 					Date:        "2026-03-09",
 					DayOrder:    "a0",
-					HTMLContent: "<html>bad</html>",
+					HTMLContent: strPtrSnapshot("<html>bad</html>"),
 					Figures: []Figure{{
 						Filename: "bad/name.png",
 						S3Key:    "figures/20260309-aaaabbbb/bad/name.png",
@@ -603,26 +670,32 @@ func TestWriteSortsSlidesFiguresAndDataFiles(t *testing.T) {
 	snapshot := Snapshot{
 		Slides: []Slide{
 			{
-				ID:          "20260310-ccccdddd",
-				Date:        "2026-03-10",
-				DayOrder:    "a0",
-				HTMLContent: "<html>later</html>",
-				CreatedAt:   time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC),
-				UpdatedAt:   time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC),
+				ID:             "20260310-ccccdddd",
+				Date:           "2026-03-10",
+				DayOrder:       "a0",
+				ProjectID:      "phase7/unit",
+				SourceDeviceID: "device/unit",
+				HTMLContent:    strPtrSnapshot("<html>later</html>"),
+				CreatedAt:      time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC),
+				UpdatedAt:      time.Date(2026, 3, 10, 9, 0, 0, 0, time.UTC),
 			},
 			{
-				ID:          "20260309-bbbbbbbb",
-				Date:        "2026-03-09",
-				DayOrder:    "b0",
-				HTMLContent: "<html>second</html>",
-				CreatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
-				UpdatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+				ID:             "20260309-bbbbbbbb",
+				Date:           "2026-03-09",
+				DayOrder:       "b0",
+				ProjectID:      "phase7/unit",
+				SourceDeviceID: "device/unit",
+				HTMLContent:    strPtrSnapshot("<html>second</html>"),
+				CreatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+				UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 			},
 			{
-				ID:          "20260309-aaaaaaaa",
-				Date:        "2026-03-09",
-				DayOrder:    "b0",
-				HTMLContent: "<html>first</html>",
+				ID:             "20260309-aaaaaaaa",
+				Date:           "2026-03-09",
+				DayOrder:       "b0",
+				ProjectID:      "phase7/unit",
+				SourceDeviceID: "device/unit",
+				HTMLContent:    strPtrSnapshot("<html>first</html>"),
 				Figures: []Figure{
 					{Filename: "zeta.png", S3Key: "figures/20260309-aaaaaaaa/zeta.png", Content: []byte("zeta")},
 					{Filename: "alpha.png", S3Key: "figures/20260309-aaaaaaaa/alpha.png", Content: []byte("alpha")},
@@ -670,6 +743,73 @@ func TestWriteSortsSlidesFiguresAndDataFiles(t *testing.T) {
 	}
 	if len(metadata.DataFiles) != 2 || metadata.DataFiles[0].Filename != "alpha.csv" || metadata.DataFiles[1].Filename != "zeta.csv" {
 		t.Fatalf("metadata data_files = %#v, want sorted by filename", metadata.DataFiles)
+	}
+}
+
+func TestRegistryFilesReadWriteAndValidation(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	archived := now.Add(time.Hour)
+	entries := []RegistryEntry{
+		{ID: "zeta", CreatedAt: now, UpdatedAt: archived, ArchivedAt: &archived},
+		{ID: "alpha", CreatedAt: now, UpdatedAt: now},
+	}
+	path := filepath.Join(root, "projects.json")
+	if err := writeRegistryFile(path, entries); err != nil {
+		t.Fatalf("writeRegistryFile() error = %v", err)
+	}
+	loaded, err := readRegistryFile(path)
+	if err != nil {
+		t.Fatalf("readRegistryFile() error = %v", err)
+	}
+	if len(loaded) != 2 || loaded[0].ID != "alpha" || loaded[1].ArchivedAt == nil {
+		t.Fatalf("loaded registry entries = %#v", loaded)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "malformed", content: "{not-json}\n", want: "invalid character"},
+		{name: "empty id", content: `[{"id":"","created_at":"2026-03-09T12:00:00Z","updated_at":"2026-03-09T12:00:00Z"}]`, want: "id is required"},
+		{name: "bad created", content: `[{"id":"x","created_at":"bad","updated_at":"2026-03-09T12:00:00Z"}]`, want: "parse created_at"},
+		{name: "bad updated", content: `[{"id":"x","created_at":"2026-03-09T12:00:00Z","updated_at":"bad"}]`, want: "parse updated_at"},
+		{name: "bad archived", content: `[{"id":"x","created_at":"2026-03-09T12:00:00Z","updated_at":"2026-03-09T12:00:00Z","archived_at":"bad"}]`, want: "parse archived_at"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testPath := filepath.Join(t.TempDir(), "devices.json")
+			if err := os.WriteFile(testPath, []byte(tc.content), 0o644); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			_, err := readRegistryFile(testPath)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("readRegistryFile() error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	if err := writeRegistryFile(filepath.Join(t.TempDir(), "bad.json"), []RegistryEntry{{CreatedAt: now, UpdatedAt: now}}); err == nil || !strings.Contains(err.Error(), "id is required") {
+		t.Fatalf("expected writeRegistryFile to reject empty ID, got %v", err)
+	}
+	if err := writeRegistryFile(filepath.Join(t.TempDir(), "bad.json"), []RegistryEntry{{ID: "bad", CreatedAt: time.Time{}, UpdatedAt: now}}); err == nil || !strings.Contains(err.Error(), "must have created_at and updated_at") {
+		t.Fatalf("expected writeRegistryFile to reject missing timestamp, got %v", err)
+	}
+	missingRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(missingRoot, "templates"), 0o755); err != nil {
+		t.Fatalf("mkdir templates: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(missingRoot, "slides"), 0o755); err != nil {
+		t.Fatalf("mkdir slides: %v", err)
+	}
+	if _, err := Read(missingRoot); err == nil || !strings.Contains(err.Error(), "read projects.json") {
+		t.Fatalf("expected missing projects.json read error, got %v", err)
+	}
+	if err := writeRegistryFile(filepath.Join(missingRoot, "projects.json"), []RegistryEntry{{ID: "phase7/unit", CreatedAt: now, UpdatedAt: now}}); err != nil {
+		t.Fatalf("write projects.json: %v", err)
+	}
+	if _, err := Read(missingRoot); err == nil || !strings.Contains(err.Error(), "read devices.json") {
+		t.Fatalf("expected missing devices.json read error, got %v", err)
 	}
 }
 
@@ -739,7 +879,7 @@ func TestWriteRejectsFilesystemFailures(t *testing.T) {
 				ID:          strings.Repeat("s", 256),
 				Date:        "2026-03-09",
 				DayOrder:    "a0",
-				HTMLContent: "<html>too long</html>",
+				HTMLContent: strPtrSnapshot("<html>too long</html>"),
 				CreatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 				UpdatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 			}},
@@ -756,7 +896,7 @@ func TestWriteRejectsFilesystemFailures(t *testing.T) {
 				ID:          "20260309-aaaabbbb",
 				Date:        "2026-03-09",
 				DayOrder:    "a0",
-				HTMLContent: "<html>figure</html>",
+				HTMLContent: strPtrSnapshot("<html>figure</html>"),
 				Figures: []Figure{{
 					Filename: strings.Repeat("f", 256),
 					S3Key:    "figures/20260309-aaaabbbb/too-long",
@@ -961,13 +1101,17 @@ func TestReadSlideRejectsMetadataAndNotesProblems(t *testing.T) {
 		}
 	})
 
-	t.Run("missing slide html", func(t *testing.T) {
+	t.Run("missing slide html is null", func(t *testing.T) {
 		_, slideDir := writeSnapshotFixture(t)
 		if err := os.Remove(filepath.Join(slideDir, "slide.html")); err != nil {
 			t.Fatalf("remove slide.html: %v", err)
 		}
-		if _, err := readSlide(slideDir, filepath.Base(slideDir)); err == nil || !strings.Contains(err.Error(), "read slide.html") {
-			t.Fatalf("readSlide error = %v, want slide.html read failure", err)
+		slide, err := readSlide(slideDir, filepath.Base(slideDir))
+		if err != nil {
+			t.Fatalf("readSlide error = %v", err)
+		}
+		if slide.HTMLContent != nil {
+			t.Fatalf("HTMLContent = %q, want nil", *slide.HTMLContent)
 		}
 	})
 
@@ -1249,7 +1393,7 @@ func TestWriteFaultInjectionErrorPaths(t *testing.T) {
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
-			HTMLContent: "<html>slide</html>",
+			HTMLContent: strPtrSnapshot("<html>slide</html>"),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}},
@@ -1287,7 +1431,7 @@ func TestWriteFaultInjectionErrorPaths(t *testing.T) {
 				ID:          "20260309-beadfeed",
 				Date:        "2026-03-09",
 				DayOrder:    "a0",
-				HTMLContent: "<html>slide</html>",
+				HTMLContent: strPtrSnapshot("<html>slide</html>"),
 				CreatedAt:   now,
 				UpdatedAt:   now,
 			}},
@@ -1320,7 +1464,7 @@ func TestWriteFaultInjectionErrorPaths(t *testing.T) {
 				ID:          "20260309-feedface",
 				Date:        "2026-03-09",
 				DayOrder:    "a0",
-				HTMLContent: "<html>slide</html>",
+				HTMLContent: strPtrSnapshot("<html>slide</html>"),
 				CreatedAt:   now,
 				UpdatedAt:   now,
 			}},
@@ -1381,11 +1525,13 @@ func writeSnapshotFixture(t *testing.T) (root string, slideDir string) {
 	snapshot := Snapshot{
 		Templates: []Template{{Name: "text-only", HTMLContent: "<html>template</html>"}},
 		Slides: []Slide{{
-			ID:          "20260309-aaaabbbb",
-			Date:        "2026-03-09",
-			DayOrder:    "a0",
-			HTMLContent: "<html><body><img src=\"figures/plot.png\"></body></html>",
-			Notes:       &notes,
+			ID:             "20260309-aaaabbbb",
+			Date:           "2026-03-09",
+			DayOrder:       "a0",
+			ProjectID:      "phase7/unit",
+			SourceDeviceID: "device/unit",
+			HTMLContent:    strPtrSnapshot("<html><body><img src=\"figures/plot.png\"></body></html>"),
+			Notes:          &notes,
 			Figures: []Figure{{
 				Filename: "plot.png",
 				S3Key:    "figures/20260309-aaaabbbb/plot.png",
@@ -1403,6 +1549,12 @@ func writeSnapshotFixture(t *testing.T) (root string, slideDir string) {
 
 func writeMetadataJSON(t *testing.T, slideDir string, metadata map[string]any) {
 	t.Helper()
+	if _, ok := metadata["project_id"]; !ok {
+		metadata["project_id"] = "phase7/unit"
+	}
+	if _, ok := metadata["source_device_id"]; !ok {
+		metadata["source_device_id"] = "device/unit"
+	}
 
 	raw, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {

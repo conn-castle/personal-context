@@ -17,7 +17,7 @@ A rolling log of important, non-obvious decisions that materially affect future 
 
 ### Entry template
 ```text
-- Decision YYYY-MM-DD abcdef: Short title
+- Decision YYYY-MM-DD short-slug: Short title
     Decision: <what was chosen>
     Reason: <why it was chosen>
     Tradeoffs: <what is gained and what is lost>
@@ -221,3 +221,8 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: Use Auth.js (NextAuth v5) with Credentials provider and Neon Postgres adapter. Two modes: (1) local-only — CLI + SQLite, no auth; (2) web — Auth.js credentials, email/password. Self-hosted and managed are the same codebase; OAuth providers (Google, GitHub) can be added later via env vars with zero code changes. CLI authenticates via user-generated API keys (hashed, stored in `api_keys` table). Local dev mode (`pc serve`) bypasses auth entirely.
     Reason: Auth.js is open source (no vendor lock-in), has native Next.js App Router support, uses the existing Neon Postgres for session/user storage (no new infrastructure), and supports the 10+ year project lifespan. Credentials provider works for both self-hosted and managed without external OAuth app registrations. API keys are simpler than OAuth device flow for CLI auth.
     Tradeoffs: Credentials provider requires password hashing and storage (security surface). Auth tables are Postgres-only (no SQLite equivalent needed — local mode has no users). S3 keys gain a `users/{user_id}/` prefix, requiring migration logic if data exists pre-auth.
+
+- Decision 2026-05-07 b4c5d6: Records require registry provenance and optional HTML
+    Decision: Records may omit `slide.html` (`html_content = NULL`), but every record must carry explicit registered `project_id` and `source_device_id`; `active_project` config is ignored by write paths.
+    Reason: Notes/data-first vault records need to round-trip without fabricated HTML while retaining auditable provenance across SQLite, Postgres, sync, and git export/import.
+    Tradeoffs: Existing folders and scripts must register/pass project and device values explicitly; this removes convenient hidden assignment but prevents silent misclassification.

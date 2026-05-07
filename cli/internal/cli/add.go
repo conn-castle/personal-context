@@ -17,6 +17,8 @@ import (
 func newAddCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	var dateFlag string
 	var projectFlag string
+	var deviceFlag string
+	var sourceRefFlag string
 	var posFirst bool
 	var posLast bool
 	var afterFlag string
@@ -31,12 +33,14 @@ func newAddCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runAdd(cmd.Context(), stdout, stderr, args[0], dateFlag, projectFlag, pos)
+			return runAdd(cmd.Context(), stdout, stderr, args[0], dateFlag, projectFlag, deviceFlag, sourceRefFlag, pos)
 		},
 	}
 
 	cmd.Flags().StringVar(&dateFlag, "date", "", "Slide date (YYYY-MM-DD, default: today)")
-	cmd.Flags().StringVar(&projectFlag, "project", "", "Project ID (overrides metadata.json)")
+	cmd.Flags().StringVar(&projectFlag, "project", "", "Project ID (must match metadata.json when both are present)")
+	cmd.Flags().StringVar(&deviceFlag, "device", "", "Source device ID (must match metadata.json when both are present)")
+	cmd.Flags().StringVar(&sourceRefFlag, "source-ref", "", "Opaque source reference (must match metadata.json when both are present)")
 	cmd.Flags().BoolVar(&posFirst, "first", false, "Insert at the start of the day")
 	cmd.Flags().BoolVar(&posLast, "last", false, "Insert at the end of the day")
 	cmd.Flags().StringVar(&afterFlag, "after", "", "Insert after this slide ID")
@@ -83,7 +87,7 @@ func resolvePositionFlags(first, last bool, after, before string) (position, err
 	}
 }
 
-func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath string, dateStr string, projectOverride string, pos position) (err error) {
+func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath string, dateStr string, projectOverride string, deviceOverride string, sourceRefOverride string, pos position) (err error) {
 	homeDir, err := resolveHomeDir()
 	if err != nil {
 		return err
@@ -117,12 +121,12 @@ func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath s
 		return err
 	}
 
-	// Resolve project_id: --project flag > metadata.json > active project
-	if projectOverride != "" {
-		input.ProjectID = &projectOverride
-	} else if input.ProjectID == nil && stack.Config.ActiveProject != "" {
-		ap := stack.Config.ActiveProject
-		input.ProjectID = &ap
+	projectID, deviceID, sourceRef, err := resolveRecordProvenance(input.ProjectID, input.SourceDeviceID, input.SourceRef, projectOverride, deviceOverride, sourceRefOverride)
+	if err != nil {
+		return err
+	}
+	if err := validateActiveProjectAndDevice(ctx, stack.Repo, projectID, deviceID); err != nil {
+		return err
 	}
 
 	// Resolve date
@@ -154,14 +158,16 @@ func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath s
 
 	// Create slide in DB
 	slide, err := stack.Repo.CreateSlide(ctx, repository.CreateSlideInput{
-		ID:           id,
-		Date:         dateField,
-		DayOrder:     dayOrder,
-		HTMLContent:  input.HTMLContent,
-		Notes:        input.Notes,
-		ProjectID:    input.ProjectID,
-		GitRemoteURL: input.GitRemoteURL,
-		GitHash:      input.GitHash,
+		ID:             id,
+		Date:           dateField,
+		DayOrder:       dayOrder,
+		HTMLContent:    input.HTMLContent,
+		Notes:          input.Notes,
+		ProjectID:      projectID,
+		SourceDeviceID: deviceID,
+		SourceRef:      sourceRef,
+		GitRemoteURL:   input.GitRemoteURL,
+		GitHash:        input.GitHash,
 	})
 	if err != nil {
 		return fmt.Errorf("create slide: %w", err)

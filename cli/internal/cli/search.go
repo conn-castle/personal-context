@@ -40,7 +40,7 @@ type searchResultJSON struct {
 	ID        string  `json:"id"`
 	Date      string  `json:"date"`
 	DayOrder  string  `json:"day_order"`
-	ProjectID *string `json:"project_id"`
+	ProjectID string  `json:"project_id"`
 	DeletedAt *string `json:"deleted_at"`
 }
 
@@ -106,11 +106,7 @@ func searchTable(w io.Writer, slides []repository.Slide) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "ID\tDate\tProject")
 	for _, s := range slides {
-		project := ""
-		if s.ProjectID != nil {
-			project = *s.ProjectID
-		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", s.ID, s.Date, project)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", s.ID, s.Date, s.ProjectID)
 	}
 	return tw.Flush()
 }

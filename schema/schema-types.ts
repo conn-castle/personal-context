@@ -11,7 +11,7 @@
 // triggers). Sync/import bypasses the trigger by providing explicit values.
 // Slide ID format: {YYYYMMDD}-{8-random-hex} (e.g., 20250304-a3f2b7e1).
 //
-// NO title. NO tags. Slides are identified by their content (HTML).
+// NO title. NO tags. Records may be notes/data-first with no HTML.
 // Project uses slash convention for hierarchy: "org/project".
 
 // -----------------------------------------------------------------------------
@@ -46,14 +46,30 @@ interface Slide {
   user_id?: string;          // Postgres only; absent in SQLite
   date: string;              // "2025-03-04" (local calendar date, no timezone)
   day_order: string;         // fractional index, lexicographic sort within date
-  html_content: string;      // raw HTML
+  html_content: string | null; // raw HTML; null when slide.html is absent
   notes: string | null;      // full markdown, null if no notes
-  project_id: string | null; // "happy-ai/sleep-staging" (slash convention for org/project)
+  project_id: string;        // FK to projects.id
+  source_device_id: string;  // FK to devices.id
+  source_ref: string | null; // opaque source/provenance string
   git_remote_url: string | null; // "https://github.com/org/repo" (optional)
   git_hash: string | null;   // full SHA-1 commit hash, 40 hex chars (optional)
   created_at: string;        // ISO 8601 UTC (e.g. "2025-03-04T14:32:00Z")
   updated_at: string;        // ISO 8601 UTC
   deleted_at: string | null; // ISO 8601 UTC if soft-deleted, null if active
+}
+
+interface Project {
+  id: string;
+  created_at: string;        // ISO 8601 UTC
+  updated_at: string;        // ISO 8601 UTC
+  archived_at: string | null;
+}
+
+interface Device {
+  id: string;
+  created_at: string;        // ISO 8601 UTC
+  updated_at: string;        // ISO 8601 UTC
+  archived_at: string | null;
 }
 
 // Sort key: ORDER BY (date, day_order, id)
@@ -106,7 +122,9 @@ interface SlideExport {
   id: string;
   date: string;
   day_order: string;
-  project_id?: string;       // omitted when null
+  project_id: string;
+  source_device_id: string;
+  source_ref?: string;       // omitted when null
   git_remote_url?: string;   // omitted when null
   git_hash?: string;         // omitted when null
   has_notes: boolean;
@@ -116,7 +134,7 @@ interface SlideExport {
   updated_at: string;        // ISO 8601 UTC
 }
 
-// Note: html_content → slide.html file, notes → notes.md file
+// Note: html_content → optional slide.html file, notes → notes.md file
 // deleted_at never exported (soft-deleted slides excluded)
 
 interface FigureExport {
@@ -138,19 +156,21 @@ interface DataFileExport {
 // -----------------------------------------------------------------------------
 //
 // personal-context-data/
+// ├── projects.json
+// ├── devices.json
 // ├── templates/
 // │   ├── text-only.html
 // │   └── single-image.html
 // └── slides/
 //     ├── 20250304-a3f2b7e1/
 //     │   ├── metadata.json      ← SlideExport
-//     │   ├── slide.html         ← html_content
+//     │   ├── slide.html         ← html_content (omitted when null)
 //     │   ├── notes.md           ← notes (only if has_notes)
 //     │   └── figures/           ← Git LFS
 //     │       └── loss-curve.png
 //     └── 20250304-b7e1c9d3/
 //         ├── metadata.json
-//         └── slide.html
+//         └── metadata.json
 //
 // Local filesystem structure:
 //
@@ -180,6 +200,8 @@ interface DataFileExport {
 //   "date": "2025-03-04",
 //   "day_order": "a",
 //   "project_id": "happy-ai/sleep-staging",
+//   "source_device_id": "nicholas-macbook",
+//   "source_ref": "file:///opaque/source/path",
 //   "git_remote_url": "https://github.com/happy-ai/sleep-staging",
 //   "git_hash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
 //   "has_notes": true,

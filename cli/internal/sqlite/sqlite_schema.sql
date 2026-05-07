@@ -1,3 +1,21 @@
+CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY CHECK (length(id) > 0),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    archived_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_archived ON projects (archived_at) WHERE archived_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS devices (
+    id TEXT PRIMARY KEY CHECK (length(id) > 0),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    archived_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_devices_archived ON devices (archived_at) WHERE archived_at IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS slides (
     id TEXT PRIMARY KEY
         CHECK (
@@ -6,9 +24,11 @@ CREATE TABLE IF NOT EXISTS slides (
     date TEXT NOT NULL
         CHECK (date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]'),
     day_order TEXT NOT NULL DEFAULT 'n',
-    html_content TEXT NOT NULL,
+    html_content TEXT,
     notes TEXT,
-    project_id TEXT,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+    source_device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE RESTRICT,
+    source_ref TEXT,
     git_remote_url TEXT,
     git_hash TEXT
         CHECK (git_hash IS NULL OR (length(git_hash) = 40 AND git_hash NOT GLOB '*[^0-9a-f]*')),
@@ -18,7 +38,8 @@ CREATE TABLE IF NOT EXISTS slides (
 );
 
 CREATE INDEX IF NOT EXISTS idx_slides_date ON slides (date, day_order, id);
-CREATE INDEX IF NOT EXISTS idx_slides_project ON slides (project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_slides_project ON slides (project_id);
+CREATE INDEX IF NOT EXISTS idx_slides_source_device ON slides (source_device_id);
 CREATE INDEX IF NOT EXISTS idx_slides_updated ON slides (updated_at);
 CREATE INDEX IF NOT EXISTS idx_slides_deleted ON slides (deleted_at) WHERE deleted_at IS NOT NULL;
 
@@ -82,12 +103,14 @@ WHEN
     OLD.id != NEW.id OR
     OLD.date != NEW.date OR
     OLD.day_order != NEW.day_order OR
-    OLD.html_content != NEW.html_content OR
-    COALESCE(OLD.notes, '') != COALESCE(NEW.notes, '') OR
-    COALESCE(OLD.project_id, '') != COALESCE(NEW.project_id, '') OR
-    COALESCE(OLD.git_remote_url, '') != COALESCE(NEW.git_remote_url, '') OR
-    COALESCE(OLD.git_hash, '') != COALESCE(NEW.git_hash, '') OR
-    COALESCE(OLD.deleted_at, '') != COALESCE(NEW.deleted_at, '')
+    OLD.html_content IS NOT NEW.html_content OR
+    OLD.notes IS NOT NEW.notes OR
+    OLD.project_id != NEW.project_id OR
+    OLD.source_device_id != NEW.source_device_id OR
+    OLD.source_ref IS NOT NEW.source_ref OR
+    OLD.git_remote_url IS NOT NEW.git_remote_url OR
+    OLD.git_hash IS NOT NEW.git_hash OR
+    OLD.deleted_at IS NOT NEW.deleted_at
 BEGIN
     UPDATE sync_version
     SET version = version + 1,
@@ -204,6 +227,72 @@ BEGIN
     WHERE id = 1;
 END;
 
+CREATE TRIGGER IF NOT EXISTS projects_sync_bump_after_insert
+AFTER INSERT ON projects
+BEGIN
+    UPDATE sync_version
+    SET version = version + 1,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = 1;
+END;
+
+CREATE TRIGGER IF NOT EXISTS projects_sync_bump_after_update
+AFTER UPDATE ON projects
+FOR EACH ROW
+WHEN
+    OLD.id != NEW.id OR
+    OLD.created_at != NEW.created_at OR
+    OLD.updated_at != NEW.updated_at OR
+    COALESCE(OLD.archived_at, '') != COALESCE(NEW.archived_at, '')
+BEGIN
+    UPDATE sync_version
+    SET version = version + 1,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = 1;
+END;
+
+CREATE TRIGGER IF NOT EXISTS projects_sync_bump_after_delete
+AFTER DELETE ON projects
+BEGIN
+    UPDATE sync_version
+    SET version = version + 1,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = 1;
+END;
+
+CREATE TRIGGER IF NOT EXISTS devices_sync_bump_after_insert
+AFTER INSERT ON devices
+BEGIN
+    UPDATE sync_version
+    SET version = version + 1,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = 1;
+END;
+
+CREATE TRIGGER IF NOT EXISTS devices_sync_bump_after_update
+AFTER UPDATE ON devices
+FOR EACH ROW
+WHEN
+    OLD.id != NEW.id OR
+    OLD.created_at != NEW.created_at OR
+    OLD.updated_at != NEW.updated_at OR
+    COALESCE(OLD.archived_at, '') != COALESCE(NEW.archived_at, '')
+BEGIN
+    UPDATE sync_version
+    SET version = version + 1,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = 1;
+END;
+
+CREATE TRIGGER IF NOT EXISTS devices_sync_bump_after_delete
+AFTER DELETE ON devices
+BEGIN
+    UPDATE sync_version
+    SET version = version + 1,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = 1;
+END;
+
 CREATE TRIGGER IF NOT EXISTS slides_auto_update_updated_at
 AFTER UPDATE ON slides
 FOR EACH ROW
@@ -222,4 +311,24 @@ BEGIN
     UPDATE templates
     SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     WHERE name = OLD.name;
+END;
+
+CREATE TRIGGER IF NOT EXISTS projects_auto_update_updated_at
+AFTER UPDATE ON projects
+FOR EACH ROW
+WHEN NEW.updated_at = OLD.updated_at
+BEGIN
+    UPDATE projects
+    SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = OLD.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS devices_auto_update_updated_at
+AFTER UPDATE ON devices
+FOR EACH ROW
+WHEN NEW.updated_at = OLD.updated_at
+BEGIN
+    UPDATE devices
+    SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+    WHERE id = OLD.id;
 END;

@@ -352,16 +352,18 @@ func (s *editMutationState) rollbackRepository(ctx context.Context, repo reposit
 		return
 	}
 	_, _ = repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-		ID:           existing.ID,
-		Date:         existing.Date,
-		DayOrder:     existing.DayOrder,
-		HTMLContent:  existing.HTMLContent,
-		Notes:        existing.Notes,
-		ProjectID:    existing.ProjectID,
-		GitRemoteURL: existing.GitRemoteURL,
-		GitHash:      existing.GitHash,
-		DeletedAt:    existing.DeletedAt,
-		UpdatedAt:    &existing.UpdatedAt,
+		ID:             existing.ID,
+		Date:           existing.Date,
+		DayOrder:       existing.DayOrder,
+		HTMLContent:    existing.HTMLContent,
+		Notes:          existing.Notes,
+		ProjectID:      existing.ProjectID,
+		SourceDeviceID: existing.SourceDeviceID,
+		SourceRef:      existing.SourceRef,
+		GitRemoteURL:   existing.GitRemoteURL,
+		GitHash:        existing.GitHash,
+		DeletedAt:      existing.DeletedAt,
+		UpdatedAt:      &existing.UpdatedAt,
 	})
 }
 

@@ -314,15 +314,17 @@ func parseListSlidesQuery(query url.Values) (listSlidesQuery, string) {
 }
 
 type slideSummary struct {
-	ID            string  `json:"id"`
-	Date          string  `json:"date"`
-	DayOrder      string  `json:"day_order"`
-	HTMLContent   string  `json:"html_content"`
-	ProjectID     *string `json:"project_id"`
-	UpdatedAt     string  `json:"updated_at"`
-	DeletedAt     *string `json:"deleted_at"`
-	FigureCount   int     `json:"figure_count"`
-	DataFileCount int     `json:"data_file_count"`
+	ID             string  `json:"id"`
+	Date           string  `json:"date"`
+	DayOrder       string  `json:"day_order"`
+	HTMLContent    *string `json:"html_content"`
+	ProjectID      string  `json:"project_id"`
+	SourceDeviceID string  `json:"source_device_id"`
+	SourceRef      *string `json:"source_ref"`
+	UpdatedAt      string  `json:"updated_at"`
+	DeletedAt      *string `json:"deleted_at"`
+	FigureCount    int     `json:"figure_count"`
+	DataFileCount  int     `json:"data_file_count"`
 }
 
 type slideFile struct {
@@ -335,19 +337,21 @@ type slideFile struct {
 }
 
 type slideDetail struct {
-	ID           string      `json:"id"`
-	Date         string      `json:"date"`
-	DayOrder     string      `json:"day_order"`
-	HTMLContent  string      `json:"html_content"`
-	Notes        *string     `json:"notes"`
-	ProjectID    *string     `json:"project_id"`
-	GitRemoteURL *string     `json:"git_remote_url"`
-	GitHash      *string     `json:"git_hash"`
-	CreatedAt    string      `json:"created_at"`
-	UpdatedAt    string      `json:"updated_at"`
-	DeletedAt    *string     `json:"deleted_at"`
-	Figures      []slideFile `json:"figures"`
-	DataFiles    []slideFile `json:"data_files"`
+	ID             string      `json:"id"`
+	Date           string      `json:"date"`
+	DayOrder       string      `json:"day_order"`
+	HTMLContent    *string     `json:"html_content"`
+	Notes          *string     `json:"notes"`
+	ProjectID      string      `json:"project_id"`
+	SourceDeviceID string      `json:"source_device_id"`
+	SourceRef      *string     `json:"source_ref"`
+	GitRemoteURL   *string     `json:"git_remote_url"`
+	GitHash        *string     `json:"git_hash"`
+	CreatedAt      string      `json:"created_at"`
+	UpdatedAt      string      `json:"updated_at"`
+	DeletedAt      *string     `json:"deleted_at"`
+	Figures        []slideFile `json:"figures"`
+	DataFiles      []slideFile `json:"data_files"`
 }
 
 func decodeJSONObject(r *http.Request) (map[string]any, string) {
@@ -526,15 +530,17 @@ func (s *Server) buildSlideSummary(ctx context.Context, slide repository.Slide) 
 	}
 
 	return slideSummary{
-		ID:            slide.ID,
-		Date:          slide.Date,
-		DayOrder:      slide.DayOrder,
-		HTMLContent:   slide.HTMLContent,
-		ProjectID:     slide.ProjectID,
-		UpdatedAt:     formatTime(slide.UpdatedAt),
-		DeletedAt:     formatTimePtr(slide.DeletedAt),
-		FigureCount:   len(figures),
-		DataFileCount: len(dataFiles),
+		ID:             slide.ID,
+		Date:           slide.Date,
+		DayOrder:       slide.DayOrder,
+		HTMLContent:    slide.HTMLContent,
+		ProjectID:      slide.ProjectID,
+		SourceDeviceID: slide.SourceDeviceID,
+		SourceRef:      slide.SourceRef,
+		UpdatedAt:      formatTime(slide.UpdatedAt),
+		DeletedAt:      formatTimePtr(slide.DeletedAt),
+		FigureCount:    len(figures),
+		DataFileCount:  len(dataFiles),
 	}, nil
 }
 
@@ -580,19 +586,21 @@ func (s *Server) buildSlideDetail(ctx context.Context, slide repository.Slide) (
 	}
 
 	return slideDetail{
-		ID:           slide.ID,
-		Date:         slide.Date,
-		DayOrder:     slide.DayOrder,
-		HTMLContent:  slide.HTMLContent,
-		Notes:        slide.Notes,
-		ProjectID:    slide.ProjectID,
-		GitRemoteURL: slide.GitRemoteURL,
-		GitHash:      slide.GitHash,
-		CreatedAt:    formatTime(slide.CreatedAt),
-		UpdatedAt:    formatTime(slide.UpdatedAt),
-		DeletedAt:    formatTimePtr(slide.DeletedAt),
-		Figures:      figureFiles,
-		DataFiles:    dataFileList,
+		ID:             slide.ID,
+		Date:           slide.Date,
+		DayOrder:       slide.DayOrder,
+		HTMLContent:    slide.HTMLContent,
+		Notes:          slide.Notes,
+		ProjectID:      slide.ProjectID,
+		SourceDeviceID: slide.SourceDeviceID,
+		SourceRef:      slide.SourceRef,
+		GitRemoteURL:   slide.GitRemoteURL,
+		GitHash:        slide.GitHash,
+		CreatedAt:      formatTime(slide.CreatedAt),
+		UpdatedAt:      formatTime(slide.UpdatedAt),
+		DeletedAt:      formatTimePtr(slide.DeletedAt),
+		Figures:        figureFiles,
+		DataFiles:      dataFileList,
 	}, nil
 }
 
@@ -626,7 +634,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	projects, err := s.repo.ListDistinctProjectIDs(ctx)
+	projects, err := s.repo.ListProjects(ctx, false)
 	if err != nil {
 		mapRepoError(w, err, "projects")
 		return
@@ -677,15 +685,16 @@ func (s *Server) handlePurgeTrash(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
-	projects, err := s.repo.ListDistinctProjectIDs(r.Context())
+	projects, err := s.repo.ListProjects(r.Context(), false)
 	if err != nil {
 		mapRepoError(w, err, "projects")
 		return
 	}
-	if projects == nil {
-		projects = []string{}
+	projectIDs := make([]string, 0, len(projects))
+	for _, project := range projects {
+		projectIDs = append(projectIDs, project.ID)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"projects": projects})
+	writeJSON(w, http.StatusOK, map[string]any{"projects": projectIDs})
 }
 
 func (s *Server) handleListSlides(w http.ResponseWriter, r *http.Request) {
@@ -893,23 +902,23 @@ func (s *Server) handlePatchSlide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	input := repository.UpdateSlideInput{
-		ID:           existing.ID,
-		Date:         existing.Date,
-		DayOrder:     existing.DayOrder,
-		HTMLContent:  existing.HTMLContent,
-		Notes:        existing.Notes,
-		ProjectID:    existing.ProjectID,
-		GitRemoteURL: existing.GitRemoteURL,
-		GitHash:      existing.GitHash,
-		DeletedAt:    existing.DeletedAt,
+		ID:             existing.ID,
+		Date:           existing.Date,
+		DayOrder:       existing.DayOrder,
+		HTMLContent:    existing.HTMLContent,
+		Notes:          existing.Notes,
+		ProjectID:      existing.ProjectID,
+		SourceDeviceID: existing.SourceDeviceID,
+		SourceRef:      existing.SourceRef,
+		GitRemoteURL:   existing.GitRemoteURL,
+		GitHash:        existing.GitHash,
+		DeletedAt:      existing.DeletedAt,
 	}
 
 	// Apply PATCH fields
 	if value, ok := normalizedBody["project_id"]; ok {
-		if value == nil {
-			input.ProjectID = nil
-		} else if projectID, ok := value.(string); ok {
-			input.ProjectID = &projectID
+		if projectID, ok := value.(string); ok && strings.TrimSpace(projectID) != "" {
+			input.ProjectID = projectID
 		}
 	}
 	if value, ok := normalizedBody["notes"]; ok {

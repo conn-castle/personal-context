@@ -37,8 +37,19 @@ type Repository interface {
 
 	GetSyncVersion(ctx context.Context) (SyncVersion, error)
 
-	// ListDistinctProjectIDs returns sorted distinct non-NULL project_id values from active slides.
-	ListDistinctProjectIDs(ctx context.Context) ([]string, error)
+	CreateProject(ctx context.Context, input CreateRegistryInput) (Project, error)
+	GetProjectByID(ctx context.Context, id string) (Project, error)
+	ListProjects(ctx context.Context, includeArchived bool) ([]Project, error)
+	ArchiveProject(ctx context.Context, id string) (Project, error)
+	RestoreProject(ctx context.Context, id string) (Project, error)
+	UpsertProjectForImport(ctx context.Context, project Project) (bool, error)
+
+	CreateDevice(ctx context.Context, input CreateRegistryInput) (Device, error)
+	GetDeviceByID(ctx context.Context, id string) (Device, error)
+	ListDevices(ctx context.Context, includeArchived bool) ([]Device, error)
+	ArchiveDevice(ctx context.Context, id string) (Device, error)
+	RestoreDevice(ctx context.Context, id string) (Device, error)
+	UpsertDeviceForImport(ctx context.Context, device Device) (bool, error)
 
 	// CountActiveSlides returns the number of non-deleted slides.
 	CountActiveSlides(ctx context.Context) (int, error)

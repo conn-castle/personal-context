@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -36,9 +37,33 @@ func makeInputFolder(t *testing.T, opts inputFolderOpts) string {
 		}
 	}
 
+	if opts.MetadataJSON == "" {
+		opts.MetadataJSON = `{"project_id":"test/default-project","source_device_id":"test-device"}`
+	} else {
+		var meta map[string]any
+		if err := json.Unmarshal([]byte(opts.MetadataJSON), &meta); err == nil {
+			if _, ok := meta["project_id"]; !ok {
+				meta["project_id"] = "test/default-project"
+			}
+			if _, ok := meta["source_device_id"]; !ok {
+				meta["source_device_id"] = "test-device"
+			}
+			raw, err := json.Marshal(meta)
+			if err == nil {
+				opts.MetadataJSON = string(raw)
+			}
+		}
+	}
 	if opts.MetadataJSON != "" {
 		if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(opts.MetadataJSON), 0o644); err != nil {
 			t.Fatalf("write metadata.json: %v", err)
+		}
+		var meta struct {
+			ProjectID      string `json:"project_id"`
+			SourceDeviceID string `json:"source_device_id"`
+		}
+		if err := json.Unmarshal([]byte(opts.MetadataJSON), &meta); err == nil && meta.ProjectID != "" && meta.SourceDeviceID != "" {
+			ensureRegisteredProjectAndDevice(t, meta.ProjectID, meta.SourceDeviceID)
 		}
 	}
 
@@ -113,7 +138,7 @@ func TestAddCommandWithDateFlag(t *testing.T) {
 
 func TestAddCommandWithProjectFlag(t *testing.T) {
 	setupEnv(t)
-	inputDir := makeInputFolder(t, inputFolderOpts{})
+	inputDir := makeInputFolder(t, inputFolderOpts{MetadataJSON: `{"project_id":"my-proj","source_device_id":"test-device"}`})
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -224,10 +249,11 @@ func TestAddCommandInvalidDate(t *testing.T) {
 	}
 }
 
-func TestAddCommandMissingSlideHTML(t *testing.T) {
+func TestAddCommandMissingSlideHTMLStoresNull(t *testing.T) {
 	setupEnv(t)
 	// Create an empty directory with no slide.html.
 	emptyDir := t.TempDir()
+	writeDefaultProvenanceMetadata(t, emptyDir)
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -235,11 +261,68 @@ func TestAddCommandMissingSlideHTML(t *testing.T) {
 	cmd.SetArgs([]string{"add", emptyDir})
 
 	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("expected error for missing slide.html")
+	if err != nil {
+		t.Fatalf("add without slide.html: %v", err)
 	}
-	if !strings.Contains(err.Error(), "slide.html") {
-		t.Fatalf("expected error to contain 'slide.html', got %q", err.Error())
+	if strings.TrimSpace(stdout.String()) == "" {
+		t.Fatal("expected slide ID on stdout")
+	}
+}
+
+func TestRunAddStoresNullHTMLAndSourceRef(t *testing.T) {
+	setupEnv(t)
+	inputDir := t.TempDir()
+	writeDefaultProvenanceMetadata(t, inputDir)
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	if err := runAdd(context.Background(), stdout, stderr, inputDir, "2026-05-07", "", "", "opaque-source", position{kind: "last"}); err != nil {
+		t.Fatalf("runAdd() error = %v", err)
+	}
+	slideID := strings.TrimSpace(stdout.String())
+	stack, err := openLocalStack(os.Getenv("PC_HOME"))
+	if err != nil {
+		t.Fatalf("open stack: %v", err)
+	}
+	defer func() { _ = stack.Close() }()
+	slide, err := stack.Repo.GetSlideByID(context.Background(), slideID)
+	if err != nil {
+		t.Fatalf("GetSlideByID() error = %v", err)
+	}
+	if slide.HTMLContent != nil {
+		t.Fatalf("HTMLContent = %q, want nil", *slide.HTMLContent)
+	}
+	if slide.SourceRef == nil || *slide.SourceRef != "opaque-source" {
+		t.Fatalf("SourceRef = %v", slide.SourceRef)
+	}
+}
+
+func TestRunAddRejectsArchivedProjectBeforeCreatingSlide(t *testing.T) {
+	setupEnv(t)
+	inputDir := makeInputFolder(t, inputFolderOpts{
+		MetadataJSON: `{"project_id":"archived-project","source_device_id":"test-device"}`,
+	})
+
+	homeDir, err := resolveHomeDir()
+	if err != nil {
+		t.Fatalf("resolve home: %v", err)
+	}
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		t.Fatalf("open stack: %v", err)
+	}
+	if _, err := stack.Repo.ArchiveProject(context.Background(), "archived-project"); err != nil {
+		t.Fatalf("archive project: %v", err)
+	}
+	if err := stack.Close(); err != nil {
+		t.Fatalf("close stack: %v", err)
+	}
+
+	err = runAdd(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, inputDir, "2026-05-07", "", "", "", position{kind: "last"})
+	if err == nil {
+		t.Fatal("expected archived project error")
+	}
+	if !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("runAdd() error = %v, want archived project", err)
 	}
 }
 
@@ -513,6 +596,7 @@ func TestComputeDayOrderAfterNotFound(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>X</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeDefaultProvenanceMetadata(t, dir)
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", "--date", "2025-05-06", "--after", "nonexistent-id", dir})
 	err := cmd.Execute()
@@ -532,6 +616,7 @@ func TestComputeDayOrderBeforeNotFound(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>X</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeDefaultProvenanceMetadata(t, dir)
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", "--date", "2025-05-07", "--before", "nonexistent-id", dir})
 	err := cmd.Execute()

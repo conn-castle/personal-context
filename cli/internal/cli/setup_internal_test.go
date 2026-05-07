@@ -20,6 +20,23 @@ import (
 type mockRepo struct {
 	getTemplateByNameFn func(ctx context.Context, name string) (repository.Template, error)
 	createTemplateFn    func(ctx context.Context, input repository.CreateTemplateInput) (repository.Template, error)
+	createSlideFn       func(ctx context.Context, input repository.CreateSlideInput) (repository.Slide, error)
+	getSlideByIDFn      func(ctx context.Context, id string) (repository.Slide, error)
+	listSlidesFn        func(ctx context.Context, filter repository.ListSlidesFilter) ([]repository.Slide, error)
+	listFiguresFn       func(ctx context.Context, slideID string) ([]repository.SlideFigure, error)
+	createFigureFn      func(ctx context.Context, input repository.CreateSlideFigureInput) (repository.SlideFigure, error)
+	updateFigureFn      func(ctx context.Context, input repository.UpdateSlideFigureInput) (repository.SlideFigure, error)
+	deleteFigureFn      func(ctx context.Context, id int64) error
+	listDataFilesFn     func(ctx context.Context, slideID string) ([]repository.SlideDataFile, error)
+	createDataFileFn    func(ctx context.Context, input repository.CreateSlideDataFileInput) (repository.SlideDataFile, error)
+	updateDataFileFn    func(ctx context.Context, input repository.UpdateSlideDataFileInput) (repository.SlideDataFile, error)
+	deleteDataFileFn    func(ctx context.Context, id int64) error
+	createProjectFn     func(ctx context.Context, input repository.CreateRegistryInput) (repository.Project, error)
+	getProjectByIDFn    func(ctx context.Context, id string) (repository.Project, error)
+	upsertProjectFn     func(ctx context.Context, project repository.Project) (bool, error)
+	createDeviceFn      func(ctx context.Context, input repository.CreateRegistryInput) (repository.Device, error)
+	getDeviceByIDFn     func(ctx context.Context, id string) (repository.Device, error)
+	upsertDeviceFn      func(ctx context.Context, device repository.Device) (bool, error)
 }
 
 func (m *mockRepo) GetTemplateByName(ctx context.Context, name string) (repository.Template, error) {
@@ -37,47 +54,84 @@ func (m *mockRepo) CreateTemplate(ctx context.Context, input repository.CreateTe
 }
 
 // Stubs for remaining Repository interface methods.
-func (m *mockRepo) CreateSlide(context.Context, repository.CreateSlideInput) (repository.Slide, error) {
+func (m *mockRepo) CreateSlide(ctx context.Context, input repository.CreateSlideInput) (repository.Slide, error) {
+	if m.createSlideFn != nil {
+		return m.createSlideFn(ctx, input)
+	}
 	return repository.Slide{}, nil
 }
-func (m *mockRepo) GetSlideByID(context.Context, string) (repository.Slide, error) {
+func (m *mockRepo) GetSlideByID(ctx context.Context, id string) (repository.Slide, error) {
+	if m.getSlideByIDFn != nil {
+		return m.getSlideByIDFn(ctx, id)
+	}
 	return repository.Slide{}, nil
 }
 func (m *mockRepo) UpdateSlide(context.Context, repository.UpdateSlideInput) (repository.Slide, error) {
 	return repository.Slide{}, nil
 }
-func (m *mockRepo) ListSlides(context.Context, repository.ListSlidesFilter) ([]repository.Slide, error) {
+func (m *mockRepo) ListSlides(ctx context.Context, filter repository.ListSlidesFilter) ([]repository.Slide, error) {
+	if m.listSlidesFn != nil {
+		return m.listSlidesFn(ctx, filter)
+	}
 	return nil, nil
 }
 func (m *mockRepo) SoftDeleteSlide(context.Context, string) error { return nil }
 func (m *mockRepo) RestoreSlide(context.Context, string) error    { return nil }
 func (m *mockRepo) DeleteSlide(context.Context, string) error     { return nil }
-func (m *mockRepo) CreateSlideFigure(context.Context, repository.CreateSlideFigureInput) (repository.SlideFigure, error) {
+func (m *mockRepo) CreateSlideFigure(ctx context.Context, input repository.CreateSlideFigureInput) (repository.SlideFigure, error) {
+	if m.createFigureFn != nil {
+		return m.createFigureFn(ctx, input)
+	}
 	return repository.SlideFigure{}, nil
 }
 func (m *mockRepo) GetSlideFigureByID(context.Context, int64) (repository.SlideFigure, error) {
 	return repository.SlideFigure{}, nil
 }
-func (m *mockRepo) UpdateSlideFigure(context.Context, repository.UpdateSlideFigureInput) (repository.SlideFigure, error) {
+func (m *mockRepo) UpdateSlideFigure(ctx context.Context, input repository.UpdateSlideFigureInput) (repository.SlideFigure, error) {
+	if m.updateFigureFn != nil {
+		return m.updateFigureFn(ctx, input)
+	}
 	return repository.SlideFigure{}, nil
 }
-func (m *mockRepo) ListSlideFiguresBySlideID(context.Context, string) ([]repository.SlideFigure, error) {
+func (m *mockRepo) ListSlideFiguresBySlideID(ctx context.Context, slideID string) ([]repository.SlideFigure, error) {
+	if m.listFiguresFn != nil {
+		return m.listFiguresFn(ctx, slideID)
+	}
 	return nil, nil
 }
-func (m *mockRepo) DeleteSlideFigure(context.Context, int64) error { return nil }
-func (m *mockRepo) CreateSlideDataFile(context.Context, repository.CreateSlideDataFileInput) (repository.SlideDataFile, error) {
+func (m *mockRepo) DeleteSlideFigure(ctx context.Context, id int64) error {
+	if m.deleteFigureFn != nil {
+		return m.deleteFigureFn(ctx, id)
+	}
+	return nil
+}
+func (m *mockRepo) CreateSlideDataFile(ctx context.Context, input repository.CreateSlideDataFileInput) (repository.SlideDataFile, error) {
+	if m.createDataFileFn != nil {
+		return m.createDataFileFn(ctx, input)
+	}
 	return repository.SlideDataFile{}, nil
 }
 func (m *mockRepo) GetSlideDataFileByID(context.Context, int64) (repository.SlideDataFile, error) {
 	return repository.SlideDataFile{}, nil
 }
-func (m *mockRepo) UpdateSlideDataFile(context.Context, repository.UpdateSlideDataFileInput) (repository.SlideDataFile, error) {
+func (m *mockRepo) UpdateSlideDataFile(ctx context.Context, input repository.UpdateSlideDataFileInput) (repository.SlideDataFile, error) {
+	if m.updateDataFileFn != nil {
+		return m.updateDataFileFn(ctx, input)
+	}
 	return repository.SlideDataFile{}, nil
 }
-func (m *mockRepo) ListSlideDataFilesBySlideID(context.Context, string) ([]repository.SlideDataFile, error) {
+func (m *mockRepo) ListSlideDataFilesBySlideID(ctx context.Context, slideID string) ([]repository.SlideDataFile, error) {
+	if m.listDataFilesFn != nil {
+		return m.listDataFilesFn(ctx, slideID)
+	}
 	return nil, nil
 }
-func (m *mockRepo) DeleteSlideDataFile(context.Context, int64) error { return nil }
+func (m *mockRepo) DeleteSlideDataFile(ctx context.Context, id int64) error {
+	if m.deleteDataFileFn != nil {
+		return m.deleteDataFileFn(ctx, id)
+	}
+	return nil
+}
 func (m *mockRepo) UpdateTemplate(context.Context, repository.UpdateTemplateInput) (repository.Template, error) {
 	return repository.Template{}, nil
 }
@@ -86,12 +140,59 @@ func (m *mockRepo) DeleteTemplate(context.Context, string) error                
 func (m *mockRepo) GetSyncVersion(context.Context) (repository.SyncVersion, error) {
 	return repository.SyncVersion{}, nil
 }
-func (m *mockRepo) ListDistinctProjectIDs(context.Context) ([]string, error) {
-	return nil, nil
+func (m *mockRepo) CreateProject(ctx context.Context, input repository.CreateRegistryInput) (repository.Project, error) {
+	if m.createProjectFn != nil {
+		return m.createProjectFn(ctx, input)
+	}
+	return repository.Project{}, nil
 }
-func (m *mockRepo) CountActiveSlides(context.Context) (int, error)        { return 0, nil }
-func (m *mockRepo) CountTrashedSlides(context.Context) (int, error)       { return 0, nil }
-func (m *mockRepo) PurgeDeletedSlides(context.Context) ([]string, error)  { return nil, nil }
+func (m *mockRepo) GetProjectByID(ctx context.Context, id string) (repository.Project, error) {
+	if m.getProjectByIDFn != nil {
+		return m.getProjectByIDFn(ctx, id)
+	}
+	return repository.Project{}, repository.ErrNotFound
+}
+func (m *mockRepo) ListProjects(context.Context, bool) ([]repository.Project, error) { return nil, nil }
+func (m *mockRepo) ArchiveProject(context.Context, string) (repository.Project, error) {
+	return repository.Project{}, nil
+}
+func (m *mockRepo) RestoreProject(context.Context, string) (repository.Project, error) {
+	return repository.Project{}, nil
+}
+func (m *mockRepo) UpsertProjectForImport(ctx context.Context, project repository.Project) (bool, error) {
+	if m.upsertProjectFn != nil {
+		return m.upsertProjectFn(ctx, project)
+	}
+	return true, nil
+}
+func (m *mockRepo) CreateDevice(ctx context.Context, input repository.CreateRegistryInput) (repository.Device, error) {
+	if m.createDeviceFn != nil {
+		return m.createDeviceFn(ctx, input)
+	}
+	return repository.Device{}, nil
+}
+func (m *mockRepo) GetDeviceByID(ctx context.Context, id string) (repository.Device, error) {
+	if m.getDeviceByIDFn != nil {
+		return m.getDeviceByIDFn(ctx, id)
+	}
+	return repository.Device{}, repository.ErrNotFound
+}
+func (m *mockRepo) ListDevices(context.Context, bool) ([]repository.Device, error) { return nil, nil }
+func (m *mockRepo) ArchiveDevice(context.Context, string) (repository.Device, error) {
+	return repository.Device{}, nil
+}
+func (m *mockRepo) RestoreDevice(context.Context, string) (repository.Device, error) {
+	return repository.Device{}, nil
+}
+func (m *mockRepo) UpsertDeviceForImport(ctx context.Context, device repository.Device) (bool, error) {
+	if m.upsertDeviceFn != nil {
+		return m.upsertDeviceFn(ctx, device)
+	}
+	return true, nil
+}
+func (m *mockRepo) CountActiveSlides(context.Context) (int, error)       { return 0, nil }
+func (m *mockRepo) CountTrashedSlides(context.Context) (int, error)      { return 0, nil }
+func (m *mockRepo) PurgeDeletedSlides(context.Context) ([]string, error) { return nil, nil }
 
 func TestSeedTemplatesAllNew(t *testing.T) {
 	created := make(map[string]bool)

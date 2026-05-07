@@ -32,7 +32,8 @@ func New(db *sql.DB) (*Repository, error) {
 
 // CreateSlide inserts a slide row.
 func (r *Repository) CreateSlide(ctx context.Context, input repository.CreateSlideInput) (repository.Slide, error) {
-	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.Date) == "" || strings.TrimSpace(input.HTMLContent) == "" {
+	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.Date) == "" ||
+		strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.SourceDeviceID) == "" {
 		return repository.Slide{}, repository.ErrInvalidArgument
 	}
 	if strings.TrimSpace(input.DayOrder) == "" {
@@ -41,14 +42,16 @@ func (r *Repository) CreateSlide(ctx context.Context, input repository.CreateSli
 
 	_, err := r.db.ExecContext(
 		ctx,
-		`INSERT INTO slides (id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), ?);`,
+		`INSERT INTO slides (id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), ?);`,
 		input.ID,
 		input.Date,
 		input.DayOrder,
-		input.HTMLContent,
+		nullableString(input.HTMLContent),
 		nullableString(input.Notes),
-		nullableString(input.ProjectID),
+		input.ProjectID,
+		input.SourceDeviceID,
+		nullableString(input.SourceRef),
 		nullableString(input.GitRemoteURL),
 		nullableString(input.GitHash),
 		nullableTime(input.CreatedAt),
@@ -70,7 +73,7 @@ func (r *Repository) GetSlideByID(ctx context.Context, id string) (repository.Sl
 
 	row := r.db.QueryRowContext(
 		ctx,
-		`SELECT id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at
+		`SELECT id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at
          FROM slides WHERE id = ?;`,
 		id,
 	)
@@ -79,22 +82,25 @@ func (r *Repository) GetSlideByID(ctx context.Context, id string) (repository.Sl
 
 // UpdateSlide updates mutable slide fields.
 func (r *Repository) UpdateSlide(ctx context.Context, input repository.UpdateSlideInput) (repository.Slide, error) {
-	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.Date) == "" || strings.TrimSpace(input.DayOrder) == "" || strings.TrimSpace(input.HTMLContent) == "" {
+	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.Date) == "" || strings.TrimSpace(input.DayOrder) == "" ||
+		strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.SourceDeviceID) == "" {
 		return repository.Slide{}, repository.ErrInvalidArgument
 	}
 
 	result, err := r.db.ExecContext(
 		ctx,
 		`UPDATE slides
-         SET date = ?, day_order = ?, html_content = ?, notes = ?, project_id = ?, git_remote_url = ?, git_hash = ?,
+         SET date = ?, day_order = ?, html_content = ?, notes = ?, project_id = ?, source_device_id = ?, source_ref = ?, git_remote_url = ?, git_hash = ?,
              updated_at = COALESCE(?, updated_at),
              deleted_at = ?
          WHERE id = ?;`,
 		input.Date,
 		input.DayOrder,
-		input.HTMLContent,
+		nullableString(input.HTMLContent),
 		nullableString(input.Notes),
-		nullableString(input.ProjectID),
+		input.ProjectID,
+		input.SourceDeviceID,
+		nullableString(input.SourceRef),
 		nullableString(input.GitRemoteURL),
 		nullableString(input.GitHash),
 		nullableTime(input.UpdatedAt),
@@ -126,7 +132,7 @@ func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlide
 	}
 
 	builder := strings.Builder{}
-	builder.WriteString(`SELECT id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM slides WHERE 1=1`)
+	builder.WriteString(`SELECT id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM slides WHERE 1=1`)
 	args := make([]any, 0, 4)
 
 	if filter.OnlyDeleted {
@@ -157,8 +163,8 @@ func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlide
 	if filter.Query != nil {
 		escaped := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(trimmedQuery)
 		q := "%" + escaped + "%"
-		builder.WriteString(` AND (html_content LIKE ? ESCAPE '\' OR notes LIKE ? ESCAPE '\' OR project_id LIKE ? ESCAPE '\')`)
-		args = append(args, q, q, q)
+		builder.WriteString(` AND (html_content LIKE ? ESCAPE '\' OR notes LIKE ? ESCAPE '\' OR project_id LIKE ? ESCAPE '\' OR source_device_id LIKE ? ESCAPE '\' OR source_ref LIKE ? ESCAPE '\')`)
+		args = append(args, q, q, q, q, q)
 	}
 	builder.WriteString(` ORDER BY date, day_order, id`)
 	if filter.Limit > 0 {
@@ -596,29 +602,167 @@ func (r *Repository) GetSyncVersion(ctx context.Context) (repository.SyncVersion
 	return version, nil
 }
 
-// ListDistinctProjectIDs returns sorted distinct non-NULL project_id values from active slides.
-func (r *Repository) ListDistinctProjectIDs(ctx context.Context) ([]string, error) {
+// CreateProject inserts a project registry row.
+func (r *Repository) CreateProject(ctx context.Context, input repository.CreateRegistryInput) (repository.Project, error) {
+	if strings.TrimSpace(input.ID) == "" {
+		return repository.Project{}, repository.ErrInvalidArgument
+	}
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO projects (id, created_at, updated_at, archived_at)
+         VALUES (?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), ?);`,
+		input.ID, nullableTime(input.CreatedAt), nullableTime(input.UpdatedAt), nullableTime(input.ArchivedAt))
+	if err != nil {
+		return repository.Project{}, mapSQLiteError(err)
+	}
+	return r.GetProjectByID(ctx, input.ID)
+}
+
+// GetProjectByID fetches a project registry row.
+func (r *Repository) GetProjectByID(ctx context.Context, id string) (repository.Project, error) {
+	if strings.TrimSpace(id) == "" {
+		return repository.Project{}, repository.ErrInvalidArgument
+	}
+	row := r.db.QueryRowContext(ctx, `SELECT id, created_at, updated_at, archived_at FROM projects WHERE id = ?;`, id)
+	return scanProject(row)
+}
+
+// ListProjects returns project registry rows sorted by id.
+func (r *Repository) ListProjects(ctx context.Context, includeArchived bool) ([]repository.Project, error) {
+	query := `SELECT id, created_at, updated_at, archived_at FROM projects`
+	if !includeArchived {
+		query += ` WHERE archived_at IS NULL`
+	}
+	query += ` ORDER BY id;`
 	rows, err := r.db.QueryContext(
 		ctx,
-		`SELECT DISTINCT project_id FROM slides WHERE project_id IS NOT NULL AND deleted_at IS NULL ORDER BY project_id;`,
+		query,
 	)
 	if err != nil {
 		return nil, mapSQLiteError(err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	projects := make([]string, 0)
+	projects := make([]repository.Project, 0)
 	for rows.Next() {
-		var pid string
-		if err := rows.Scan(&pid); err != nil {
-			return nil, mapSQLiteError(err)
+		project, err := scanProjectRows(rows)
+		if err != nil {
+			return nil, err
 		}
-		projects = append(projects, pid)
+		projects = append(projects, project)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, mapSQLiteError(err)
 	}
 	return projects, nil
+}
+
+// ArchiveProject marks a project as archived.
+func (r *Repository) ArchiveProject(ctx context.Context, id string) (repository.Project, error) {
+	return r.setProjectArchivedAt(ctx, id, `STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')`)
+}
+
+// RestoreProject clears a project's archive timestamp.
+func (r *Repository) RestoreProject(ctx context.Context, id string) (repository.Project, error) {
+	return r.setProjectArchivedAt(ctx, id, `NULL`)
+}
+
+func (r *Repository) setProjectArchivedAt(ctx context.Context, id string, valueSQL string) (repository.Project, error) {
+	if strings.TrimSpace(id) == "" {
+		return repository.Project{}, repository.ErrInvalidArgument
+	}
+	result, err := r.db.ExecContext(ctx, fmt.Sprintf(`UPDATE projects SET archived_at = %s WHERE id = ?;`, valueSQL), id)
+	if err != nil {
+		return repository.Project{}, mapSQLiteError(err)
+	}
+	if err := ensureRowsAffected(result); err != nil {
+		return repository.Project{}, err
+	}
+	return r.GetProjectByID(ctx, id)
+}
+
+// UpsertProjectForImport creates or replaces an imported project when newer.
+func (r *Repository) UpsertProjectForImport(ctx context.Context, project repository.Project) (bool, error) {
+	return upsertProjectForImport(ctx, r, project)
+}
+
+// CreateDevice inserts a device registry row.
+func (r *Repository) CreateDevice(ctx context.Context, input repository.CreateRegistryInput) (repository.Device, error) {
+	if strings.TrimSpace(input.ID) == "" {
+		return repository.Device{}, repository.ErrInvalidArgument
+	}
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO devices (id, created_at, updated_at, archived_at)
+         VALUES (?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), ?);`,
+		input.ID, nullableTime(input.CreatedAt), nullableTime(input.UpdatedAt), nullableTime(input.ArchivedAt))
+	if err != nil {
+		return repository.Device{}, mapSQLiteError(err)
+	}
+	return r.GetDeviceByID(ctx, input.ID)
+}
+
+// GetDeviceByID fetches a device registry row.
+func (r *Repository) GetDeviceByID(ctx context.Context, id string) (repository.Device, error) {
+	if strings.TrimSpace(id) == "" {
+		return repository.Device{}, repository.ErrInvalidArgument
+	}
+	row := r.db.QueryRowContext(ctx, `SELECT id, created_at, updated_at, archived_at FROM devices WHERE id = ?;`, id)
+	return scanDevice(row)
+}
+
+// ListDevices returns device registry rows sorted by id.
+func (r *Repository) ListDevices(ctx context.Context, includeArchived bool) ([]repository.Device, error) {
+	query := `SELECT id, created_at, updated_at, archived_at FROM devices`
+	if !includeArchived {
+		query += ` WHERE archived_at IS NULL`
+	}
+	query += ` ORDER BY id;`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, mapSQLiteError(err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	devices := make([]repository.Device, 0)
+	for rows.Next() {
+		device, err := scanDeviceRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		devices = append(devices, device)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapSQLiteError(err)
+	}
+	return devices, nil
+}
+
+// ArchiveDevice marks a device as archived.
+func (r *Repository) ArchiveDevice(ctx context.Context, id string) (repository.Device, error) {
+	return r.setDeviceArchivedAt(ctx, id, `STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')`)
+}
+
+// RestoreDevice clears a device archive timestamp.
+func (r *Repository) RestoreDevice(ctx context.Context, id string) (repository.Device, error) {
+	return r.setDeviceArchivedAt(ctx, id, `NULL`)
+}
+
+func (r *Repository) setDeviceArchivedAt(ctx context.Context, id string, valueSQL string) (repository.Device, error) {
+	if strings.TrimSpace(id) == "" {
+		return repository.Device{}, repository.ErrInvalidArgument
+	}
+	result, err := r.db.ExecContext(ctx, fmt.Sprintf(`UPDATE devices SET archived_at = %s WHERE id = ?;`, valueSQL), id)
+	if err != nil {
+		return repository.Device{}, mapSQLiteError(err)
+	}
+	if err := ensureRowsAffected(result); err != nil {
+		return repository.Device{}, err
+	}
+	return r.GetDeviceByID(ctx, id)
+}
+
+// UpsertDeviceForImport creates or replaces an imported device when newer.
+func (r *Repository) UpsertDeviceForImport(ctx context.Context, device repository.Device) (bool, error) {
+	return upsertDeviceForImport(ctx, r, device)
 }
 
 // CountActiveSlides returns the number of non-deleted slides.
@@ -674,17 +818,19 @@ func (r *Repository) PurgeDeletedSlides(ctx context.Context) ([]string, error) {
 }
 
 type slideRow struct {
-	ID           string
-	Date         string
-	DayOrder     string
-	HTMLContent  string
-	Notes        sql.NullString
-	ProjectID    sql.NullString
-	GitRemoteURL sql.NullString
-	GitHash      sql.NullString
-	CreatedAt    string
-	UpdatedAt    string
-	DeletedAt    sql.NullString
+	ID             string
+	Date           string
+	DayOrder       string
+	HTMLContent    sql.NullString
+	Notes          sql.NullString
+	ProjectID      string
+	SourceDeviceID string
+	SourceRef      sql.NullString
+	GitRemoteURL   sql.NullString
+	GitHash        sql.NullString
+	CreatedAt      string
+	UpdatedAt      string
+	DeletedAt      sql.NullString
 }
 
 func (r slideRow) toModel() (repository.Slide, error) {
@@ -702,17 +848,19 @@ func (r slideRow) toModel() (repository.Slide, error) {
 	}
 
 	return repository.Slide{
-		ID:           r.ID,
-		Date:         r.Date,
-		DayOrder:     r.DayOrder,
-		HTMLContent:  r.HTMLContent,
-		Notes:        nullableStringPtr(r.Notes),
-		ProjectID:    nullableStringPtr(r.ProjectID),
-		GitRemoteURL: nullableStringPtr(r.GitRemoteURL),
-		GitHash:      nullableStringPtr(r.GitHash),
-		CreatedAt:    createdAt,
-		UpdatedAt:    updatedAt,
-		DeletedAt:    deletedAt,
+		ID:             r.ID,
+		Date:           r.Date,
+		DayOrder:       r.DayOrder,
+		HTMLContent:    nullableStringPtr(r.HTMLContent),
+		Notes:          nullableStringPtr(r.Notes),
+		ProjectID:      r.ProjectID,
+		SourceDeviceID: r.SourceDeviceID,
+		SourceRef:      nullableStringPtr(r.SourceRef),
+		GitRemoteURL:   nullableStringPtr(r.GitRemoteURL),
+		GitHash:        nullableStringPtr(r.GitHash),
+		CreatedAt:      createdAt,
+		UpdatedAt:      updatedAt,
+		DeletedAt:      deletedAt,
 	}, nil
 }
 
@@ -725,6 +873,8 @@ func scanSlide(row *sql.Row) (repository.Slide, error) {
 		&scanned.HTMLContent,
 		&scanned.Notes,
 		&scanned.ProjectID,
+		&scanned.SourceDeviceID,
+		&scanned.SourceRef,
 		&scanned.GitRemoteURL,
 		&scanned.GitHash,
 		&scanned.CreatedAt,
@@ -745,6 +895,8 @@ func scanSlideRows(rows *sql.Rows) (repository.Slide, error) {
 		&scanned.HTMLContent,
 		&scanned.Notes,
 		&scanned.ProjectID,
+		&scanned.SourceDeviceID,
+		&scanned.SourceRef,
 		&scanned.GitRemoteURL,
 		&scanned.GitHash,
 		&scanned.CreatedAt,
@@ -754,6 +906,129 @@ func scanSlideRows(rows *sql.Rows) (repository.Slide, error) {
 		return repository.Slide{}, mapSQLiteError(err)
 	}
 	return scanned.toModel()
+}
+
+type registryRow struct {
+	ID         string
+	CreatedAt  string
+	UpdatedAt  string
+	ArchivedAt sql.NullString
+}
+
+func (r registryRow) toProject() (repository.Project, error) {
+	createdAt, err := parseTimestamp(r.CreatedAt)
+	if err != nil {
+		return repository.Project{}, err
+	}
+	updatedAt, err := parseTimestamp(r.UpdatedAt)
+	if err != nil {
+		return repository.Project{}, err
+	}
+	archivedAt, err := parseNullableTimestamp(r.ArchivedAt)
+	if err != nil {
+		return repository.Project{}, err
+	}
+	return repository.Project{ID: r.ID, CreatedAt: createdAt, UpdatedAt: updatedAt, ArchivedAt: archivedAt}, nil
+}
+
+func (r registryRow) toDevice() (repository.Device, error) {
+	createdAt, err := parseTimestamp(r.CreatedAt)
+	if err != nil {
+		return repository.Device{}, err
+	}
+	updatedAt, err := parseTimestamp(r.UpdatedAt)
+	if err != nil {
+		return repository.Device{}, err
+	}
+	archivedAt, err := parseNullableTimestamp(r.ArchivedAt)
+	if err != nil {
+		return repository.Device{}, err
+	}
+	return repository.Device{ID: r.ID, CreatedAt: createdAt, UpdatedAt: updatedAt, ArchivedAt: archivedAt}, nil
+}
+
+func scanProject(row *sql.Row) (repository.Project, error) {
+	var scanned registryRow
+	if err := row.Scan(&scanned.ID, &scanned.CreatedAt, &scanned.UpdatedAt, &scanned.ArchivedAt); err != nil {
+		return repository.Project{}, mapSQLiteError(err)
+	}
+	return scanned.toProject()
+}
+
+func scanProjectRows(rows *sql.Rows) (repository.Project, error) {
+	var scanned registryRow
+	if err := rows.Scan(&scanned.ID, &scanned.CreatedAt, &scanned.UpdatedAt, &scanned.ArchivedAt); err != nil {
+		return repository.Project{}, mapSQLiteError(err)
+	}
+	return scanned.toProject()
+}
+
+func scanDevice(row *sql.Row) (repository.Device, error) {
+	var scanned registryRow
+	if err := row.Scan(&scanned.ID, &scanned.CreatedAt, &scanned.UpdatedAt, &scanned.ArchivedAt); err != nil {
+		return repository.Device{}, mapSQLiteError(err)
+	}
+	return scanned.toDevice()
+}
+
+func scanDeviceRows(rows *sql.Rows) (repository.Device, error) {
+	var scanned registryRow
+	if err := rows.Scan(&scanned.ID, &scanned.CreatedAt, &scanned.UpdatedAt, &scanned.ArchivedAt); err != nil {
+		return repository.Device{}, mapSQLiteError(err)
+	}
+	return scanned.toDevice()
+}
+
+func upsertProjectForImport(ctx context.Context, r *Repository, project repository.Project) (bool, error) {
+	if strings.TrimSpace(project.ID) == "" || project.CreatedAt.IsZero() || project.UpdatedAt.IsZero() {
+		return false, repository.ErrInvalidArgument
+	}
+	existing, err := r.GetProjectByID(ctx, project.ID)
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return false, err
+	}
+	if err == nil && !project.UpdatedAt.After(existing.UpdatedAt) {
+		return false, nil
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		_, err = r.CreateProject(ctx, repository.CreateRegistryInput{
+			ID:         project.ID,
+			CreatedAt:  &project.CreatedAt,
+			UpdatedAt:  &project.UpdatedAt,
+			ArchivedAt: project.ArchivedAt,
+		})
+		return true, err
+	}
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE projects SET created_at = ?, updated_at = ?, archived_at = ? WHERE id = ?;`,
+		nullableTime(&project.CreatedAt), nullableTime(&project.UpdatedAt), nullableTime(project.ArchivedAt), project.ID)
+	return true, mapSQLiteError(err)
+}
+
+func upsertDeviceForImport(ctx context.Context, r *Repository, device repository.Device) (bool, error) {
+	if strings.TrimSpace(device.ID) == "" || device.CreatedAt.IsZero() || device.UpdatedAt.IsZero() {
+		return false, repository.ErrInvalidArgument
+	}
+	existing, err := r.GetDeviceByID(ctx, device.ID)
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return false, err
+	}
+	if err == nil && !device.UpdatedAt.After(existing.UpdatedAt) {
+		return false, nil
+	}
+	if errors.Is(err, repository.ErrNotFound) {
+		_, err = r.CreateDevice(ctx, repository.CreateRegistryInput{
+			ID:         device.ID,
+			CreatedAt:  &device.CreatedAt,
+			UpdatedAt:  &device.UpdatedAt,
+			ArchivedAt: device.ArchivedAt,
+		})
+		return true, err
+	}
+	_, err = r.db.ExecContext(ctx,
+		`UPDATE devices SET created_at = ?, updated_at = ?, archived_at = ? WHERE id = ?;`,
+		nullableTime(&device.CreatedAt), nullableTime(&device.UpdatedAt), nullableTime(device.ArchivedAt), device.ID)
+	return true, mapSQLiteError(err)
 }
 
 type figureRow struct {

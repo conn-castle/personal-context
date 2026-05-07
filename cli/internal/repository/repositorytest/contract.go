@@ -26,29 +26,34 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250304-a3f2b7e1",
 			Date:        "2025-03-04",
 			DayOrder:    "b",
-			HTMLContent: "<h1>A</h1>",
+			HTMLContent: strPtr("<h1>A</h1>"),
 		})
 
 		notes := "updated notes"
 		projectID := "org/project"
+		sourceDeviceID := "contract-device"
+		if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: projectID}); err != nil && !errors.Is(err, repository.ErrConflict) {
+			t.Fatalf("CreateProject(update target) error = %v", err)
+		}
 		updated, err := repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-			ID:          slideA.ID,
-			Date:        "2025-03-04",
-			DayOrder:    "c",
-			HTMLContent: "<h1>A2</h1>",
-			Notes:       &notes,
-			ProjectID:   &projectID,
+			ID:             slideA.ID,
+			Date:           "2025-03-04",
+			DayOrder:       "c",
+			HTMLContent:    strPtr("<h1>A2</h1>"),
+			Notes:          &notes,
+			ProjectID:      projectID,
+			SourceDeviceID: sourceDeviceID,
 		})
 		if err != nil {
 			t.Fatalf("UpdateSlide() error = %v", err)
 		}
-		if updated.DayOrder != "c" || updated.HTMLContent != "<h1>A2</h1>" {
+		if updated.DayOrder != "c" || updated.HTMLContent == nil || *updated.HTMLContent != "<h1>A2</h1>" {
 			t.Fatalf("unexpected updated slide DayOrder/HTMLContent: %+v", updated)
 		}
 		if updated.Notes == nil || *updated.Notes != "updated notes" {
 			t.Fatalf("expected Notes=%q after update, got %v", "updated notes", updated.Notes)
 		}
-		if updated.ProjectID == nil || *updated.ProjectID != "org/project" {
+		if updated.ProjectID != "org/project" {
 			t.Fatalf("expected ProjectID=%q after update, got %v", "org/project", updated.ProjectID)
 		}
 		if updated.UpdatedAt.IsZero() {
@@ -62,19 +67,19 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250304-b7e1c9d3",
 			Date:        "2025-03-04",
 			DayOrder:    "a",
-			HTMLContent: "<h1>B</h1>",
+			HTMLContent: strPtr("<h1>B</h1>"),
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250303-c0ffee01",
 			Date:        "2025-03-03",
 			DayOrder:    "z",
-			HTMLContent: "<h1>C</h1>",
+			HTMLContent: strPtr("<h1>C</h1>"),
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250304-a3f2b700",
 			Date:        "2025-03-04",
 			DayOrder:    "c",
-			HTMLContent: "<h1>D</h1>",
+			HTMLContent: strPtr("<h1>D</h1>"),
 		})
 
 		slides, err := repo.ListSlides(ctx, repository.ListSlidesFilter{})
@@ -99,7 +104,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250305-deadbeef",
 			Date:        "2025-03-05",
 			DayOrder:    "n",
-			HTMLContent: "<h1>Trash me</h1>",
+			HTMLContent: strPtr("<h1>Trash me</h1>"),
 		})
 
 		if err := repo.SoftDeleteSlide(ctx, slide.ID); err != nil {
@@ -141,7 +146,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250306-1111aaaa",
 			Date:        "2025-03-06",
 			DayOrder:    "n",
-			HTMLContent: "<h1>Assets</h1>",
+			HTMLContent: strPtr("<h1>Assets</h1>"),
 		})
 
 		figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
@@ -198,7 +203,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250306-2222bbbb",
 			Date:        "2025-03-06",
 			DayOrder:    "n",
-			HTMLContent: "<h1>Asset updates</h1>",
+			HTMLContent: strPtr("<h1>Asset updates</h1>"),
 		})
 
 		figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
@@ -309,22 +314,22 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250301-aa11aa11",
 			Date:        "2025-03-01",
 			DayOrder:    "a",
-			HTMLContent: "<h1>1</h1>",
-			ProjectID:   strPtr("org/p1"),
+			HTMLContent: strPtr("<h1>1</h1>"),
+			ProjectID:   "org/p1",
 		})
 		second := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250302-bb22bb22",
 			Date:        "2025-03-02",
 			DayOrder:    "a",
-			HTMLContent: "<h1>2</h1>",
-			ProjectID:   strPtr("org/p2"),
+			HTMLContent: strPtr("<h1>2</h1>"),
+			ProjectID:   "org/p2",
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250303-cc33cc33",
 			Date:        "2025-03-03",
 			DayOrder:    "a",
-			HTMLContent: "<h1>3</h1>",
-			ProjectID:   strPtr("org/p2"),
+			HTMLContent: strPtr("<h1>3</h1>"),
+			ProjectID:   "org/p2",
 		})
 
 		if err := repo.SoftDeleteSlide(ctx, second.ID); err != nil {
@@ -414,21 +419,21 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250304-a1b2c3d4",
 			Date:        "2025-03-04",
 			DayOrder:    "a",
-			HTMLContent: "<h1>First</h1>",
+			HTMLContent: strPtr("<h1>First</h1>"),
 			UpdatedAt:   &firstUpdatedAt,
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250304-b2c3d4e5",
 			Date:        "2025-03-04",
 			DayOrder:    "b",
-			HTMLContent: "<h1>Middle</h1>",
+			HTMLContent: strPtr("<h1>Middle</h1>"),
 			UpdatedAt:   &middleUpdatedAt,
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250304-c3d4e5f6",
 			Date:        "2025-03-04",
 			DayOrder:    "c",
-			HTMLContent: "<h1>Last</h1>",
+			HTMLContent: strPtr("<h1>Last</h1>"),
 			UpdatedAt:   &lastUpdatedAt,
 		})
 
@@ -523,7 +528,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250309-ca5cad01",
 			Date:        "2025-03-09",
 			DayOrder:    "n",
-			HTMLContent: "<h1>Cascade</h1>",
+			HTMLContent: strPtr("<h1>Cascade</h1>"),
 		})
 		figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
 			SlideID:  slide.ID,
@@ -595,19 +600,19 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250401-aa010101",
 			Date:        "2025-04-01",
 			DayOrder:    "a",
-			HTMLContent: "<h1>Active 1</h1>",
+			HTMLContent: strPtr("<h1>Active 1</h1>"),
 		})
 		deletedSlide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250401-bb020202",
 			Date:        "2025-04-01",
 			DayOrder:    "b",
-			HTMLContent: "<h1>Will be deleted</h1>",
+			HTMLContent: strPtr("<h1>Will be deleted</h1>"),
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250401-cc030303",
 			Date:        "2025-04-01",
 			DayOrder:    "c",
-			HTMLContent: "<h1>Active 2</h1>",
+			HTMLContent: strPtr("<h1>Active 2</h1>"),
 		})
 
 		if err := repo.SoftDeleteSlide(ctx, deletedSlide.ID); err != nil {
@@ -637,27 +642,27 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250402-a0a0a0a1",
 			Date:        "2025-04-02",
 			DayOrder:    "a",
-			HTMLContent: "<p>Advances in machine learning</p>",
+			HTMLContent: strPtr("<p>Advances in machine learning</p>"),
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250402-b0b0b0b2",
 			Date:        "2025-04-02",
 			DayOrder:    "b",
-			HTMLContent: "<p>Unrelated content</p>",
+			HTMLContent: strPtr("<p>Unrelated content</p>"),
 			Notes:       strPtr("learning about rust"),
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250402-c0c0c0c3",
 			Date:        "2025-04-02",
 			DayOrder:    "c",
-			HTMLContent: "<p>Some other topic</p>",
-			ProjectID:   strPtr("org/learning-project"),
+			HTMLContent: strPtr("<p>Some other topic</p>"),
+			ProjectID:   "org/learning-project",
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250402-d0d0d0d4",
 			Date:        "2025-04-02",
 			DayOrder:    "d",
-			HTMLContent: "<p>unrelated content only</p>",
+			HTMLContent: strPtr("<p>unrelated content only</p>"),
 		})
 
 		query := "learning"
@@ -690,22 +695,22 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250403-a1a1a1a1",
 			Date:        "2025-04-03",
 			DayOrder:    "a",
-			HTMLContent: "<p>golang concurrency patterns</p>",
-			ProjectID:   strPtr("org/backend"),
+			HTMLContent: strPtr("<p>golang concurrency patterns</p>"),
+			ProjectID:   "org/backend",
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250403-b2b2b2b2",
 			Date:        "2025-04-03",
 			DayOrder:    "b",
-			HTMLContent: "<p>golang generics tutorial</p>",
-			ProjectID:   strPtr("org/frontend"),
+			HTMLContent: strPtr("<p>golang generics tutorial</p>"),
+			ProjectID:   "org/frontend",
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250403-c3c3c3c3",
 			Date:        "2025-04-03",
 			DayOrder:    "c",
-			HTMLContent: "<p>python asyncio</p>",
-			ProjectID:   strPtr("org/backend"),
+			HTMLContent: strPtr("<p>python asyncio</p>"),
+			ProjectID:   "org/backend",
 		})
 
 		query := "golang"
@@ -730,7 +735,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250404-de1e1e01",
 			Date:        "2025-04-04",
 			DayOrder:    "a",
-			HTMLContent: "<p>searchable content</p>",
+			HTMLContent: strPtr("<p>searchable content</p>"),
 		})
 		if err := repo.SoftDeleteSlide(ctx, slide.ID); err != nil {
 			t.Fatalf("SoftDeleteSlide() error = %v", err)
@@ -765,13 +770,13 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250405-e5c01aa1",
 			Date:        "2025-04-05",
 			DayOrder:    "a",
-			HTMLContent: "<p>100% complete</p>",
+			HTMLContent: strPtr("<p>100% complete</p>"),
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250405-e5c02bb2",
 			Date:        "2025-04-05",
 			DayOrder:    "b",
-			HTMLContent: "<p>1000 items</p>",
+			HTMLContent: strPtr("<p>1000 items</p>"),
 		})
 
 		// "100%" should only match the slide with the literal percent sign,
@@ -790,13 +795,13 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250405-e5c03cc3",
 			Date:        "2025-04-05",
 			DayOrder:    "c",
-			HTMLContent: "<p>item_count is 5</p>",
+			HTMLContent: strPtr("<p>item_count is 5</p>"),
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250405-e5c04dd4",
 			Date:        "2025-04-05",
 			DayOrder:    "d",
-			HTMLContent: "<p>itemXcount is 9</p>",
+			HTMLContent: strPtr("<p>itemXcount is 9</p>"),
 		})
 
 		underscoreQuery := "item_count"
@@ -817,13 +822,13 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ID:          "20250405-e5c05ee5",
 			Date:        "2025-04-05",
 			DayOrder:    "e",
-			HTMLContent: `<p>path is C:\Users\docs</p>`,
+			HTMLContent: strPtr(`<p>path is C:\Users\docs</p>`),
 		})
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
 			ID:          "20250405-e5c06ff6",
 			Date:        "2025-04-05",
 			DayOrder:    "f",
-			HTMLContent: "<p>path is C:Usersdocs</p>",
+			HTMLContent: strPtr("<p>path is C:Usersdocs</p>"),
 		})
 
 		// A query containing backslashes should only match the slide with
@@ -881,10 +886,10 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 
 		// Create two slides, trash one.
 		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
-			ID: "20250410-c0a1b2c3", Date: "2025-04-10", DayOrder: "a", HTMLContent: "<h1>A</h1>",
+			ID: "20250410-c0a1b2c3", Date: "2025-04-10", DayOrder: "a", HTMLContent: strPtr("<h1>A</h1>"),
 		})
 		toTrash := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
-			ID: "20250410-c0d4e5f6", Date: "2025-04-10", DayOrder: "b", HTMLContent: "<h1>B</h1>",
+			ID: "20250410-c0d4e5f6", Date: "2025-04-10", DayOrder: "b", HTMLContent: strPtr("<h1>B</h1>"),
 		})
 		if err := repo.SoftDeleteSlide(ctx, toTrash.ID); err != nil {
 			t.Fatalf("SoftDeleteSlide() error = %v", err)
@@ -921,13 +926,13 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 
 		// Create 3 slides, trash 2, purge.
 		activeSlide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
-			ID: "20250411-a0a1a1a1", Date: "2025-04-11", DayOrder: "a", HTMLContent: "<h1>Active</h1>",
+			ID: "20250411-a0a1a1a1", Date: "2025-04-11", DayOrder: "a", HTMLContent: strPtr("<h1>Active</h1>"),
 		})
 		trash1 := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
-			ID: "20250411-b0b2b2b2", Date: "2025-04-11", DayOrder: "b", HTMLContent: "<h1>Trash1</h1>",
+			ID: "20250411-b0b2b2b2", Date: "2025-04-11", DayOrder: "b", HTMLContent: strPtr("<h1>Trash1</h1>"),
 		})
 		trash2 := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
-			ID: "20250411-c0c3c3c3", Date: "2025-04-11", DayOrder: "c", HTMLContent: "<h1>Trash2</h1>",
+			ID: "20250411-c0c3c3c3", Date: "2025-04-11", DayOrder: "c", HTMLContent: strPtr("<h1>Trash2</h1>"),
 		})
 
 		if err := repo.SoftDeleteSlide(ctx, trash1.ID); err != nil {
@@ -969,72 +974,92 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 	})
 
-	t.Run("ListDistinctProjectIDs", func(t *testing.T) {
+	t.Run("registry CRUD archive restore and import upsert", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		// Empty DB returns empty slice.
-		ids, err := repo.ListDistinctProjectIDs(ctx)
+		projects, err := repo.ListProjects(ctx, false)
 		if err != nil {
-			t.Fatalf("ListDistinctProjectIDs(empty) error = %v", err)
+			t.Fatalf("ListProjects(empty) error = %v", err)
 		}
-		if len(ids) != 0 {
-			t.Fatalf("expected empty slice for empty DB, got %v", ids)
-		}
-
-		// Create slides with different project_ids, including duplicates and nil.
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
-			ID:          "20250406-a1d01aa1",
-			Date:        "2025-04-06",
-			DayOrder:    "a",
-			HTMLContent: "<h1>1</h1>",
-			ProjectID:   strPtr("org/zebra"),
-		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
-			ID:          "20250406-b2d02bb2",
-			Date:        "2025-04-06",
-			DayOrder:    "b",
-			HTMLContent: "<h1>2</h1>",
-			ProjectID:   strPtr("org/alpha"),
-		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
-			ID:          "20250406-c3d03cc3",
-			Date:        "2025-04-06",
-			DayOrder:    "c",
-			HTMLContent: "<h1>3</h1>",
-			ProjectID:   strPtr("org/alpha"), // duplicate
-		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
-			ID:          "20250406-d4d04dd4",
-			Date:        "2025-04-06",
-			DayOrder:    "d",
-			HTMLContent: "<h1>4</h1>",
-			// nil ProjectID — should be excluded
-		})
-		deletedSlide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
-			ID:          "20250406-e5d05ee5",
-			Date:        "2025-04-06",
-			DayOrder:    "e",
-			HTMLContent: "<h1>5</h1>",
-			ProjectID:   strPtr("org/deleted-proj"),
-		})
-		if err := repo.SoftDeleteSlide(ctx, deletedSlide.ID); err != nil {
-			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		if len(projects) != 0 {
+			t.Fatalf("expected empty project slice, got %v", projects)
 		}
 
-		ids, err = repo.ListDistinctProjectIDs(ctx)
+		project, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "org/alpha"})
 		if err != nil {
-			t.Fatalf("ListDistinctProjectIDs() error = %v", err)
+			t.Fatalf("CreateProject() error = %v", err)
+		}
+		archivedProject, err := repo.ArchiveProject(ctx, project.ID)
+		if err != nil {
+			t.Fatalf("ArchiveProject() error = %v", err)
+		}
+		if archivedProject.ArchivedAt == nil {
+			t.Fatal("expected archived project timestamp")
+		}
+		activeProjects, err := repo.ListProjects(ctx, false)
+		if err != nil {
+			t.Fatalf("ListProjects(active) error = %v", err)
+		}
+		if len(activeProjects) != 0 {
+			t.Fatalf("expected archived project excluded from active list, got %+v", activeProjects)
+		}
+		restoredProject, err := repo.RestoreProject(ctx, project.ID)
+		if err != nil {
+			t.Fatalf("RestoreProject() error = %v", err)
+		}
+		if restoredProject.ArchivedAt != nil {
+			t.Fatalf("expected restored project archived_at nil, got %v", restoredProject.ArchivedAt)
 		}
 
-		expectedIDs := []string{"org/alpha", "org/zebra"}
-		if len(ids) != len(expectedIDs) {
-			t.Fatalf("expected %d project IDs, got %d: %v", len(expectedIDs), len(ids), ids)
+		device, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "device/a"})
+		if err != nil {
+			t.Fatalf("CreateDevice() error = %v", err)
 		}
-		for i, want := range expectedIDs {
-			if ids[i] != want {
-				t.Fatalf("expected project ID at index %d to be %q, got %q (full list: %v)", i, want, ids[i], ids)
-			}
+		archivedDevice, err := repo.ArchiveDevice(ctx, device.ID)
+		if err != nil {
+			t.Fatalf("ArchiveDevice() error = %v", err)
+		}
+		if archivedDevice.ArchivedAt == nil {
+			t.Fatal("expected archived device timestamp")
+		}
+		if _, err := repo.RestoreDevice(ctx, device.ID); err != nil {
+			t.Fatalf("RestoreDevice() error = %v", err)
+		}
+
+		olderUpdatedAt := project.UpdatedAt.Add(-time.Hour)
+		changed, err := repo.UpsertProjectForImport(ctx, repository.Project{
+			ID:        project.ID,
+			CreatedAt: project.CreatedAt,
+			UpdatedAt: olderUpdatedAt,
+		})
+		if err != nil {
+			t.Fatalf("UpsertProjectForImport(older) error = %v", err)
+		}
+		if changed {
+			t.Fatal("expected older imported project to be skipped")
+		}
+
+		newerUpdatedAt := project.UpdatedAt.Add(time.Hour)
+		importArchivedAt := newerUpdatedAt.Add(time.Minute)
+		changed, err = repo.UpsertProjectForImport(ctx, repository.Project{
+			ID:         project.ID,
+			CreatedAt:  project.CreatedAt,
+			UpdatedAt:  newerUpdatedAt,
+			ArchivedAt: &importArchivedAt,
+		})
+		if err != nil {
+			t.Fatalf("UpsertProjectForImport(newer) error = %v", err)
+		}
+		if !changed {
+			t.Fatal("expected newer imported project to replace existing")
+		}
+		importedProject, err := repo.GetProjectByID(ctx, project.ID)
+		if err != nil {
+			t.Fatalf("GetProjectByID(imported) error = %v", err)
+		}
+		if importedProject.ArchivedAt == nil || !importedProject.UpdatedAt.Equal(newerUpdatedAt.UTC()) {
+			t.Fatalf("unexpected imported project row: %+v", importedProject)
 		}
 	})
 
@@ -1042,6 +1067,27 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 
 func mustCreateSlide(t *testing.T, ctx context.Context, repo repository.Repository, input repository.CreateSlideInput) repository.Slide {
 	t.Helper()
+
+	if input.ProjectID == "" {
+		input.ProjectID = "contract/default-project"
+	}
+	if input.SourceDeviceID == "" {
+		input.SourceDeviceID = "contract-device"
+	}
+	_, err := repo.GetProjectByID(ctx, input.ProjectID)
+	if errors.Is(err, repository.ErrNotFound) {
+		_, err = repo.CreateProject(ctx, repository.CreateRegistryInput{ID: input.ProjectID})
+	}
+	if err != nil {
+		t.Fatalf("ensure project registry row failed: %v", err)
+	}
+	_, err = repo.GetDeviceByID(ctx, input.SourceDeviceID)
+	if errors.Is(err, repository.ErrNotFound) {
+		_, err = repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: input.SourceDeviceID})
+	}
+	if err != nil {
+		t.Fatalf("ensure device registry row failed: %v", err)
+	}
 
 	slide, err := repo.CreateSlide(ctx, input)
 	if err != nil {

@@ -85,15 +85,17 @@ func runMove(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 
 	// Update slide (full replacement, preserve all fields except Date and DayOrder)
 	if _, err := stack.Repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-		ID:           id,
-		Date:         dateField,
-		DayOrder:     dayOrder,
-		HTMLContent:  existing.HTMLContent,
-		Notes:        existing.Notes,
-		ProjectID:    existing.ProjectID,
-		GitRemoteURL: existing.GitRemoteURL,
-		GitHash:      existing.GitHash,
-		DeletedAt:    existing.DeletedAt,
+		ID:             id,
+		Date:           dateField,
+		DayOrder:       dayOrder,
+		HTMLContent:    existing.HTMLContent,
+		Notes:          existing.Notes,
+		ProjectID:      existing.ProjectID,
+		SourceDeviceID: existing.SourceDeviceID,
+		SourceRef:      existing.SourceRef,
+		GitRemoteURL:   existing.GitRemoteURL,
+		GitHash:        existing.GitHash,
+		DeletedAt:      existing.DeletedAt,
 	}); err != nil {
 		return fmt.Errorf("update slide: %w", err)
 	}
