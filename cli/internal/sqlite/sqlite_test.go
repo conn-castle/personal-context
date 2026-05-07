@@ -304,7 +304,13 @@ func TestMigrationTriggersUpdateUpdatedAtAndSyncVersion(t *testing.T) {
 		t.Fatalf("ApplySchema() error = %v", err)
 	}
 
-	if _, err := connection.DB().Exec(`INSERT INTO slides(id, date, day_order, html_content) VALUES(?, ?, ?, ?);`, "20260305-abcddcba", "2026-03-05", "n", "<h1>a</h1>"); err != nil {
+	if _, err := connection.DB().Exec(`INSERT INTO projects(id) VALUES(?);`, "sqlite/project"); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if _, err := connection.DB().Exec(`INSERT INTO devices(id) VALUES(?);`, "sqlite-device"); err != nil {
+		t.Fatalf("insert device: %v", err)
+	}
+	if _, err := connection.DB().Exec(`INSERT INTO slides(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`, "20260305-abcddcba", "2026-03-05", "n", "<h1>a</h1>", "sqlite/project", "sqlite-device"); err != nil {
 		t.Fatalf("insert slide: %v", err)
 	}
 
@@ -358,44 +364,58 @@ func TestMigrationEnforcesStrictIDAndHashConstraints(t *testing.T) {
 	if err := connection.ApplySchema(context.Background()); err != nil {
 		t.Fatalf("ApplySchema() error = %v", err)
 	}
+	if _, err := connection.DB().Exec(`INSERT INTO projects(id) VALUES(?);`, "sqlite/project"); err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if _, err := connection.DB().Exec(`INSERT INTO devices(id) VALUES(?);`, "sqlite-device"); err != nil {
+		t.Fatalf("insert device: %v", err)
+	}
 
 	if _, err := connection.DB().Exec(
-		`INSERT INTO slides(id, date, day_order, html_content) VALUES(?, ?, ?, ?);`,
+		`INSERT INTO slides(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`,
 		"20260305-zzzzzzzz",
 		"2026-03-05",
 		"n",
 		"<h1>bad id</h1>",
+		"sqlite/project",
+		"sqlite-device",
 	); err == nil {
 		t.Fatal("expected invalid slide id to violate CHECK constraint")
 	}
 
 	if _, err := connection.DB().Exec(
-		`INSERT INTO slides(id, date, day_order, html_content, git_hash) VALUES(?, ?, ?, ?, ?);`,
+		`INSERT INTO slides(id, date, day_order, html_content, project_id, source_device_id, git_hash) VALUES(?, ?, ?, ?, ?, ?, ?);`,
 		"20260305-a1b2c3d4",
 		"2026-03-05",
 		"n",
 		"<h1>bad git hash</h1>",
+		"sqlite/project",
+		"sqlite-device",
 		"gggggggggggggggggggggggggggggggggggggggg",
 	); err == nil {
 		t.Fatal("expected invalid git_hash to violate CHECK constraint")
 	}
 
 	if _, err := connection.DB().Exec(
-		`INSERT INTO slides(id, date, day_order, html_content) VALUES(?, ?, ?, ?);`,
+		`INSERT INTO slides(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`,
 		"20260305-c1c2c3c4",
 		"March 5",
 		"n",
 		"<h1>bad date</h1>",
+		"sqlite/project",
+		"sqlite-device",
 	); err == nil {
 		t.Fatal("expected non-YYYY-MM-DD date to violate CHECK constraint")
 	}
 
 	if _, err := connection.DB().Exec(
-		`INSERT INTO slides(id, date, day_order, html_content) VALUES(?, ?, ?, ?);`,
+		`INSERT INTO slides(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`,
 		"20260305-b1b2c3d4",
 		"2026-03-05",
 		"n",
 		"<h1>good slide</h1>",
+		"sqlite/project",
+		"sqlite-device",
 	); err != nil {
 		t.Fatalf("insert valid slide failed: %v", err)
 	}

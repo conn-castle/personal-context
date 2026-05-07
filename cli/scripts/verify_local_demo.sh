@@ -191,17 +191,19 @@ declare -A slide_ids
 declare -A slide_titles
 date_value="2025-04-01"
 project_id="demo/local"
+device_id="demo-device"
 
 setup_out="$(run_pc setup)"
 [[ "${setup_out}" == *"Personal Context initialized at"* ]] || fail "setup output did not include initialization message"
 
-run_pc project set "${project_id}" >/dev/null
+run_pc device register "${device_id}" >/dev/null
+run_pc project add "${project_id}" >/dev/null
 
 for i in {1..10}; do
 	write_slide_input "${i}"
 	title="$(printf 'Slide %02d' "${i}")"
 	slide_titles["${i}"]="${title}"
-	id="$(run_pc add --date "${date_value}" "${inputs_root}/slide-${i}" | trim_crlf)"
+	id="$(run_pc add --date "${date_value}" --project "${project_id}" --device "${device_id}" "${inputs_root}/slide-${i}" | trim_crlf)"
 	[[ "${id}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected slide ID format from add ${i}: ${id}"
 	slide_ids["${i}"]="${id}"
 done

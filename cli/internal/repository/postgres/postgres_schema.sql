@@ -1,3 +1,38 @@
+-- =============================================================================
+-- Personal Context — Database Schema (v8)
+-- =============================================================================
+--
+-- Design-level source of truth (Postgres dialect). The executable SQLite schema
+-- is embedded in cli/internal/sqlite/sqlite_schema.sql, and the executable
+-- Postgres schema is embedded in cli/internal/repository/postgres/postgres_schema.sql.
+-- This file documents the intended schema structure.
+--
+-- Sort key: (date, day_order, id) — id is the universal tiebreaker.
+-- Slide ID format: {YYYYMMDD}-{8-random-hex} (e.g., 20250304-a3f2b7e1).
+-- Soft deletes: deleted_at column on slides (for sync and trash/restore).
+-- No title column. No tags column. Project is a plain string with slash convention.
+--
+-- TIMEZONE RULE: All timestamps stored as UTC (TIMESTAMPTZ in Postgres,
+-- ISO 8601 with Z suffix in SQLite). Date fields (slide date) are stored
+-- as DATE (no time component). "Today" is determined by local time at the
+-- point of creation, then stored as a date. All reads convert to local
+-- timezone for display.
+--
+-- TIMESTAMP MANAGEMENT: created_at and updated_at are DB-managed via defaults
+-- and triggers. Application code does NOT set these for normal operations.
+-- The auto_update_updated_at trigger bumps updated_at on any UPDATE unless
+-- the UPDATE explicitly sets updated_at (for sync/import to preserve original
+-- timestamps). Sync/import bypasses the trigger by providing explicit values.
+--
+-- MULTI-USER: The users and api_keys tables, plus the user_id column on slides
+-- and the per-user sync_version table, are Postgres-only. SQLite remains
+-- single-user (local mode). The schema equivalence guard has exceptions for
+-- these Postgres-only structures.
+
+-- =============================================================================
+-- Authentication tables (Postgres only — no SQLite equivalent)
+-- =============================================================================
+
 CREATE TABLE IF NOT EXISTS users (
     id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
     email           TEXT NOT NULL UNIQUE,
@@ -10,8 +45,8 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS api_keys (
     id              TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
     user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    key_hash        TEXT NOT NULL UNIQUE,
-    label           TEXT NOT NULL,
+    key_hash        TEXT NOT NULL UNIQUE,    -- SHA-256 hash of the raw key
+    label           TEXT NOT NULL,           -- user-provided description
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_used_at    TIMESTAMPTZ,
     revoked_at      TIMESTAMPTZ
@@ -20,24 +55,57 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys (user_id);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys (key_hash) WHERE revoked_at IS NULL;
 
-CREATE TABLE IF NOT EXISTS slides (
-    id              TEXT PRIMARY KEY CHECK (id ~ '^\d{8}-[0-9a-f]{8}$'),
-    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    date            DATE NOT NULL,
-    day_order       TEXT NOT NULL DEFAULT 'n',
-    html_content    TEXT NOT NULL,
-    notes           TEXT,
-    project_id      TEXT,
-    git_remote_url  TEXT,
-    git_hash        TEXT CHECK (git_hash ~ '^[0-9a-f]{40}$'),
+-- =============================================================================
+-- Application tables
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS projects (
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- Postgres only; absent in SQLite
+    id              TEXT NOT NULL CHECK (length(id) > 0),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at      TIMESTAMPTZ
+    archived_at     TIMESTAMPTZ,
+    PRIMARY KEY (user_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_user ON projects (user_id);
+CREATE INDEX IF NOT EXISTS idx_projects_archived ON projects (archived_at) WHERE archived_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS devices (
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- Postgres only; absent in SQLite
+    id              TEXT NOT NULL CHECK (length(id) > 0),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    archived_at     TIMESTAMPTZ,
+    PRIMARY KEY (user_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_devices_user ON devices (user_id);
+CREATE INDEX IF NOT EXISTS idx_devices_archived ON devices (archived_at) WHERE archived_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS slides (
+    id              TEXT PRIMARY KEY CHECK (id ~ '^\d{8}-[0-9a-f]{8}$'),
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,  -- Postgres only; absent in SQLite
+    date            DATE NOT NULL,                  -- local date when slide was created/assigned
+    day_order       TEXT NOT NULL DEFAULT 'n',
+    html_content    TEXT,
+    notes           TEXT,
+    project_id      TEXT NOT NULL,                  -- e.g. 'happy-ai/sleep-staging'
+    source_device_id TEXT NOT NULL,
+    source_ref      TEXT,
+    git_remote_url  TEXT,                           -- e.g. 'https://github.com/org/repo'
+    git_hash        TEXT CHECK (git_hash ~ '^[0-9a-f]{40}$'),  -- full SHA-1 commit hash (40 hex chars)
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at      TIMESTAMPTZ,                    -- NULL = active, non-NULL = soft deleted
+    FOREIGN KEY (user_id, project_id) REFERENCES projects(user_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (user_id, source_device_id) REFERENCES devices(user_id, id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_slides_user ON slides (user_id);
 CREATE INDEX IF NOT EXISTS idx_slides_date ON slides (date, day_order, id);
-CREATE INDEX IF NOT EXISTS idx_slides_project ON slides (project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_slides_project ON slides (project_id);
+CREATE INDEX IF NOT EXISTS idx_slides_source_device ON slides (source_device_id);
 CREATE INDEX IF NOT EXISTS idx_slides_updated ON slides (updated_at);
 CREATE INDEX IF NOT EXISTS idx_slides_deleted ON slides (deleted_at) WHERE deleted_at IS NOT NULL;
 
@@ -52,6 +120,14 @@ CREATE TABLE IF NOT EXISTS slide_figures (
 );
 
 CREATE INDEX IF NOT EXISTS idx_figures_slide ON slide_figures (slide_id);
+
+-- INVARIANT: Child rows (slide_figures, slide_data_files) are only modified as
+-- part of a parent slide operation (pc add, pc edit, sync). Never independently.
+-- The parent slide's updated_at is the authoritative change signal for sync.
+-- The sync_version triggers on child tables may cause harmless false positives
+-- (version bump without discoverable slide changes) during sync operations.
+-- If independent child modification commands are ever added, a cross-table
+-- trigger to bump parent slide updated_at should be added at that time.
 
 CREATE TABLE IF NOT EXISTS slide_data_files (
     id              SERIAL PRIMARY KEY,
@@ -76,7 +152,7 @@ CREATE TABLE IF NOT EXISTS templates (
 );
 
 CREATE TABLE IF NOT EXISTS sync_version (
-    user_id         TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    user_id         TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,  -- per-user; SQLite uses id=1 singleton
     version         BIGINT NOT NULL DEFAULT 0,
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -86,11 +162,16 @@ RETURNS TRIGGER AS $$
 DECLARE
     _user_id TEXT;
 BEGIN
+    -- Resolve the user_id from the triggering row.
+    -- For slides: directly on the row. For child tables: join via slide_id.
     IF TG_TABLE_NAME = 'slides' THEN
         _user_id := COALESCE(NEW.user_id, OLD.user_id);
     ELSIF TG_TABLE_NAME IN ('slide_figures', 'slide_data_files') THEN
         SELECT user_id INTO _user_id FROM slides WHERE id = COALESCE(NEW.slide_id, OLD.slide_id);
+    ELSIF TG_TABLE_NAME IN ('projects', 'devices') THEN
+        _user_id := COALESCE(NEW.user_id, OLD.user_id);
     ELSIF TG_TABLE_NAME = 'templates' THEN
+        -- Templates are shared; create or bump every user's sync_version.
         INSERT INTO sync_version (user_id, version, updated_at)
         SELECT u.id, 1, NOW()
         FROM users AS u
@@ -124,6 +205,8 @@ CREATE TRIGGER slides_sync_bump_after_update
         OLD.html_content IS DISTINCT FROM NEW.html_content OR
         OLD.notes IS DISTINCT FROM NEW.notes OR
         OLD.project_id IS DISTINCT FROM NEW.project_id OR
+        OLD.source_device_id IS DISTINCT FROM NEW.source_device_id OR
+        OLD.source_ref IS DISTINCT FROM NEW.source_ref OR
         OLD.git_remote_url IS DISTINCT FROM NEW.git_remote_url OR
         OLD.git_hash IS DISTINCT FROM NEW.git_hash OR
         OLD.deleted_at IS DISTINCT FROM NEW.deleted_at
@@ -202,6 +285,58 @@ CREATE TRIGGER templates_sync_bump_after_delete
     AFTER DELETE ON templates
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS projects_sync_bump_after_insert ON projects;
+CREATE TRIGGER projects_sync_bump_after_insert
+    AFTER INSERT ON projects
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS projects_sync_bump_after_update ON projects;
+CREATE TRIGGER projects_sync_bump_after_update
+    AFTER UPDATE ON projects
+    FOR EACH ROW
+    WHEN (
+        OLD.id IS DISTINCT FROM NEW.id OR
+        OLD.created_at IS DISTINCT FROM NEW.created_at OR
+        OLD.updated_at IS DISTINCT FROM NEW.updated_at OR
+        OLD.archived_at IS DISTINCT FROM NEW.archived_at
+    )
+    EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS projects_sync_bump_after_delete ON projects;
+CREATE TRIGGER projects_sync_bump_after_delete
+    AFTER DELETE ON projects
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS devices_sync_bump_after_insert ON devices;
+CREATE TRIGGER devices_sync_bump_after_insert
+    AFTER INSERT ON devices
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS devices_sync_bump_after_update ON devices;
+CREATE TRIGGER devices_sync_bump_after_update
+    AFTER UPDATE ON devices
+    FOR EACH ROW
+    WHEN (
+        OLD.id IS DISTINCT FROM NEW.id OR
+        OLD.created_at IS DISTINCT FROM NEW.created_at OR
+        OLD.updated_at IS DISTINCT FROM NEW.updated_at OR
+        OLD.archived_at IS DISTINCT FROM NEW.archived_at
+    )
+    EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS devices_sync_bump_after_delete ON devices;
+CREATE TRIGGER devices_sync_bump_after_delete
+    AFTER DELETE ON devices
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+-- ---------------------------------------------------------------------------
+-- Auto-update updated_at on row modification.
+-- When a normal UPDATE does not explicitly set updated_at, the trigger bumps
+-- it to NOW(). When sync/import explicitly sets updated_at to a different
+-- value (NEW.updated_at != OLD.updated_at), the trigger skips.
+-- SQLite equivalent uses AFTER UPDATE trigger (see cli/internal/sqlite/sqlite_schema.sql).
+-- ---------------------------------------------------------------------------
+
 CREATE OR REPLACE FUNCTION auto_update_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -225,4 +360,14 @@ CREATE TRIGGER slides_auto_updated_at
 DROP TRIGGER IF EXISTS templates_auto_updated_at ON templates;
 CREATE TRIGGER templates_auto_updated_at
     BEFORE UPDATE ON templates
+    FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
+
+DROP TRIGGER IF EXISTS projects_auto_updated_at ON projects;
+CREATE TRIGGER projects_auto_updated_at
+    BEFORE UPDATE ON projects
+    FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
+
+DROP TRIGGER IF EXISTS devices_auto_updated_at ON devices;
+CREATE TRIGGER devices_auto_updated_at
+    BEFORE UPDATE ON devices
     FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();

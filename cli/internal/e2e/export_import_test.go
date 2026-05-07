@@ -51,18 +51,19 @@ type slideDataFileJSON struct {
 }
 
 type slideExportJSON struct {
-	FormatVersion int                 `json:"format_version"`
-	ID            string              `json:"id"`
-	Date          string              `json:"date"`
-	DayOrder      string              `json:"day_order"`
-	ProjectID     *string             `json:"project_id,omitempty"`
-	GitRemoteURL  *string             `json:"git_remote_url,omitempty"`
-	GitHash       *string             `json:"git_hash,omitempty"`
-	HasNotes      bool                `json:"has_notes"`
-	Figures       []slideFigureJSON   `json:"figures"`
-	DataFiles     []slideDataFileJSON `json:"data_files"`
-	CreatedAt     string              `json:"created_at"`
-	UpdatedAt     string              `json:"updated_at"`
+	FormatVersion  int                 `json:"format_version"`
+	ID             string              `json:"id"`
+	Date           string              `json:"date"`
+	DayOrder       string              `json:"day_order"`
+	ProjectID      *string             `json:"project_id,omitempty"`
+	SourceDeviceID string              `json:"source_device_id"`
+	GitRemoteURL   *string             `json:"git_remote_url,omitempty"`
+	GitHash        *string             `json:"git_hash,omitempty"`
+	HasNotes       bool                `json:"has_notes"`
+	Figures        []slideFigureJSON   `json:"figures"`
+	DataFiles      []slideDataFileJSON `json:"data_files"`
+	CreatedAt      string              `json:"created_at"`
+	UpdatedAt      string              `json:"updated_at"`
 }
 
 type manualExportSlide struct {
@@ -684,6 +685,8 @@ func writeSeededTemplates(t *testing.T, db *sql.DB, exportDir string) {
 	if err := os.MkdirAll(slidesDir, 0o755); err != nil {
 		t.Fatalf("mkdir slides: %v", err)
 	}
+	ensureManualRegistryEntry(t, exportDir, "projects.json", "test/default-project")
+	ensureManualRegistryEntry(t, exportDir, "devices.json", "test-device")
 }
 
 func writeManualExportSlide(t *testing.T, exportDir string, slide manualExportSlide) {
@@ -693,6 +696,15 @@ func writeManualExportSlide(t *testing.T, exportDir string, slide manualExportSl
 	if err := os.MkdirAll(filepath.Join(slideDir, "figures"), 0o755); err != nil {
 		t.Fatalf("mkdir slide export dir: %v", err)
 	}
+	if slide.Metadata.ProjectID == nil || *slide.Metadata.ProjectID == "" {
+		defaultProject := "test/default-project"
+		slide.Metadata.ProjectID = &defaultProject
+	}
+	if slide.Metadata.SourceDeviceID == "" {
+		slide.Metadata.SourceDeviceID = "test-device"
+	}
+	ensureManualRegistryEntry(t, exportDir, "projects.json", *slide.Metadata.ProjectID)
+	ensureManualRegistryEntry(t, exportDir, "devices.json", slide.Metadata.SourceDeviceID)
 	metadataBytes, err := json.MarshalIndent(slide.Metadata, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal metadata for %s: %v", slide.Metadata.ID, err)
@@ -712,6 +724,47 @@ func writeManualExportSlide(t *testing.T, exportDir string, slide manualExportSl
 		if err := os.WriteFile(filepath.Join(slideDir, "figures", name), content, 0o644); err != nil {
 			t.Fatalf("write figure %s for %s: %v", name, slide.Metadata.ID, err)
 		}
+	}
+}
+
+func ensureManualRegistryEntry(t *testing.T, exportDir string, filename string, id string) {
+	t.Helper()
+	if strings.TrimSpace(id) == "" {
+		return
+	}
+	path := filepath.Join(exportDir, filename)
+	type registryEntry struct {
+		ID         string  `json:"id"`
+		CreatedAt  string  `json:"created_at"`
+		UpdatedAt  string  `json:"updated_at"`
+		ArchivedAt *string `json:"archived_at,omitempty"`
+	}
+	entries := make([]registryEntry, 0)
+	if data, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(data, &entries); err != nil {
+			t.Fatalf("parse %s: %v", filename, err)
+		}
+	}
+	for _, entry := range entries {
+		if entry.ID == id {
+			return
+		}
+	}
+	entries = append(entries, registryEntry{
+		ID:        id,
+		CreatedAt: "2026-03-09T12:00:00Z",
+		UpdatedAt: "2026-03-09T12:00:00Z",
+	})
+	slices.SortFunc(entries, func(a, b registryEntry) int {
+		return strings.Compare(a.ID, b.ID)
+	})
+	data, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal %s: %v", filename, err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", filename, err)
 	}
 }
 

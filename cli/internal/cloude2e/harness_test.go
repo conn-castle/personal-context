@@ -39,6 +39,9 @@ var (
 
 	schemaCounter int
 	bucketCounter int
+
+	registeredProjects = map[string]bool{}
+	registeredDevices  = map[string]bool{}
 )
 
 func TestMain(m *testing.M) {
@@ -374,6 +377,7 @@ func runPCWithEnv(t *testing.T, homeDir string, userHome string, stdin io.Reader
 // runPCSuccess runs pc and fails if exit code is non-zero.
 func runPCSuccess(t *testing.T, homeDir string, userHome string, args ...string) string {
 	t.Helper()
+	args = withMutationProvenance(t, homeDir, userHome, args)
 	result := runPCWithEnv(t, homeDir, userHome, nil, args...)
 	if result.ExitCode != 0 {
 		t.Fatalf("pc %v failed (exit %d):\nstdout: %s\nstderr: %s",
@@ -386,6 +390,7 @@ func runPCSuccess(t *testing.T, homeDir string, userHome string, args ...string)
 func runPCSuccessNoStderr(t *testing.T, homeDir string, userHome string, args ...string) string {
 	t.Helper()
 
+	args = withMutationProvenance(t, homeDir, userHome, args)
 	result := runPCWithEnv(t, homeDir, userHome, nil, args...)
 	if result.ExitCode != 0 {
 		t.Fatalf("pc %v failed (exit %d):\nstdout: %s\nstderr: %s",
@@ -395,6 +400,103 @@ func runPCSuccessNoStderr(t *testing.T, homeDir string, userHome string, args ..
 		t.Fatalf("pc %v wrote unexpected stderr:\n%s", args, result.Stderr)
 	}
 	return result.Stdout
+}
+
+func withMutationProvenance(t *testing.T, homeDir string, userHome string, args []string) []string {
+	t.Helper()
+	if len(args) == 0 {
+		return args
+	}
+	if args[0] == "edit" && len(args) >= 3 {
+		ensureEditMetadata(t, homeDir, userHome, args[1], args[2])
+		return args
+	}
+	if args[0] != "add" {
+		return args
+	}
+
+	const defaultProjectID = "cloud-e2e/default"
+	const defaultDeviceID = "cloud-e2e-device"
+
+	projectID, hasProject := flagValue(args, "--project")
+	deviceID, hasDevice := flagValue(args, "--device")
+	if !hasProject {
+		projectID = defaultProjectID
+	}
+	if !hasDevice {
+		deviceID = defaultDeviceID
+	}
+	ensureProjectRegistered(t, homeDir, userHome, projectID)
+	ensureDeviceRegistered(t, homeDir, userHome, deviceID)
+
+	withProvenance := append([]string{}, args...)
+	insertAt := 1
+	if !hasDevice {
+		withProvenance = append(withProvenance[:insertAt], append([]string{"--device", deviceID}, withProvenance[insertAt:]...)...)
+	}
+	if !hasProject {
+		withProvenance = append(withProvenance[:insertAt], append([]string{"--project", projectID}, withProvenance[insertAt:]...)...)
+	}
+	return withProvenance
+}
+
+func ensureEditMetadata(t *testing.T, homeDir string, userHome string, slideID string, inputDir string) {
+	t.Helper()
+	metadataPath := filepath.Join(inputDir, "metadata.json")
+	if _, err := os.Stat(metadataPath); err == nil {
+		return
+	} else if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("stat edit metadata: %v", err)
+	}
+	slide := getSlideJSON(t, homeDir, userHome, slideID)
+	raw, err := json.MarshalIndent(map[string]string{
+		"project_id":       slide.ProjectID,
+		"source_device_id": slide.SourceDeviceID,
+	}, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal edit metadata: %v", err)
+	}
+	if err := os.WriteFile(metadataPath, raw, 0o644); err != nil {
+		t.Fatalf("write edit metadata: %v", err)
+	}
+}
+
+func flagValue(args []string, name string) (string, bool) {
+	for idx, arg := range args {
+		if arg == name && idx+1 < len(args) {
+			return args[idx+1], true
+		}
+		if strings.HasPrefix(arg, name+"=") {
+			return strings.TrimPrefix(arg, name+"="), true
+		}
+	}
+	return "", false
+}
+
+func ensureProjectRegistered(t *testing.T, homeDir string, userHome string, projectID string) {
+	t.Helper()
+	key := homeDir + "\x00" + projectID
+	if registeredProjects[key] {
+		return
+	}
+	result := runPCWithEnv(t, homeDir, userHome, nil, "project", "add", projectID)
+	if result.ExitCode != 0 {
+		t.Fatalf("pc project add %q failed (exit %d):\nstdout: %s\nstderr: %s", projectID, result.ExitCode, result.Stdout, result.Stderr)
+	}
+	registeredProjects[key] = true
+}
+
+func ensureDeviceRegistered(t *testing.T, homeDir string, userHome string, deviceID string) {
+	t.Helper()
+	key := homeDir + "\x00" + deviceID
+	if registeredDevices[key] {
+		return
+	}
+	result := runPCWithEnv(t, homeDir, userHome, nil, "device", "register", deviceID)
+	if result.ExitCode != 0 {
+		t.Fatalf("pc device register %q failed (exit %d):\nstdout: %s\nstderr: %s", deviceID, result.ExitCode, result.Stdout, result.Stderr)
+	}
+	registeredDevices[key] = true
 }
 
 // runPCFailure runs pc and fails if exit code is zero.
@@ -492,11 +594,12 @@ func createInputFolder(t *testing.T, htmlContent string, notes string, figures m
 
 // showJSON represents the relevant fields from `pc show --format json`.
 type showJSON struct {
-	ID          string `json:"id"`
-	Date        string `json:"date"`
-	HTMLContent string `json:"html_content"`
-	Notes       string `json:"notes"`
-	ProjectID   string `json:"project_id"`
+	ID             string `json:"id"`
+	Date           string `json:"date"`
+	HTMLContent    string `json:"html_content"`
+	Notes          string `json:"notes"`
+	ProjectID      string `json:"project_id"`
+	SourceDeviceID string `json:"source_device_id"`
 }
 
 // getSlideJSON runs `pc show --format json` and parses the output.

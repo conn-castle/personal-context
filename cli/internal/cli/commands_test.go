@@ -27,6 +27,7 @@ func TestEditCommandSuccess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>original</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir)
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
@@ -41,6 +42,7 @@ func TestEditCommandSuccess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html>updated</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, editDir)
 
 	editOut := &bytes.Buffer{}
 	editCmd := NewRootCommand(RootCommandOptions{Stdout: editOut, Stderr: &bytes.Buffer{}})
@@ -68,6 +70,7 @@ func TestEditCommandNotFound(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, editDir)
 
 	editCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	editCmd.SetArgs([]string{"edit", "nonexistent-id", editDir})
@@ -109,6 +112,7 @@ func TestEditCommandWithFigures(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte(`<html><img src="figures/original.png"></html>`), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir)
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
@@ -130,6 +134,7 @@ func TestEditCommandWithFigures(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><img src="figures/new.png"></html>`), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, editDir)
 
 	editOut := &bytes.Buffer{}
 	editCmd := NewRootCommand(RootCommandOptions{Stdout: editOut, Stderr: &bytes.Buffer{}})
@@ -161,6 +166,7 @@ func TestDeleteCommandSuccess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir)
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
@@ -228,6 +234,7 @@ func TestRestoreCommandSuccess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir)
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
@@ -303,6 +310,7 @@ func TestMoveCommandChangesDate(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir)
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
@@ -339,6 +347,7 @@ func TestMoveCommandPositionFirst(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir1, "slide.html"), []byte("<html>first</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir1)
 
 	addOut1 := &bytes.Buffer{}
 	addCmd1 := NewRootCommand(RootCommandOptions{Stdout: addOut1, Stderr: &bytes.Buffer{}})
@@ -351,6 +360,7 @@ func TestMoveCommandPositionFirst(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir2, "slide.html"), []byte("<html>second</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir2)
 
 	addOut2 := &bytes.Buffer{}
 	addCmd2 := NewRootCommand(RootCommandOptions{Stdout: addOut2, Stderr: &bytes.Buffer{}})
@@ -387,6 +397,7 @@ func TestMoveCommandNoFlags(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir)
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
@@ -449,6 +460,7 @@ func TestMoveCommandInvalidDate(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
 		t.Fatalf("write slide.html: %v", err)
 	}
+	writeDefaultProvenanceMetadata(t, inputDir)
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
@@ -485,6 +497,7 @@ func TestEditWithDataFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(newDir, "slide.html"), []byte("<html>edited</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeDefaultProvenanceMetadata(t, newDir)
 	dataDir := filepath.Join(newDir, "data")
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -521,6 +534,7 @@ func TestEditReplacesFiguresAndDataFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(newDir, "slide.html"), []byte(`<html><img src="figures/new.png">new</html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeDefaultProvenanceMetadata(t, newDir)
 	if err := os.WriteFile(filepath.Join(newDir, "notes.md"), []byte("new notes"), 0o644); err != nil {
 		t.Fatal(err)
 	}

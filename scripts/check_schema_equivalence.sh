@@ -28,10 +28,12 @@ errors=0
 # Tables, columns, and indexes that exist only in the Postgres schema (multi-user
 # auth support). SQLite is single-user (local mode) and has no equivalent.
 POSTGRES_ONLY_TABLES="api_keys users"
+POSTGRES_ONLY_COLUMNS_projects="user_id"
+POSTGRES_ONLY_COLUMNS_devices="user_id"
 POSTGRES_ONLY_COLUMNS_slides="user_id"
 POSTGRES_ONLY_COLUMNS_sync_version="user_id"
 SQLITE_ONLY_COLUMNS_sync_version="id"
-POSTGRES_ONLY_INDEXES="idx_api_keys_hash idx_api_keys_user idx_slides_user"
+POSTGRES_ONLY_INDEXES="idx_api_keys_hash idx_api_keys_user idx_devices_user idx_projects_user idx_slides_user"
 
 # Helper: remove Postgres-only entries from a newline-separated list.
 filter_pg_only() {

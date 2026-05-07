@@ -4,12 +4,17 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 	pcs3 "github.com/conn-castle/personal-context/cli/internal/s3client"
 )
@@ -57,7 +62,7 @@ func TestNewFetchCommandParsesFlagsAndRunsFetch(t *testing.T) {
 	proj := "org/proj"
 	mockCloudStackForFetch(t, &fetchMockConfig{
 		slidesByProject: map[string][]repository.Slide{
-			proj: {{ID: "s1", Date: "2025-01-01", ProjectID: &proj}},
+			proj: {{ID: "s1", Date: "2025-01-01", ProjectID: proj}},
 		},
 		dataFiles: map[string][]repository.SlideDataFile{
 			"s1": {{ID: 1, SlideID: "s1", Filename: "a.txt", S3Key: "data/s1/a.txt"}},
@@ -70,6 +75,32 @@ func TestNewFetchCommandParsesFlagsAndRunsFetch(t *testing.T) {
 	cmd := newFetchCommand(stdout, stderr)
 	cmd.SetArgs([]string{"--project", proj, "--output", outputDir})
 
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("ExecuteContext() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Downloaded 1 file(s)") {
+		t.Fatalf("stdout = %q, want download summary", stdout.String())
+	}
+}
+
+func TestNewFetchCommandPassesSlideIDArgument(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+	outputDir := t.TempDir()
+
+	mockCloudStackForFetch(t, &fetchMockConfig{
+		slides: map[string]repository.Slide{
+			"slide-arg": {ID: "slide-arg", Date: "2025-03-01"},
+		},
+		dataFiles: map[string][]repository.SlideDataFile{
+			"slide-arg": {{ID: 1, SlideID: "slide-arg", Filename: "a.txt", S3Key: "data/slide-arg/a.txt"}},
+		},
+		s3Data: map[string]string{"data/slide-arg/a.txt": "alpha"},
+	})
+
+	stdout := &bytes.Buffer{}
+	cmd := newFetchCommand(stdout, &bytes.Buffer{})
+	cmd.SetArgs([]string{"slide-arg", "--output", outputDir})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("ExecuteContext() error = %v", err)
 	}
@@ -205,8 +236,8 @@ func TestRunFetchProjectSuccess(t *testing.T) {
 	mockCloudStackForFetch(t, &fetchMockConfig{
 		slidesByProject: map[string][]repository.Slide{
 			proj: {
-				{ID: "s1", Date: "2025-01-01", ProjectID: &proj},
-				{ID: "s2", Date: "2025-01-02", ProjectID: &proj},
+				{ID: "s1", Date: "2025-01-01", ProjectID: proj},
+				{ID: "s2", Date: "2025-01-02", ProjectID: proj},
 			},
 		},
 		dataFiles: map[string][]repository.SlideDataFile{
@@ -305,6 +336,63 @@ func TestRunFetchS3DownloadError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "download") {
 		t.Fatalf("unexpected error = %v", err)
+	}
+}
+
+func TestDownloadS3FileFnWritesAtomically(t *testing.T) {
+	client := newTestS3Client(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/test-bucket/data/slide/report.csv" {
+			t.Fatalf("path = %s, want /test-bucket/data/slide/report.csv", r.URL.Path)
+		}
+		_, _ = w.Write([]byte("a,b\n1,2\n"))
+	}))
+
+	destPath := filepath.Join(t.TempDir(), "nested", "report.csv")
+	if err := downloadS3FileFn(context.Background(), client, "data/slide/report.csv", destPath); err != nil {
+		t.Fatalf("downloadS3FileFn() error = %v", err)
+	}
+	got, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(got) != "a,b\n1,2\n" {
+		t.Fatalf("content = %q", got)
+	}
+}
+
+func TestDownloadS3FileFnReportsLocalWriteErrors(t *testing.T) {
+	client := newTestS3Client(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("content"))
+	}))
+
+	blockerPath := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blockerPath, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	err := downloadS3FileFn(context.Background(), client, "data/slide/report.csv", filepath.Join(blockerPath, "report.csv"))
+	if err == nil {
+		t.Fatal("expected directory creation error")
+	}
+	if !strings.Contains(err.Error(), "create directory") {
+		t.Fatalf("error = %v, want create directory", err)
+	}
+}
+
+func TestDownloadS3FileFnReportsS3Errors(t *testing.T) {
+	client := newTestS3Client(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "missing", http.StatusNotFound)
+	}))
+
+	err := downloadS3FileFn(context.Background(), client, "data/missing.csv", filepath.Join(t.TempDir(), "missing.csv"))
+	if err == nil {
+		t.Fatal("expected download error")
+	}
+	if !strings.Contains(err.Error(), "download data/missing.csv") {
+		t.Fatalf("error = %v, want S3 download context", err)
 	}
 }
 
@@ -463,7 +551,7 @@ func TestRunFetchProjectCollectDataFilesError(t *testing.T) {
 	proj := "org/proj"
 	mockCloudStackForFetch(t, &fetchMockConfig{
 		slidesByProject: map[string][]repository.Slide{
-			proj: {{ID: "s1", Date: "2025-01-01", ProjectID: &proj}},
+			proj: {{ID: "s1", Date: "2025-01-01", ProjectID: proj}},
 		},
 		listDataFilesErr: errors.New("data files error"),
 	})
@@ -580,6 +668,28 @@ func mockCloudStackForFetch(t *testing.T, cfg *fetchMockConfig) {
 		}
 		return os.WriteFile(destPath, []byte(content), 0o644)
 	}
+}
+
+func newTestS3Client(t *testing.T, handler http.Handler) *pcs3.Client {
+	t.Helper()
+
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	cfg := aws.Config{
+		Region:      "us-east-1",
+		Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("test", "test", "")),
+		HTTPClient:  server.Client(),
+	}
+	s3Client := awss3.NewFromConfig(cfg, func(o *awss3.Options) {
+		o.BaseEndpoint = aws.String(server.URL)
+		o.UsePathStyle = true
+	})
+	client, err := pcs3.New(s3Client, "test-bucket", "")
+	if err != nil {
+		t.Fatalf("s3client.New() error = %v", err)
+	}
+	return client
 }
 
 // fetchMockRepo is a mock repository for fetch tests.

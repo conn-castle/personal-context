@@ -29,18 +29,18 @@ type mockRepo struct {
 	syncVer    repository.SyncVersion
 
 	// Error injection
-	listSlidesErr      error
-	getSlideErr        error
-	updateSlideErr     error
-	softDeleteErr      error
-	restoreErr         error
-	deleteSlideErr     error
-	countSlidesErr     error
-	purgeDeletedErr    error
-	listFiguresErr     error
-	listDataFilesErr   error
-	listProjectsErr    error
-	getSyncVersionErr  error
+	listSlidesErr     error
+	getSlideErr       error
+	updateSlideErr    error
+	softDeleteErr     error
+	restoreErr        error
+	deleteSlideErr    error
+	countSlidesErr    error
+	purgeDeletedErr   error
+	listFiguresErr    error
+	listDataFilesErr  error
+	listProjectsErr   error
+	getSyncVersionErr error
 }
 
 func newMockRepo() *mockRepo {
@@ -55,11 +55,68 @@ func newMockRepo() *mockRepo {
 	}
 }
 
-func (m *mockRepo) ListDistinctProjectIDs(_ context.Context) ([]string, error) {
+func strPtrTest(value string) *string {
+	return &value
+}
+
+func (m *mockRepo) ListProjects(_ context.Context, includeArchived bool) ([]repository.Project, error) {
 	if m.listProjectsErr != nil {
 		return nil, m.listProjectsErr
 	}
-	return m.projectIDs, nil
+	projects := make([]repository.Project, 0, len(m.projectIDs))
+	for _, id := range m.projectIDs {
+		projects = append(projects, repository.Project{ID: id})
+	}
+	return projects, nil
+}
+
+func (m *mockRepo) CreateProject(_ context.Context, input repository.CreateRegistryInput) (repository.Project, error) {
+	return repository.Project{ID: input.ID}, nil
+}
+
+func (m *mockRepo) GetProjectByID(_ context.Context, id string) (repository.Project, error) {
+	for _, projectID := range m.projectIDs {
+		if projectID == id {
+			return repository.Project{ID: id}, nil
+		}
+	}
+	return repository.Project{}, repository.ErrNotFound
+}
+
+func (m *mockRepo) ArchiveProject(_ context.Context, id string) (repository.Project, error) {
+	return repository.Project{ID: id}, nil
+}
+
+func (m *mockRepo) RestoreProject(_ context.Context, id string) (repository.Project, error) {
+	return repository.Project{ID: id}, nil
+}
+
+func (m *mockRepo) UpsertProjectForImport(_ context.Context, project repository.Project) (bool, error) {
+	return true, nil
+}
+
+func (m *mockRepo) CreateDevice(_ context.Context, input repository.CreateRegistryInput) (repository.Device, error) {
+	return repository.Device{ID: input.ID}, nil
+}
+
+func (m *mockRepo) GetDeviceByID(_ context.Context, id string) (repository.Device, error) {
+	return repository.Device{ID: id}, nil
+}
+
+func (m *mockRepo) ListDevices(_ context.Context, includeArchived bool) ([]repository.Device, error) {
+	return nil, nil
+}
+
+func (m *mockRepo) ArchiveDevice(_ context.Context, id string) (repository.Device, error) {
+	return repository.Device{ID: id}, nil
+}
+
+func (m *mockRepo) RestoreDevice(_ context.Context, id string) (repository.Device, error) {
+	return repository.Device{ID: id}, nil
+}
+
+func (m *mockRepo) UpsertDeviceForImport(_ context.Context, device repository.Device) (bool, error) {
+	return true, nil
 }
 
 func (m *mockRepo) ListSlides(_ context.Context, filter repository.ListSlidesFilter) ([]repository.Slide, error) {
@@ -74,7 +131,7 @@ func (m *mockRepo) ListSlides(_ context.Context, filter repository.ListSlidesFil
 		if filter.OnlyDeleted && s.DeletedAt == nil {
 			continue
 		}
-		if filter.ProjectID != nil && (s.ProjectID == nil || *s.ProjectID != *filter.ProjectID) {
+		if filter.ProjectID != nil && s.ProjectID != *filter.ProjectID {
 			continue
 		}
 		if filter.UpdatedAfter != nil && s.UpdatedAt.Before(*filter.UpdatedAfter) {
@@ -123,6 +180,8 @@ func (m *mockRepo) UpdateSlide(_ context.Context, input repository.UpdateSlideIn
 			m.slides[i].HTMLContent = input.HTMLContent
 			m.slides[i].Notes = input.Notes
 			m.slides[i].ProjectID = input.ProjectID
+			m.slides[i].SourceDeviceID = input.SourceDeviceID
+			m.slides[i].SourceRef = input.SourceRef
 			m.slides[i].GitRemoteURL = input.GitRemoteURL
 			m.slides[i].GitHash = input.GitHash
 			m.slides[i].DeletedAt = input.DeletedAt
@@ -530,12 +589,14 @@ func TestListProjects_Error(t *testing.T) {
 func testSlide(id, date, dayOrder string) repository.Slide {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	return repository.Slide{
-		ID:          id,
-		Date:        date,
-		DayOrder:    dayOrder,
-		HTMLContent: "<p>" + id + "</p>",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:             id,
+		Date:           date,
+		DayOrder:       dayOrder,
+		HTMLContent:    strPtrTest("<p>" + id + "</p>"),
+		ProjectID:      "test/project",
+		SourceDeviceID: "test-device",
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 }
 
@@ -592,7 +653,7 @@ func TestListSlides_ProjectFilter(t *testing.T) {
 	repo := newMockRepo()
 	proj := "alpha"
 	s1 := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
-	s1.ProjectID = &proj
+	s1.ProjectID = proj
 	s2 := testSlide("20260310-bbbbbbbb", "2026-03-10", "a1")
 	repo.slides = []repository.Slide{s1, s2}
 	ts := setupTestServer(t, repo)
@@ -999,7 +1060,7 @@ func TestPatchSlide_RejectsUnknownFields(t *testing.T) {
 	}
 }
 
-func TestPatchSlide_EmptyProjectIDNormalizesToNil(t *testing.T) {
+func TestPatchSlide_EmptyProjectIDKeepsExistingRequiredProject(t *testing.T) {
 	repo := newMockRepo()
 	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
@@ -1008,10 +1069,13 @@ func TestPatchSlide_EmptyProjectIDNormalizesToNil(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(`{"project_id":""}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
 	result := readBody(t, resp)
 	slide := result["slide"].(map[string]any)
-	if slide["project_id"] != nil {
-		t.Fatalf("expected nil project_id, got %v", slide["project_id"])
+	if slide["project_id"] != "test/project" {
+		t.Fatalf("expected existing project_id, got %v", slide["project_id"])
 	}
 }
 
@@ -2480,7 +2544,7 @@ func TestPatchSlide_NonStringProjectID(t *testing.T) {
 	repo := newMockRepo()
 	proj := "original"
 	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
-	s.ProjectID = &proj
+	s.ProjectID = proj
 	repo.slides = []repository.Slide{s}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
@@ -2592,9 +2656,9 @@ func TestHandleStats(t *testing.T) {
 	repo := newMockRepo()
 	proj := "test-project"
 	repo.slides = []repository.Slide{
-		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: "<p>active1</p>", ProjectID: &proj, UpdatedAt: now, CreatedAt: now},
-		{ID: "20260310-a1b2c3d5", Date: "2026-03-10", DayOrder: "a1", HTMLContent: "<p>active2</p>", UpdatedAt: now, CreatedAt: now},
-		{ID: "20260310-a1b2c3d6", Date: "2026-03-10", DayOrder: "a2", HTMLContent: "<p>trashed</p>", UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
+		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: strPtrTest("<p>active1</p>"), ProjectID: proj, UpdatedAt: now, CreatedAt: now},
+		{ID: "20260310-a1b2c3d5", Date: "2026-03-10", DayOrder: "a1", HTMLContent: strPtrTest("<p>active2</p>"), UpdatedAt: now, CreatedAt: now},
+		{ID: "20260310-a1b2c3d6", Date: "2026-03-10", DayOrder: "a2", HTMLContent: strPtrTest("<p>trashed</p>"), UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
 	}
 	repo.projectIDs = []string{"test-project"}
 
@@ -2693,9 +2757,9 @@ func TestHandlePurgeTrash(t *testing.T) {
 	deletedAt := now.Add(-1 * time.Hour)
 	repo := newMockRepo()
 	repo.slides = []repository.Slide{
-		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: "<p>active</p>", UpdatedAt: now, CreatedAt: now},
-		{ID: "20260310-a1b2c3d5", Date: "2026-03-10", DayOrder: "a1", HTMLContent: "<p>trashed1</p>", UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
-		{ID: "20260310-a1b2c3d6", Date: "2026-03-10", DayOrder: "a2", HTMLContent: "<p>trashed2</p>", UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
+		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: strPtrTest("<p>active</p>"), UpdatedAt: now, CreatedAt: now},
+		{ID: "20260310-a1b2c3d5", Date: "2026-03-10", DayOrder: "a1", HTMLContent: strPtrTest("<p>trashed1</p>"), UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
+		{ID: "20260310-a1b2c3d6", Date: "2026-03-10", DayOrder: "a2", HTMLContent: strPtrTest("<p>trashed2</p>"), UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
 	}
 
 	ts := setupTestServer(t, repo)
@@ -2737,7 +2801,7 @@ func TestHandlePurgeTrash(t *testing.T) {
 func TestHandlePurgeTrash_Empty(t *testing.T) {
 	repo := newMockRepo()
 	repo.slides = []repository.Slide{
-		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: "<p>active</p>", UpdatedAt: time.Now().UTC(), CreatedAt: time.Now().UTC()},
+		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: strPtrTest("<p>active</p>"), UpdatedAt: time.Now().UTC(), CreatedAt: time.Now().UTC()},
 	}
 
 	ts := setupTestServer(t, repo)
@@ -2765,7 +2829,7 @@ func TestHandlePurgeTrash_RemovesFilesystemDirs(t *testing.T) {
 	repo := newMockRepo()
 	slideID := "20260310-a1b2c3d4"
 	repo.slides = []repository.Slide{
-		{ID: slideID, Date: "2026-03-10", DayOrder: "a0", HTMLContent: "<p>trashed</p>", UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
+		{ID: slideID, Date: "2026-03-10", DayOrder: "a0", HTMLContent: strPtrTest("<p>trashed</p>"), UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
 	}
 
 	dataDir := t.TempDir()

@@ -14,7 +14,9 @@ import (
 
 func TestRunAddAutoSyncWarningDoesNotPolluteStdout(t *testing.T) {
 	setupEnv(t)
-
+	if err := runProjectAdd(context.Background(), io.Discard, io.Discard, "test/project"); err != nil {
+		t.Fatalf("runProjectAdd() error = %v", err)
+	}
 	inputDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<h1>slide</h1>"), 0o644); err != nil {
 		t.Fatalf("WriteFile(slide.html) error = %v", err)
@@ -31,7 +33,7 @@ func TestRunAddAutoSyncWarningDoesNotPolluteStdout(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	if err := runAdd(context.Background(), stdout, stderr, inputDir, "", "", position{kind: "last"}); err != nil {
+	if err := runAdd(context.Background(), stdout, stderr, inputDir, "", "test/project", "test-device", "", position{kind: "last"}); err != nil {
 		t.Fatalf("runAdd() error = %v", err)
 	}
 
@@ -58,11 +60,17 @@ func TestRunDeleteCallsAutoSyncAfterLocalSuccess(t *testing.T) {
 	}
 	defer func() { _ = stack.Close() }()
 
-	if _, err := stack.Repo.CreateSlide(context.Background(), repository.CreateSlideInput{
-		ID:          "20260308-a1b2c3d4",
-		Date:        "2026-03-08",
-		DayOrder:    "a",
-		HTMLContent: "<h1>x</h1>",
+	ctx := context.Background()
+	if _, err := stack.Repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "test/project"}); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if _, err := stack.Repo.CreateSlide(ctx, repository.CreateSlideInput{
+		ID:             "20260308-a1b2c3d4",
+		Date:           "2026-03-08",
+		DayOrder:       "a",
+		HTMLContent:    strPtr("<h1>x</h1>"),
+		ProjectID:      "test/project",
+		SourceDeviceID: "test-device",
 	}); err != nil {
 		t.Fatalf("CreateSlide() error = %v", err)
 	}

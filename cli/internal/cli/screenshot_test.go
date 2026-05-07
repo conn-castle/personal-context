@@ -193,6 +193,7 @@ func TestScreenshotHappyPath(t *testing.T) {
 	if err := os.WriteFile(htmlPath, []byte(`<!DOCTYPE html><html><body><h1>Test</h1></body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeDefaultProvenanceMetadata(t, slideDir)
 
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
@@ -284,6 +285,7 @@ printf 'fake png' > "$out"
 	if err := os.WriteFile(filepath.Join(slideDir, "slide.html"), []byte(`<!DOCTYPE html><html><body><img src="figures/chart.png" alt="chart"></body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeDefaultProvenanceMetadata(t, slideDir)
 
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
@@ -321,6 +323,7 @@ func TestScreenshotDefaultOutput(t *testing.T) {
 	if err := os.WriteFile(htmlPath, []byte(`<!DOCTYPE html><html><body><h1>Default Output</h1></body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeDefaultProvenanceMetadata(t, slideDir)
 
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
@@ -398,6 +401,9 @@ func TestScreenshotChromeFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(slideDir, "slide.html"), []byte(`<html><body>Test</body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeDefaultProvenanceMetadata(t, slideDir)
+	writeDefaultProvenanceMetadata(t, slideDir)
+	writeDefaultProvenanceMetadata(t, slideDir)
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
 	addCmd.SetArgs([]string{"add", slideDir})
@@ -573,6 +579,7 @@ func TestScreenshotTempDirError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(slideDir, "slide.html"), []byte(`<html><body>Test</body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeDefaultProvenanceMetadata(t, slideDir)
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
 	addCmd.SetArgs([]string{"add", slideDir})
@@ -894,4 +901,3 @@ func TestPrepareScreenshotWorkspace_AssetIsFile(t *testing.T) {
 		t.Error("expected figures dir to be absent when source is a file")
 	}
 }
-

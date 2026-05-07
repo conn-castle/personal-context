@@ -86,10 +86,15 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 		}
 	}
 	updatedSlide := updatedSnapshot.Slides[0]
-	updatedSlide.HTMLContent = `<html><body><img src="figures/fresh.png">updated</body></html>`
+	updatedSlide.HTMLContent = strPtr(`<html><body><img src="figures/fresh.png">updated</body></html>`)
 	updatedSlide.UpdatedAt = updatedSlide.UpdatedAt.Add(time.Minute)
 	updatedSlide.Notes = strPtr("updated-notes")
-	updatedSlide.ProjectID = strPtr("phase7/updated")
+	updatedSlide.ProjectID = "phase7/updated"
+	updatedSnapshot.Projects = append(updatedSnapshot.Projects, gitsnapshot.RegistryEntry{
+		ID:        "phase7/updated",
+		CreatedAt: updatedSlide.UpdatedAt,
+		UpdatedAt: updatedSlide.UpdatedAt,
+	})
 	updatedSlide.GitRemoteURL = strPtr("https://github.com/org/updated")
 	updatedSlide.GitHash = strPtr("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	updatedSlide.Figures = []gitsnapshot.Figure{{
@@ -540,10 +545,12 @@ func TestImportSnapshotIntoStackErrorPaths(t *testing.T) {
 
 	snapshot := gitsnapshot.Snapshot{
 		Slides: []gitsnapshot.Slide{{
-			ID:          "20260309-beadfeed",
-			Date:        "2026-03-09",
-			DayOrder:    "a",
-			HTMLContent: "<html>snapshot</html>",
+			ID:             "20260309-beadfeed",
+			Date:           "2026-03-09",
+			DayOrder:       "a",
+			ProjectID:      "phase7/test",
+			SourceDeviceID: "test-device",
+			HTMLContent:    strPtr("<html>snapshot</html>"),
 			Figures: []gitsnapshot.Figure{{
 				Filename: "plot.png",
 				S3Key:    "figures/20260309-beadfeed/plot.png",
@@ -807,12 +814,14 @@ func TestPhase7CommandAdditionalErrorPaths(t *testing.T) {
 		withResolvedHomeDir(t, homeDir)
 
 		slide := repository.Slide{
-			ID:          "20260309-clouddead",
-			Date:        "2026-03-09",
-			DayOrder:    "a0",
-			HTMLContent: `<html><body><img src="figures/cloud.png"></body></html>`,
-			CreatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
-			UpdatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+			ID:             "20260309-clouddead",
+			Date:           "2026-03-09",
+			DayOrder:       "a0",
+			ProjectID:      "phase7/test",
+			SourceDeviceID: "test-device",
+			HTMLContent:    strPtr(`<html><body><img src="figures/cloud.png"></body></html>`),
+			CreatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 		}
 		figure := repository.SlideFigure{
 			SlideID:  slide.ID,
@@ -884,12 +893,14 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 	t.Run("buildCloudSnapshot downloads figure content", func(t *testing.T) {
 		homeDir := setupEnv(t)
 		slide := repository.Slide{
-			ID:          "20260309-cloudbeef",
-			Date:        "2026-03-09",
-			DayOrder:    "a0",
-			HTMLContent: `<html><body><img src="figures/cloud.png"></body></html>`,
-			CreatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
-			UpdatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+			ID:             "20260309-cloudbeef",
+			Date:           "2026-03-09",
+			DayOrder:       "a0",
+			ProjectID:      "phase7/test",
+			SourceDeviceID: "test-device",
+			HTMLContent:    strPtr(`<html><body><img src="figures/cloud.png"></body></html>`),
+			CreatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 		}
 		figure := repository.SlideFigure{
 			SlideID:  slide.ID,
@@ -1009,6 +1020,44 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 			},
 		}, gitsnapshot.Template{Name: "update-fail", HTMLContent: "<html>new</html>"}); err == nil || !strings.Contains(err.Error(), "update template") {
 			t.Fatalf("upsertTemplate(update error) = %v, want update failure", err)
+		}
+	})
+
+	t.Run("import registry and slide lookup errors", func(t *testing.T) {
+		projectErr := errors.New("project upsert failed")
+		_, err := importSnapshotIntoStack(ctx, &localStack{Repo: &mockRepo{
+			upsertProjectFn: func(context.Context, repository.Project) (bool, error) {
+				return false, projectErr
+			},
+		}}, gitsnapshot.Snapshot{
+			Projects: []gitsnapshot.RegistryEntry{{ID: "project/a"}},
+		})
+		if !errors.Is(err, projectErr) || !strings.Contains(err.Error(), "upsert project") {
+			t.Fatalf("importSnapshotIntoStack(project error) = %v", err)
+		}
+
+		deviceErr := errors.New("device upsert failed")
+		_, err = importSnapshotIntoStack(ctx, &localStack{Repo: &mockRepo{
+			upsertDeviceFn: func(context.Context, repository.Device) (bool, error) {
+				return false, deviceErr
+			},
+		}}, gitsnapshot.Snapshot{
+			Devices: []gitsnapshot.RegistryEntry{{ID: "device/a"}},
+		})
+		if !errors.Is(err, deviceErr) || !strings.Contains(err.Error(), "upsert device") {
+			t.Fatalf("importSnapshotIntoStack(device error) = %v", err)
+		}
+
+		getSlideErr := errors.New("slide lookup failed")
+		_, err = importSnapshotIntoStack(ctx, &localStack{Repo: &mockRepo{
+			getSlideByIDFn: func(context.Context, string) (repository.Slide, error) {
+				return repository.Slide{}, getSlideErr
+			},
+		}}, gitsnapshot.Snapshot{
+			Slides: []gitsnapshot.Slide{{ID: "slide-a"}},
+		})
+		if !errors.Is(err, getSlideErr) || !strings.Contains(err.Error(), "get slide") {
+			t.Fatalf("importSnapshotIntoStack(slide lookup error) = %v", err)
 		}
 	})
 

@@ -20,6 +20,8 @@ const FormatVersion = 1
 // Snapshot is the deterministic git-export representation of Personal Context data.
 type Snapshot struct {
 	Templates []Template
+	Projects  []RegistryEntry
+	Devices   []RegistryEntry
 	Slides    []Slide
 }
 
@@ -31,18 +33,28 @@ type Template struct {
 
 // Slide is an exported slide directory with metadata, content, and figures.
 type Slide struct {
-	ID           string
-	Date         string
-	DayOrder     string
-	ProjectID    *string
-	GitRemoteURL *string
-	GitHash      *string
-	HTMLContent  string
-	Notes        *string
-	Figures      []Figure
-	DataFiles    []DataFile
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID             string
+	Date           string
+	DayOrder       string
+	ProjectID      string
+	SourceDeviceID string
+	SourceRef      *string
+	GitRemoteURL   *string
+	GitHash        *string
+	HTMLContent    *string
+	Notes          *string
+	Figures        []Figure
+	DataFiles      []DataFile
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// RegistryEntry is an exported project/device registry row.
+type RegistryEntry struct {
+	ID         string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	ArchivedAt *time.Time
 }
 
 // Figure is a metadata row plus exported file bytes.
@@ -63,18 +75,27 @@ type DataFile struct {
 }
 
 type metadataFile struct {
-	FormatVersion int          `json:"format_version"`
-	ID            string       `json:"id"`
-	Date          string       `json:"date"`
-	DayOrder      string       `json:"day_order"`
-	ProjectID     *string      `json:"project_id,omitempty"`
-	GitRemoteURL  *string      `json:"git_remote_url,omitempty"`
-	GitHash       *string      `json:"git_hash,omitempty"`
-	HasNotes      bool         `json:"has_notes"`
-	Figures       []figureFile `json:"figures"`
-	DataFiles     []dataFile   `json:"data_files"`
-	CreatedAt     string       `json:"created_at"`
-	UpdatedAt     string       `json:"updated_at"`
+	FormatVersion  int          `json:"format_version"`
+	ID             string       `json:"id"`
+	Date           string       `json:"date"`
+	DayOrder       string       `json:"day_order"`
+	ProjectID      string       `json:"project_id"`
+	SourceDeviceID string       `json:"source_device_id"`
+	SourceRef      *string      `json:"source_ref,omitempty"`
+	GitRemoteURL   *string      `json:"git_remote_url,omitempty"`
+	GitHash        *string      `json:"git_hash,omitempty"`
+	HasNotes       bool         `json:"has_notes"`
+	Figures        []figureFile `json:"figures"`
+	DataFiles      []dataFile   `json:"data_files"`
+	CreatedAt      string       `json:"created_at"`
+	UpdatedAt      string       `json:"updated_at"`
+}
+
+type registryFileEntry struct {
+	ID         string  `json:"id"`
+	CreatedAt  string  `json:"created_at"`
+	UpdatedAt  string  `json:"updated_at"`
+	ArchivedAt *string `json:"archived_at,omitempty"`
 }
 
 type figureFile struct {
@@ -120,6 +141,14 @@ func Write(root string, snapshot Snapshot) error {
 	}
 	templatesDir := filepath.Join(root, "templates")
 	slidesDir := filepath.Join(root, "slides")
+	projectsPath := filepath.Join(root, "projects.json")
+	devicesPath := filepath.Join(root, "devices.json")
+	if err := os.Remove(projectsPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reset projects.json: %w", err)
+	}
+	if err := os.Remove(devicesPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reset devices.json: %w", err)
+	}
 	if err := os.RemoveAll(templatesDir); err != nil {
 		return fmt.Errorf("reset templates dir: %w", err)
 	}
@@ -132,7 +161,6 @@ func Write(root string, snapshot Snapshot) error {
 	if err := os.MkdirAll(slidesDir, 0o755); err != nil {
 		return fmt.Errorf("create slides dir: %w", err)
 	}
-
 	templates := append([]Template(nil), snapshot.Templates...)
 	sort.Slice(templates, func(i, j int) bool {
 		return templates[i].Name < templates[j].Name
@@ -165,8 +193,10 @@ func Write(root string, snapshot Snapshot) error {
 		if err := os.MkdirAll(slideDir, 0o755); err != nil {
 			return fmt.Errorf("create slide dir %s: %w", slide.ID, err)
 		}
-		if err := writeFile(filepath.Join(slideDir, "slide.html"), []byte(slide.HTMLContent)); err != nil {
-			return fmt.Errorf("write slide.html for %s: %w", slide.ID, err)
+		if slide.HTMLContent != nil {
+			if err := writeFile(filepath.Join(slideDir, "slide.html"), []byte(*slide.HTMLContent)); err != nil {
+				return fmt.Errorf("write slide.html for %s: %w", slide.ID, err)
+			}
 		}
 		if slide.Notes != nil {
 			if err := writeFile(filepath.Join(slideDir, "notes.md"), []byte(*slide.Notes)); err != nil {
@@ -212,18 +242,20 @@ func Write(root string, snapshot Snapshot) error {
 		}
 
 		metadataBytes, err := json.MarshalIndent(metadataFile{
-			FormatVersion: FormatVersion,
-			ID:            slide.ID,
-			Date:          slide.Date,
-			DayOrder:      slide.DayOrder,
-			ProjectID:     slide.ProjectID,
-			GitRemoteURL:  slide.GitRemoteURL,
-			GitHash:       slide.GitHash,
-			HasNotes:      slide.Notes != nil,
-			Figures:       metadataFigures,
-			DataFiles:     metadataDataFiles,
-			CreatedAt:     slide.CreatedAt.UTC().Format(time.RFC3339Nano),
-			UpdatedAt:     slide.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			FormatVersion:  FormatVersion,
+			ID:             slide.ID,
+			Date:           slide.Date,
+			DayOrder:       slide.DayOrder,
+			ProjectID:      slide.ProjectID,
+			SourceDeviceID: slide.SourceDeviceID,
+			SourceRef:      slide.SourceRef,
+			GitRemoteURL:   slide.GitRemoteURL,
+			GitHash:        slide.GitHash,
+			HasNotes:       slide.Notes != nil,
+			Figures:        metadataFigures,
+			DataFiles:      metadataDataFiles,
+			CreatedAt:      slide.CreatedAt.UTC().Format(time.RFC3339Nano),
+			UpdatedAt:      slide.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		}, "", "  ")
 		if err != nil {
 			return fmt.Errorf("marshal metadata for %s: %w", slide.ID, err)
@@ -232,6 +264,13 @@ func Write(root string, snapshot Snapshot) error {
 		if err := writeFile(filepath.Join(slideDir, "metadata.json"), metadataBytes); err != nil {
 			return fmt.Errorf("write metadata.json for %s: %w", slide.ID, err)
 		}
+	}
+
+	if err := writeRegistryFile(projectsPath, snapshot.Projects); err != nil {
+		return fmt.Errorf("write projects.json: %w", err)
+	}
+	if err := writeRegistryFile(devicesPath, snapshot.Devices); err != nil {
+		return fmt.Errorf("write devices.json: %w", err)
 	}
 
 	return nil
@@ -250,7 +289,15 @@ func Read(root string) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return Snapshot{Templates: templates, Slides: slides}, nil
+	projects, err := readRegistryFile(filepath.Join(root, "projects.json"))
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("read projects.json: %w", err)
+	}
+	devices, err := readRegistryFile(filepath.Join(root, "devices.json"))
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("read devices.json: %w", err)
+	}
+	return Snapshot{Templates: templates, Projects: projects, Devices: devices, Slides: slides}, nil
 }
 
 // Manifest returns a deterministic listing of the snapshot tree for byte-for-byte comparisons.
@@ -283,6 +330,88 @@ func Manifest(root string) ([]string, error) {
 		return nil, err
 	}
 	sort.Strings(entries)
+	return entries, nil
+}
+
+func writeRegistryFile(path string, entries []RegistryEntry) error {
+	sorted := append([]RegistryEntry(nil), entries...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].ID < sorted[j].ID
+	})
+	fileEntries := make([]registryFileEntry, 0, len(sorted))
+	for _, entry := range sorted {
+		if strings.TrimSpace(entry.ID) == "" {
+			return fmt.Errorf("registry id is required")
+		}
+		if entry.CreatedAt.IsZero() || entry.UpdatedAt.IsZero() {
+			return fmt.Errorf("registry %s must have created_at and updated_at", entry.ID)
+		}
+		var archivedAt *string
+		if entry.ArchivedAt != nil {
+			value := entry.ArchivedAt.UTC().Format(time.RFC3339Nano)
+			archivedAt = &value
+		}
+		fileEntries = append(fileEntries, registryFileEntry{
+			ID:         entry.ID,
+			CreatedAt:  entry.CreatedAt.UTC().Format(time.RFC3339Nano),
+			UpdatedAt:  entry.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			ArchivedAt: archivedAt,
+		})
+	}
+	content, err := json.MarshalIndent(fileEntries, "", "  ")
+	if err != nil {
+		return err
+	}
+	content = append(content, '\n')
+	return writeFile(path, content)
+}
+
+func readRegistryFile(path string) ([]RegistryEntry, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var fileEntries []registryFileEntry
+	if err := json.Unmarshal(content, &fileEntries); err != nil {
+		return nil, err
+	}
+	entries := make([]RegistryEntry, 0, len(fileEntries))
+	seen := make(map[string]struct{}, len(fileEntries))
+	for _, fileEntry := range fileEntries {
+		if strings.TrimSpace(fileEntry.ID) == "" {
+			return nil, fmt.Errorf("registry id is required")
+		}
+		if _, exists := seen[fileEntry.ID]; exists {
+			return nil, fmt.Errorf("duplicate registry id %s", fileEntry.ID)
+		}
+		seen[fileEntry.ID] = struct{}{}
+		createdAt, err := time.Parse(time.RFC3339Nano, fileEntry.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse created_at for registry %s: %w", fileEntry.ID, err)
+		}
+		updatedAt, err := time.Parse(time.RFC3339Nano, fileEntry.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse updated_at for registry %s: %w", fileEntry.ID, err)
+		}
+		var archivedAt *time.Time
+		if fileEntry.ArchivedAt != nil {
+			parsedArchivedAt, err := time.Parse(time.RFC3339Nano, *fileEntry.ArchivedAt)
+			if err != nil {
+				return nil, fmt.Errorf("parse archived_at for registry %s: %w", fileEntry.ID, err)
+			}
+			utcArchivedAt := parsedArchivedAt.UTC()
+			archivedAt = &utcArchivedAt
+		}
+		entries = append(entries, RegistryEntry{
+			ID:         fileEntry.ID,
+			CreatedAt:  createdAt.UTC(),
+			UpdatedAt:  updatedAt.UTC(),
+			ArchivedAt: archivedAt,
+		})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].ID < entries[j].ID
+	})
 	return entries, nil
 }
 
@@ -364,6 +493,12 @@ func readSlide(dir string, slideID string) (Slide, error) {
 	if metadata.ID != slideID {
 		return Slide{}, fmt.Errorf("metadata id %s does not match slide dir %s", metadata.ID, slideID)
 	}
+	if strings.TrimSpace(metadata.ProjectID) == "" {
+		return Slide{}, fmt.Errorf("project_id is required for %s", slideID)
+	}
+	if strings.TrimSpace(metadata.SourceDeviceID) == "" {
+		return Slide{}, fmt.Errorf("source_device_id is required for %s", slideID)
+	}
 	createdAt, err := time.Parse(time.RFC3339Nano, metadata.CreatedAt)
 	if err != nil {
 		return Slide{}, fmt.Errorf("parse created_at for %s: %w", slideID, err)
@@ -372,8 +507,12 @@ func readSlide(dir string, slideID string) (Slide, error) {
 	if err != nil {
 		return Slide{}, fmt.Errorf("parse updated_at for %s: %w", slideID, err)
 	}
+	var htmlContent *string
 	htmlBytes, err := os.ReadFile(filepath.Join(dir, "slide.html"))
-	if err != nil {
+	if err == nil {
+		value := string(htmlBytes)
+		htmlContent = &value
+	} else if !os.IsNotExist(err) {
 		return Slide{}, fmt.Errorf("read slide.html for %s: %w", slideID, err)
 	}
 	var notes *string
@@ -401,18 +540,20 @@ func readSlide(dir string, slideID string) (Slide, error) {
 	}
 
 	return Slide{
-		ID:           slideID,
-		Date:         metadata.Date,
-		DayOrder:     metadata.DayOrder,
-		ProjectID:    metadata.ProjectID,
-		GitRemoteURL: metadata.GitRemoteURL,
-		GitHash:      metadata.GitHash,
-		HTMLContent:  string(htmlBytes),
-		Notes:        notes,
-		Figures:      figures,
-		DataFiles:    dataFiles,
-		CreatedAt:    createdAt.UTC(),
-		UpdatedAt:    updatedAt.UTC(),
+		ID:             slideID,
+		Date:           metadata.Date,
+		DayOrder:       metadata.DayOrder,
+		ProjectID:      metadata.ProjectID,
+		SourceDeviceID: metadata.SourceDeviceID,
+		SourceRef:      metadata.SourceRef,
+		GitRemoteURL:   metadata.GitRemoteURL,
+		GitHash:        metadata.GitHash,
+		HTMLContent:    htmlContent,
+		Notes:          notes,
+		Figures:        figures,
+		DataFiles:      dataFiles,
+		CreatedAt:      createdAt.UTC(),
+		UpdatedAt:      updatedAt.UTC(),
 	}, nil
 }
 

@@ -1,14 +1,13 @@
 package e2e_test
 
 import (
-	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
 )
 
 // TestFullLocalWorkflow exercises the complete local CLI workflow end-to-end
-// in a single sequential test: setup, project, add, search, edit, move,
+// in a single sequential test: setup, registry, add, search, edit, move,
 // delete, trash, gc, project list, and doctor.
 func TestFullLocalWorkflow(t *testing.T) {
 	homeDir := t.TempDir()
@@ -16,39 +15,39 @@ func TestFullLocalWorkflow(t *testing.T) {
 	// 1. pc setup
 	runPCSuccess(t, homeDir, "setup")
 
-	// 2. pc project set "workflow/test"
-	runPCSuccess(t, homeDir, "project", "set", "workflow/test")
-
-	// 3. pc add slide1 (date 2025-01-15, uses active project)
+	// 2. pc add slide1 (date 2025-01-15, explicit metadata project)
 	folder1 := createInputFolder(t, inputFolderOpts{
-		HTMLContent: "<html><body>Slide one neural nets</body></html>",
-		Notes:       "First slide notes",
+		HTMLContent:  "<html><body>Slide one neural nets</body></html>",
+		Notes:        "First slide notes",
+		MetadataJSON: `{"project_id":"workflow/test","source_device_id":"test-device"}`,
 	})
 	stdout := runPCSuccess(t, homeDir, "add", folder1, "--date", "2025-01-15")
 	slide1 := strings.TrimSpace(stdout)
 
-	// Verify slide1 has active project
+	// Verify slide1 has its explicit project.
 	db := openTestDB(t, homeDir)
-	var projectID sql.NullString
+	var projectID string
 	if err := db.QueryRow("SELECT project_id FROM slides WHERE id = ?", slide1).Scan(&projectID); err != nil {
 		t.Fatalf("query slide1 project: %v", err)
 	}
-	if !projectID.Valid || projectID.String != "workflow/test" {
+	if projectID != "workflow/test" {
 		t.Fatalf("expected project 'workflow/test', got %v", projectID)
 	}
 
-	// 4. pc add slide2 (date 2025-01-16, explicit project overrides active)
+	// 3. pc add slide2 (date 2025-01-16, explicit project flag)
 	folder2 := createInputFolder(t, inputFolderOpts{
-		HTMLContent: "<html><body>Slide two transformers</body></html>",
-		Notes:       "Second slide notes",
+		HTMLContent:  "<html><body>Slide two transformers</body></html>",
+		Notes:        "Second slide notes",
+		MetadataJSON: `{"project_id":"other/proj","source_device_id":"test-device"}`,
 	})
 	stdout = runPCSuccess(t, homeDir, "add", "--project", "other/proj", folder2, "--date", "2025-01-16")
 	slide2 := strings.TrimSpace(stdout)
 
-	// 5. pc add slide3 (date 2025-01-15, same date as slide1, uses active project)
+	// 4. pc add slide3 (date 2025-01-15, same date as slide1)
 	folder3 := createInputFolder(t, inputFolderOpts{
-		HTMLContent: "<html><body>Slide three experiment</body></html>",
-		Figures:     map[string][]byte{"chart.png": []byte("fake-png-data")},
+		HTMLContent:  "<html><body>Slide three experiment</body></html>",
+		Figures:      map[string][]byte{"chart.png": []byte("fake-png-data")},
+		MetadataJSON: `{"project_id":"workflow/test","source_device_id":"test-device"}`,
 	})
 	stdout = runPCSuccess(t, homeDir, "add", folder3, "--date", "2025-01-15")
 	slide3 := strings.TrimSpace(stdout)
@@ -83,7 +82,8 @@ func TestFullLocalWorkflow(t *testing.T) {
 
 	// 9. pc edit slide1 with new content
 	editFolder := createInputFolder(t, inputFolderOpts{
-		HTMLContent: "<html><body>Updated slide one content</body></html>",
+		HTMLContent:  "<html><body>Updated slide one content</body></html>",
+		MetadataJSON: `{"project_id":"workflow/test","source_device_id":"test-device"}`,
 	})
 	runPCSuccess(t, homeDir, "edit", slide1, editFolder)
 
@@ -135,13 +135,10 @@ func TestFullLocalWorkflow(t *testing.T) {
 		t.Fatalf("trash should be empty after gc, got: %s", stdout)
 	}
 
-	// 19. pc project list -- should show workflow/test but not other/proj (gc'd)
+	// 19. pc project list is registry-backed and retains both projects.
 	stdout = runPCSuccess(t, homeDir, "project", "list")
-	if !strings.Contains(stdout, "workflow/test") {
-		t.Fatalf("project list should show 'workflow/test'")
-	}
-	if strings.Contains(stdout, "other/proj") {
-		t.Fatalf("project list should not show 'other/proj' (slide was gc'd)")
+	if !strings.Contains(stdout, "workflow/test") || !strings.Contains(stdout, "other/proj") {
+		t.Fatalf("project list should show both registered projects, got %q", stdout)
 	}
 
 	// 20. pc doctor -- should be healthy

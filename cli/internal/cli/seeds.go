@@ -163,7 +163,7 @@ pc add my-slide/ --first</pre>
     <div class="folder">
       <h4>Folder Structure</h4>
       <pre>my-slide/
-&#x251C;&#x2500;&#x2500; slide.html        # required
+&#x251C;&#x2500;&#x2500; slide.html        # optional
 &#x251C;&#x2500;&#x2500; notes.md          # optional
 &#x251C;&#x2500;&#x2500; metadata.json     # optional
 &#x251C;&#x2500;&#x2500; figures/           # optional
@@ -263,14 +263,15 @@ pc gc</pre>
 			ProjectID: "personal-context/tutorial",
 			Notes: `## Projects
 
-Projects are just strings — there's no project table. This keeps things simple and flexible.
+Projects and source devices are first-class registries. Each record must name a registered project and source device explicitly.
 
-### Active project workflow
+### Registry workflow
 ` + "```bash" + `
-pc project set "ml/sleep-staging"
-pc add slide1/   # -> ml/sleep-staging
-pc project clear
+pc project add "ml/sleep-staging"
+pc device register "work-laptop"
+pc add slide1/ --project "ml/sleep-staging" --device "work-laptop"
 pc project list
+pc device list
 ` + "```" + `
 
 ### Web UI filtering
@@ -305,18 +306,18 @@ In the web UI, use the project picker in the left panel to filter slides by proj
   <div class="grid">
     <div class="left">
       <div class="section">
-        <h2>Active Project</h2>
-        <p>Set an active project so new slides are automatically assigned.</p>
-        <pre>pc project set "ml/sleep-staging"
-pc add my-slide/   # auto-assigned
+        <h2>Registry First</h2>
+        <p>Register projects and devices, then pass explicit provenance when adding records.</p>
+        <pre>pc project add "ml/sleep-staging"
+pc device register "work-laptop"
+pc add my-slide/ --project "ml/sleep-staging" --device "work-laptop"
 
-pc project clear   # stop auto-assigning
 pc project list    # show all projects</pre>
       </div>
       <div class="section">
-        <h2>Per-Slide Override</h2>
-        <p>Override with <code style="color:#059669; font-weight:600">--project</code> flag or <code style="color:#059669; font-weight:600">metadata.json</code>.</p>
-        <pre>pc add my-slide/ --project "infra/deploy"</pre>
+        <h2>Folder Metadata</h2>
+        <p>Use <code style="color:#059669; font-weight:600">metadata.json</code> instead of flags when another tool prepares the folder.</p>
+        <pre>{"project_id":"infra/deploy","source_device_id":"work-laptop"}</pre>
       </div>
     </div>
     <div class="right">

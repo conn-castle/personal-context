@@ -13,18 +13,20 @@ import (
 )
 
 type cloudSlideExportJSON struct {
-	FormatVersion int                      `json:"format_version"`
-	ID            string                   `json:"id"`
-	Date          string                   `json:"date"`
-	DayOrder      string                   `json:"day_order"`
-	ProjectID     *string                  `json:"project_id,omitempty"`
-	GitRemoteURL  *string                  `json:"git_remote_url,omitempty"`
-	GitHash       *string                  `json:"git_hash,omitempty"`
-	HasNotes      bool                     `json:"has_notes"`
-	Figures       []cloudSlideFigureJSON   `json:"figures"`
-	DataFiles     []cloudSlideDataFileJSON `json:"data_files"`
-	CreatedAt     string                   `json:"created_at"`
-	UpdatedAt     string                   `json:"updated_at"`
+	FormatVersion  int                      `json:"format_version"`
+	ID             string                   `json:"id"`
+	Date           string                   `json:"date"`
+	DayOrder       string                   `json:"day_order"`
+	ProjectID      *string                  `json:"project_id,omitempty"`
+	SourceDeviceID *string                  `json:"source_device_id,omitempty"`
+	SourceRef      *string                  `json:"source_ref,omitempty"`
+	GitRemoteURL   *string                  `json:"git_remote_url,omitempty"`
+	GitHash        *string                  `json:"git_hash,omitempty"`
+	HasNotes       bool                     `json:"has_notes"`
+	Figures        []cloudSlideFigureJSON   `json:"figures"`
+	DataFiles      []cloudSlideDataFileJSON `json:"data_files"`
+	CreatedAt      string                   `json:"created_at"`
+	UpdatedAt      string                   `json:"updated_at"`
 }
 
 type cloudSlideFigureJSON struct {
@@ -42,18 +44,20 @@ type cloudSlideDataFileJSON struct {
 }
 
 type cloudSlideDetailsJSON struct {
-	ID           string                   `json:"id"`
-	Date         string                   `json:"date"`
-	DayOrder     string                   `json:"day_order"`
-	HTMLContent  string                   `json:"html_content"`
-	Notes        *string                  `json:"notes"`
-	ProjectID    *string                  `json:"project_id"`
-	GitRemoteURL *string                  `json:"git_remote_url"`
-	GitHash      *string                  `json:"git_hash"`
-	CreatedAt    string                   `json:"created_at"`
-	UpdatedAt    string                   `json:"updated_at"`
-	Figures      []cloudSlideFigureJSON   `json:"figures"`
-	DataFiles    []cloudSlideDataFileJSON `json:"data_files"`
+	ID             string                   `json:"id"`
+	Date           string                   `json:"date"`
+	DayOrder       string                   `json:"day_order"`
+	HTMLContent    string                   `json:"html_content"`
+	Notes          *string                  `json:"notes"`
+	ProjectID      *string                  `json:"project_id"`
+	SourceDeviceID *string                  `json:"source_device_id"`
+	SourceRef      *string                  `json:"source_ref"`
+	GitRemoteURL   *string                  `json:"git_remote_url"`
+	GitHash        *string                  `json:"git_hash"`
+	CreatedAt      string                   `json:"created_at"`
+	UpdatedAt      string                   `json:"updated_at"`
+	Figures        []cloudSlideFigureJSON   `json:"figures"`
+	DataFiles      []cloudSlideDataFileJSON `json:"data_files"`
 }
 
 func TestExportFromCloudWritesGitTreeAndSkipsDeletedSlides(t *testing.T) {

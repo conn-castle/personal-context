@@ -6,8 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -198,101 +196,15 @@ func setupHomeWithConfig(t *testing.T) string {
 	return homeDir
 }
 
-// --- Project command: config store factory errors ---
-
-func TestProjectSetConfigStoreFactoryError(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv(pcHomeEnvVar, homeDir)
-
-	original := newConfigStoreFn
-	t.Cleanup(func() { newConfigStoreFn = original })
-	newConfigStoreFn = func(string) (config.Store, error) {
-		return config.Store{}, errors.New("store factory failed")
-	}
-
-	err := runProjectSet(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "proj")
-	if err == nil {
-		t.Fatal("expected error when config store creation fails")
-	}
-}
-
-func TestProjectClearConfigStoreFactoryError(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv(pcHomeEnvVar, homeDir)
-
-	original := newConfigStoreFn
-	t.Cleanup(func() { newConfigStoreFn = original })
-	newConfigStoreFn = func(string) (config.Store, error) {
-		return config.Store{}, errors.New("store factory failed")
-	}
-
-	err := runProjectClear(context.Background(), &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil {
-		t.Fatal("expected error when config store creation fails")
-	}
-}
-
-func TestProjectSetWriteError(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv(pcHomeEnvVar, homeDir)
-
-	// Create valid config so read succeeds
-	store, err := config.NewStore(homeDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Write(config.Config{}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Make .pc dir read-only so write fails
-	pcDir := filepath.Join(homeDir, "personal-context", ".pc")
-	if err := os.Chmod(pcDir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(pcDir, 0o755) })
-
-	err = runProjectSet(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "proj")
-	if err == nil {
-		t.Fatal("expected error when config write fails")
-	}
-}
-
-func TestProjectClearWriteError(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv(pcHomeEnvVar, homeDir)
-
-	// Create valid config so read succeeds
-	store, err := config.NewStore(homeDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Write(config.Config{}); err != nil {
-		t.Fatal(err)
-	}
-
-	// Make .pc dir read-only so write fails
-	pcDir := filepath.Join(homeDir, "personal-context", ".pc")
-	if err := os.Chmod(pcDir, 0o555); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(pcDir, 0o755) })
-
-	err = runProjectClear(context.Background(), &bytes.Buffer{}, &bytes.Buffer{})
-	if err == nil {
-		t.Fatal("expected error when config write fails")
-	}
-}
-
 func TestProjectListDBError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	corruptTable(t, homeDir, "slides")
+	corruptTable(t, homeDir, "projects")
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"project", "list"})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slides table missing")
+		t.Fatal("expected error when projects table missing")
 	}
 }

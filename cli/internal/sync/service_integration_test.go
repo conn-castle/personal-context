@@ -107,7 +107,7 @@ func TestServiceSyncIntegrationRoundTripBetweenLocals(t *testing.T) {
 			ID:          "20260308-a1b2c3d4",
 			Date:        "2026-03-08",
 			DayOrder:    "a0",
-			HTMLContent: "<html>integration</html>",
+			HTMLContent: strPtr("<html>integration</html>"),
 			CreatedAt:   time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC),
 			UpdatedAt:   time.Date(2026, 3, 8, 10, 1, 0, 0, time.UTC),
 		},
@@ -169,7 +169,7 @@ func TestServiceSyncIntegrationCloudLaterEditWins(t *testing.T) {
 			ID:          "20260308-b1c2d3e4",
 			Date:        "2026-03-08",
 			DayOrder:    "a1",
-			HTMLContent: "<html>original</html>",
+			HTMLContent: strPtr("<html>original</html>"),
 			CreatedAt:   time.Date(2026, 3, 8, 11, 0, 0, 0, time.UTC),
 			UpdatedAt:   time.Date(2026, 3, 8, 11, 1, 0, 0, time.UTC),
 		},
@@ -196,7 +196,7 @@ func TestServiceSyncIntegrationCloudLaterEditWins(t *testing.T) {
 		ID:          bundle.Slide.ID,
 		Date:        bundle.Slide.Date,
 		DayOrder:    bundle.Slide.DayOrder,
-		HTMLContent: "<html>local edit</html>",
+		HTMLContent: strPtr("<html>local edit</html>"),
 		UpdatedAt:   &localUpdatedAt,
 	}); err != nil {
 		t.Fatalf("local UpdateSlide() error = %v", err)
@@ -208,7 +208,7 @@ func TestServiceSyncIntegrationCloudLaterEditWins(t *testing.T) {
 		ID:          bundle.Slide.ID,
 		Date:        bundle.Slide.Date,
 		DayOrder:    bundle.Slide.DayOrder,
-		HTMLContent: "<html>cloud edit</html>",
+		HTMLContent: strPtr("<html>cloud edit</html>"),
 		UpdatedAt:   &cloudUpdatedAt,
 	}); err != nil {
 		t.Fatalf("cloud UpdateSlide() error = %v", err)

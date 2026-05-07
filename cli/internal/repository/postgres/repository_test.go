@@ -173,11 +173,27 @@ func newConcreteRepo(t *testing.T) (*Repository, *pgxpool.Pool) {
 func mustCreateSlide(t *testing.T, repo repository.Repository, input repository.CreateSlideInput) repository.Slide {
 	t.Helper()
 
+	if input.ProjectID == "" {
+		input.ProjectID = "test/project"
+	}
+	if input.SourceDeviceID == "" {
+		input.SourceDeviceID = "test-device"
+	}
+	if _, err := repo.CreateProject(context.Background(), repository.CreateRegistryInput{ID: input.ProjectID}); err != nil && !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("CreateProject(%q) error = %v", input.ProjectID, err)
+	}
+	if _, err := repo.CreateDevice(context.Background(), repository.CreateRegistryInput{ID: input.SourceDeviceID}); err != nil && !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("CreateDevice(%q) error = %v", input.SourceDeviceID, err)
+	}
 	slide, err := repo.CreateSlide(context.Background(), input)
 	if err != nil {
 		t.Fatalf("CreateSlide() error = %v", err)
 	}
 	return slide
+}
+
+func testHTML(value string) *string {
+	return &value
 }
 
 func mustCreateUser(t *testing.T, pool *pgxpool.Pool, userID string, email string) {
@@ -218,7 +234,7 @@ func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
 	slide := mustCreateSlide(t, repo, repository.CreateSlideInput{
 		ID:          "20260305-a1b2c3d4",
 		Date:        "2026-03-05",
-		HTMLContent: "<h1>x</h1>",
+		HTMLContent: testHTML("<h1>x</h1>"),
 		CreatedAt:   &createdAt,
 		UpdatedAt:   &updatedAt,
 		DeletedAt:   &deletedAt,
@@ -234,10 +250,12 @@ func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
 	}
 
 	_, err = repo.CreateSlide(ctx, repository.CreateSlideInput{
-		ID:          "20260305-a1b2c3d4",
-		Date:        "2026-03-05",
-		DayOrder:    "a",
-		HTMLContent: "<h1>dup</h1>",
+		ID:             "20260305-a1b2c3d4",
+		Date:           "2026-03-05",
+		DayOrder:       "a",
+		HTMLContent:    testHTML("<h1>dup</h1>"),
+		ProjectID:      "test/project",
+		SourceDeviceID: "test-device",
 	})
 	if !errors.Is(err, repository.ErrConflict) {
 		t.Fatalf("expected ErrConflict for duplicate slide id, got %v", err)
@@ -249,10 +267,12 @@ func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
 	}
 
 	_, err = repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-		ID:          "20260305-ffffeeee",
-		Date:        "2026-03-05",
-		DayOrder:    "a",
-		HTMLContent: "<h1>missing</h1>",
+		ID:             "20260305-ffffeeee",
+		Date:           "2026-03-05",
+		DayOrder:       "a",
+		HTMLContent:    testHTML("<h1>missing</h1>"),
+		ProjectID:      "test/project",
+		SourceDeviceID: "test-device",
 	})
 	if !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing slide update, got %v", err)
@@ -276,7 +296,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 		ID:          "20260305-11112222",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
-		HTMLContent: "<h1>assets</h1>",
+		HTMLContent: testHTML("<h1>assets</h1>"),
 	})
 
 	_, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{})
@@ -384,13 +404,13 @@ func TestAssetQueriesAreUserScoped(t *testing.T) {
 		ID:          "20260305-abcdd001",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
-		HTMLContent: "<h1>user-a</h1>",
+		HTMLContent: testHTML("<h1>user-a</h1>"),
 	})
 	slideB := mustCreateSlide(t, repoB, repository.CreateSlideInput{
 		ID:          "20260305-abcdd002",
 		Date:        "2026-03-05",
 		DayOrder:    "b",
-		HTMLContent: "<h1>user-b</h1>",
+		HTMLContent: testHTML("<h1>user-b</h1>"),
 	})
 
 	figureA, err := repoA.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
@@ -576,7 +596,7 @@ func TestSchemaRejectsNegativeSlideDataFileSize(t *testing.T) {
 		ID:          "20260305-dddd0001",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
-		HTMLContent: "<h1>schema</h1>",
+		HTMLContent: testHTML("<h1>schema</h1>"),
 	})
 
 	_, err := pool.Exec(
@@ -604,7 +624,7 @@ func TestFigureAndDataFileNoOpUpdatesDoNotBumpSyncVersion(t *testing.T) {
 		ID:          "20260305-dddd0002",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
-		HTMLContent: "<h1>sync</h1>",
+		HTMLContent: testHTML("<h1>sync</h1>"),
 	})
 
 	figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
@@ -772,7 +792,7 @@ func TestErrorPathsWithClosedPool(t *testing.T) {
 		ID:          "20260305-aaaa0001",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
-		HTMLContent: "<h1>pool-close</h1>",
+		HTMLContent: testHTML("<h1>pool-close</h1>"),
 	})
 
 	// Close the pool to force all subsequent operations to fail.
@@ -811,19 +831,22 @@ func TestErrorPathsWithClosedPool(t *testing.T) {
 	if _, err := repo.GetSyncVersion(ctx); err == nil {
 		t.Fatal("expected error for GetSyncVersion on closed pool")
 	}
-	if _, err := repo.ListDistinctProjectIDs(ctx); err == nil {
-		t.Fatal("expected error for ListDistinctProjectIDs on closed pool")
+	if _, err := repo.ListProjects(ctx, true); err == nil {
+		t.Fatal("expected error for ListProjects on closed pool")
+	}
+	if _, err := repo.ListDevices(ctx, true); err == nil {
+		t.Fatal("expected error for ListDevices on closed pool")
 	}
 	if _, err := repo.GetSlideByID(ctx, slide.ID); err == nil {
 		t.Fatal("expected error for GetSlideByID on closed pool")
 	}
 	if _, err := repo.CreateSlide(ctx, repository.CreateSlideInput{
-		ID: "20260305-aaaa0002", Date: "2026-03-05", HTMLContent: "<h1>x</h1>",
+		ID: "20260305-aaaa0002", Date: "2026-03-05", HTMLContent: testHTML("<h1>x</h1>"), ProjectID: "test/project", SourceDeviceID: "test-device",
 	}); err == nil {
 		t.Fatal("expected error for CreateSlide on closed pool")
 	}
 	if _, err := repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-		ID: slide.ID, Date: "2026-03-05", DayOrder: "a", HTMLContent: "<h1>x</h1>",
+		ID: slide.ID, Date: "2026-03-05", DayOrder: "a", HTMLContent: testHTML("<h1>x</h1>"), ProjectID: "test/project", SourceDeviceID: "test-device",
 	}); err == nil {
 		t.Fatal("expected error for UpdateSlide on closed pool")
 	}

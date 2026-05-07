@@ -2,6 +2,7 @@ package e2e_test
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -86,6 +87,12 @@ func runPCWithOptions(t *testing.T, homeDir string, opts runOptions, args ...str
 // runPCSuccess runs pc and fails the test if exit code is non-zero.
 func runPCSuccess(t *testing.T, homeDir string, args ...string) string {
 	t.Helper()
+	if len(args) > 0 && args[0] == "add" {
+		ensureRegistryForAdd(t, homeDir, args[1:])
+	}
+	if len(args) > 0 && args[0] == "edit" {
+		ensureRegistryForEdit(t, homeDir, args[1:])
+	}
 	result := runPC(t, homeDir, args...)
 	if result.ExitCode != 0 {
 		t.Fatalf("pc %v failed (exit %d):\nstdout: %s\nstderr: %s",
@@ -146,6 +153,11 @@ func createInputFolder(t *testing.T, opts inputFolderOpts) string {
 	}
 
 	if opts.MetadataJSON != "" {
+		opts.MetadataJSON = mergeDefaultProvenanceMetadata(t, opts.MetadataJSON)
+	} else {
+		opts.MetadataJSON = `{"project_id":"test/default-project","source_device_id":"test-device"}`
+	}
+	if opts.MetadataJSON != "" {
 		if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(opts.MetadataJSON), 0o644); err != nil {
 			t.Fatalf("write metadata.json: %v", err)
 		}
@@ -185,4 +197,119 @@ type inputFolderOpts struct {
 	MetadataJSON string
 	Figures      map[string][]byte
 	DataFiles    map[string][]byte
+}
+
+func mergeDefaultProvenanceMetadata(t *testing.T, metadata string) string {
+	t.Helper()
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(metadata), &meta); err != nil {
+		return metadata
+	}
+	if _, ok := meta["project_id"]; !ok {
+		meta["project_id"] = "test/default-project"
+	}
+	if _, ok := meta["source_device_id"]; !ok {
+		meta["source_device_id"] = "test-device"
+	}
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+	return string(raw)
+}
+
+func ensureRegistryForAdd(t *testing.T, homeDir string, args []string) {
+	t.Helper()
+	projectID, deviceID, inputPath := parseAddProvenance(t, args)
+	if inputPath != "" {
+		metadataPath := filepath.Join(inputPath, "metadata.json")
+		if data, err := os.ReadFile(metadataPath); err == nil {
+			var meta struct {
+				ProjectID      string `json:"project_id"`
+				SourceDeviceID string `json:"source_device_id"`
+			}
+			if err := json.Unmarshal(data, &meta); err == nil {
+				if projectID == "" {
+					projectID = meta.ProjectID
+				}
+				if deviceID == "" {
+					deviceID = meta.SourceDeviceID
+				}
+			}
+		}
+	}
+	ensureRegistryEntry(t, homeDir, "project", "add", projectID)
+	ensureRegistryEntry(t, homeDir, "device", "register", deviceID)
+}
+
+func ensureRegistryForEdit(t *testing.T, homeDir string, args []string) {
+	t.Helper()
+	if len(args) < 2 {
+		return
+	}
+	inputPath := args[len(args)-1]
+	metadataPath := filepath.Join(inputPath, "metadata.json")
+	data, err := os.ReadFile(metadataPath)
+	if err != nil {
+		return
+	}
+	var meta struct {
+		ProjectID      string `json:"project_id"`
+		SourceDeviceID string `json:"source_device_id"`
+	}
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return
+	}
+	ensureRegistryEntry(t, homeDir, "project", "add", meta.ProjectID)
+	ensureRegistryEntry(t, homeDir, "device", "register", meta.SourceDeviceID)
+}
+
+func parseAddProvenance(t *testing.T, args []string) (string, string, string) {
+	t.Helper()
+	var projectID, deviceID, inputPath string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--project" && i+1 < len(args):
+			projectID = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "--project="):
+			projectID = strings.TrimPrefix(arg, "--project=")
+		case arg == "--device" && i+1 < len(args):
+			deviceID = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "--device="):
+			deviceID = strings.TrimPrefix(arg, "--device=")
+		case arg == "--date" || arg == "--after" || arg == "--before" || arg == "--source-ref":
+			i++
+		case strings.HasPrefix(arg, "--date=") || strings.HasPrefix(arg, "--after=") || strings.HasPrefix(arg, "--before=") || strings.HasPrefix(arg, "--source-ref="):
+		case strings.HasPrefix(arg, "-"):
+		default:
+			inputPath = arg
+		}
+	}
+	return projectID, deviceID, inputPath
+}
+
+func ensureRegistryEntry(t *testing.T, homeDir string, command string, subcommand string, id string) {
+	t.Helper()
+	if strings.TrimSpace(id) == "" {
+		return
+	}
+	result := runPC(t, homeDir, command, subcommand, id)
+	if result.ExitCode != 0 && !strings.Contains(result.Stderr, "already") && !strings.Contains(result.Stderr, "UNIQUE constraint failed") {
+		t.Fatalf("pc [%s %s %s] failed (exit %d):\nstdout: %s\nstderr: %s",
+			command, subcommand, id, result.ExitCode, result.Stdout, result.Stderr)
+	}
+}
+
+func nonEmptyLines(s string) []string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

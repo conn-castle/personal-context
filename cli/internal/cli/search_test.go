@@ -110,7 +110,7 @@ func TestSearchJSONFormat(t *testing.T) {
 	if len(results) == 0 {
 		t.Fatal("expected at least one result")
 	}
-	if results[0].ProjectID == nil || *results[0].ProjectID != "proj-search" {
+	if results[0].ProjectID != "proj-search" {
 		t.Fatalf("expected project_id=proj-search, got %v", results[0].ProjectID)
 	}
 }

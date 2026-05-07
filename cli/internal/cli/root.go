@@ -66,6 +66,7 @@ func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 	root.AddCommand(newTrashCommand(stdout, stderr))
 	root.AddCommand(newSearchCommand(stdout, stderr))
 	root.AddCommand(newProjectCommand(stdout, stderr))
+	root.AddCommand(newDeviceCommand(stdout, stderr))
 	root.AddCommand(newGCCommand(stdout, stderr))
 	root.AddCommand(newDoctorCommand(stdout, stderr))
 	root.AddCommand(newSyncCommand(stdout, stderr))

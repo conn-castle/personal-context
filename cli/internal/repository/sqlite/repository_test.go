@@ -47,11 +47,37 @@ func newConcreteRepo(t *testing.T) (*Repository, *sql.DB) {
 func mustCreateSlide(t *testing.T, repo repository.Repository, input repository.CreateSlideInput) repository.Slide {
 	t.Helper()
 
+	ctx := context.Background()
+	if input.ProjectID == "" {
+		input.ProjectID = "sqlite/default-project"
+	}
+	if input.SourceDeviceID == "" {
+		input.SourceDeviceID = "sqlite-device"
+	}
+	_, err := repo.GetProjectByID(ctx, input.ProjectID)
+	if errors.Is(err, repository.ErrNotFound) {
+		_, err = repo.CreateProject(ctx, repository.CreateRegistryInput{ID: input.ProjectID})
+	}
+	if err != nil {
+		t.Fatalf("ensure project registry row failed: %v", err)
+	}
+	_, err = repo.GetDeviceByID(ctx, input.SourceDeviceID)
+	if errors.Is(err, repository.ErrNotFound) {
+		_, err = repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: input.SourceDeviceID})
+	}
+	if err != nil {
+		t.Fatalf("ensure device registry row failed: %v", err)
+	}
+
 	slide, err := repo.CreateSlide(context.Background(), input)
 	if err != nil {
 		t.Fatalf("CreateSlide() error = %v", err)
 	}
 	return slide
+}
+
+func strPtr(value string) *string {
+	return &value
 }
 
 func TestSQLiteRepositoryContractSuite(t *testing.T) {
@@ -85,7 +111,7 @@ func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
 	slide := mustCreateSlide(t, repo, repository.CreateSlideInput{
 		ID:          "20260305-a1b2c3d4",
 		Date:        "2026-03-05",
-		HTMLContent: "<h1>x</h1>",
+		HTMLContent: strPtr("<h1>x</h1>"),
 		CreatedAt:   &createdAt,
 		UpdatedAt:   &updatedAt,
 		DeletedAt:   &deletedAt,
@@ -101,10 +127,12 @@ func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
 	}
 
 	_, err = repo.CreateSlide(ctx, repository.CreateSlideInput{
-		ID:          "20260305-a1b2c3d4",
-		Date:        "2026-03-05",
-		DayOrder:    "a",
-		HTMLContent: "<h1>dup</h1>",
+		ID:             "20260305-a1b2c3d4",
+		Date:           "2026-03-05",
+		DayOrder:       "a",
+		HTMLContent:    strPtr("<h1>dup</h1>"),
+		ProjectID:      slide.ProjectID,
+		SourceDeviceID: slide.SourceDeviceID,
 	})
 	if !errors.Is(err, repository.ErrConflict) {
 		t.Fatalf("expected ErrConflict for duplicate slide id, got %v", err)
@@ -116,10 +144,12 @@ func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
 	}
 
 	_, err = repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-		ID:          "20260305-ffffeeee",
-		Date:        "2026-03-05",
-		DayOrder:    "a",
-		HTMLContent: "<h1>missing</h1>",
+		ID:             "20260305-ffffeeee",
+		Date:           "2026-03-05",
+		DayOrder:       "a",
+		HTMLContent:    strPtr("<h1>missing</h1>"),
+		ProjectID:      slide.ProjectID,
+		SourceDeviceID: slide.SourceDeviceID,
 	})
 	if !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing slide update, got %v", err)
@@ -143,7 +173,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 		ID:          "20260305-11112222",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
-		HTMLContent: "<h1>assets</h1>",
+		HTMLContent: strPtr("<h1>assets</h1>"),
 	})
 
 	_, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{})
@@ -233,7 +263,7 @@ func TestSchemaRejectsNegativeSlideDataFileSize(t *testing.T) {
 		ID:          "20260305-dddd0001",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
-		HTMLContent: "<h1>schema</h1>",
+		HTMLContent: strPtr("<h1>schema</h1>"),
 	})
 
 	_, err := db.ExecContext(
@@ -261,7 +291,7 @@ func TestFigureAndDataFileNoOpUpdatesDoNotBumpSyncVersion(t *testing.T) {
 		ID:          "20260305-dddd0002",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
-		HTMLContent: "<h1>sync</h1>",
+		HTMLContent: strPtr("<h1>sync</h1>"),
 	})
 
 	figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
@@ -584,6 +614,250 @@ func TestAdditionalModelTimestampFailureBranches(t *testing.T) {
 	if _, err := (templateRow{CreatedAt: "2026-03-05T00:00:00Z", UpdatedAt: "bad"}).toModel(); err == nil {
 		t.Fatal("expected templateRow.toModel() to fail on bad updated_at")
 	}
+	if _, err := (registryRow{CreatedAt: "bad", UpdatedAt: "2026-03-05T00:00:00Z"}).toProject(); err == nil {
+		t.Fatal("expected project row to fail on bad created_at")
+	}
+	if _, err := (registryRow{CreatedAt: "2026-03-05T00:00:00Z", UpdatedAt: "bad"}).toDevice(); err == nil {
+		t.Fatal("expected device row to fail on bad updated_at")
+	}
+	if _, err := (registryRow{
+		CreatedAt:  "2026-03-05T00:00:00Z",
+		UpdatedAt:  "2026-03-05T00:00:00Z",
+		ArchivedAt: sql.NullString{Valid: true, String: "bad"},
+	}).toProject(); err == nil {
+		t.Fatal("expected project row to fail on bad archived_at")
+	}
+}
+
+func TestRegistryMethodsSQLiteBranches(t *testing.T) {
+	repo, _ := newConcreteRepo(t)
+	ctx := context.Background()
+	now := time.Date(2026, 3, 5, 10, 0, 0, 0, time.UTC)
+	later := time.Now().UTC().Add(time.Hour)
+	archived := later.Add(time.Hour)
+
+	if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("CreateProject(empty) error = %v", err)
+	}
+	if _, err := repo.GetProjectByID(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("GetProjectByID(empty) error = %v", err)
+	}
+	project, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "registry/project", CreatedAt: &now, UpdatedAt: &now})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if project.ID != "registry/project" {
+		t.Fatalf("project ID = %q", project.ID)
+	}
+	if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "registry/project"}); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("CreateProject(duplicate) error = %v", err)
+	}
+	if _, err := repo.ArchiveProject(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("ArchiveProject(empty) error = %v", err)
+	}
+	if _, err := repo.ArchiveProject(ctx, "missing"); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("ArchiveProject(missing) error = %v", err)
+	}
+	if _, err := repo.ArchiveProject(ctx, "registry/project"); err != nil {
+		t.Fatalf("ArchiveProject() error = %v", err)
+	}
+	activeProjects, err := repo.ListProjects(ctx, false)
+	if err != nil {
+		t.Fatalf("ListProjects(active) error = %v", err)
+	}
+	if len(activeProjects) != 0 {
+		t.Fatalf("expected archived project hidden, got %#v", activeProjects)
+	}
+	allProjects, err := repo.ListProjects(ctx, true)
+	if err != nil {
+		t.Fatalf("ListProjects(all) error = %v", err)
+	}
+	if len(allProjects) != 1 || allProjects[0].ArchivedAt == nil {
+		t.Fatalf("expected archived project in all list, got %#v", allProjects)
+	}
+	if _, err := repo.RestoreProject(ctx, "registry/project"); err != nil {
+		t.Fatalf("RestoreProject() error = %v", err)
+	}
+	changed, err := repo.UpsertProjectForImport(ctx, repository.Project{ID: "registry/project", CreatedAt: now, UpdatedAt: now})
+	if err != nil || changed {
+		t.Fatalf("older UpsertProjectForImport changed=%v error=%v", changed, err)
+	}
+	changed, err = repo.UpsertProjectForImport(ctx, repository.Project{ID: "registry/project", CreatedAt: now, UpdatedAt: later, ArchivedAt: &archived})
+	if err != nil || !changed {
+		t.Fatalf("newer UpsertProjectForImport changed=%v error=%v", changed, err)
+	}
+	if changed, err := repo.UpsertProjectForImport(ctx, repository.Project{}); !errors.Is(err, repository.ErrInvalidArgument) || changed {
+		t.Fatalf("invalid UpsertProjectForImport changed=%v error=%v", changed, err)
+	}
+	changed, err = repo.UpsertProjectForImport(ctx, repository.Project{ID: "new-project", CreatedAt: now, UpdatedAt: later})
+	if err != nil || !changed {
+		t.Fatalf("new UpsertProjectForImport changed=%v error=%v", changed, err)
+	}
+
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("CreateDevice(empty) error = %v", err)
+	}
+	if _, err := repo.GetDeviceByID(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("GetDeviceByID(empty) error = %v", err)
+	}
+	device, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "registry-device", CreatedAt: &now, UpdatedAt: &now})
+	if err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+	if device.ID != "registry-device" {
+		t.Fatalf("device ID = %q", device.ID)
+	}
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "registry-device"}); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("CreateDevice(duplicate) error = %v", err)
+	}
+	if _, err := repo.ArchiveDevice(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("ArchiveDevice(empty) error = %v", err)
+	}
+	if _, err := repo.ArchiveDevice(ctx, "missing"); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("ArchiveDevice(missing) error = %v", err)
+	}
+	if _, err := repo.ArchiveDevice(ctx, "registry-device"); err != nil {
+		t.Fatalf("ArchiveDevice() error = %v", err)
+	}
+	activeDevices, err := repo.ListDevices(ctx, false)
+	if err != nil {
+		t.Fatalf("ListDevices(active) error = %v", err)
+	}
+	if len(activeDevices) != 0 {
+		t.Fatalf("expected archived device hidden, got %#v", activeDevices)
+	}
+	allDevices, err := repo.ListDevices(ctx, true)
+	if err != nil {
+		t.Fatalf("ListDevices(all) error = %v", err)
+	}
+	if len(allDevices) != 1 || allDevices[0].ArchivedAt == nil {
+		t.Fatalf("expected archived device in all list, got %#v", allDevices)
+	}
+	if _, err := repo.RestoreDevice(ctx, "registry-device"); err != nil {
+		t.Fatalf("RestoreDevice() error = %v", err)
+	}
+	if changed, err := repo.UpsertDeviceForImport(ctx, repository.Device{}); !errors.Is(err, repository.ErrInvalidArgument) || changed {
+		t.Fatalf("invalid UpsertDeviceForImport changed=%v error=%v", changed, err)
+	}
+	changed, err = repo.UpsertDeviceForImport(ctx, repository.Device{ID: "registry-device", CreatedAt: now, UpdatedAt: now})
+	if err != nil || changed {
+		t.Fatalf("older UpsertDeviceForImport changed=%v error=%v", changed, err)
+	}
+	changed, err = repo.UpsertDeviceForImport(ctx, repository.Device{ID: "registry-device", CreatedAt: now, UpdatedAt: later, ArchivedAt: &archived})
+	if err != nil || !changed {
+		t.Fatalf("newer UpsertDeviceForImport changed=%v error=%v", changed, err)
+	}
+	changed, err = repo.UpsertDeviceForImport(ctx, repository.Device{ID: "new-device", CreatedAt: now, UpdatedAt: later})
+	if err != nil || !changed {
+		t.Fatalf("new UpsertDeviceForImport changed=%v error=%v", changed, err)
+	}
+}
+
+func TestSQLiteCountsAndPurgeBranches(t *testing.T) {
+	repo, db := newConcreteRepo(t)
+	ctx := context.Background()
+	active := mustCreateSlide(t, repo, repository.CreateSlideInput{
+		ID:          "20260305-aaabbb01",
+		Date:        "2026-03-05",
+		HTMLContent: strPtr("<h1>active</h1>"),
+	})
+	trashed := mustCreateSlide(t, repo, repository.CreateSlideInput{
+		ID:          "20260305-aaabbb02",
+		Date:        "2026-03-05",
+		HTMLContent: strPtr("<h1>trashed</h1>"),
+	})
+	if err := repo.SoftDeleteSlide(ctx, trashed.ID); err != nil {
+		t.Fatalf("SoftDeleteSlide() error = %v", err)
+	}
+	activeCount, err := repo.CountActiveSlides(ctx)
+	if err != nil {
+		t.Fatalf("CountActiveSlides() error = %v", err)
+	}
+	if activeCount != 1 {
+		t.Fatalf("active count = %d", activeCount)
+	}
+	trashedCount, err := repo.CountTrashedSlides(ctx)
+	if err != nil {
+		t.Fatalf("CountTrashedSlides() error = %v", err)
+	}
+	if trashedCount != 1 {
+		t.Fatalf("trashed count = %d", trashedCount)
+	}
+	deletedAt := time.Now().UTC().Add(-48 * time.Hour).Format("2006-01-02T15:04:05.000Z")
+	if _, err := db.ExecContext(ctx, `UPDATE slides SET deleted_at = ? WHERE id = ?`, deletedAt, trashed.ID); err != nil {
+		t.Fatalf("backdate deleted_at: %v", err)
+	}
+	purged, err := repo.PurgeDeletedSlides(ctx)
+	if err != nil {
+		t.Fatalf("PurgeDeletedSlides() error = %v", err)
+	}
+	if len(purged) != 1 || purged[0] != trashed.ID {
+		t.Fatalf("purged = %#v", purged)
+	}
+	if _, err := repo.GetSlideByID(ctx, active.ID); err != nil {
+		t.Fatalf("active slide should remain: %v", err)
+	}
+	purged, err = repo.PurgeDeletedSlides(ctx)
+	if err != nil {
+		t.Fatalf("PurgeDeletedSlides(empty) error = %v", err)
+	}
+	if len(purged) != 0 {
+		t.Fatalf("expected no second purge IDs, got %#v", purged)
+	}
+}
+
+func TestSQLiteListChildAndTemplateBranches(t *testing.T) {
+	repo, _ := newConcreteRepo(t)
+	ctx := context.Background()
+	slide := mustCreateSlide(t, repo, repository.CreateSlideInput{
+		ID:          "20260305-aaabbb03",
+		Date:        "2026-03-05",
+		HTMLContent: strPtr("<h1>children</h1>"),
+	})
+	alt := "Alt"
+	if _, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
+		SlideID:  slide.ID,
+		Filename: "plot.png",
+		S3Key:    "figures/20260305-aaabbb03/plot.png",
+		AltText:  &alt,
+	}); err != nil {
+		t.Fatalf("CreateSlideFigure() error = %v", err)
+	}
+	figures, err := repo.ListSlideFiguresBySlideID(ctx, slide.ID)
+	if err != nil {
+		t.Fatalf("ListSlideFiguresBySlideID() error = %v", err)
+	}
+	if len(figures) != 1 || figures[0].AltText == nil {
+		t.Fatalf("figures = %#v", figures)
+	}
+	description := "Data description"
+	if _, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
+		SlideID:     slide.ID,
+		Filename:    "data.csv",
+		S3Key:       "data/20260305-aaabbb03/data.csv",
+		Size:        12,
+		Hash:        strings.Repeat("b", 64),
+		Description: &description,
+	}); err != nil {
+		t.Fatalf("CreateSlideDataFile() error = %v", err)
+	}
+	dataFiles, err := repo.ListSlideDataFilesBySlideID(ctx, slide.ID)
+	if err != nil {
+		t.Fatalf("ListSlideDataFilesBySlideID() error = %v", err)
+	}
+	if len(dataFiles) != 1 || dataFiles[0].Description == nil {
+		t.Fatalf("data files = %#v", dataFiles)
+	}
+	if _, err := repo.CreateTemplate(ctx, repository.CreateTemplateInput{Name: "extra", HTMLContent: "<main>extra</main>"}); err != nil {
+		t.Fatalf("CreateTemplate() error = %v", err)
+	}
+	templates, err := repo.ListTemplates(ctx)
+	if err != nil {
+		t.Fatalf("ListTemplates() error = %v", err)
+	}
+	if len(templates) != 1 {
+		t.Fatalf("templates = %#v", templates)
+	}
 }
 
 func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
@@ -603,6 +877,7 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 
 	ctx := context.Background()
 	projectID := "org/p"
+	deviceID := "device/p"
 
 	methods := []struct {
 		name string
@@ -610,11 +885,12 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 	}{
 		{name: "CreateSlide", run: func() error {
 			_, err := repo.CreateSlide(ctx, repository.CreateSlideInput{
-				ID:          "20260320-abcd1234",
-				Date:        "2026-03-20",
-				DayOrder:    "a",
-				HTMLContent: "<h1>x</h1>",
-				ProjectID:   &projectID,
+				ID:             "20260320-abcd1234",
+				Date:           "2026-03-20",
+				DayOrder:       "a",
+				HTMLContent:    strPtr("<h1>x</h1>"),
+				ProjectID:      projectID,
+				SourceDeviceID: deviceID,
 			})
 			return err
 		}},
@@ -624,10 +900,12 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 		}},
 		{name: "UpdateSlide", run: func() error {
 			_, err := repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-				ID:          "20260320-abcd1234",
-				Date:        "2026-03-20",
-				DayOrder:    "a",
-				HTMLContent: "<h1>x</h1>",
+				ID:             "20260320-abcd1234",
+				Date:           "2026-03-20",
+				DayOrder:       "a",
+				HTMLContent:    strPtr("<h1>x</h1>"),
+				ProjectID:      projectID,
+				SourceDeviceID: deviceID,
 			})
 			return err
 		}},
@@ -694,7 +972,27 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 		{name: "ListTemplates", run: func() error { _, err := repo.ListTemplates(ctx); return err }},
 		{name: "DeleteTemplate", run: func() error { return repo.DeleteTemplate(ctx, "tmpl") }},
 		{name: "GetSyncVersion", run: func() error { _, err := repo.GetSyncVersion(ctx); return err }},
-		{name: "ListDistinctProjectIDs", run: func() error { _, err := repo.ListDistinctProjectIDs(ctx); return err }},
+		{name: "ListProjects", run: func() error { _, err := repo.ListProjects(ctx, true); return err }},
+		{name: "CreateProject", run: func() error { _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "p"}); return err }},
+		{name: "GetProjectByID", run: func() error { _, err := repo.GetProjectByID(ctx, "p"); return err }},
+		{name: "ArchiveProject", run: func() error { _, err := repo.ArchiveProject(ctx, "p"); return err }},
+		{name: "RestoreProject", run: func() error { _, err := repo.RestoreProject(ctx, "p"); return err }},
+		{name: "ListDevices", run: func() error { _, err := repo.ListDevices(ctx, true); return err }},
+		{name: "CreateDevice", run: func() error { _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "d"}); return err }},
+		{name: "GetDeviceByID", run: func() error { _, err := repo.GetDeviceByID(ctx, "d"); return err }},
+		{name: "ArchiveDevice", run: func() error { _, err := repo.ArchiveDevice(ctx, "d"); return err }},
+		{name: "RestoreDevice", run: func() error { _, err := repo.RestoreDevice(ctx, "d"); return err }},
+		{name: "UpsertProjectForImport", run: func() error {
+			_, err := repo.UpsertProjectForImport(ctx, repository.Project{ID: "p", CreatedAt: time.Now(), UpdatedAt: time.Now()})
+			return err
+		}},
+		{name: "UpsertDeviceForImport", run: func() error {
+			_, err := repo.UpsertDeviceForImport(ctx, repository.Device{ID: "d", CreatedAt: time.Now(), UpdatedAt: time.Now()})
+			return err
+		}},
+		{name: "CountActiveSlides", run: func() error { _, err := repo.CountActiveSlides(ctx); return err }},
+		{name: "CountTrashedSlides", run: func() error { _, err := repo.CountTrashedSlides(ctx); return err }},
+		{name: "PurgeDeletedSlides", run: func() error { _, err := repo.PurgeDeletedSlides(ctx); return err }},
 	}
 
 	for _, method := range methods {

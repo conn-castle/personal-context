@@ -11,6 +11,7 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/conn-castle/personal-context/cli/internal/filesystem"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 	pcs3 "github.com/conn-castle/personal-context/cli/internal/s3client"
 	pcsync "github.com/conn-castle/personal-context/cli/internal/sync"
@@ -171,6 +172,32 @@ func TestNewSyncCommandExecutesRunE(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error because cloud is not configured")
+	}
+}
+
+func TestDefaultSyncFactoriesCreateConcreteDependencies(t *testing.T) {
+	session, err := newSyncSessionManagerFn(t.TempDir())
+	if err != nil {
+		t.Fatalf("newSyncSessionManagerFn() error = %v", err)
+	}
+	if session == nil {
+		t.Fatal("expected session manager")
+	}
+
+	fsClient, err := filesystem.NewClient(t.TempDir())
+	if err != nil {
+		t.Fatalf("filesystem.NewClient() error = %v", err)
+	}
+	runner, err := newSyncServiceFn(
+		&localStack{Repo: &mockRepo{}, FS: fsClient},
+		&cloudStack{Repo: &mockRepo{}, S3: &pcs3.Client{}},
+		&fakeSyncSessionManager{},
+	)
+	if err != nil {
+		t.Fatalf("newSyncServiceFn() error = %v", err)
+	}
+	if runner == nil {
+		t.Fatal("expected sync runner")
 	}
 }
 

@@ -30,19 +30,21 @@ func newShowCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 
 // slideJSON is the JSON representation for pc show --format json.
 type slideJSON struct {
-	ID           string         `json:"id"`
-	Date         string         `json:"date"`
-	DayOrder     string         `json:"day_order"`
-	HTMLContent  string         `json:"html_content"`
-	Notes        *string        `json:"notes"`
-	ProjectID    *string        `json:"project_id"`
-	GitRemoteURL *string        `json:"git_remote_url"`
-	GitHash      *string        `json:"git_hash"`
-	CreatedAt    string         `json:"created_at"`
-	UpdatedAt    string         `json:"updated_at"`
-	DeletedAt    *string        `json:"deleted_at"`
-	Figures      []figureJSON   `json:"figures"`
-	DataFiles    []dataFileJSON `json:"data_files"`
+	ID             string         `json:"id"`
+	Date           string         `json:"date"`
+	DayOrder       string         `json:"day_order"`
+	HTMLContent    *string        `json:"html_content"`
+	Notes          *string        `json:"notes"`
+	ProjectID      string         `json:"project_id"`
+	SourceDeviceID string         `json:"source_device_id"`
+	SourceRef      *string        `json:"source_ref"`
+	GitRemoteURL   *string        `json:"git_remote_url"`
+	GitHash        *string        `json:"git_hash"`
+	CreatedAt      string         `json:"created_at"`
+	UpdatedAt      string         `json:"updated_at"`
+	DeletedAt      *string        `json:"deleted_at"`
+	Figures        []figureJSON   `json:"figures"`
+	DataFiles      []dataFileJSON `json:"data_files"`
 }
 
 type figureJSON struct {
@@ -101,18 +103,20 @@ func runShow(ctx context.Context, stdout io.Writer, _ io.Writer, id string, form
 
 func showJSON(w io.Writer, slide repository.Slide, figures []repository.SlideFigure, dataFiles []repository.SlideDataFile) error {
 	out := slideJSON{
-		ID:           slide.ID,
-		Date:         slide.Date,
-		DayOrder:     slide.DayOrder,
-		HTMLContent:  slide.HTMLContent,
-		Notes:        slide.Notes,
-		ProjectID:    slide.ProjectID,
-		GitRemoteURL: slide.GitRemoteURL,
-		GitHash:      slide.GitHash,
-		CreatedAt:    slide.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
-		UpdatedAt:    slide.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
-		Figures:      make([]figureJSON, 0, len(figures)),
-		DataFiles:    make([]dataFileJSON, 0, len(dataFiles)),
+		ID:             slide.ID,
+		Date:           slide.Date,
+		DayOrder:       slide.DayOrder,
+		HTMLContent:    slide.HTMLContent,
+		Notes:          slide.Notes,
+		ProjectID:      slide.ProjectID,
+		SourceDeviceID: slide.SourceDeviceID,
+		SourceRef:      slide.SourceRef,
+		GitRemoteURL:   slide.GitRemoteURL,
+		GitHash:        slide.GitHash,
+		CreatedAt:      slide.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		UpdatedAt:      slide.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		Figures:        make([]figureJSON, 0, len(figures)),
+		DataFiles:      make([]dataFileJSON, 0, len(dataFiles)),
 	}
 
 	if slide.DeletedAt != nil {
@@ -148,8 +152,10 @@ func showText(w io.Writer, slide repository.Slide, figures []repository.SlideFig
 	_, _ = fmt.Fprintf(w, "Date:       %s\n", slide.Date)
 	_, _ = fmt.Fprintf(w, "DayOrder:   %s\n", slide.DayOrder)
 
-	if slide.ProjectID != nil {
-		_, _ = fmt.Fprintf(w, "Project:    %s\n", *slide.ProjectID)
+	_, _ = fmt.Fprintf(w, "Project:    %s\n", slide.ProjectID)
+	_, _ = fmt.Fprintf(w, "Device:     %s\n", slide.SourceDeviceID)
+	if slide.SourceRef != nil {
+		_, _ = fmt.Fprintf(w, "Source Ref: %s\n", *slide.SourceRef)
 	}
 
 	if slide.DeletedAt != nil {

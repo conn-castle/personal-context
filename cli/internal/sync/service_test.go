@@ -24,7 +24,7 @@ func TestServiceSyncPushesLocalBundleToCloud(t *testing.T) {
 			ID:          slideID,
 			Date:        "2026-03-08",
 			DayOrder:    "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		},
@@ -79,7 +79,7 @@ func TestServiceSyncPullsCloudBundleToLocalWithoutDownloadingDataFiles(t *testin
 			ID:          slideID,
 			Date:        "2026-03-08",
 			DayOrder:    "a1",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		},
@@ -130,7 +130,7 @@ func TestServiceSyncLeavesLastSyncUnchangedOnFailure(t *testing.T) {
 			ID:          slideID,
 			Date:        "2026-03-08",
 			DayOrder:    "a2",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		},
@@ -165,7 +165,7 @@ func TestServiceSyncPullsLaterCloudEditOverLocalChange(t *testing.T) {
 			ID:          slideID,
 			Date:        "2026-03-08",
 			DayOrder:    "a3",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base,
 			UpdatedAt:   base.Add(1 * time.Minute),
 		},
@@ -180,7 +180,7 @@ func TestServiceSyncPullsLaterCloudEditOverLocalChange(t *testing.T) {
 			ID:          slideID,
 			Date:        "2026-03-08",
 			DayOrder:    "a3",
-			HTMLContent: "<html>cloud wins</html>",
+			HTMLContent: strPtr("<html>cloud wins</html>"),
 			CreatedAt:   base,
 			UpdatedAt:   base.Add(2 * time.Minute),
 		},
@@ -217,7 +217,7 @@ func TestServiceSyncPullsRenamedCloudFigureWithoutDeletingNewFile(t *testing.T) 
 			ID:          slideID,
 			Date:        "2026-03-08",
 			DayOrder:    "a4",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base,
 			UpdatedAt:   base,
 		},
@@ -233,7 +233,7 @@ func TestServiceSyncPullsRenamedCloudFigureWithoutDeletingNewFile(t *testing.T) 
 			ID:          slideID,
 			Date:        "2026-03-08",
 			DayOrder:    "a4",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base,
 			UpdatedAt:   base.Add(1 * time.Minute),
 		},
@@ -440,7 +440,7 @@ func TestSyncErrorsOnLoadBundleNonNotFoundError(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
@@ -465,7 +465,7 @@ func TestSyncErrorsOnBundleForSlideListFiguresError(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
@@ -489,7 +489,7 @@ func TestSyncErrorsOnBundleForSlideListDataFilesError(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
@@ -513,7 +513,7 @@ func TestSyncErrorsOnUploadFileOpenFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
@@ -540,7 +540,7 @@ func TestSyncErrorsOnDownloadFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
@@ -571,14 +571,14 @@ func TestSyncPushSkipsWhenCloudWins(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud later</html>",
+			HTMLContent: strPtr("<html>cloud later</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
@@ -590,8 +590,8 @@ func TestSyncPushSkipsWhenCloudWins(t *testing.T) {
 
 	// Cloud should not have been overwritten by local.
 	got := cloudRepo.bundle(slideID)
-	if got.Slide.HTMLContent != "<html>cloud later</html>" {
-		t.Fatalf("cloud HTMLContent = %q, want %q", got.Slide.HTMLContent, "<html>cloud later</html>")
+	if got.Slide.HTMLContent == nil || *got.Slide.HTMLContent != "<html>cloud later</html>" {
+		t.Fatalf("cloud HTMLContent = %v, want %q", got.Slide.HTMLContent, "<html>cloud later</html>")
 	}
 }
 
@@ -604,14 +604,14 @@ func TestSyncPullSkipsWhenLocalWins(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local later</html>",
+			HTMLContent: strPtr("<html>local later</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
@@ -623,8 +623,8 @@ func TestSyncPullSkipsWhenLocalWins(t *testing.T) {
 
 	// Local should not have been overwritten by cloud.
 	got := localRepo.bundle(slideID)
-	if got.Slide.HTMLContent != "<html>local later</html>" {
-		t.Fatalf("local HTMLContent = %q, want %q", got.Slide.HTMLContent, "<html>local later</html>")
+	if got.Slide.HTMLContent == nil || *got.Slide.HTMLContent != "<html>local later</html>" {
+		t.Fatalf("local HTMLContent = %v, want %q", got.Slide.HTMLContent, "<html>local later</html>")
 	}
 }
 
@@ -638,7 +638,7 @@ func TestSyncPushFigureCreateUpdateDeleteOnCloud(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{
@@ -650,7 +650,7 @@ func TestSyncPushFigureCreateUpdateDeleteOnCloud(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
@@ -699,7 +699,7 @@ func TestSyncPushDataFileCreateUpdateDeleteOnCloud(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{
@@ -712,7 +712,7 @@ func TestSyncPushDataFileCreateUpdateDeleteOnCloud(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
@@ -760,7 +760,7 @@ func TestSyncPullDeletesLocalFiguresAndDataFiles(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
@@ -775,7 +775,7 @@ func TestSyncPullDeletesLocalFiguresAndDataFiles(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud wins</html>",
+			HTMLContent: strPtr("<html>cloud wins</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
@@ -816,7 +816,7 @@ func TestSyncPullWithDataFileFilenameChange(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
@@ -827,7 +827,7 @@ func TestSyncPullWithDataFileFilenameChange(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{
@@ -867,7 +867,7 @@ func TestSyncPushLocalWinsUpdatesCloud(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local wins</html>",
+			HTMLContent: strPtr("<html>local wins</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{{
@@ -877,7 +877,7 @@ func TestSyncPushLocalWinsUpdatesCloud(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud loses</html>",
+			HTMLContent: strPtr("<html>cloud loses</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(1 * time.Minute),
 		},
 	}
@@ -890,8 +890,8 @@ func TestSyncPushLocalWinsUpdatesCloud(t *testing.T) {
 	}
 
 	got := cloudRepo.bundle(slideID)
-	if got.Slide.HTMLContent != "<html>local wins</html>" {
-		t.Fatalf("cloud HTMLContent = %q, want %q", got.Slide.HTMLContent, "<html>local wins</html>")
+	if got.Slide.HTMLContent == nil || *got.Slide.HTMLContent != "<html>local wins</html>" {
+		t.Fatalf("cloud HTMLContent = %v, want %q", got.Slide.HTMLContent, "<html>local wins</html>")
 	}
 	if uploadedFig := objects.objects["figures/"+slideID+"/plot.png"]; uploadedFig != "LOCAL-FIGURE" {
 		t.Fatalf("uploaded figure = %q, want %q", uploadedFig, "LOCAL-FIGURE")
@@ -941,7 +941,7 @@ func TestSyncPullNewCloudSlideWithDataFiles(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud new</html>",
+			HTMLContent: strPtr("<html>cloud new</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -979,7 +979,7 @@ func TestSyncPullUpdatesLocalDataFilesAndFigures(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
@@ -994,7 +994,7 @@ func TestSyncPullUpdatesLocalDataFilesAndFigures(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud wins</html>",
+			HTMLContent: strPtr("<html>cloud wins</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{
@@ -1040,14 +1040,14 @@ func TestSyncPushErrorsOnApplySlideUpdateFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local wins</html>",
+			HTMLContent: strPtr("<html>local wins</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
@@ -1073,7 +1073,7 @@ func TestSyncPushErrorsOnApplySlideCreateFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
@@ -1099,7 +1099,7 @@ func TestSyncPushErrorsOnCloudCreateSlideFigureFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
@@ -1128,7 +1128,7 @@ func TestSyncPushErrorsOnCloudUpdateSlideFigureFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{{
@@ -1138,7 +1138,7 @@ func TestSyncPushErrorsOnCloudUpdateSlideFigureFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
@@ -1167,14 +1167,14 @@ func TestSyncPushErrorsOnCloudDeleteSlideFigureFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
@@ -1202,14 +1202,14 @@ func TestSyncPushErrorsOnCloudDeleteObjectAfterDeleteFigure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
@@ -1235,7 +1235,7 @@ func TestSyncPushErrorsOnUploadFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
@@ -1264,7 +1264,7 @@ func TestSyncPushErrorsOnCloudCreateSlideDataFileFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1294,7 +1294,7 @@ func TestSyncPushErrorsOnCloudUpdateSlideDataFileFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1305,7 +1305,7 @@ func TestSyncPushErrorsOnCloudUpdateSlideDataFileFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1335,14 +1335,14 @@ func TestSyncPushErrorsOnCloudDeleteSlideDataFileFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1372,7 +1372,7 @@ func TestSyncPullErrorsOnLocalCreateSlideFigureFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
@@ -1401,7 +1401,7 @@ func TestSyncPullErrorsOnLocalUpdateSlideFigureFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
@@ -1412,7 +1412,7 @@ func TestSyncPullErrorsOnLocalUpdateSlideFigureFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{{
@@ -1443,7 +1443,7 @@ func TestSyncPullErrorsOnLocalDeleteSlideFigureFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
@@ -1453,7 +1453,7 @@ func TestSyncPullErrorsOnLocalDeleteSlideFigureFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
@@ -1480,7 +1480,7 @@ func TestSyncPullErrorsOnLocalCreateSlideDataFileFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1509,7 +1509,7 @@ func TestSyncPullErrorsOnLocalUpdateSlideDataFileFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1520,7 +1520,7 @@ func TestSyncPullErrorsOnLocalUpdateSlideDataFileFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1549,7 +1549,7 @@ func TestSyncPullErrorsOnLocalDeleteSlideDataFileFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1560,7 +1560,7 @@ func TestSyncPullErrorsOnLocalDeleteSlideDataFileFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
@@ -1587,7 +1587,7 @@ func TestSyncPullFigureFilenameRenameDeletesOldFile(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
@@ -1597,7 +1597,7 @@ func TestSyncPullFigureFilenameRenameDeletesOldFile(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{{
@@ -1634,7 +1634,7 @@ func TestSyncPullDataFileUpdateWithFilenameChange(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1647,7 +1647,7 @@ func TestSyncPullDataFileUpdateWithFilenameChange(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1680,7 +1680,7 @@ func TestSyncPushErrorsOnApplyFiguresToCloudFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
@@ -1707,7 +1707,7 @@ func TestSyncPushErrorsOnApplyDataFilesToCloudResolvePathFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1734,7 +1734,7 @@ func TestSyncPullErrorsOnApplyFiguresToLocalResolvePathFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
@@ -1760,7 +1760,7 @@ func TestSyncPullErrorsOnApplyDataFilesToLocalResolvePathFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -1789,7 +1789,7 @@ func TestSyncPullErrorsOnCloudBundleForSlideListFiguresError(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
@@ -1813,7 +1813,7 @@ func TestSyncPullErrorsOnCloudBundleForSlideListDataFilesError(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
@@ -1839,7 +1839,7 @@ func TestSyncPullErrorsOnLoadLocalBundleNonNotFoundError(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
@@ -1905,7 +1905,7 @@ func TestSyncPullErrorsOnApplySlideToLocalFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
@@ -1930,14 +1930,14 @@ func TestSyncPullErrorsOnApplySlideUpdateToLocalFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
@@ -1963,7 +1963,7 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideError(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
@@ -1973,7 +1973,7 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideError(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
@@ -2000,7 +2000,7 @@ func TestSyncPullDeleteFigureWithFileRemoval(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
@@ -2011,7 +2011,7 @@ func TestSyncPullDeleteFigureWithFileRemoval(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{
@@ -2051,7 +2051,7 @@ func TestSyncPullDeleteDataFileWithFileRemoval(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
@@ -2062,7 +2062,7 @@ func TestSyncPullDeleteDataFileWithFileRemoval(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
@@ -2094,7 +2094,7 @@ func TestSyncPullDataFileUpdateWithFilenameRename(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
@@ -2106,7 +2106,7 @@ func TestSyncPullDataFileUpdateWithFilenameRename(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{
@@ -2267,7 +2267,7 @@ func TestSyncReturnsLockReleaseError(t *testing.T) {
 			ID:          slideID,
 			Date:        "2026-03-08",
 			DayOrder:    "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		},
@@ -2350,7 +2350,7 @@ func TestDownloadFileWriteError(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
@@ -2401,7 +2401,7 @@ func TestSyncPushCreatesCloudDataFileMetadataWithoutLocalBinary(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2431,7 +2431,7 @@ func TestSyncPushUpdatesCloudDataFileMetadataWithoutLocalBinaryWhenS3KeyIsUnchan
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2442,7 +2442,7 @@ func TestSyncPushUpdatesCloudDataFileMetadataWithoutLocalBinaryWhenS3KeyIsUnchan
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2472,7 +2472,7 @@ func TestSyncPushErrorsWhenMissingLocalBinaryWouldChangeDataFileS3Key(t *testing
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2483,7 +2483,7 @@ func TestSyncPushErrorsWhenMissingLocalBinaryWouldChangeDataFileS3Key(t *testing
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2510,7 +2510,7 @@ func TestSyncPushErrorsOnDataFileCreateUploadFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2542,7 +2542,7 @@ func TestSyncPushErrorsOnDataFileUpdateUploadFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2553,7 +2553,7 @@ func TestSyncPushErrorsOnDataFileUpdateUploadFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2584,7 +2584,7 @@ func TestSyncPushErrorsOnDataFileUpdateDeleteOldS3Failure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2595,7 +2595,7 @@ func TestSyncPushErrorsOnDataFileUpdateDeleteOldS3Failure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2636,14 +2636,14 @@ func TestSyncPushErrorsOnDataFileDeleteObjectFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2673,7 +2673,7 @@ func TestSyncPushErrorsOnFigureUpdateDeleteOldS3Failure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.SlideFigure{{
@@ -2683,7 +2683,7 @@ func TestSyncPushErrorsOnFigureUpdateDeleteOldS3Failure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{{
@@ -2719,7 +2719,7 @@ func TestSyncPushErrorsOnDataFileCreateResolvePathFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2749,7 +2749,7 @@ func TestSyncPushErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2760,7 +2760,7 @@ func TestSyncPushErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2790,7 +2790,7 @@ func TestSyncPullErrorsOnFigureDeleteResolvePathFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
@@ -2800,7 +2800,7 @@ func TestSyncPullErrorsOnFigureDeleteResolvePathFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
@@ -2828,7 +2828,7 @@ func TestSyncPullErrorsOnDataFileCreateResolvePathFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2862,7 +2862,7 @@ func TestSyncPullErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2873,7 +2873,7 @@ func TestSyncPullErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2906,7 +2906,7 @@ func TestSyncPullErrorsOnDataFileDeleteResolvePathFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -2917,7 +2917,7 @@ func TestSyncPullErrorsOnDataFileDeleteResolvePathFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
@@ -2979,7 +2979,7 @@ func TestSyncPullSkipsWhenLocalHasLaterPreExistingEdit(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local stays</html>",
+			HTMLContent: strPtr("<html>local stays</html>"),
 			CreatedAt:   localUpdatedAt, UpdatedAt: localUpdatedAt,
 			DeletedAt: &localDeletedAt,
 		},
@@ -2988,7 +2988,7 @@ func TestSyncPullSkipsWhenLocalHasLaterPreExistingEdit(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud loses</html>",
+			HTMLContent: strPtr("<html>cloud loses</html>"),
 			CreatedAt:   localUpdatedAt, UpdatedAt: cloudUpdatedAt,
 		},
 	}
@@ -3029,8 +3029,8 @@ func TestSyncPullSkipsWhenLocalHasLaterPreExistingEdit(t *testing.T) {
 
 	// Local should NOT have been updated to cloud's content (local won).
 	got := localRepo.bundle(slideID)
-	if got.Slide.HTMLContent != "<html>local stays</html>" {
-		t.Fatalf("local HTMLContent = %q, want %q (local should win)", got.Slide.HTMLContent, "<html>local stays</html>")
+	if got.Slide.HTMLContent == nil || *got.Slide.HTMLContent != "<html>local stays</html>" {
+		t.Fatalf("local HTMLContent = %v, want %q (local should win)", got.Slide.HTMLContent, "<html>local stays</html>")
 	}
 }
 
@@ -3045,7 +3045,7 @@ func TestSyncPullErrorsOnFigurePlanReconciliationWithInvalidDesired(t *testing.T
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
@@ -3076,7 +3076,7 @@ func TestSyncPushErrorsOnFigurePlanReconciliationWithInvalidDesired(t *testing.T
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.SlideFigure{{
@@ -3107,7 +3107,7 @@ func TestSyncPullErrorsOnDataFilePlanReconciliationWithInvalidDesired(t *testing
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -3137,7 +3137,7 @@ func TestSyncPushErrorsOnDataFilePlanReconciliationWithInvalidDesired(t *testing
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -3170,7 +3170,7 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideErrorInsideLoadBundle(t *testin
 	localRepo := newMemoryRepo([]SlideBundle{{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   localUpdatedAt, UpdatedAt: localUpdatedAt,
 		},
 	}})
@@ -3179,7 +3179,7 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideErrorInsideLoadBundle(t *testin
 	cloudRepo := newMemoryRepo([]SlideBundle{{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   localUpdatedAt, UpdatedAt: cloudUpdatedAt,
 		},
 	}})
@@ -3231,7 +3231,7 @@ func TestSyncPullErrorsOnFigureDeleteRemoveFileFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		Figures: []repository.SlideFigure{
@@ -3241,7 +3241,7 @@ func TestSyncPullErrorsOnFigureDeleteRemoveFileFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
@@ -3277,7 +3277,7 @@ func TestSyncPullErrorsOnDataFileDeleteRemoveFileFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
@@ -3288,7 +3288,7 @@ func TestSyncPullErrorsOnDataFileDeleteRemoveFileFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
@@ -3324,7 +3324,7 @@ func TestSyncPullErrorsOnDataFileUpdateRemoveFileFailure(t *testing.T) {
 	localBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>local</html>",
+			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.SlideDataFile{
@@ -3335,7 +3335,7 @@ func TestSyncPullErrorsOnDataFileUpdateRemoveFileFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.SlideDataFile{
@@ -3374,7 +3374,7 @@ func TestSyncPullErrorsOnDataFileCreateRemoveFileFailure(t *testing.T) {
 	cloudBundle := SlideBundle{
 		Slide: repository.Slide{
 			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
-			HTMLContent: "<html>cloud</html>",
+			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		DataFiles: []repository.SlideDataFile{{
@@ -3520,6 +3520,8 @@ func (e *errSessionManager) Complete(_ syncengine.SyncWindow) error {
 
 type memoryRepo struct {
 	slides         map[string]repository.Slide
+	projects       map[string]repository.Project
+	devices        map[string]repository.Device
 	figuresBySlide map[string]map[string]repository.SlideFigure
 	dataBySlide    map[string]map[string]repository.SlideDataFile
 	nextFigureID   int64
@@ -3545,6 +3547,8 @@ type memoryRepo struct {
 func newMemoryRepo(bundles []SlideBundle) *memoryRepo {
 	repo := &memoryRepo{
 		slides:         make(map[string]repository.Slide),
+		projects:       make(map[string]repository.Project),
+		devices:        make(map[string]repository.Device),
 		figuresBySlide: make(map[string]map[string]repository.SlideFigure),
 		dataBySlide:    make(map[string]map[string]repository.SlideDataFile),
 		nextFigureID:   1,
@@ -3552,6 +3556,18 @@ func newMemoryRepo(bundles []SlideBundle) *memoryRepo {
 		syncVersion:    repository.SyncVersion{ID: 1, Version: 1},
 	}
 	for _, bundle := range bundles {
+		if bundle.Slide.ProjectID == "" {
+			bundle.Slide.ProjectID = "sync/default-project"
+		}
+		if bundle.Slide.SourceDeviceID == "" {
+			bundle.Slide.SourceDeviceID = "sync-device"
+		}
+		if _, ok := repo.projects[bundle.Slide.ProjectID]; !ok {
+			repo.projects[bundle.Slide.ProjectID] = repository.Project{ID: bundle.Slide.ProjectID, CreatedAt: bundle.Slide.CreatedAt, UpdatedAt: bundle.Slide.UpdatedAt}
+		}
+		if _, ok := repo.devices[bundle.Slide.SourceDeviceID]; !ok {
+			repo.devices[bundle.Slide.SourceDeviceID] = repository.Device{ID: bundle.Slide.SourceDeviceID, CreatedAt: bundle.Slide.CreatedAt, UpdatedAt: bundle.Slide.UpdatedAt}
+		}
 		repo.slides[bundle.Slide.ID] = bundle.Slide
 		repo.figuresBySlide[bundle.Slide.ID] = make(map[string]repository.SlideFigure)
 		for _, figure := range bundle.Figures {
@@ -3585,17 +3601,19 @@ func (m *memoryRepo) CreateSlide(_ context.Context, input repository.CreateSlide
 		return repository.Slide{}, repository.ErrConflict
 	}
 	slide := repository.Slide{
-		ID:           input.ID,
-		Date:         input.Date,
-		DayOrder:     input.DayOrder,
-		HTMLContent:  input.HTMLContent,
-		Notes:        cloneStringPtr(input.Notes),
-		ProjectID:    cloneStringPtr(input.ProjectID),
-		GitRemoteURL: cloneStringPtr(input.GitRemoteURL),
-		GitHash:      cloneStringPtr(input.GitHash),
-		CreatedAt:    derefTime(input.CreatedAt),
-		UpdatedAt:    derefTime(input.UpdatedAt),
-		DeletedAt:    cloneTimePtr(input.DeletedAt),
+		ID:             input.ID,
+		Date:           input.Date,
+		DayOrder:       input.DayOrder,
+		HTMLContent:    input.HTMLContent,
+		Notes:          cloneStringPtr(input.Notes),
+		ProjectID:      input.ProjectID,
+		SourceDeviceID: input.SourceDeviceID,
+		SourceRef:      cloneStringPtr(input.SourceRef),
+		GitRemoteURL:   cloneStringPtr(input.GitRemoteURL),
+		GitHash:        cloneStringPtr(input.GitHash),
+		CreatedAt:      derefTime(input.CreatedAt),
+		UpdatedAt:      derefTime(input.UpdatedAt),
+		DeletedAt:      cloneTimePtr(input.DeletedAt),
 	}
 	m.slides[input.ID] = slide
 	if _, ok := m.figuresBySlide[input.ID]; !ok {
@@ -3630,7 +3648,9 @@ func (m *memoryRepo) UpdateSlide(_ context.Context, input repository.UpdateSlide
 	slide.DayOrder = input.DayOrder
 	slide.HTMLContent = input.HTMLContent
 	slide.Notes = cloneStringPtr(input.Notes)
-	slide.ProjectID = cloneStringPtr(input.ProjectID)
+	slide.ProjectID = input.ProjectID
+	slide.SourceDeviceID = input.SourceDeviceID
+	slide.SourceRef = cloneStringPtr(input.SourceRef)
 	slide.GitRemoteURL = cloneStringPtr(input.GitRemoteURL)
 	slide.GitHash = cloneStringPtr(input.GitHash)
 	slide.UpdatedAt = derefTime(input.UpdatedAt)
@@ -3848,10 +3868,109 @@ func (m *memoryRepo) GetSyncVersion(_ context.Context) (repository.SyncVersion, 
 	}
 	return m.syncVersion, nil
 }
-func (m *memoryRepo) ListDistinctProjectIDs(_ context.Context) ([]string, error) { return nil, nil }
-func (m *memoryRepo) CountActiveSlides(_ context.Context) (int, error)          { return 0, nil }
-func (m *memoryRepo) CountTrashedSlides(_ context.Context) (int, error)         { return 0, nil }
-func (m *memoryRepo) PurgeDeletedSlides(_ context.Context) ([]string, error)    { return nil, nil }
+func (m *memoryRepo) CreateProject(_ context.Context, input repository.CreateRegistryInput) (repository.Project, error) {
+	project := repository.Project{ID: input.ID, CreatedAt: derefTime(input.CreatedAt), UpdatedAt: derefTime(input.UpdatedAt), ArchivedAt: cloneTimePtr(input.ArchivedAt)}
+	m.projects[input.ID] = project
+	return project, nil
+}
+func (m *memoryRepo) GetProjectByID(_ context.Context, id string) (repository.Project, error) {
+	project, ok := m.projects[id]
+	if !ok {
+		return repository.Project{}, repository.ErrNotFound
+	}
+	return project, nil
+}
+func (m *memoryRepo) ListProjects(_ context.Context, includeArchived bool) ([]repository.Project, error) {
+	projects := make([]repository.Project, 0, len(m.projects))
+	for _, project := range m.projects {
+		if !includeArchived && project.ArchivedAt != nil {
+			continue
+		}
+		projects = append(projects, project)
+	}
+	sort.Slice(projects, func(i, j int) bool { return projects[i].ID < projects[j].ID })
+	return projects, nil
+}
+func (m *memoryRepo) ArchiveProject(_ context.Context, id string) (repository.Project, error) {
+	project, ok := m.projects[id]
+	if !ok {
+		return repository.Project{}, repository.ErrNotFound
+	}
+	now := time.Now().UTC()
+	project.ArchivedAt = &now
+	m.projects[id] = project
+	return project, nil
+}
+func (m *memoryRepo) RestoreProject(_ context.Context, id string) (repository.Project, error) {
+	project, ok := m.projects[id]
+	if !ok {
+		return repository.Project{}, repository.ErrNotFound
+	}
+	project.ArchivedAt = nil
+	m.projects[id] = project
+	return project, nil
+}
+func (m *memoryRepo) UpsertProjectForImport(_ context.Context, project repository.Project) (bool, error) {
+	existing, ok := m.projects[project.ID]
+	if ok && !project.UpdatedAt.After(existing.UpdatedAt) {
+		return false, nil
+	}
+	m.projects[project.ID] = project
+	return true, nil
+}
+func (m *memoryRepo) CreateDevice(_ context.Context, input repository.CreateRegistryInput) (repository.Device, error) {
+	device := repository.Device{ID: input.ID, CreatedAt: derefTime(input.CreatedAt), UpdatedAt: derefTime(input.UpdatedAt), ArchivedAt: cloneTimePtr(input.ArchivedAt)}
+	m.devices[input.ID] = device
+	return device, nil
+}
+func (m *memoryRepo) GetDeviceByID(_ context.Context, id string) (repository.Device, error) {
+	device, ok := m.devices[id]
+	if !ok {
+		return repository.Device{}, repository.ErrNotFound
+	}
+	return device, nil
+}
+func (m *memoryRepo) ListDevices(_ context.Context, includeArchived bool) ([]repository.Device, error) {
+	devices := make([]repository.Device, 0, len(m.devices))
+	for _, device := range m.devices {
+		if !includeArchived && device.ArchivedAt != nil {
+			continue
+		}
+		devices = append(devices, device)
+	}
+	sort.Slice(devices, func(i, j int) bool { return devices[i].ID < devices[j].ID })
+	return devices, nil
+}
+func (m *memoryRepo) ArchiveDevice(_ context.Context, id string) (repository.Device, error) {
+	device, ok := m.devices[id]
+	if !ok {
+		return repository.Device{}, repository.ErrNotFound
+	}
+	now := time.Now().UTC()
+	device.ArchivedAt = &now
+	m.devices[id] = device
+	return device, nil
+}
+func (m *memoryRepo) RestoreDevice(_ context.Context, id string) (repository.Device, error) {
+	device, ok := m.devices[id]
+	if !ok {
+		return repository.Device{}, repository.ErrNotFound
+	}
+	device.ArchivedAt = nil
+	m.devices[id] = device
+	return device, nil
+}
+func (m *memoryRepo) UpsertDeviceForImport(_ context.Context, device repository.Device) (bool, error) {
+	existing, ok := m.devices[device.ID]
+	if ok && !device.UpdatedAt.After(existing.UpdatedAt) {
+		return false, nil
+	}
+	m.devices[device.ID] = device
+	return true, nil
+}
+func (m *memoryRepo) CountActiveSlides(_ context.Context) (int, error)       { return 0, nil }
+func (m *memoryRepo) CountTrashedSlides(_ context.Context) (int, error)      { return 0, nil }
+func (m *memoryRepo) PurgeDeletedSlides(_ context.Context) ([]string, error) { return nil, nil }
 
 func (m *memoryRepo) bundle(slideID string) SlideBundle {
 	slide, ok := m.slides[slideID]
@@ -4029,7 +4148,7 @@ func canonicalBundle(bundle SlideBundle) string {
 		bundle.Slide.ID,
 		bundle.Slide.Date,
 		bundle.Slide.DayOrder,
-		bundle.Slide.HTMLContent,
+		nullableStringValue(bundle.Slide.HTMLContent),
 		bundle.Slide.CreatedAt.UTC().Format(time.RFC3339Nano),
 		bundle.Slide.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}

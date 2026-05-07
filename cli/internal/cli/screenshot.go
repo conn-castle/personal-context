@@ -283,7 +283,10 @@ func runScreenshot(ctx context.Context, stdout io.Writer, _ io.Writer, id string
 		output = id + ".png"
 	}
 
-	html := buildSlideHTML(slide.HTMLContent)
+	if slide.HTMLContent == nil {
+		return fmt.Errorf("slide %s has no slide.html content", id)
+	}
+	html := buildSlideHTML(*slide.HTMLContent)
 	htmlPath, cleanup, err := prepareScreenshotWorkspace(id, html, basePath(homeDir))
 	if err != nil {
 		return err

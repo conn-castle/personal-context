@@ -2,194 +2,92 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
-	"os"
-	"path/filepath"
+	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
-func TestProjectSetSuccess(t *testing.T) {
-	homeDir := setupEnv(t)
+func TestProjectRegistryCommands(t *testing.T) {
+	setupEnv(t)
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"project", "set", "my-project"})
+	cmd.SetArgs([]string{"project", "add", "alpha"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("project set: %v", err)
+		t.Fatalf("project add: %v", err)
 	}
-	if !strings.Contains(stdout.String(), `"my-project"`) {
-		t.Fatalf("expected project name in output, got %q", stdout.String())
-	}
-
-	// Verify config was updated
-	configPath := filepath.Join(homeDir, "personal-context", ".pc", "config.json")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		t.Fatalf("parse config: %v", err)
-	}
-	if cfg["active_project"] != "my-project" {
-		t.Fatalf("expected active_project=my-project in config, got %v", cfg["active_project"])
-	}
-}
-
-func TestProjectSetOverwrites(t *testing.T) {
-	homeDir := setupEnv(t)
-
-	cmd1 := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd1.SetArgs([]string{"project", "set", "first"})
-	if err := cmd1.Execute(); err != nil {
-		t.Fatalf("project set first: %v", err)
+	if !strings.Contains(stdout.String(), "alpha") {
+		t.Fatalf("expected alpha in add output, got %q", stdout.String())
 	}
 
-	cmd2 := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd2.SetArgs([]string{"project", "set", "second"})
-	if err := cmd2.Execute(); err != nil {
-		t.Fatalf("project set second: %v", err)
-	}
-
-	configPath := filepath.Join(homeDir, "personal-context", ".pc", "config.json")
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("read config: %v", err)
-	}
-	var cfg map[string]interface{}
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		t.Fatalf("parse config: %v", err)
-	}
-	if cfg["active_project"] != "second" {
-		t.Fatalf("expected active_project=second, got %v", cfg["active_project"])
-	}
-}
-
-func TestProjectSetEmptyName(t *testing.T) {
-	setupEnv(t)
-
-	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"project", "set", ""})
-	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error for empty project name")
-	}
-}
-
-func TestProjectSetWhitespaceName(t *testing.T) {
-	setupEnv(t)
-
-	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"project", "set", "   "})
-	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error for whitespace-only project name")
-	}
-}
-
-func TestProjectClearSuccess(t *testing.T) {
-	setupEnv(t)
-
-	// Set first
-	cmd1 := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd1.SetArgs([]string{"project", "set", "to-clear"})
-	if err := cmd1.Execute(); err != nil {
-		t.Fatalf("project set: %v", err)
-	}
-
-	// Clear
-	stdout := &bytes.Buffer{}
-	cmd2 := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd2.SetArgs([]string{"project", "clear"})
-	if err := cmd2.Execute(); err != nil {
-		t.Fatalf("project clear: %v", err)
-	}
-	if !strings.Contains(stdout.String(), "Active project cleared.") {
-		t.Fatalf("expected clear message, got %q", stdout.String())
-	}
-}
-
-func TestProjectClearIdempotent(t *testing.T) {
-	setupEnv(t)
-
-	// Clear without setting first
-	stdout := &bytes.Buffer{}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"project", "clear"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("project clear: %v", err)
-	}
-	if !strings.Contains(stdout.String(), "Active project cleared.") {
-		t.Fatalf("expected clear message, got %q", stdout.String())
-	}
-}
-
-func TestProjectListEmpty(t *testing.T) {
-	setupEnv(t)
-
-	stdout := &bytes.Buffer{}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"project", "list"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("project list: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "No projects found.") {
-		t.Fatalf("expected 'No projects found.', got %q", stdout.String())
+	if !strings.Contains(stdout.String(), "alpha") {
+		t.Fatalf("expected alpha in list output, got %q", stdout.String())
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "archive", "alpha"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project archive: %v", err)
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "list"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project list active: %v", err)
+	}
+	if strings.Contains(stdout.String(), "alpha") {
+		t.Fatalf("expected archived project excluded, got %q", stdout.String())
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "restore", "alpha"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project restore: %v", err)
 	}
 }
 
-func TestProjectListWithProjects(t *testing.T) {
+func TestDeviceRegistryCommands(t *testing.T) {
 	setupEnv(t)
-
-	// Add slides with projects
-	addSlideWithContent(t, "<html>A</html>", "", `{"project_id":"alpha"}`, nil, nil)
-	addSlideWithContent(t, "<html>B</html>", "", `{"project_id":"beta"}`, nil, nil)
-	addSlideWithContent(t, "<html>C</html>", "", `{"project_id":"alpha"}`, nil, nil) // duplicate
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"project", "list"})
+	cmd.SetArgs([]string{"device", "register", "laptop"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("project list: %v", err)
+		t.Fatalf("device register: %v", err)
 	}
 
-	out := stdout.String()
-	if !strings.Contains(out, "alpha") {
-		t.Fatalf("expected alpha in output, got %q", out)
-	}
-	if !strings.Contains(out, "beta") {
-		t.Fatalf("expected beta in output, got %q", out)
-	}
-}
-
-func TestProjectListMarksActive(t *testing.T) {
-	setupEnv(t)
-
-	addSlideWithContent(t, "<html>A</html>", "", `{"project_id":"alpha"}`, nil, nil)
-	addSlideWithContent(t, "<html>B</html>", "", `{"project_id":"beta"}`, nil, nil)
-
-	// Set active project
-	setCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	setCmd.SetArgs([]string{"project", "set", "beta"})
-	if err := setCmd.Execute(); err != nil {
-		t.Fatalf("project set: %v", err)
-	}
-
-	stdout := &bytes.Buffer{}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"project", "list"})
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"device", "list"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("project list: %v", err)
+		t.Fatalf("device list: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "laptop") {
+		t.Fatalf("expected laptop in list output, got %q", stdout.String())
 	}
 
-	out := stdout.String()
-	if !strings.Contains(out, "beta (active)") {
-		t.Fatalf("expected 'beta (active)' in output, got %q", out)
+	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"device", "archive", "laptop"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("device archive: %v", err)
 	}
-	// alpha should not have (active)
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "alpha") && strings.Contains(line, "(active)") {
-			t.Fatalf("alpha should not be marked active: %q", line)
-		}
+
+	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"device", "restore", "laptop"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("device restore: %v", err)
 	}
 }
 
@@ -202,97 +100,238 @@ func TestProjectCommandShowsHelp(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("project help: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "Manage active project") {
+	if !strings.Contains(stdout.String(), "Manage project registry") {
 		t.Fatalf("expected help text, got %q", stdout.String())
 	}
 }
 
-func TestAddUsesActiveProject(t *testing.T) {
-	homeDir := setupEnv(t)
-
-	// Set active project
-	setCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	setCmd.SetArgs([]string{"project", "set", "active-proj"})
-	if err := setCmd.Execute(); err != nil {
-		t.Fatalf("project set: %v", err)
+func TestRegistryCommandsEmptyListsAndDeviceHelp(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"setup"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("setup: %v", err)
 	}
 
-	// Add slide without --project flag
-	id := addSlide(t)
-
-	// Verify project from DB
-	stack, err := openLocalStack(homeDir)
-	if err != nil {
-		t.Fatalf("open stack: %v", err)
+	stdout := &bytes.Buffer{}
+	if err := runProjectList(context.Background(), stdout, &bytes.Buffer{}, false); err != nil {
+		t.Fatalf("runProjectList(empty): %v", err)
 	}
-	defer func() { _ = stack.Close() }()
-
-	slide, err := stack.Repo.GetSlideByID(t.Context(), id)
-	if err != nil {
-		t.Fatalf("get slide: %v", err)
+	if !strings.Contains(stdout.String(), "No projects registered.") {
+		t.Fatalf("expected empty project list message, got %q", stdout.String())
 	}
-	if slide.ProjectID == nil {
-		t.Fatal("expected project_id to be set from active project")
+	stdout.Reset()
+	if err := runDeviceList(context.Background(), stdout, &bytes.Buffer{}, false); err != nil {
+		t.Fatalf("runDeviceList(empty): %v", err)
 	}
-	if *slide.ProjectID != "active-proj" {
-		t.Fatalf("expected project_id=active-proj, got %q", *slide.ProjectID)
-	}
-}
-
-func TestAddProjectFlagOverridesActiveProject(t *testing.T) {
-	homeDir := setupEnv(t)
-
-	// Set active project
-	setCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	setCmd.SetArgs([]string{"project", "set", "active-proj"})
-	if err := setCmd.Execute(); err != nil {
-		t.Fatalf("project set: %v", err)
+	if !strings.Contains(stdout.String(), "No devices registered.") {
+		t.Fatalf("expected empty device list message, got %q", stdout.String())
 	}
 
-	// Add slide with --project flag
-	id := addSlide(t, "--project", "flag-proj")
-
-	// Verify flag wins
-	stack, err := openLocalStack(homeDir)
-	if err != nil {
-		t.Fatalf("open stack: %v", err)
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"device"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("device help: %v", err)
 	}
-	defer func() { _ = stack.Close() }()
-
-	slide, err := stack.Repo.GetSlideByID(t.Context(), id)
-	if err != nil {
-		t.Fatalf("get slide: %v", err)
-	}
-	if slide.ProjectID == nil || *slide.ProjectID != "flag-proj" {
-		t.Fatalf("expected project_id=flag-proj, got %v", slide.ProjectID)
+	if !strings.Contains(stdout.String(), "Manage source device registry") {
+		t.Fatalf("expected device help text, got %q", stdout.String())
 	}
 }
 
-func TestAddMetadataOverridesActiveProject(t *testing.T) {
-	homeDir := setupEnv(t)
-
-	// Set active project
-	setCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	setCmd.SetArgs([]string{"project", "set", "active-proj"})
-	if err := setCmd.Execute(); err != nil {
-		t.Fatalf("project set: %v", err)
+func TestRegistryCommandsHomeResolutionErrors(t *testing.T) {
+	original := resolveHomeDirFn
+	t.Cleanup(func() { resolveHomeDirFn = original })
+	resolveHomeDirFn = func() (string, error) {
+		return "", errors.New("home unavailable")
 	}
 
-	// Add slide with metadata.json project_id (no --project flag)
-	id := addSlideWithContent(t, "<html>X</html>", "", `{"project_id":"metadata-proj"}`, nil, nil)
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{name: "project list", run: func() error { return runProjectList(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, false) }},
+		{name: "project add", run: func() error { return runProjectAdd(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "p") }},
+		{name: "project archive", run: func() error { _, err := runArchiveProjectForTest("p"); return err }},
+		{name: "project restore", run: func() error { return runProjectRestore(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "p") }},
+		{name: "device list", run: func() error { return runDeviceList(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, false) }},
+		{name: "device register", run: func() error { return runDeviceRegister(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "d") }},
+		{name: "device archive", run: func() error { return runDeviceArchive(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "d") }},
+		{name: "device restore", run: func() error { return runDeviceRestore(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "d") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.run(); err == nil {
+				t.Fatal("expected home resolution error")
+			}
+		})
+	}
+}
 
-	// Verify metadata wins over active project
+func TestProjectAndDeviceRegistryCommandBranches(t *testing.T) {
+	setupEnv(t)
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "project empty", args: []string{"project", "add", ""}, want: "project id must not be empty"},
+		{name: "device empty", args: []string{"device", "register", ""}, want: "device id must not be empty"},
+		{name: "project missing archive", args: []string{"project", "archive", "missing"}, want: "archive project"},
+		{name: "project missing restore", args: []string{"project", "restore", "missing"}, want: "restore project"},
+		{name: "device missing archive", args: []string{"device", "archive", "missing"}, want: "archive device"},
+		{name: "device missing restore", args: []string{"device", "restore", "missing"}, want: "restore device"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+			cmd.SetArgs(tc.args)
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	if err := runProjectAdd(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "archived-project"); err != nil {
+		t.Fatalf("runProjectAdd: %v", err)
+	}
+	if _, err := runArchiveProjectForTest("archived-project"); err != nil {
+		t.Fatalf("archive project: %v", err)
+	}
+	stdout := &bytes.Buffer{}
+	if err := runProjectList(context.Background(), stdout, &bytes.Buffer{}, true); err != nil {
+		t.Fatalf("runProjectList(all): %v", err)
+	}
+	if !strings.Contains(stdout.String(), "archived-project (archived)") {
+		t.Fatalf("expected archived project marker, got %q", stdout.String())
+	}
+
+	if err := runDeviceRegister(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "archived-device"); err != nil {
+		t.Fatalf("runDeviceRegister: %v", err)
+	}
+	if _, err := runArchiveDeviceForTest("archived-device"); err != nil {
+		t.Fatalf("archive device: %v", err)
+	}
+	stdout.Reset()
+	if err := runDeviceList(context.Background(), stdout, &bytes.Buffer{}, true); err != nil {
+		t.Fatalf("runDeviceList(all): %v", err)
+	}
+	if !strings.Contains(stdout.String(), "archived-device (archived)") {
+		t.Fatalf("expected archived device marker, got %q", stdout.String())
+	}
+}
+
+func TestProvenanceResolutionAndValidationBranches(t *testing.T) {
+	setupEnv(t)
+	project := "project/a"
+	device := "device/a"
+	sourceRef := "src"
+	resolvedProject, resolvedDevice, resolvedSourceRef, err := resolveRecordProvenance(&project, &device, &sourceRef, "project/a", "device/a", "src")
+	if err != nil {
+		t.Fatalf("resolveRecordProvenance: %v", err)
+	}
+	if resolvedProject != project || resolvedDevice != device || resolvedSourceRef == nil || *resolvedSourceRef != sourceRef {
+		t.Fatalf("resolved provenance = %q %q %v", resolvedProject, resolvedDevice, resolvedSourceRef)
+	}
+
+	empty := " "
+	if _, _, _, err := resolveRecordProvenance(&empty, &device, nil, "", "", ""); err == nil || !strings.Contains(err.Error(), "project_id") {
+		t.Fatalf("expected empty project metadata error, got %v", err)
+	}
+	if _, _, _, err := resolveRecordProvenance(&project, &device, nil, "other", "", ""); err == nil || !strings.Contains(err.Error(), "project_id conflict") {
+		t.Fatalf("expected project conflict, got %v", err)
+	}
+	if _, _, _, err := resolveRecordProvenance(&project, &device, &sourceRef, "", "", "other"); err == nil || !strings.Contains(err.Error(), "source_ref conflict") {
+		t.Fatalf("expected source_ref conflict, got %v", err)
+	}
+	if provenanceFlagName("other_field") != "other-field" {
+		t.Fatalf("unexpected fallback flag name")
+	}
+	if provenanceFlagName("source_device_id") != "device" {
+		t.Fatalf("unexpected source device flag name")
+	}
+	if emptySource, err := resolveOptionalProvenanceValue("source_ref", &empty, ""); err != nil || emptySource != nil {
+		t.Fatalf("empty optional provenance = %v, %v; want nil, nil", emptySource, err)
+	}
+
+	homeDir, err := resolveHomeDir()
+	if err != nil {
+		t.Fatalf("resolve home: %v", err)
+	}
 	stack, err := openLocalStack(homeDir)
 	if err != nil {
 		t.Fatalf("open stack: %v", err)
 	}
 	defer func() { _ = stack.Close() }()
+	ctx := context.Background()
+	if err := validateActiveProjectAndDevice(ctx, stack.Repo, "missing", "test-device"); err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Fatalf("expected missing project validation error, got %v", err)
+	}
+	if err := validateActiveProjectAndDevice(ctx, stack.Repo, "test/default-project", "missing"); err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Fatalf("expected missing device validation error, got %v", err)
+	}
+	if _, err := stack.Repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "archived"}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if _, err := stack.Repo.ArchiveProject(ctx, "archived"); err != nil {
+		t.Fatalf("archive project: %v", err)
+	}
+	if err := validateActiveProjectAndDevice(ctx, stack.Repo, "archived", "test-device"); err == nil || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("expected archived project validation error, got %v", err)
+	}
+	if _, err := stack.Repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "archived-device"}); err != nil {
+		t.Fatalf("create device: %v", err)
+	}
+	if _, err := stack.Repo.ArchiveDevice(ctx, "archived-device"); err != nil {
+		t.Fatalf("archive device: %v", err)
+	}
+	if err := validateActiveProjectAndDevice(ctx, stack.Repo, "test/default-project", "archived-device"); err == nil || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("expected archived device validation error, got %v", err)
+	}
+	projectErr := errors.New("project lookup failed")
+	if err := validateActiveProjectAndDevice(ctx, &mockRepo{
+		getProjectByIDFn: func(context.Context, string) (repository.Project, error) {
+			return repository.Project{}, projectErr
+		},
+	}, "project/a", "device/a"); !errors.Is(err, projectErr) {
+		t.Fatalf("expected wrapped project lookup error, got %v", err)
+	}
+	deviceErr := errors.New("device lookup failed")
+	if err := validateActiveProjectAndDevice(ctx, &mockRepo{
+		getProjectByIDFn: func(context.Context, string) (repository.Project, error) {
+			return repository.Project{ID: "project/a"}, nil
+		},
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return repository.Device{}, deviceErr
+		},
+	}, "project/a", "device/a"); !errors.Is(err, deviceErr) {
+		t.Fatalf("expected wrapped device lookup error, got %v", err)
+	}
+}
 
-	slide, err := stack.Repo.GetSlideByID(t.Context(), id)
+func runArchiveProjectForTest(id string) (repository.Project, error) {
+	homeDir, err := resolveHomeDir()
 	if err != nil {
-		t.Fatalf("get slide: %v", err)
+		return repository.Project{}, err
 	}
-	if slide.ProjectID == nil || *slide.ProjectID != "metadata-proj" {
-		t.Fatalf("expected project_id=metadata-proj, got %v", slide.ProjectID)
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		return repository.Project{}, err
 	}
+	defer func() { _ = stack.Close() }()
+	return stack.Repo.ArchiveProject(context.Background(), id)
+}
+
+func runArchiveDeviceForTest(id string) (repository.Device, error) {
+	homeDir, err := resolveHomeDir()
+	if err != nil {
+		return repository.Device{}, err
+	}
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		return repository.Device{}, err
+	}
+	defer func() { _ = stack.Close() }()
+	return stack.Repo.ArchiveDevice(context.Background(), id)
 }

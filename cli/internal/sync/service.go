@@ -151,6 +151,10 @@ func (s *Service) syncChangedSlides(
 	since time.Time,
 	direction syncDirection,
 ) error {
+	if err := syncRegistries(ctx, direction.sourceRepo, direction.targetRepo); err != nil {
+		return fmt.Errorf("sync %s registries: %w", direction.name, err)
+	}
+
 	slides, err := s.listChangedSlides(ctx, direction.sourceRepo, since)
 	if err != nil {
 		return fmt.Errorf("list %s changes: %w", direction.sourceLabel, err)
@@ -192,6 +196,28 @@ func (s *Service) syncChangedSlides(
 		}
 	}
 
+	return nil
+}
+
+func syncRegistries(ctx context.Context, source repository.Repository, target repository.Repository) error {
+	projects, err := source.ListProjects(ctx, true)
+	if err != nil {
+		return fmt.Errorf("list projects: %w", err)
+	}
+	for _, project := range projects {
+		if _, err := target.UpsertProjectForImport(ctx, project); err != nil {
+			return fmt.Errorf("upsert project %s: %w", project.ID, err)
+		}
+	}
+	devices, err := source.ListDevices(ctx, true)
+	if err != nil {
+		return fmt.Errorf("list devices: %w", err)
+	}
+	for _, device := range devices {
+		if _, err := target.UpsertDeviceForImport(ctx, device); err != nil {
+			return fmt.Errorf("upsert device %s: %w", device.ID, err)
+		}
+	}
 	return nil
 }
 
@@ -300,32 +326,36 @@ func applySlide(
 ) error {
 	if exists {
 		_, err := repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-			ID:           slide.ID,
-			Date:         slide.Date,
-			DayOrder:     slide.DayOrder,
-			HTMLContent:  slide.HTMLContent,
-			Notes:        slide.Notes,
-			ProjectID:    slide.ProjectID,
-			GitRemoteURL: slide.GitRemoteURL,
-			GitHash:      slide.GitHash,
-			UpdatedAt:    &slide.UpdatedAt,
-			DeletedAt:    slide.DeletedAt,
+			ID:             slide.ID,
+			Date:           slide.Date,
+			DayOrder:       slide.DayOrder,
+			HTMLContent:    slide.HTMLContent,
+			Notes:          slide.Notes,
+			ProjectID:      slide.ProjectID,
+			SourceDeviceID: slide.SourceDeviceID,
+			SourceRef:      slide.SourceRef,
+			GitRemoteURL:   slide.GitRemoteURL,
+			GitHash:        slide.GitHash,
+			UpdatedAt:      &slide.UpdatedAt,
+			DeletedAt:      slide.DeletedAt,
 		})
 		return err
 	}
 
 	_, err := repo.CreateSlide(ctx, repository.CreateSlideInput{
-		ID:           slide.ID,
-		Date:         slide.Date,
-		DayOrder:     slide.DayOrder,
-		HTMLContent:  slide.HTMLContent,
-		Notes:        slide.Notes,
-		ProjectID:    slide.ProjectID,
-		GitRemoteURL: slide.GitRemoteURL,
-		GitHash:      slide.GitHash,
-		CreatedAt:    &slide.CreatedAt,
-		UpdatedAt:    &slide.UpdatedAt,
-		DeletedAt:    slide.DeletedAt,
+		ID:             slide.ID,
+		Date:           slide.Date,
+		DayOrder:       slide.DayOrder,
+		HTMLContent:    slide.HTMLContent,
+		Notes:          slide.Notes,
+		ProjectID:      slide.ProjectID,
+		SourceDeviceID: slide.SourceDeviceID,
+		SourceRef:      slide.SourceRef,
+		GitRemoteURL:   slide.GitRemoteURL,
+		GitHash:        slide.GitHash,
+		CreatedAt:      &slide.CreatedAt,
+		UpdatedAt:      &slide.UpdatedAt,
+		DeletedAt:      slide.DeletedAt,
 	})
 	return err
 }

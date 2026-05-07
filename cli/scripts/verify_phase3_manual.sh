@@ -137,7 +137,7 @@ Edited notes
 NOTES
 
 cat >"${input_edit}/metadata.json" <<'META'
-{"project_id":"phase3/edited"}
+{"project_id":"phase3/edited","source_device_id":"phase3-device"}
 META
 
 cat >"${input_edit}/figures/plot2.svg" <<'SVG'
@@ -171,10 +171,15 @@ fail() {
 setup_out="$(run_pc setup)"
 [[ "${setup_out}" == *"Personal Context initialized at"* ]] || fail "setup output did not include initialization message"
 
-id1="$(run_pc add --date 2025-03-01 "${input_a}" | tr -d '\r\n')"
+device_id="phase3-device"
+run_pc device register "${device_id}" >/dev/null
+run_pc project add "phase3/manual" >/dev/null
+run_pc project add "phase3/edited" >/dev/null
+
+id1="$(run_pc add --date 2025-03-01 --device "${device_id}" "${input_a}" | tr -d '\r\n')"
 [[ "${id1}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected slide ID format from first add: ${id1}"
 
-id2="$(run_pc add --date 2025-03-01 "${input_b}" | tr -d '\r\n')"
+id2="$(run_pc add --date 2025-03-01 --device "${device_id}" --project "phase3/manual" "${input_b}" | tr -d '\r\n')"
 [[ "${id2}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected slide ID format from second add: ${id2}"
 
 show_text="$(run_pc show "${id1}")"

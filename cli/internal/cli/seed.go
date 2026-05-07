@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -54,7 +55,9 @@ func runSeed(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 	// See ISSUES.md t1u2v3a.
 	existingByHTML := make(map[string]string, len(existing))
 	for _, slide := range existing {
-		existingByHTML[slide.HTMLContent] = slide.DayOrder
+		if slide.HTMLContent != nil {
+			existingByHTML[*slide.HTMLContent] = slide.DayOrder
+		}
 	}
 
 	now := time.Now().UTC()
@@ -94,14 +97,32 @@ func runSeed(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 		prevOrder = order
 
 		normalizedNotes := notes.NormalizeString(seed.Notes)
+		if _, err := stack.Repo.GetProjectByID(ctx, seed.ProjectID); err != nil {
+			if !errors.Is(err, repository.ErrNotFound) {
+				return fmt.Errorf("get seed project: %w", err)
+			}
+			if _, err := stack.Repo.CreateProject(ctx, repository.CreateRegistryInput{ID: seed.ProjectID}); err != nil {
+				return fmt.Errorf("create seed project: %w", err)
+			}
+		}
+		const seedDeviceID = "personal-context-seed"
+		if _, err := stack.Repo.GetDeviceByID(ctx, seedDeviceID); err != nil {
+			if !errors.Is(err, repository.ErrNotFound) {
+				return fmt.Errorf("get seed device: %w", err)
+			}
+			if _, err := stack.Repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: seedDeviceID}); err != nil {
+				return fmt.Errorf("create seed device: %w", err)
+			}
+		}
 
 		input := repository.CreateSlideInput{
-			ID:          id,
-			Date:        now.Format("2006-01-02"),
-			DayOrder:    order,
-			HTMLContent: seed.HTMLContent,
-			Notes:       normalizedNotes,
-			ProjectID:   &seed.ProjectID,
+			ID:             id,
+			Date:           now.Format("2006-01-02"),
+			DayOrder:       order,
+			HTMLContent:    &seed.HTMLContent,
+			Notes:          normalizedNotes,
+			ProjectID:      seed.ProjectID,
+			SourceDeviceID: seedDeviceID,
 		}
 
 		if _, err := stack.Repo.CreateSlide(ctx, input); err != nil {

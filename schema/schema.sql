@@ -59,24 +59,53 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys (key_hash) WHERE revoke
 -- Application tables
 -- =============================================================================
 
+CREATE TABLE IF NOT EXISTS projects (
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- Postgres only; absent in SQLite
+    id              TEXT NOT NULL CHECK (length(id) > 0),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    archived_at     TIMESTAMPTZ,
+    PRIMARY KEY (user_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_user ON projects (user_id);
+CREATE INDEX IF NOT EXISTS idx_projects_archived ON projects (archived_at) WHERE archived_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS devices (
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,  -- Postgres only; absent in SQLite
+    id              TEXT NOT NULL CHECK (length(id) > 0),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    archived_at     TIMESTAMPTZ,
+    PRIMARY KEY (user_id, id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_devices_user ON devices (user_id);
+CREATE INDEX IF NOT EXISTS idx_devices_archived ON devices (archived_at) WHERE archived_at IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS slides (
     id              TEXT PRIMARY KEY CHECK (id ~ '^\d{8}-[0-9a-f]{8}$'),
     user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,  -- Postgres only; absent in SQLite
     date            DATE NOT NULL,                  -- local date when slide was created/assigned
     day_order       TEXT NOT NULL DEFAULT 'n',
-    html_content    TEXT NOT NULL,
+    html_content    TEXT,
     notes           TEXT,
-    project_id      TEXT,                           -- e.g. 'happy-ai/sleep-staging'
+    project_id      TEXT NOT NULL,                  -- e.g. 'happy-ai/sleep-staging'
+    source_device_id TEXT NOT NULL,
+    source_ref      TEXT,
     git_remote_url  TEXT,                           -- e.g. 'https://github.com/org/repo'
     git_hash        TEXT CHECK (git_hash ~ '^[0-9a-f]{40}$'),  -- full SHA-1 commit hash (40 hex chars)
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    deleted_at      TIMESTAMPTZ                     -- NULL = active, non-NULL = soft deleted
+    deleted_at      TIMESTAMPTZ,                    -- NULL = active, non-NULL = soft deleted
+    FOREIGN KEY (user_id, project_id) REFERENCES projects(user_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (user_id, source_device_id) REFERENCES devices(user_id, id) ON DELETE RESTRICT
 );
 
 CREATE INDEX IF NOT EXISTS idx_slides_user ON slides (user_id);
 CREATE INDEX IF NOT EXISTS idx_slides_date ON slides (date, day_order, id);
-CREATE INDEX IF NOT EXISTS idx_slides_project ON slides (project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_slides_project ON slides (project_id);
+CREATE INDEX IF NOT EXISTS idx_slides_source_device ON slides (source_device_id);
 CREATE INDEX IF NOT EXISTS idx_slides_updated ON slides (updated_at);
 CREATE INDEX IF NOT EXISTS idx_slides_deleted ON slides (deleted_at) WHERE deleted_at IS NOT NULL;
 
@@ -139,6 +168,8 @@ BEGIN
         _user_id := COALESCE(NEW.user_id, OLD.user_id);
     ELSIF TG_TABLE_NAME IN ('slide_figures', 'slide_data_files') THEN
         SELECT user_id INTO _user_id FROM slides WHERE id = COALESCE(NEW.slide_id, OLD.slide_id);
+    ELSIF TG_TABLE_NAME IN ('projects', 'devices') THEN
+        _user_id := COALESCE(NEW.user_id, OLD.user_id);
     ELSIF TG_TABLE_NAME = 'templates' THEN
         -- Templates are shared; create or bump every user's sync_version.
         INSERT INTO sync_version (user_id, version, updated_at)
@@ -174,6 +205,8 @@ CREATE TRIGGER slides_sync_bump_after_update
         OLD.html_content IS DISTINCT FROM NEW.html_content OR
         OLD.notes IS DISTINCT FROM NEW.notes OR
         OLD.project_id IS DISTINCT FROM NEW.project_id OR
+        OLD.source_device_id IS DISTINCT FROM NEW.source_device_id OR
+        OLD.source_ref IS DISTINCT FROM NEW.source_ref OR
         OLD.git_remote_url IS DISTINCT FROM NEW.git_remote_url OR
         OLD.git_hash IS DISTINCT FROM NEW.git_hash OR
         OLD.deleted_at IS DISTINCT FROM NEW.deleted_at
@@ -252,6 +285,50 @@ CREATE TRIGGER templates_sync_bump_after_delete
     AFTER DELETE ON templates
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS projects_sync_bump_after_insert ON projects;
+CREATE TRIGGER projects_sync_bump_after_insert
+    AFTER INSERT ON projects
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS projects_sync_bump_after_update ON projects;
+CREATE TRIGGER projects_sync_bump_after_update
+    AFTER UPDATE ON projects
+    FOR EACH ROW
+    WHEN (
+        OLD.id IS DISTINCT FROM NEW.id OR
+        OLD.created_at IS DISTINCT FROM NEW.created_at OR
+        OLD.updated_at IS DISTINCT FROM NEW.updated_at OR
+        OLD.archived_at IS DISTINCT FROM NEW.archived_at
+    )
+    EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS projects_sync_bump_after_delete ON projects;
+CREATE TRIGGER projects_sync_bump_after_delete
+    AFTER DELETE ON projects
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS devices_sync_bump_after_insert ON devices;
+CREATE TRIGGER devices_sync_bump_after_insert
+    AFTER INSERT ON devices
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS devices_sync_bump_after_update ON devices;
+CREATE TRIGGER devices_sync_bump_after_update
+    AFTER UPDATE ON devices
+    FOR EACH ROW
+    WHEN (
+        OLD.id IS DISTINCT FROM NEW.id OR
+        OLD.created_at IS DISTINCT FROM NEW.created_at OR
+        OLD.updated_at IS DISTINCT FROM NEW.updated_at OR
+        OLD.archived_at IS DISTINCT FROM NEW.archived_at
+    )
+    EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS devices_sync_bump_after_delete ON devices;
+CREATE TRIGGER devices_sync_bump_after_delete
+    AFTER DELETE ON devices
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
 -- ---------------------------------------------------------------------------
 -- Auto-update updated_at on row modification.
 -- When a normal UPDATE does not explicitly set updated_at, the trigger bumps
@@ -283,4 +360,14 @@ CREATE TRIGGER slides_auto_updated_at
 DROP TRIGGER IF EXISTS templates_auto_updated_at ON templates;
 CREATE TRIGGER templates_auto_updated_at
     BEFORE UPDATE ON templates
+    FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
+
+DROP TRIGGER IF EXISTS projects_auto_updated_at ON projects;
+CREATE TRIGGER projects_auto_updated_at
+    BEFORE UPDATE ON projects
+    FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
+
+DROP TRIGGER IF EXISTS devices_auto_updated_at ON devices;
+CREATE TRIGGER devices_auto_updated_at
+    BEFORE UPDATE ON devices
     FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();

@@ -105,6 +105,7 @@ func TestAddAfterNonexistentRef(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	writeDefaultProvenanceMetadata(t, dir)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", "--after", "nonexistent-ref", "--date", "2099-01-01", dir})
@@ -817,6 +818,9 @@ func TestAddFigureCopyError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte(`<html><img src="figures/fig.png">x</html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(`{"project_id":"test/default-project","source_device_id":"test-device"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	figDir := filepath.Join(dir, "figures")
 	if err := os.MkdirAll(figDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -849,6 +853,9 @@ func TestAddDataFileCopyError(t *testing.T) {
 
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(`{"project_id":"test/default-project","source_device_id":"test-device"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	dDir := filepath.Join(dir, "data")
