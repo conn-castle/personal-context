@@ -1,5 +1,7 @@
 # `pc serve` Implementation Plan
 
+> **Phase 9 completed (2026-03).** This plan is retained as architectural rationale. For current state, see CONTEXT.md.
+
 ## Overview
 
 Add a `pc serve` command to the Go CLI that starts an HTTP server implementing the same REST API as the Next.js API routes, backed by local SQLite + filesystem. This enables `make dev` without cloud credentials (Neon/S3).
@@ -56,7 +58,7 @@ The Go `Repository` interface was designed for CLI use and has two gaps that mus
 **A3. Create `pc serve` command scaffold**
 - New package: `cli/internal/serve/`
 - New command: `cli/internal/cli/serve.go` — registers `pc serve` with cobra.
-- Flags: `--port` (default 9876), `--web-dir` (optional path to `web/` for auto-launching `next dev`).
+- Flags: `--port` (default 9876). The earlier `--web-dir` idea was proposed during planning but was not shipped.
 - On startup: read CLI config, open SQLite DB, resolve local data directory (`~/personal-context/`), start HTTP server on `127.0.0.1:<port>`.
 - Log: print `Local API server listening on http://127.0.0.1:<port>` and `Set LOCAL_BACKEND_URL=http://127.0.0.1:<port> when running next dev`.
 - Graceful shutdown on SIGINT/SIGTERM.

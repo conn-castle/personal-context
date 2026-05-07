@@ -16,7 +16,8 @@ import (
 
 // Repository implements repository.Repository using Postgres via pgx.
 type Repository struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	userID string // scopes all slide/sync_version queries to this user
 }
 
 var _ repository.Repository = (*Repository)(nil)
@@ -27,14 +28,17 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-// New constructs a Postgres repository implementation.
-// Args: pool is an initialized pgx connection pool.
-// Returns: repository implementation or an error when pool is nil.
-func New(pool *pgxpool.Pool) (*Repository, error) {
+// New constructs a Postgres repository implementation scoped to a specific user.
+// Args: pool is an initialized pgx connection pool; userID scopes all queries.
+// Returns: repository implementation or an error when pool or userID is invalid.
+func New(pool *pgxpool.Pool, userID string) (*Repository, error) {
 	if pool == nil {
 		return nil, repository.ErrInvalidArgument
 	}
-	return &Repository{pool: pool}, nil
+	if strings.TrimSpace(userID) == "" {
+		return nil, fmt.Errorf("%w: userID is required for Postgres repository", repository.ErrInvalidArgument)
+	}
+	return &Repository{pool: pool, userID: userID}, nil
 }
 
 // CreateSlide inserts a slide row.
@@ -48,10 +52,11 @@ func (r *Repository) CreateSlide(ctx context.Context, input repository.CreateSli
 
 	row := r.pool.QueryRow(
 		ctx,
-		`INSERT INTO slides (id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9, NOW()), COALESCE($10, NOW()), $11)
-         RETURNING id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at`,
+		`INSERT INTO slides (id, user_id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, NOW()), COALESCE($11, NOW()), $12)
+         RETURNING id, user_id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at`,
 		input.ID,
+		r.userID,
 		input.Date,
 		input.DayOrder,
 		input.HTMLContent,
@@ -74,9 +79,10 @@ func (r *Repository) GetSlideByID(ctx context.Context, id string) (repository.Sl
 
 	row := r.pool.QueryRow(
 		ctx,
-		`SELECT id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at
-         FROM slides WHERE id = $1`,
+		`SELECT id, user_id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at
+         FROM slides WHERE id = $1 AND user_id = $2`,
 		id,
+		r.userID,
 	)
 	return scanSlide(row)
 }
@@ -93,8 +99,8 @@ func (r *Repository) UpdateSlide(ctx context.Context, input repository.UpdateSli
          SET date = $1, day_order = $2, html_content = $3, notes = $4, project_id = $5, git_remote_url = $6, git_hash = $7,
              updated_at = COALESCE($8, updated_at),
              deleted_at = $9
-         WHERE id = $10
-         RETURNING id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at`,
+         WHERE id = $10 AND user_id = $11
+         RETURNING id, user_id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at`,
 		input.Date,
 		input.DayOrder,
 		input.HTMLContent,
@@ -105,6 +111,7 @@ func (r *Repository) UpdateSlide(ctx context.Context, input repository.UpdateSli
 		input.UpdatedAt,
 		input.DeletedAt,
 		input.ID,
+		r.userID,
 	)
 	return scanSlide(row)
 }
@@ -124,9 +131,9 @@ func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlide
 	}
 
 	builder := strings.Builder{}
-	builder.WriteString(`SELECT id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM slides WHERE 1=1`)
-	args := make([]any, 0, 8)
-	paramIdx := 1
+	builder.WriteString(`SELECT id, user_id, date, day_order, html_content, notes, project_id, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM slides WHERE user_id = $1`)
+	args := []any{r.userID}
+	paramIdx := 2
 
 	if filter.OnlyDeleted {
 		builder.WriteString(` AND deleted_at IS NOT NULL`)
@@ -199,8 +206,9 @@ func (r *Repository) SoftDeleteSlide(ctx context.Context, id string) error {
 
 	tag, err := r.pool.Exec(
 		ctx,
-		`UPDATE slides SET deleted_at = COALESCE(deleted_at, NOW()) WHERE id = $1`,
+		`UPDATE slides SET deleted_at = COALESCE(deleted_at, NOW()) WHERE id = $1 AND user_id = $2`,
 		id,
+		r.userID,
 	)
 	if err != nil {
 		return mapPgError(err)
@@ -214,7 +222,7 @@ func (r *Repository) RestoreSlide(ctx context.Context, id string) error {
 		return repository.ErrInvalidArgument
 	}
 
-	tag, err := r.pool.Exec(ctx, `UPDATE slides SET deleted_at = NULL WHERE id = $1`, id)
+	tag, err := r.pool.Exec(ctx, `UPDATE slides SET deleted_at = NULL WHERE id = $1 AND user_id = $2`, id, r.userID)
 	if err != nil {
 		return mapPgError(err)
 	}
@@ -227,7 +235,7 @@ func (r *Repository) DeleteSlide(ctx context.Context, id string) error {
 		return repository.ErrInvalidArgument
 	}
 
-	tag, err := r.pool.Exec(ctx, `DELETE FROM slides WHERE id = $1`, id)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM slides WHERE id = $1 AND user_id = $2`, id, r.userID)
 	if err != nil {
 		return mapPgError(err)
 	}
@@ -242,14 +250,31 @@ func (r *Repository) CreateSlideFigure(ctx context.Context, input repository.Cre
 
 	row := r.pool.QueryRow(
 		ctx,
-		`INSERT INTO slide_figures(slide_id, filename, s3_key, alt_text) VALUES($1, $2, $3, $4)
+		`WITH scoped_slide AS (
+             SELECT id
+             FROM slides
+             WHERE id = $1 AND user_id = $2
+         )
+         INSERT INTO slide_figures(slide_id, filename, s3_key, alt_text)
+         SELECT id, $3, $4, $5
+         FROM scoped_slide
          RETURNING id, slide_id, filename, s3_key, alt_text, created_at`,
 		input.SlideID,
+		r.userID,
 		input.Filename,
 		input.S3Key,
 		input.AltText,
 	)
-	return scanFigure(row)
+	figure, err := scanFigure(row)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			// Preserve contract behavior: missing parent slide surfaces as FK violation.
+			// This also keeps cross-user and missing-slide outcomes indistinguishable.
+			return repository.SlideFigure{}, repository.ErrForeignKeyViolation
+		}
+		return repository.SlideFigure{}, err
+	}
+	return figure, nil
 }
 
 // GetSlideFigureByID fetches a figure by id.
@@ -260,8 +285,12 @@ func (r *Repository) GetSlideFigureByID(ctx context.Context, id int64) (reposito
 
 	row := r.pool.QueryRow(
 		ctx,
-		`SELECT id, slide_id, filename, s3_key, alt_text, created_at FROM slide_figures WHERE id = $1`,
+		`SELECT f.id, f.slide_id, f.filename, f.s3_key, f.alt_text, f.created_at
+         FROM slide_figures AS f
+         INNER JOIN slides AS s ON s.id = f.slide_id
+         WHERE f.id = $1 AND s.user_id = $2`,
 		id,
+		r.userID,
 	)
 	return scanFigure(row)
 }
@@ -286,11 +315,18 @@ func (r *Repository) UpdateSlideFigure(ctx context.Context, input repository.Upd
 		nextParam++
 	}
 
-	args = append(args, input.ID)
+	args = append(args, input.ID, r.userID)
 	query := fmt.Sprintf(
-		`UPDATE slide_figures SET %s WHERE id = $%d RETURNING id, slide_id, filename, s3_key, alt_text, created_at`,
+		`UPDATE slide_figures AS f
+         SET %s
+         FROM slides AS s
+         WHERE f.id = $%d
+           AND s.id = f.slide_id
+           AND s.user_id = $%d
+         RETURNING f.id, f.slide_id, f.filename, f.s3_key, f.alt_text, f.created_at`,
 		strings.Join(setClauses, ", "),
 		nextParam,
+		nextParam+1,
 	)
 
 	row := r.pool.QueryRow(ctx, query, args...)
@@ -309,11 +345,13 @@ func (r *Repository) ListSlideFiguresBySlideID(ctx context.Context, slideID stri
 
 	rows, err := r.pool.Query(
 		ctx,
-		`SELECT id, slide_id, filename, s3_key, alt_text, created_at
-         FROM slide_figures
-         WHERE slide_id = $1
-         ORDER BY id`,
+		`SELECT f.id, f.slide_id, f.filename, f.s3_key, f.alt_text, f.created_at
+         FROM slide_figures AS f
+         INNER JOIN slides AS s ON s.id = f.slide_id
+         WHERE f.slide_id = $1 AND s.user_id = $2
+         ORDER BY f.id`,
 		slideID,
+		r.userID,
 	)
 	if err != nil {
 		return nil, mapPgError(err)
@@ -341,7 +379,16 @@ func (r *Repository) DeleteSlideFigure(ctx context.Context, id int64) error {
 		return repository.ErrInvalidArgument
 	}
 
-	tag, err := r.pool.Exec(ctx, `DELETE FROM slide_figures WHERE id = $1`, id)
+	tag, err := r.pool.Exec(
+		ctx,
+		`DELETE FROM slide_figures AS f
+         USING slides AS s
+         WHERE f.id = $1
+           AND s.id = f.slide_id
+           AND s.user_id = $2`,
+		id,
+		r.userID,
+	)
 	if err != nil {
 		return mapPgError(err)
 	}
@@ -359,17 +406,32 @@ func (r *Repository) CreateSlideDataFile(ctx context.Context, input repository.C
 
 	row := r.pool.QueryRow(
 		ctx,
-		`INSERT INTO slide_data_files(slide_id, filename, s3_key, size, hash, description)
-         VALUES($1, $2, $3, $4, $5, $6)
+		`WITH scoped_slide AS (
+             SELECT id
+             FROM slides
+             WHERE id = $1 AND user_id = $2
+         )
+         INSERT INTO slide_data_files(slide_id, filename, s3_key, size, hash, description)
+         SELECT id, $3, $4, $5, $6, $7
+         FROM scoped_slide
          RETURNING id, slide_id, filename, s3_key, size, hash, description, created_at`,
 		input.SlideID,
+		r.userID,
 		input.Filename,
 		input.S3Key,
 		input.Size,
 		input.Hash,
 		input.Description,
 	)
-	return scanDataFile(row)
+	file, err := scanDataFile(row)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			// Preserve contract behavior and avoid leaking tenant existence via error shape.
+			return repository.SlideDataFile{}, repository.ErrForeignKeyViolation
+		}
+		return repository.SlideDataFile{}, err
+	}
+	return file, nil
 }
 
 // GetSlideDataFileByID fetches one data-file row.
@@ -380,8 +442,12 @@ func (r *Repository) GetSlideDataFileByID(ctx context.Context, id int64) (reposi
 
 	row := r.pool.QueryRow(
 		ctx,
-		`SELECT id, slide_id, filename, s3_key, size, hash, description, created_at FROM slide_data_files WHERE id = $1`,
+		`SELECT d.id, d.slide_id, d.filename, d.s3_key, d.size, d.hash, d.description, d.created_at
+         FROM slide_data_files AS d
+         INNER JOIN slides AS s ON s.id = d.slide_id
+         WHERE d.id = $1 AND s.user_id = $2`,
 		id,
+		r.userID,
 	)
 	return scanDataFile(row)
 }
@@ -410,11 +476,18 @@ func (r *Repository) UpdateSlideDataFile(ctx context.Context, input repository.U
 		nextParam++
 	}
 
-	args = append(args, input.ID)
+	args = append(args, input.ID, r.userID)
 	query := fmt.Sprintf(
-		`UPDATE slide_data_files SET %s WHERE id = $%d RETURNING id, slide_id, filename, s3_key, size, hash, description, created_at`,
+		`UPDATE slide_data_files AS d
+         SET %s
+         FROM slides AS s
+         WHERE d.id = $%d
+           AND s.id = d.slide_id
+           AND s.user_id = $%d
+         RETURNING d.id, d.slide_id, d.filename, d.s3_key, d.size, d.hash, d.description, d.created_at`,
 		strings.Join(setClauses, ", "),
 		nextParam,
+		nextParam+1,
 	)
 
 	row := r.pool.QueryRow(ctx, query, args...)
@@ -433,11 +506,13 @@ func (r *Repository) ListSlideDataFilesBySlideID(ctx context.Context, slideID st
 
 	rows, err := r.pool.Query(
 		ctx,
-		`SELECT id, slide_id, filename, s3_key, size, hash, description, created_at
-         FROM slide_data_files
-         WHERE slide_id = $1
-         ORDER BY id`,
+		`SELECT d.id, d.slide_id, d.filename, d.s3_key, d.size, d.hash, d.description, d.created_at
+         FROM slide_data_files AS d
+         INNER JOIN slides AS s ON s.id = d.slide_id
+         WHERE d.slide_id = $1 AND s.user_id = $2
+         ORDER BY d.id`,
 		slideID,
+		r.userID,
 	)
 	if err != nil {
 		return nil, mapPgError(err)
@@ -465,7 +540,16 @@ func (r *Repository) DeleteSlideDataFile(ctx context.Context, id int64) error {
 		return repository.ErrInvalidArgument
 	}
 
-	tag, err := r.pool.Exec(ctx, `DELETE FROM slide_data_files WHERE id = $1`, id)
+	tag, err := r.pool.Exec(
+		ctx,
+		`DELETE FROM slide_data_files AS d
+         USING slides AS s
+         WHERE d.id = $1
+           AND s.id = d.slide_id
+           AND s.user_id = $2`,
+		id,
+		r.userID,
+	)
 	if err != nil {
 		return mapPgError(err)
 	}
@@ -565,13 +649,26 @@ func (r *Repository) DeleteTemplate(ctx context.Context, name string) error {
 	return ensureRowsAffected(tag)
 }
 
-// GetSyncVersion returns the singleton sync_version row.
+// GetSyncVersion returns the per-user sync_version row, creating it if absent.
 func (r *Repository) GetSyncVersion(ctx context.Context) (repository.SyncVersion, error) {
 	var sv repository.SyncVersion
-	err := r.pool.QueryRow(ctx, `SELECT id, version, updated_at FROM sync_version WHERE id = 1`).
-		Scan(&sv.ID, &sv.Version, &sv.UpdatedAt)
-	if err != nil {
+	err := r.pool.QueryRow(ctx,
+		`INSERT INTO sync_version (user_id, version, updated_at)
+		 VALUES ($1, 0, NOW())
+		 ON CONFLICT (user_id) DO NOTHING
+		 RETURNING user_id, version, updated_at`, r.userID).
+		Scan(&sv.UserID, &sv.Version, &sv.UpdatedAt)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return repository.SyncVersion{}, mapPgError(err)
+	}
+	// Row already existed (ON CONFLICT DO NOTHING returns no rows) — fetch it.
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = r.pool.QueryRow(ctx,
+			`SELECT user_id, version, updated_at FROM sync_version WHERE user_id = $1`, r.userID).
+			Scan(&sv.UserID, &sv.Version, &sv.UpdatedAt)
+		if err != nil {
+			return repository.SyncVersion{}, mapPgError(err)
+		}
 	}
 	sv.UpdatedAt = sv.UpdatedAt.UTC()
 	return sv, nil
@@ -581,7 +678,8 @@ func (r *Repository) GetSyncVersion(ctx context.Context) (repository.SyncVersion
 func (r *Repository) ListDistinctProjectIDs(ctx context.Context) ([]string, error) {
 	rows, err := r.pool.Query(
 		ctx,
-		`SELECT DISTINCT project_id FROM slides WHERE project_id IS NOT NULL AND deleted_at IS NULL ORDER BY project_id`,
+		`SELECT DISTINCT project_id FROM slides WHERE user_id = $1 AND project_id IS NOT NULL AND deleted_at IS NULL ORDER BY project_id`,
+		r.userID,
 	)
 	if err != nil {
 		return nil, mapPgError(err)
@@ -605,7 +703,7 @@ func (r *Repository) ListDistinctProjectIDs(ctx context.Context) ([]string, erro
 // CountActiveSlides returns the number of non-deleted slides.
 func (r *Repository) CountActiveSlides(ctx context.Context) (int, error) {
 	var count int
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM slides WHERE deleted_at IS NULL`).Scan(&count)
+	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM slides WHERE user_id = $1 AND deleted_at IS NULL`, r.userID).Scan(&count)
 	if err != nil {
 		return 0, mapPgError(err)
 	}
@@ -615,7 +713,7 @@ func (r *Repository) CountActiveSlides(ctx context.Context) (int, error) {
 // CountTrashedSlides returns the number of soft-deleted slides.
 func (r *Repository) CountTrashedSlides(ctx context.Context) (int, error) {
 	var count int
-	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM slides WHERE deleted_at IS NOT NULL`).Scan(&count)
+	err := r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM slides WHERE user_id = $1 AND deleted_at IS NOT NULL`, r.userID).Scan(&count)
 	if err != nil {
 		return 0, mapPgError(err)
 	}
@@ -624,7 +722,7 @@ func (r *Repository) CountTrashedSlides(ctx context.Context) (int, error) {
 
 // PurgeDeletedSlides hard-deletes all soft-deleted slides and returns their IDs.
 func (r *Repository) PurgeDeletedSlides(ctx context.Context) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `DELETE FROM slides WHERE deleted_at IS NOT NULL RETURNING id`)
+	rows, err := r.pool.Query(ctx, `DELETE FROM slides WHERE user_id = $1 AND deleted_at IS NOT NULL RETURNING id`, r.userID)
 	if err != nil {
 		return nil, mapPgError(err)
 	}
@@ -650,6 +748,7 @@ func scanSlide(rs rowScanner) (repository.Slide, error) {
 	var date time.Time
 	err := rs.Scan(
 		&s.ID,
+		&s.UserID,
 		&date,
 		&s.DayOrder,
 		&s.HTMLContent,

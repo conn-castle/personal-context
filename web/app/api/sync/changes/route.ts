@@ -4,6 +4,7 @@ import { badRequest, internalError } from "@/lib/api-error";
 import type { ErrorResponseBody } from "@/lib/api-error";
 import { isValidISOTimestamp } from "@/lib/validation";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
+import { requireUser } from "@/lib/auth-helpers";
 import type { SyncChangesResponse, SlideSummary } from "@/lib/types";
 
 /**
@@ -19,6 +20,10 @@ export async function GET(
   if (isLocalMode()) {
     return proxyToLocal(req);
   }
+
+  const userOrError = await requireUser(req);
+  if (userOrError instanceof NextResponse) return userOrError;
+  const user = userOrError;
 
   try {
     const since = req.nextUrl.searchParams.get("since");
@@ -56,9 +61,9 @@ export async function GET(
            FROM slide_data_files
            GROUP BY slide_id
          ) dc ON dc.slide_id = s.id
-         WHERE s.updated_at >= $1 AND s.updated_at <= $2
+         WHERE s.user_id = $1 AND s.updated_at >= $2 AND s.updated_at <= $3
          ORDER BY s.date DESC, s.day_order ASC, s.id ASC`,
-      [since, serverNow]
+      [user.id, since, serverNow]
     )) as Record<string, unknown>[];
 
     const slideSummaries: SlideSummary[] = items.map((row) => ({

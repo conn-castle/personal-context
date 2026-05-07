@@ -242,7 +242,7 @@ func TestSnapshotCommandErrorPathsAndHelpers(t *testing.T) {
 
 	origOpenCloud := openCloudStackFn
 	t.Cleanup(func() { openCloudStackFn = origOpenCloud })
-	openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 		return nil, errCloudNotConfigured
 	}
 	if err := runExport(ctx, &bytes.Buffer{}, &bytes.Buffer{}, exportOptions{Path: t.TempDir(), FromCloud: true}); err == nil {
@@ -737,7 +737,7 @@ func TestPhase7CommandAdditionalErrorPaths(t *testing.T) {
 		resolveHomeDirFn = func() (string, error) {
 			return t.TempDir(), nil
 		}
-		openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+		openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 			return nil, errors.New("cloud dial failed")
 		}
 		t.Cleanup(func() {
@@ -833,7 +833,7 @@ func TestPhase7CommandAdditionalErrorPaths(t *testing.T) {
 
 		origOpenCloudStackFn := openCloudStackFn
 		origDownloadCloudFigureFn := downloadCloudFigureFn
-		openCloudStackFn = func(context.Context, string) (*cloudStack, error) {
+		openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
 			return &cloudStack{Repo: repo}, nil
 		}
 		downloadCloudFigureFn = func(context.Context, *cloudStack, string) (io.ReadCloser, error) {

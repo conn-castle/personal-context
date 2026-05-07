@@ -127,10 +127,10 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Reason: Covers 7 error paths (one per command) that cannot be reached via environment manipulation. Alternative (interface-based DI) would require threading a dependency through every command function for a single test concern.
     Tradeoffs: Unsafe with t.Parallel (tests must restore original via t.Cleanup). Acceptable since cli package tests are not parallel. See ISSUES.md b2c3d4.
 
-- Decision 2026-03-05 y5z6a7: Phase 1 Playwright gate is DB-free smoke only
-    Decision: Phase 1 Playwright verification runs a DB-free smoke test (`pnpm test:e2e:smoke`) against a static app route via `playwright.config` `webServer`.
-    Reason: Full DB-backed e2e setup belongs to later phases; Phase 1 needs reproducible e2e wiring without introducing fake backend logic.
-    Tradeoffs: Phase 1 e2e only proves browser/server wiring, not data workflows; richer e2e scenarios remain required in later roadmap phases.
+- Decision 2026-03-05 y5z6a7: Playwright browser e2e runs in local mode with mocked APIs
+    Decision: Playwright browser verification starts Next.js with `LOCAL_BACKEND_URL=http://127.0.0.1:9876` and uses `page.route()` interception for mocked API workflows.
+    Reason: Browser e2e should verify UI/browser wiring without cloud credentials or auth sessions; cloud behavior is covered by API/unit tests and CLI cloud integration tests.
+    Tradeoffs: Mocked browser e2e does not prove the hosted cloud auth flow end to end; cloud data behavior is covered below the browser layer.
 
 - Decision 2026-03-07 a1b2c3: S3 client constructor accepts pre-configured *s3.Client
     Decision: `s3client.New()` accepts a pre-configured `*s3.Client` and bucket name (same DI pattern as Postgres repo accepting `*pgxpool.Pool`).
@@ -177,10 +177,10 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Reason: S3 `_version` file doesn't support push notifications. Polling is simpler and sufficient for low-frequency CLI-driven mutations.
     Tradeoffs: Changes are not instant (seconds of latency); acceptable for single-user CLI-to-web workflow.
 
-- Decision 2026-03-09 v9w0x1: sync_version uses single-row singleton with trigger-driven auto-increment
-    Decision: `sync_version` table uses a single-row singleton pattern with a trigger that auto-increments on any slide mutation, not per-slide versioning.
-    Reason: Simpler client polling — one value to check. S3 `_version` mirrors this single integer.
-    Tradeoffs: Any mutation bumps the global version even if the web client already has the change; redundant refetch is cheap (small dataset).
+- Decision 2026-05-07 v9w0x1: sync_version is per-user with tenant-scoped S3 version objects
+    Decision: In cloud mode, `sync_version` is keyed by `user_id` and S3 version objects live under `users/{user_id}/_version`; SQLite remains a local singleton. Shared template changes create or bump every existing user's `sync_version` row.
+    Reason: Multi-user cloud mode needs each user's polling cursor to advance only for that user's slide mutations while preserving the simple single-version polling model within each tenant. Templates are shared, so every existing user's cursor must advance when templates change, including users who have not yet made slide mutations.
+    Tradeoffs: Fresh cloud bootstrap must create users/auth tables before API keys can be generated, and all cloud callers must carry user scope into Postgres and S3. Template changes touch all users; a separate shared-resource cursor would scale better for frequent template edits but would require widening the client polling contract.
 
 - Decision 2026-03-09 x9y0z1: react-resizable-panels v4 sizes must use string percentages
     Decision: All `defaultSize`, `minSize`, `maxSize` props in `spreadsheet-viewer.tsx` use string percentages (e.g., `"18%"`) not bare numbers.
@@ -216,3 +216,8 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: Local dev mode uses a Go HTTP server (`pc serve`) that implements the same REST API shape as the Next.js API routes, backed by the existing Go SQLite repository and local filesystem. Next.js API routes detect `LOCAL_BACKEND_URL` and proxy to the Go server. Cloud mode (Amplify) is unchanged — Node.js handles Neon + S3 directly.
     Reason: Three alternatives were evaluated: (1) Go reverse proxy replacing Node entirely — precludes cloud-deployed frontend on Amplify; (2) SQLite-in-Node via env var — adds SQLite dependency to Node, requires SQL dialect translation layer, pollutes the production web app; (3) Go REST server — reuses existing Go repository layer (24 methods, already tested), no new Node dependencies, and keeps the web-side changes isolated to a small proxy helper plus the affected API route handlers. The Go CLI already has full SQLite access, filesystem code, and contract tests for both SQLite and Postgres implementations.
     Tradeoffs: Two implementations of the same API logic (Go for local, Node for cloud). Mitigated by contract tests that call both backends with identical inputs and assert response parity + correctness. Both must stay in sync when API changes are made. Cloud `_version` now uses JSON `{version, updated_at}` as the canonical payload, while readers retain compatibility with legacy bare-integer objects.
+
+- Decision 2026-03-13 d3e4f5: Auth.js credentials provider for web authentication (two-mode architecture)
+    Decision: Use Auth.js (NextAuth v5) with Credentials provider and Neon Postgres adapter. Two modes: (1) local-only — CLI + SQLite, no auth; (2) web — Auth.js credentials, email/password. Self-hosted and managed are the same codebase; OAuth providers (Google, GitHub) can be added later via env vars with zero code changes. CLI authenticates via user-generated API keys (hashed, stored in `api_keys` table). Local dev mode (`pc serve`) bypasses auth entirely.
+    Reason: Auth.js is open source (no vendor lock-in), has native Next.js App Router support, uses the existing Neon Postgres for session/user storage (no new infrastructure), and supports the 10+ year project lifespan. Credentials provider works for both self-hosted and managed without external OAuth app registrations. API keys are simpler than OAuth device flow for CLI auth.
+    Tradeoffs: Credentials provider requires password hashing and storage (security surface). Auth tables are Postgres-only (no SQLite equivalent needed — local mode has no users). S3 keys gain a `users/{user_id}/` prefix, requiring migration logic if data exists pre-auth.

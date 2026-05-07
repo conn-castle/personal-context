@@ -4,6 +4,8 @@ package cloude2e_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
+	postgresrepo "github.com/conn-castle/personal-context/cli/internal/repository/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go"
 	miniomodule "github.com/testcontainers/testcontainers-go/modules/minio"
@@ -30,7 +33,7 @@ var (
 	cloudEnv struct {
 		postgresConnString string
 		minioEndpoint      string
-		minioUsername       string
+		minioUsername      string
 		minioPassword      string
 	}
 
@@ -126,6 +129,8 @@ type cloudTestEnv struct {
 	NeonURL    string
 	BucketName string
 	S3Client   *awss3.Client
+	APIKey     string
+	UserID     string
 }
 
 // newCloudTestEnv creates an isolated Postgres schema and S3 bucket for a test.
@@ -159,6 +164,9 @@ func newCloudTestEnv(t *testing.T) cloudTestEnv {
 	})
 
 	connWithSchema := cloudEnv.postgresConnString + fmt.Sprintf("&search_path=%s", schemaName)
+	apiKey := fmt.Sprintf("pc_key_cloude2e_%d_%d", time.Now().UnixNano(), schemaCounter)
+	userID := fmt.Sprintf("cloude2e-user-%d-%d", time.Now().UnixNano(), schemaCounter)
+	seedCloudUserAndAPIKey(t, connWithSchema, userID, apiKey)
 
 	// Create isolated S3 bucket.
 	bucketCounter++
@@ -205,6 +213,44 @@ func newCloudTestEnv(t *testing.T) cloudTestEnv {
 		NeonURL:    connWithSchema,
 		BucketName: bucketName,
 		S3Client:   s3Client,
+		APIKey:     apiKey,
+		UserID:     userID,
+	}
+}
+
+func seedCloudUserAndAPIKey(t *testing.T, neonURL string, userID string, apiKey string) {
+	t.Helper()
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, neonURL)
+	if err != nil {
+		t.Fatalf("pgxpool.New(): %v", err)
+	}
+	defer pool.Close()
+
+	if err := postgresrepo.ApplySchema(ctx, pool); err != nil {
+		t.Fatalf("apply cloud schema: %v", err)
+	}
+
+	sum := sha256.Sum256([]byte(apiKey))
+	keyHash := hex.EncodeToString(sum[:])
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO users (id, email, password_hash)
+		 VALUES ($1, $2, $3)`,
+		userID,
+		userID+"@example.test",
+		"hash-placeholder",
+	); err != nil {
+		t.Fatalf("insert cloud user: %v", err)
+	}
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO api_keys (user_id, key_hash, label)
+		 VALUES ($1, $2, $3)`,
+		userID,
+		keyHash,
+		"cloud e2e",
+	); err != nil {
+		t.Fatalf("insert cloud api key: %v", err)
 	}
 }
 
@@ -229,6 +275,7 @@ func setupCloudHome(t *testing.T, cloud cloudTestEnv) (homeDir string, fakeUserH
 		"--aws-secret", cloudEnv.minioPassword,
 		"--s3-endpoint", cloudEnv.minioEndpoint,
 		"--s3-force-path-style",
+		"--api-key", cloud.APIKey,
 	)
 	if result.ExitCode != 0 {
 		t.Fatalf("pc setup failed (exit %d):\nstdout: %s\nstderr: %s",
@@ -258,12 +305,13 @@ func setupCloudHomeNoSchema(t *testing.T, cloud cloudTestEnv) (homeDir string, f
 	// Write cloud config directly to config.json.
 	configPath := filepath.Join(homeDir, "personal-context", ".pc", "config.json")
 	cfg := map[string]interface{}{
-		"neon_url":           cloud.NeonURL,
-		"s3_bucket":          cloud.BucketName,
-		"s3_region":          "us-east-1",
-		"aws_profile":        "personal-context",
-		"s3_endpoint":        cloudEnv.minioEndpoint,
+		"neon_url":            cloud.NeonURL,
+		"s3_bucket":           cloud.BucketName,
+		"s3_region":           "us-east-1",
+		"aws_profile":         "personal-context",
+		"s3_endpoint":         cloudEnv.minioEndpoint,
 		"s3_force_path_style": true,
+		"api_key":             cloud.APIKey,
 	}
 	cfgBytes, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

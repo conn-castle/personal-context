@@ -4,6 +4,7 @@ import { bumpS3Version } from "@/lib/s3";
 import { invalidId, notFound, internalError } from "@/lib/api-error";
 import { isValidSlideId } from "@/lib/validation";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
+import { requireUser } from "@/lib/auth-helpers";
 import type { RestoreResponse } from "@/lib/types";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -16,12 +17,16 @@ type RouteContext = { params: Promise<{ id: string }> };
  * @returns The restored slide info with sync version.
  */
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   context: RouteContext
 ): Promise<NextResponse | Response> {
   if (isLocalMode()) {
-    return proxyToLocal(_req);
+    return proxyToLocal(req);
   }
+
+  const userOrError = await requireUser(req);
+  if (userOrError instanceof NextResponse) return userOrError;
+  const user = userOrError;
 
   try {
     const { id } = await context.params;
@@ -33,7 +38,7 @@ export async function POST(
     const sql = getDb();
 
     // Only restore slides that are currently deleted
-    const rows = (await sql`UPDATE slides SET deleted_at = NULL WHERE id = ${id} AND deleted_at IS NOT NULL RETURNING id, deleted_at, updated_at`) as {
+    const rows = (await sql`UPDATE slides SET deleted_at = NULL WHERE id = ${id} AND user_id = ${user.id} AND deleted_at IS NOT NULL RETURNING id, deleted_at, updated_at`) as {
       id: string;
       deleted_at: null;
       updated_at: string;
@@ -46,7 +51,7 @@ export async function POST(
     const row = rows[0];
 
     // Read sync_version and bump S3
-    const versionRows = (await sql`SELECT version, updated_at FROM sync_version LIMIT 1`) as {
+    const versionRows = (await sql`SELECT version, updated_at FROM sync_version WHERE user_id = ${user.id}`) as {
       version: number;
       updated_at: string;
     }[];
@@ -54,7 +59,7 @@ export async function POST(
     const syncUpdatedAt = versionRows[0]?.updated_at ?? new Date().toISOString();
 
     try {
-      await bumpS3Version(syncVersion, syncUpdatedAt);
+      await bumpS3Version(syncVersion, syncUpdatedAt, user.id);
     } catch (error) {
       console.error(
         "POST /api/slides/[id]/restore S3 version bump failed after Postgres commit:",

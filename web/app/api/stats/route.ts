@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { internalError } from "@/lib/api-error";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
+import { requireUser } from "@/lib/auth-helpers";
 import type { StatsResponse } from "@/lib/types";
 import type { ErrorResponseBody } from "@/lib/api-error";
 
@@ -17,13 +18,17 @@ export async function GET(
     return proxyToLocal(req);
   }
 
+  const userOrError = await requireUser(req);
+  if (userOrError instanceof NextResponse) return userOrError;
+  const user = userOrError;
+
   try {
     const sql = getDb();
 
     const [totalResult, projectResult, trashedResult] = await Promise.all([
-      sql`SELECT COUNT(*)::int AS count FROM slides WHERE deleted_at IS NULL`,
-      sql`SELECT COUNT(DISTINCT project_id)::int AS count FROM slides WHERE deleted_at IS NULL AND project_id IS NOT NULL`,
-      sql`SELECT COUNT(*)::int AS count FROM slides WHERE deleted_at IS NOT NULL`,
+      sql`SELECT COUNT(*)::int AS count FROM slides WHERE user_id = ${user.id} AND deleted_at IS NULL`,
+      sql`SELECT COUNT(DISTINCT project_id)::int AS count FROM slides WHERE user_id = ${user.id} AND deleted_at IS NULL AND project_id IS NOT NULL`,
+      sql`SELECT COUNT(*)::int AS count FROM slides WHERE user_id = ${user.id} AND deleted_at IS NOT NULL`,
     ]);
 
     const totalSlides =

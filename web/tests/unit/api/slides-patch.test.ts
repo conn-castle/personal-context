@@ -21,6 +21,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
   });
 
   const slideId = "20250304-a3f2b7e1";
+  const testUserId = "test-user-id";
 
   const makeSlideRow = (overrides: Record<string, unknown> = {}) => ({
     id: slideId,
@@ -70,13 +71,13 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     // data_files
     mockSql.mockResolvedValueOnce(makeDataFiles());
 
-    const res = await handlePatchSlide(slideId, { project_id: "org/alpha" });
+    const res = await handlePatchSlide(slideId, { project_id: "org/alpha" }, testUserId);
 
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.slide.project_id).toBe("org/alpha");
     expect(body.sync_version).toBe(5);
-    expect(mockBumpS3Version).toHaveBeenCalledWith(5, "2025-03-04T10:00:00.000Z");
+    expect(mockBumpS3Version).toHaveBeenCalledWith(5, "2025-03-04T10:00:00.000Z", "test-user-id");
   });
 
   it("updates notes and normalizes empty string to null", async () => {
@@ -89,7 +90,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     // data_files
     mockSql.mockResolvedValueOnce([]);
 
-    const res = await handlePatchSlide(slideId, { notes: "" });
+    const res = await handlePatchSlide(slideId, { notes: "" }, testUserId);
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -110,7 +111,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     const res = await handlePatchSlide(slideId, {
       git_hash: gitHash,
       git_remote_url: gitUrl,
-    });
+    }, testUserId);
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -121,7 +122,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
   it("validates git_hash format", async () => {
     const res = await handlePatchSlide(slideId, {
       git_hash: "not-a-valid-hash",
-    });
+    }, testUserId);
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -129,7 +130,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
   });
 
   it("rejects empty body", async () => {
-    const res = await handlePatchSlide(slideId, {});
+    const res = await handlePatchSlide(slideId, {}, testUserId);
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -139,7 +140,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
   it("rejects unknown fields", async () => {
     const res = await handlePatchSlide(slideId, {
       unknown_field: "value",
-    } as Record<string, unknown>);
+    } as Record<string, unknown>, testUserId);
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -153,7 +154,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
 
     const res = await handlePatchSlide(slideId, {
       project_id: "org/alpha",
-    });
+    }, testUserId);
 
     expect(res.status).toBe(404);
     const body = await res.json();
@@ -163,7 +164,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
   it("returns 400 for invalid slide ID", async () => {
     const res = await handlePatchSlide("bad-id", {
       project_id: "org/alpha",
-    });
+    }, testUserId);
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -176,10 +177,10 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     mockSql.mockResolvedValueOnce([]);
     mockSql.mockResolvedValueOnce([]);
 
-    const res = await handlePatchSlide(slideId, { notes: "updated" });
+    const res = await handlePatchSlide(slideId, { notes: "updated" }, testUserId);
 
     expect(res.status).toBe(200);
-    expect(mockBumpS3Version).toHaveBeenCalledWith(10, "2025-03-04T10:00:00.000Z");
+    expect(mockBumpS3Version).toHaveBeenCalledWith(10, "2025-03-04T10:00:00.000Z", "test-user-id");
   });
 
   it("returns 200 when S3 version bump fails after the update commits", async () => {
@@ -191,7 +192,7 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     mockSql.mockResolvedValueOnce([]);
     mockBumpS3Version.mockRejectedValueOnce(new Error("S3 unavailable"));
 
-    const res = await handlePatchSlide(slideId, { notes: "updated" });
+    const res = await handlePatchSlide(slideId, { notes: "updated" }, testUserId);
 
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -208,18 +209,18 @@ describe("PATCH /api/slides/[id] (handlePatchSlide)", () => {
     mockSql.mockResolvedValueOnce([]);
     mockSql.mockResolvedValueOnce([]);
 
-    const res = await handlePatchSlide(slideId, { notes: "updated" });
+    const res = await handlePatchSlide(slideId, { notes: "updated" }, testUserId);
 
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.sync_version).toBe(0);
-    expect(mockBumpS3Version).toHaveBeenCalledWith(0, expect.any(String));
+    expect(mockBumpS3Version).toHaveBeenCalledWith(0, expect.any(String), "test-user-id");
   });
 
   it("returns 500 on database error", async () => {
     mockSql.mockRejectedValueOnce(new Error("connection refused"));
 
-    const res = await handlePatchSlide(slideId, { notes: "updated" });
+    const res = await handlePatchSlide(slideId, { notes: "updated" }, testUserId);
 
     expect(res.status).toBe(500);
     const body = await res.json();

@@ -24,11 +24,13 @@ type SqlFn = ReturnType<typeof getDb> &
  *
  * @param id - The slide ID from the URL path.
  * @param body - The parsed request body with fields to update.
+ * @param userId - The authenticated user's ID for query scoping.
  * @returns A NextResponse with the updated slide or an error.
  */
 export async function handlePatchSlide(
   id: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  userId: string,
 ): Promise<NextResponse> {
   try {
     // Validate ID
@@ -71,7 +73,8 @@ export async function handlePatchSlide(
     }
 
     values.push(id);
-    const queryText = `UPDATE slides SET ${setClauses.join(", ")} WHERE id = $${paramIndex} AND deleted_at IS NULL RETURNING *`;
+    values.push(userId);
+    const queryText = `UPDATE slides SET ${setClauses.join(", ")} WHERE id = $${paramIndex} AND user_id = $${paramIndex + 1} AND deleted_at IS NULL RETURNING *`;
 
     const rows = (await sql(queryText, values)) as Record<string, unknown>[];
 
@@ -82,7 +85,7 @@ export async function handlePatchSlide(
     const row = rows[0];
 
     // Read sync_version (trigger already fired from the UPDATE above)
-    const versionRows = (await sql`SELECT version, updated_at FROM sync_version LIMIT 1`) as {
+    const versionRows = (await sql`SELECT version, updated_at FROM sync_version WHERE user_id = ${userId}`) as {
       version: number;
       updated_at: string;
     }[];
@@ -90,7 +93,7 @@ export async function handlePatchSlide(
     const syncUpdatedAt = versionRows[0]?.updated_at ?? new Date().toISOString();
 
     try {
-      await bumpS3Version(syncVersion, syncUpdatedAt);
+      await bumpS3Version(syncVersion, syncUpdatedAt, userId);
     } catch (error) {
       console.error(
         "PATCH /api/slides/[id] S3 version bump failed after Postgres commit:",

@@ -1,9 +1,23 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 const mockSql = vi.fn();
+const { mockIsLocalMode, mockProxyToLocal, mockRequireUser } = vi.hoisted(() => ({
+  mockIsLocalMode: vi.fn(),
+  mockProxyToLocal: vi.fn(),
+  mockRequireUser: vi.fn(),
+}));
 vi.mock("@/lib/db", () => ({
   getDb: () => mockSql,
+}));
+
+vi.mock("@/lib/auth-helpers", () => ({
+  requireUser: mockRequireUser,
+}));
+
+vi.mock("@/lib/local-proxy", () => ({
+  isLocalMode: mockIsLocalMode,
+  proxyToLocal: mockProxyToLocal,
 }));
 
 import { GET } from "@/app/api/projects/route";
@@ -11,6 +25,42 @@ import { GET } from "@/app/api/projects/route";
 describe("GET /api/projects", () => {
   beforeEach(() => {
     mockSql.mockReset();
+    mockIsLocalMode.mockReset();
+    mockIsLocalMode.mockReturnValue(false);
+    mockProxyToLocal.mockReset();
+    mockRequireUser.mockReset();
+    mockRequireUser.mockResolvedValue({
+      id: "test-user-id",
+      email: "test@test.com",
+    });
+  });
+
+  it("proxies to the local backend in local mode", async () => {
+    const proxied = new Response("proxied", { status: 202 });
+    mockIsLocalMode.mockReturnValueOnce(true);
+    mockProxyToLocal.mockResolvedValueOnce(proxied);
+
+    const req = new NextRequest("http://localhost/api/projects");
+    const res = await GET(req);
+
+    expect(res).toBe(proxied);
+    expect(mockProxyToLocal).toHaveBeenCalledWith(req);
+    expect(mockSql).not.toHaveBeenCalled();
+  });
+
+  it("returns auth errors before querying projects", async () => {
+    mockRequireUser.mockResolvedValueOnce(
+      NextResponse.json(
+        { error: "Unauthorized", code: "UNAUTHORIZED" },
+        { status: 401 },
+      ),
+    );
+
+    const req = new NextRequest("http://localhost/api/projects");
+    const res = await GET(req);
+
+    expect(res.status).toBe(401);
+    expect(mockSql).not.toHaveBeenCalled();
   });
 
   it("returns distinct project IDs", async () => {

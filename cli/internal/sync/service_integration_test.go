@@ -297,7 +297,16 @@ func newCloudDependencies(t *testing.T) (repository.Repository, *s3client.Client
 	}
 	t.Cleanup(func() { pool.Close() })
 
-	repo, err := postgresrepo.New(pool)
+	// Create a test user required by the user_id FK on slides.
+	const testUserID = "test-user-sync-integration"
+	if _, err := pool.Exec(ctx,
+		`INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)`,
+		testUserID, "sync-test@example.com", "hash-placeholder",
+	); err != nil {
+		t.Fatalf("create test user: %v", err)
+	}
+
+	repo, err := postgresrepo.New(pool, testUserID)
 	if err != nil {
 		t.Fatalf("postgresrepo.New() error = %v", err)
 	}
@@ -336,7 +345,7 @@ func newCloudDependencies(t *testing.T) (repository.Repository, *s3client.Client
 		})
 	})
 
-	client, err := s3client.New(s3Client, bucketName)
+	client, err := s3client.New(s3Client, bucketName, "users/"+testUserID+"/")
 	if err != nil {
 		t.Fatalf("s3client.New() error = %v", err)
 	}

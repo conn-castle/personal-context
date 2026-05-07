@@ -36,7 +36,7 @@ func TestLoadAWSConfigWhitespaceOnlyProfile(t *testing.T) {
 }
 
 func TestOpenCloudStackEmptyHomeDir(t *testing.T) {
-	_, err := openCloudStack(context.Background(), "")
+	_, err := openCloudStack(context.Background(), "", "")
 	if err == nil {
 		t.Fatal("expected error for empty homeDir")
 	}
@@ -63,13 +63,13 @@ func TestOpenCloudStackS3ClientFactoryError(t *testing.T) {
 
 	originalRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = originalRepo })
-	newPostgresRepoFn = func(*pgxpool.Pool) (repository.Repository, error) {
+	newPostgresRepoFn = func(*pgxpool.Pool, string) (repository.Repository, error) {
 		return &mockRepo{}, nil
 	}
 
 	originalS3 := newCloudS3ClientFn
 	t.Cleanup(func() { newCloudS3ClientFn = originalS3 })
-	newCloudS3ClientFn = func(_ *awss3.Client, _ string) (*pcs3.Client, error) {
+	newCloudS3ClientFn = func(_ *awss3.Client, _ string, _ string) (*pcs3.Client, error) {
 		return nil, errors.New("s3 client failed")
 	}
 
@@ -83,7 +83,7 @@ func TestOpenCloudStackS3ClientFactoryError(t *testing.T) {
 		}
 	}
 
-	_, err := openCloudStack(context.Background(), homeDir)
+	_, err := openCloudStack(context.Background(), homeDir, "test-user-id")
 	if err == nil {
 		t.Fatal("expected s3 client factory error")
 	}
@@ -101,7 +101,7 @@ func TestOpenCloudStackConfigStoreError(t *testing.T) {
 		return config.Store{}, errors.New("store failed")
 	}
 
-	_, err := openCloudStack(context.Background(), homeDir)
+	_, err := openCloudStack(context.Background(), homeDir, "test-user-id")
 	if err == nil {
 		t.Fatal("expected error when config store creation fails")
 	}
@@ -122,7 +122,7 @@ func TestOpenCloudStackConfigReadError(t *testing.T) {
 		t.Fatalf("WriteFile error = %v", err)
 	}
 
-	_, err = openCloudStack(context.Background(), homeDir)
+	_, err = openCloudStack(context.Background(), homeDir, "test-user-id")
 	if err == nil {
 		t.Fatal("expected error when config read fails")
 	}
@@ -145,7 +145,7 @@ func TestOpenCloudStackModeError(t *testing.T) {
 		t.Fatalf("WriteFile error = %v", err)
 	}
 
-	_, err = openCloudStack(context.Background(), homeDir)
+	_, err = openCloudStack(context.Background(), homeDir, "test-user-id")
 	if err == nil {
 		t.Fatal("expected error for partial cloud config (Mode() error)")
 	}
@@ -154,7 +154,7 @@ func TestOpenCloudStackModeError(t *testing.T) {
 func TestOpenCloudStackRejectsLocalOnlyConfig(t *testing.T) {
 	homeDir := setupHomeWithConfig(t)
 
-	_, err := openCloudStack(context.Background(), homeDir)
+	_, err := openCloudStack(context.Background(), homeDir, "test-user-id")
 	if !errors.Is(err, errCloudNotConfigured) {
 		t.Fatalf("expected errCloudNotConfigured, got %v", err)
 	}
@@ -169,7 +169,7 @@ func TestOpenCloudStackValidateCloudConfigError(t *testing.T) {
 		return errors.New("cloud config invalid")
 	}
 
-	_, err := openCloudStack(context.Background(), homeDir)
+	_, err := openCloudStack(context.Background(), homeDir, "test-user-id")
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
@@ -184,7 +184,7 @@ func TestOpenCloudStackAWSConfigLoadError(t *testing.T) {
 		return aws.Config{}, errors.New("aws config failed")
 	}
 
-	_, err := openCloudStack(context.Background(), homeDir)
+	_, err := openCloudStack(context.Background(), homeDir, "test-user-id")
 	if err == nil {
 		t.Fatal("expected aws config load error")
 	}
@@ -205,7 +205,7 @@ func TestOpenCloudStackPGPoolFactoryError(t *testing.T) {
 		return nil, errors.New("pg pool failed")
 	}
 
-	_, err := openCloudStack(context.Background(), homeDir)
+	_, err := openCloudStack(context.Background(), homeDir, "test-user-id")
 	if err == nil {
 		t.Fatal("expected pg pool factory error")
 	}
@@ -239,11 +239,11 @@ func TestOpenCloudStackPostgresRepoFactoryError(t *testing.T) {
 
 	originalRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = originalRepo })
-	newPostgresRepoFn = func(*pgxpool.Pool) (repository.Repository, error) {
+	newPostgresRepoFn = func(*pgxpool.Pool, string) (repository.Repository, error) {
 		return nil, errors.New("postgres repo failed")
 	}
 
-	_, err := openCloudStack(context.Background(), homeDir)
+	_, err := openCloudStack(context.Background(), homeDir, "test-user-id")
 	if err == nil {
 		t.Fatal("expected postgres repo factory error")
 	}
@@ -276,14 +276,29 @@ func TestOpenCloudStackSuccess(t *testing.T) {
 
 	originalRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = originalRepo })
-	newPostgresRepoFn = func(pool *pgxpool.Pool) (repository.Repository, error) {
+	newPostgresRepoFn = func(pool *pgxpool.Pool, userID string) (repository.Repository, error) {
 		if pool != expectedPool {
 			t.Fatal("openCloudStack passed unexpected pool to repository factory")
+		}
+		if userID != "test-user-id" {
+			t.Fatalf("expected userID test-user-id, got %q", userID)
 		}
 		return &mockRepo{}, nil
 	}
 
-	stack, err := openCloudStack(context.Background(), homeDir)
+	originalS3 := newCloudS3ClientFn
+	t.Cleanup(func() { newCloudS3ClientFn = originalS3 })
+	newCloudS3ClientFn = func(_ *awss3.Client, bucket string, keyPrefix string) (*pcs3.Client, error) {
+		if bucket != "personal-context-test" {
+			t.Fatalf("expected bucket personal-context-test, got %q", bucket)
+		}
+		if keyPrefix != "users/test-user-id/" {
+			t.Fatalf("expected key prefix users/test-user-id/, got %q", keyPrefix)
+		}
+		return &pcs3.Client{}, nil
+	}
+
+	stack, err := openCloudStack(context.Background(), homeDir, "test-user-id")
 	if err != nil {
 		t.Fatalf("openCloudStack() error = %v", err)
 	}
@@ -371,6 +386,107 @@ func TestLoadAWSConfigSuccessfulLoad(t *testing.T) {
 	}
 }
 
+func TestResolveUserIDFromAPIKeyEmptyKey(t *testing.T) {
+	_, err := resolveUserIDFromAPIKey(context.Background(), nil, "")
+	if err == nil {
+		t.Fatal("expected error for empty API key")
+	}
+	if !strings.Contains(err.Error(), "API key is required") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+}
+
+func TestResolveUserIDFromAPIKeyWhitespaceKey(t *testing.T) {
+	_, err := resolveUserIDFromAPIKey(context.Background(), nil, "   ")
+	if err == nil {
+		t.Fatal("expected error for whitespace-only API key")
+	}
+}
+
+func TestResolveUserIDFromAPIKeySuccess(t *testing.T) {
+	original := queryAPIKeyUserIDFn
+	t.Cleanup(func() { queryAPIKeyUserIDFn = original })
+
+	rawKey := "pc_key_test-1234"
+	expectedHash := "9c5eb0a5bd681c94974f4b6ab2736e2819ecdaee0db5c1b2cc561b827e0ee368"
+	var capturedHash string
+
+	queryAPIKeyUserIDFn = func(_ context.Context, _ *pgxpool.Pool, keyHash string) (string, error) {
+		capturedHash = keyHash
+		return "user-abc", nil
+	}
+
+	userID, err := resolveUserIDFromAPIKey(context.Background(), nil, rawKey)
+	if err != nil {
+		t.Fatalf("resolveUserIDFromAPIKey() error = %v", err)
+	}
+	if userID != "user-abc" {
+		t.Fatalf("expected user-abc, got %q", userID)
+	}
+	if capturedHash != expectedHash {
+		t.Fatalf("expected hash %q, got %q", expectedHash, capturedHash)
+	}
+}
+
+func TestResolveUserIDFromAPIKeyQueryError(t *testing.T) {
+	original := queryAPIKeyUserIDFn
+	t.Cleanup(func() { queryAPIKeyUserIDFn = original })
+
+	queryAPIKeyUserIDFn = func(context.Context, *pgxpool.Pool, string) (string, error) {
+		return "", errors.New("no rows")
+	}
+
+	_, err := resolveUserIDFromAPIKey(context.Background(), nil, "pc_key_bad")
+	if err == nil {
+		t.Fatal("expected error for failed query")
+	}
+	if !strings.Contains(err.Error(), "API key validation failed") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+}
+
+func TestOpenCloudStackResolveUserIDError(t *testing.T) {
+	homeDir := setupHomeWithCloudConfig(t)
+
+	originalLoad := loadAWSConfigFn
+	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
+	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
+		return aws.Config{}, nil
+	}
+
+	originalPool := newPGXPoolFn
+	t.Cleanup(func() { newPGXPoolFn = originalPool })
+	expectedPool := &pgxpool.Pool{}
+	newPGXPoolFn = func(context.Context, string) (*pgxpool.Pool, error) {
+		return expectedPool, nil
+	}
+
+	originalClose := closePGXPoolFn
+	t.Cleanup(func() { closePGXPoolFn = originalClose })
+	closeCalled := false
+	closePGXPoolFn = func(pool *pgxpool.Pool) {
+		closeCalled = true
+	}
+
+	originalResolve := resolveUserIDFn
+	t.Cleanup(func() { resolveUserIDFn = originalResolve })
+	resolveUserIDFn = func(context.Context, *pgxpool.Pool, string) (string, error) {
+		return "", errors.New("api key invalid")
+	}
+
+	// Pass empty userID to trigger the resolveUserIDFn path
+	_, err := openCloudStack(context.Background(), homeDir, "")
+	if err == nil {
+		t.Fatal("expected error when resolveUserIDFn fails")
+	}
+	if !strings.Contains(err.Error(), "api key invalid") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+	if !closeCalled {
+		t.Fatal("expected resolve failure to close the opened pool")
+	}
+}
+
 func setupHomeWithCloudConfig(t *testing.T) string {
 	t.Helper()
 
@@ -385,6 +501,7 @@ func setupHomeWithCloudConfig(t *testing.T) string {
 		S3Bucket:   "personal-context-test",
 		S3Region:   "us-east-1",
 		AWSProfile: "personal-context",
+		APIKey:     "pc_key_test",
 	}
 	if err := store.Write(cfg); err != nil {
 		t.Fatalf("Write() error = %v", err)

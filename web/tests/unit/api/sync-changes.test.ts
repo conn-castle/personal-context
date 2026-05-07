@@ -7,6 +7,10 @@ vi.mock("@/lib/db", () => ({
   getDb: () => mockSql,
 }));
 
+vi.mock("@/lib/auth-helpers", () => ({
+  requireUser: vi.fn().mockResolvedValue({ id: "test-user-id", email: "test@test.com" }),
+}));
+
 import { GET } from "@/app/api/sync/changes/route";
 
 describe("GET /api/sync/changes", () => {
@@ -159,6 +163,7 @@ describe("GET /api/sync/changes", () => {
     const firstCall = mockQuery.mock.calls[0];
     expect(firstCall[0]).toContain("<=");
     expect(firstCall[1]).toEqual([
+      "test-user-id",
       "2026-03-01T00:00:00.000Z",
       "2026-03-09T10:00:00.000Z",
     ]);

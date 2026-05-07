@@ -104,6 +104,7 @@ func TestValidateCloudConfig(t *testing.T) {
 			S3Bucket:   "my-bucket",
 			S3Region:   "us-east-1",
 			AWSProfile: "personal-context",
+			APIKey:     "pc_key_test",
 		})
 		if err != nil {
 			t.Fatalf("ValidateCloudConfig() error = %v", err)
@@ -130,6 +131,7 @@ func TestValidateCloudConfig(t *testing.T) {
 			S3Bucket:   "my-bucket",
 			S3Region:   "us-east-1",
 			AWSProfile: "personal-context",
+			APIKey:     "pc_key_test",
 		})
 		if err == nil {
 			t.Fatal("expected error for invalid Neon URL")
@@ -142,6 +144,7 @@ func TestValidateCloudConfig(t *testing.T) {
 			S3Bucket:   "INVALID",
 			S3Region:   "us-east-1",
 			AWSProfile: "personal-context",
+			APIKey:     "pc_key_test",
 		})
 		if err == nil {
 			t.Fatal("expected error for invalid S3 bucket")
@@ -154,6 +157,7 @@ func TestValidateCloudConfig(t *testing.T) {
 			S3Bucket:   "my-bucket",
 			S3Region:   "notaregion",
 			AWSProfile: "personal-context",
+			APIKey:     "pc_key_test",
 		})
 		if err == nil {
 			t.Fatal("expected error for invalid S3 region")
@@ -166,9 +170,23 @@ func TestValidateCloudConfig(t *testing.T) {
 			S3Bucket:   "my-bucket",
 			S3Region:   "us-east-1",
 			AWSProfile: "  ",
+			APIKey:     "pc_key_test",
 		})
 		if err == nil {
 			t.Fatal("expected error for whitespace AWS profile")
+		}
+	})
+
+	t.Run("empty API key passes validation (validated at use-time)", func(t *testing.T) {
+		err := ValidateCloudConfig(Config{
+			NeonURL:    "postgres://user:pass@host/db",
+			S3Bucket:   "my-bucket",
+			S3Region:   "us-east-1",
+			AWSProfile: "personal-context",
+			APIKey:     " ",
+		})
+		if err != nil {
+			t.Fatalf("ValidateCloudConfig() should not reject empty api_key: %v", err)
 		}
 	})
 }

@@ -5,6 +5,7 @@
  * to forward the request to the Go server (pc serve) instead of using
  * Neon/S3 directly. When not set, behavior is unchanged.
  */
+import { getLocalBackendURL, getLocalModeState } from "@/lib/local-mode";
 
 /** Headers that must not be forwarded between hops (RFC 7230 §6.1). */
 const HOP_BY_HOP = new Set([
@@ -16,16 +17,38 @@ const HOP_BY_HOP = new Set([
   "upgrade",
 ]);
 
+/** Sensitive end-user auth headers should not be forwarded to local proxy targets. */
+const SENSITIVE_REQUEST_HEADERS = new Set(["authorization", "cookie"]);
+const SENSITIVE_RESPONSE_HEADERS = new Set(["set-cookie"]);
+
 /**
- * Copies headers from `source`, skipping hop-by-hop headers.
+ * Copies request headers from `source`, skipping hop-by-hop and sensitive headers.
  *
  * @param source - The original Headers to copy from.
  * @returns A new Headers object with hop-by-hop headers removed.
  */
-function forwardHeaders(source: Headers): Headers {
+function forwardRequestHeaders(source: Headers): Headers {
   const headers = new Headers();
   source.forEach((value, key) => {
-    if (!HOP_BY_HOP.has(key.toLowerCase())) {
+    const normalized = key.toLowerCase();
+    if (!HOP_BY_HOP.has(normalized) && !SENSITIVE_REQUEST_HEADERS.has(normalized)) {
+      headers.set(key, value);
+    }
+  });
+  return headers;
+}
+
+/**
+ * Copies response headers from `source`, skipping hop-by-hop and sensitive headers.
+ *
+ * @param source - The original response headers to copy from.
+ * @returns A new Headers object safe to return from proxy.
+ */
+function forwardResponseHeaders(source: Headers): Headers {
+  const headers = new Headers();
+  source.forEach((value, key) => {
+    const normalized = key.toLowerCase();
+    if (!HOP_BY_HOP.has(normalized) && !SENSITIVE_RESPONSE_HEADERS.has(normalized)) {
       headers.set(key, value);
     }
   });
@@ -35,10 +58,14 @@ function forwardHeaders(source: Headers): Headers {
 /**
  * Returns true if local backend mode is active.
  *
- * @returns Whether LOCAL_BACKEND_URL is set.
+ * Returns false when LOCAL_BACKEND_URL is unset or misconfigured.
+ * Config errors are surfaced by the middleware (getLocalModeState);
+ * route handlers use this as a safe boolean check.
+ *
+ * @returns Whether LOCAL_BACKEND_URL is set and valid.
  */
 export function isLocalMode(): boolean {
-  return !!process.env.LOCAL_BACKEND_URL;
+  return getLocalModeState().enabled;
 }
 
 /**
@@ -51,15 +78,18 @@ export function isLocalMode(): boolean {
  * @returns The proxied response from the Go server.
  */
 export async function proxyToLocal(request: Request): Promise<Response> {
-  const backendUrl = process.env.LOCAL_BACKEND_URL;
-  if (!backendUrl) {
+  const backendURL = getLocalBackendURL();
+  if (!backendURL) {
     throw new Error("LOCAL_BACKEND_URL is not set");
   }
 
   const url = new URL(request.url);
-  const targetUrl = `${backendUrl}${url.pathname}${url.search}`;
+  const targetUrl = new URL(
+    `${url.pathname}${url.search}`,
+    backendURL,
+  ).toString();
 
-  const headers = forwardHeaders(request.headers);
+  const headers = forwardRequestHeaders(request.headers);
 
   const init: RequestInit = {
     method: request.method,
@@ -99,6 +129,6 @@ export async function proxyToLocal(request: Request): Promise<Response> {
   const responseBody = await response.arrayBuffer();
   return new Response(responseBody, {
     status: response.status,
-    headers: forwardHeaders(response.headers),
+    headers: forwardResponseHeaders(response.headers),
   });
 }

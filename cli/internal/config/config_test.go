@@ -19,6 +19,7 @@ func TestReadWriteRoundTrip(t *testing.T) {
 		S3Bucket:   "my-bucket",
 		S3Region:   "us-east-1",
 		AWSProfile: "personal-context",
+		APIKey:     "pc_key_test",
 	}
 	if err := store.Write(original); err != nil {
 		t.Fatalf("Write() error = %v", err)
@@ -44,6 +45,7 @@ func TestReadWriteRoundTripWithS3Endpoint(t *testing.T) {
 		S3Bucket:         "my-bucket",
 		S3Region:         "us-east-1",
 		AWSProfile:       "personal-context",
+		APIKey:           "pc_key_test",
 		S3Endpoint:       "http://localhost:9000",
 		S3ForcePathStyle: true,
 	}
@@ -67,6 +69,7 @@ func TestModeIgnoresS3EndpointFields(t *testing.T) {
 		S3Bucket:         "bucket",
 		S3Region:         "us-east-1",
 		AWSProfile:       "profile",
+		APIKey:           "pc_key_test",
 		S3Endpoint:       "http://localhost:9000",
 		S3ForcePathStyle: true,
 	}
@@ -102,6 +105,7 @@ func TestModeDetection(t *testing.T) {
 		S3Bucket:   "bucket",
 		S3Region:   "us-east-1",
 		AWSProfile: "profile",
+		APIKey:     "pc_key_test",
 	}).Mode()
 	if err != nil {
 		t.Fatalf("cloud config Mode() error = %v", err)
@@ -111,10 +115,32 @@ func TestModeDetection(t *testing.T) {
 	}
 }
 
+func TestModeAllowsLegacyCloudConfigWithoutAPIKey(t *testing.T) {
+	mode, err := (Config{
+		NeonURL:    "postgres://url",
+		S3Bucket:   "bucket",
+		S3Region:   "us-east-1",
+		AWSProfile: "profile",
+	}).Mode()
+	if err != nil {
+		t.Fatalf("legacy cloud config Mode() error = %v", err)
+	}
+	if mode != ModeCloud {
+		t.Fatalf("expected %q, got %q", ModeCloud, mode)
+	}
+}
+
 func TestModeRejectsPartialCloudConfig(t *testing.T) {
 	_, err := (Config{NeonURL: "postgres://url"}).Mode()
 	if err == nil {
 		t.Fatal("expected error for partial cloud config")
+	}
+}
+
+func TestModeRejectsAPIKeyWithoutCloudFields(t *testing.T) {
+	_, err := (Config{APIKey: "pc_key_test"}).Mode()
+	if err == nil {
+		t.Fatal("expected error for api_key without cloud fields")
 	}
 }
 
@@ -364,6 +390,7 @@ func TestWriteFailurePreservesExistingConfig(t *testing.T) {
 		S3Bucket:   "bucket",
 		S3Region:   "us-east-1",
 		AWSProfile: "profile",
+		APIKey:     "pc_key_test",
 	})
 	if err == nil {
 		t.Fatal("expected write failure when config directory is not writable")

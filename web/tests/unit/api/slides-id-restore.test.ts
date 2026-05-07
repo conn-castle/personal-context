@@ -12,6 +12,10 @@ vi.mock("@/lib/s3", () => ({
   getS3Version: vi.fn(),
 }));
 
+vi.mock("@/lib/auth-helpers", () => ({
+  requireUser: vi.fn().mockResolvedValue({ id: "test-user-id", email: "test@test.com" }),
+}));
+
 import { POST } from "@/app/api/slides/[id]/restore/route";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -112,7 +116,7 @@ describe("POST /api/slides/[id]/restore", () => {
     );
     await POST(req, makeContext(slideId));
 
-    expect(mockBumpS3Version).toHaveBeenCalledWith(12, "2025-03-04T12:00:00.000Z");
+    expect(mockBumpS3Version).toHaveBeenCalledWith(12, "2025-03-04T12:00:00.000Z", "test-user-id");
   });
 
   it("returns 200 when S3 version bump fails after restore commits", async () => {
@@ -161,7 +165,7 @@ describe("POST /api/slides/[id]/restore", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.sync_version).toBe(0);
-    expect(mockBumpS3Version).toHaveBeenCalledWith(0, expect.any(String));
+    expect(mockBumpS3Version).toHaveBeenCalledWith(0, expect.any(String), "test-user-id");
   });
 
   it("returns 500 on database error", async () => {

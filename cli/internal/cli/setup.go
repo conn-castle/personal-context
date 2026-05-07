@@ -25,12 +25,20 @@ type setupOptions struct {
 	S3Endpoint       string
 	S3ForcePathStyle bool
 	RemoveCloud      bool
+	APIKey           string
+	InitCloudSchema  bool
 }
 
 // hasCloudFlags returns true if any cloud flag was provided.
 func (o setupOptions) hasCloudFlags() bool {
 	return o.NeonURL != "" || o.S3Bucket != "" || o.S3Region != "" ||
-		o.AWSKey != "" || o.AWSSecret != ""
+		o.AWSKey != "" || o.AWSSecret != "" || o.APIKey != ""
+}
+
+func (o setupOptions) hasCloudSchemaOnlyConflictFlags() bool {
+	return o.S3Bucket != "" || o.S3Region != "" || o.AWSKey != "" ||
+		o.AWSSecret != "" || o.S3Endpoint != "" || o.S3ForcePathStyle ||
+		strings.TrimSpace(o.APIKey) != ""
 }
 
 // validateCloudFlagsComplete returns an error listing any missing cloud flags.
@@ -50,6 +58,9 @@ func (o setupOptions) validateCloudFlagsComplete() error {
 	}
 	if o.AWSSecret == "" {
 		missing = append(missing, "--aws-secret")
+	}
+	if strings.TrimSpace(o.APIKey) == "" {
+		missing = append(missing, "--api-key")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required cloud flags: %s", strings.Join(missing, ", "))
@@ -78,6 +89,8 @@ func newSetupCommand(stdout io.Writer, stderr io.Writer, stdin io.Reader) *cobra
 	cmd.Flags().StringVar(&opts.S3Endpoint, "s3-endpoint", "", "Custom S3 endpoint URL (for S3-compatible services)")
 	cmd.Flags().BoolVar(&opts.S3ForcePathStyle, "s3-force-path-style", false, "Use path-style S3 addressing (for S3-compatible services)")
 	cmd.Flags().BoolVar(&opts.RemoveCloud, "remove-cloud", false, "Remove cloud configuration")
+	cmd.Flags().StringVar(&opts.APIKey, "api-key", "", "API key for CLI authentication (generate from authenticated web app)")
+	cmd.Flags().BoolVar(&opts.InitCloudSchema, "init-cloud-schema", false, "Initialize the cloud Postgres schema only")
 
 	return cmd
 }
@@ -85,8 +98,17 @@ func newSetupCommand(stdout io.Writer, stderr io.Writer, stdin io.Reader) *cobra
 // runSetup initializes the local environment and optionally configures cloud sync.
 func runSetup(ctx context.Context, stdout io.Writer, stderr io.Writer, stdin io.Reader, opts setupOptions) error {
 	// Validate flag combinations.
-	if opts.RemoveCloud && opts.hasCloudFlags() {
+	if opts.RemoveCloud && (opts.hasCloudFlags() || opts.InitCloudSchema) {
 		return fmt.Errorf("--remove-cloud cannot be used with cloud configuration flags")
+	}
+	if opts.InitCloudSchema {
+		if opts.NeonURL == "" {
+			return fmt.Errorf("--init-cloud-schema requires --neon-url")
+		}
+		if opts.hasCloudSchemaOnlyConflictFlags() {
+			return fmt.Errorf("--init-cloud-schema can only be used with --neon-url")
+		}
+		return runSetupInitCloudSchema(ctx, stdout, opts.NeonURL)
 	}
 
 	// Wrap stdin so all prompt calls share the same buffered reader.
@@ -143,7 +165,7 @@ func runSetup(ctx context.Context, stdout io.Writer, stderr io.Writer, stdin io.
 		}
 		if err := runSetupCloud(ctx, stdout, stderr, nil, homeDir, store,
 			opts.NeonURL, opts.S3Bucket, opts.S3Region, opts.AWSKey, opts.AWSSecret,
-			opts.S3Endpoint, opts.S3ForcePathStyle,
+			opts.S3Endpoint, opts.S3ForcePathStyle, opts.APIKey,
 			nil, false); err != nil {
 			return err
 		}
@@ -186,10 +208,14 @@ func runSetup(ctx context.Context, stdout io.Writer, stderr io.Writer, stdin io.
 	if err != nil {
 		return fmt.Errorf("read AWS secret key: %w", err)
 	}
+	apiKey, err := promptLineFn(br, stdout, "API key (generate from authenticated web app): ")
+	if err != nil {
+		return fmt.Errorf("read API key: %w", err)
+	}
 
 	return runSetupCloud(ctx, stdout, stderr, br, homeDir, store,
 		neonURL, s3Bucket, s3Region, awsKey, awsSecret,
-		"", false,
+		"", false, apiKey,
 		repo, true)
 }
 

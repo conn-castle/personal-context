@@ -28,6 +28,24 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
 
 <!-- ENTRIES START -->
 
+- Backlog 2026-05-07 clerk-auth-eval: Evaluate Clerk instead of custom Auth.js auth
+    Priority: Medium. Area: web, auth
+    Description: Assess whether Clerk should replace the current custom Auth.js/NextAuth credentials and API-key implementation for web authentication.
+    Acceptance criteria: Decision includes migration scope, CLI API-key strategy, self-hosting/vendor-lock-in tradeoffs, pricing/limits, and impact on per-user data isolation.
+    Notes: Compare against Decision 2026-03-13 d3e4f5 before scheduling implementation.
+
+- Backlog 2026-05-06 empty-slide-ui: Graceful UI for notes/data-only records
+    Priority: Medium. Area: web
+    Description: Handle records with missing or empty `slide.html` as notes/data-only records instead of silently showing blank visual content.
+    Acceptance criteria: The UI presents notes and attached figures/data clearly when visual slide content is absent, with no broken preview state.
+    Notes: Needed for using personal-context as the Castle Vault substrate.
+
+- Backlog 2026-04-26 n8p9q0: Enable Neon point-in-time restore on personal-context database
+    Priority: High. Area: infra
+    Description: Enable Neon snapshots (point-in-time restore) on the personal-context Neon Postgres database via the Neon dashboard.
+    Acceptance criteria: Point-in-time restore is active and verifiable in the Neon dashboard for this project's database.
+    Notes: Part of a cross-project sweep — castle-steward and agent-panel are tracking the same item in their own backlogs. No code changes required; configuration-only via Neon dashboard.
+
 - Backlog 2026-03-12 r6s6t6: Web UI trash view and restore flow
     Priority: High. Area: web
     Description: Add a visible way in the web UI to switch into a trash/deleted-slides view, browse soft-deleted slides, inspect them, and restore a slide back to the active deck.
@@ -98,11 +116,6 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
     Description: Add an embedded agent interface in the web UI that lets users interact with their slide library the way an agent would via `pc`, including command-like creation, editing, search, movement, delete/restore, and related workflows.
     Acceptance criteria: User can open the UI agent panel, issue natural-language or command-oriented requests, and see the agent read or mutate slides through the same underlying capabilities exposed by `pc`, with visible results and clear confirmations/errors.
     Notes: Reuse the existing `pc`/agent capability surface as the source of truth rather than inventing a separate browser-only action model.
-
-- Backlog 2026-03-05 f6a6b6: Multi-user auth with per-user S3 namespace
-    Priority: Low. Area: infra
-    Description: Authentication system with per-user data isolation (`s3://bucket/users/{user_id}/...`).
-    Acceptance criteria: Multiple users can use the same deployment with isolated data.
 
 - Backlog 2026-03-05 a7b7c7: Mobile-optimized web UI
     Priority: Low. Area: web

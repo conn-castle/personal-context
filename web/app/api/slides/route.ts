@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { badRequest, internalError } from "@/lib/api-error";
 import { parseQueryInt, isValidISOTimestamp } from "@/lib/validation";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
+import { requireUser } from "@/lib/auth-helpers";
 import type { SlideSummary } from "@/lib/types";
 
 // Neon driver supports both tagged-template and function call forms.
@@ -62,6 +63,10 @@ export async function GET(
     return proxyToLocal(req);
   }
 
+  const userOrError = await requireUser(req);
+  if (userOrError instanceof NextResponse) return userOrError;
+  const user = userOrError;
+
   try {
     const sql = getDb() as SqlFn;
     const url = req.nextUrl;
@@ -90,6 +95,10 @@ export async function GET(
     const conditions: string[] = [];
     const params: unknown[] = [];
     let paramIndex = 1;
+
+    // user_id filter (always applied)
+    conditions.push(`s.user_id = $${paramIndex++}`);
+    params.push(user.id);
 
     // deleted filter
     const showDeleted = deletedParam === "true";

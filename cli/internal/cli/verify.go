@@ -46,7 +46,7 @@ func runVerify(ctx context.Context, stdout io.Writer, _ io.Writer, fromCloud boo
 
 	var snapshot gitsnapshot.Snapshot
 	if fromCloud {
-		cloud, err := openCloudStackFn(ctx, homeDir)
+		cloud, err := openCloudStackFn(ctx, homeDir, "")
 		if err != nil {
 			if errors.Is(err, errCloudNotConfigured) {
 				return fmt.Errorf("cloud is not configured; run 'pc setup' first")

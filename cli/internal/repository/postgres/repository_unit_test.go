@@ -12,9 +12,21 @@ import (
 )
 
 func TestNewFailsForNilPool(t *testing.T) {
-	_, err := New(nil)
+	_, err := New(nil, "user-id")
 	if err == nil {
 		t.Fatal("expected error for nil pool, got nil")
+	}
+	if !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
+	}
+}
+
+func TestNewFailsForEmptyUserID(t *testing.T) {
+	// Cannot construct a real pool without a Postgres server, but the userID
+	// validation fires before pool is used.
+	_, err := New(nil, "")
+	if err == nil {
+		t.Fatal("expected error for empty userID, got nil")
 	}
 	if !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument, got %v", err)

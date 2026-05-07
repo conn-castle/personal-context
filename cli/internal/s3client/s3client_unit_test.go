@@ -105,7 +105,7 @@ func (e *mockHTTP404Error) HTTPStatusCode() int   { return e.code }
 func strPtr(s string) *string { return &s }
 
 func TestNewRejectsNilClient(t *testing.T) {
-	_, err := New(nil, "bucket")
+	_, err := New(nil, "bucket", "")
 	if err == nil {
 		t.Fatal("expected error for nil client")
 	}
@@ -114,7 +114,7 @@ func TestNewRejectsNilClient(t *testing.T) {
 func TestNewRejectsEmptyBucket(t *testing.T) {
 	// Cannot easily construct a real *s3.Client without aws config,
 	// but we can test nil + empty bucket separately.
-	_, err := New(nil, "")
+	_, err := New(nil, "", "")
 	if err == nil {
 		t.Fatal("expected error for nil client + empty bucket")
 	}

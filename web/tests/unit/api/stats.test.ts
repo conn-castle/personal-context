@@ -6,6 +6,10 @@ vi.mock("@/lib/db", () => ({
   getDb: () => mockSql,
 }));
 
+vi.mock("@/lib/auth-helpers", () => ({
+  requireUser: vi.fn().mockResolvedValue({ id: "test-user-id", email: "test@test.com" }),
+}));
+
 import { GET } from "@/app/api/stats/route";
 
 describe("GET /api/stats", () => {

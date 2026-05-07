@@ -48,6 +48,17 @@ type Service struct {
 	session      SessionManager
 }
 
+// syncDirection describes one source-to-target reconciliation pass.
+type syncDirection struct {
+	name        string
+	sourceLabel string
+	targetLabel string
+	sourceRepo  repository.Repository
+	targetRepo  repository.Repository
+	winningSide Winner
+	apply       func(context.Context, SlideBundle, *SlideBundle) error
+}
+
 // NewService validates and constructs a sync service.
 func NewService(
 	localRepo repository.Repository,
@@ -111,75 +122,73 @@ func (s *Service) Sync(ctx context.Context) (err error) {
 }
 
 func (s *Service) pushChangedSlides(ctx context.Context, since time.Time) error {
-	slides, err := s.listChangedSlides(ctx, s.localRepo, since)
-	if err != nil {
-		return fmt.Errorf("list local changes: %w", err)
-	}
-
-	for _, slide := range slides {
-		localBundle, err := s.bundleForSlide(ctx, s.localRepo, slide)
-		if err != nil {
-			return fmt.Errorf("load local bundle %s: %w", slide.ID, err)
-		}
-
-		cloudBundle, exists, err := s.loadBundle(ctx, s.cloudRepo, slide.ID)
-		if err != nil {
-			return fmt.Errorf("load cloud bundle %s: %w", slide.ID, err)
-		}
-		if !exists {
-			if err := s.applyBundleToCloud(ctx, localBundle, nil); err != nil {
-				return fmt.Errorf("push new local slide %s: %w", slide.ID, err)
-			}
-			continue
-		}
-
-		_, winner, err := ResolveBundle(localBundle, cloudBundle)
-		if err != nil {
-			return fmt.Errorf("resolve push bundle %s: %w", slide.ID, err)
-		}
-		if winner != WinnerLocal {
-			continue
-		}
-		if err := s.applyBundleToCloud(ctx, localBundle, &cloudBundle); err != nil {
-			return fmt.Errorf("push local slide %s: %w", slide.ID, err)
-		}
-	}
-
-	return nil
+	return s.syncChangedSlides(ctx, since, syncDirection{
+		name:        "push",
+		sourceLabel: "local",
+		targetLabel: "cloud",
+		sourceRepo:  s.localRepo,
+		targetRepo:  s.cloudRepo,
+		winningSide: WinnerLocal,
+		apply:       s.applyBundleToCloud,
+	})
 }
 
 func (s *Service) pullChangedSlides(ctx context.Context, since time.Time) error {
-	slides, err := s.listChangedSlides(ctx, s.cloudRepo, since)
+	return s.syncChangedSlides(ctx, since, syncDirection{
+		name:        "pull",
+		sourceLabel: "cloud",
+		targetLabel: "local",
+		sourceRepo:  s.cloudRepo,
+		targetRepo:  s.localRepo,
+		winningSide: WinnerCloud,
+		apply:       s.applyBundleToLocal,
+	})
+}
+
+// syncChangedSlides runs one mirrored push/pull pass with consistent error labels.
+func (s *Service) syncChangedSlides(
+	ctx context.Context,
+	since time.Time,
+	direction syncDirection,
+) error {
+	slides, err := s.listChangedSlides(ctx, direction.sourceRepo, since)
 	if err != nil {
-		return fmt.Errorf("list cloud changes: %w", err)
+		return fmt.Errorf("list %s changes: %w", direction.sourceLabel, err)
 	}
 
 	for _, slide := range slides {
-		cloudBundle, err := s.bundleForSlide(ctx, s.cloudRepo, slide)
+		sourceBundle, err := s.bundleForSlide(ctx, direction.sourceRepo, slide)
 		if err != nil {
-			return fmt.Errorf("load cloud bundle %s: %w", slide.ID, err)
+			return fmt.Errorf("load %s bundle %s: %w", direction.sourceLabel, slide.ID, err)
 		}
 
-		localBundle, exists, err := s.loadBundle(ctx, s.localRepo, slide.ID)
+		targetBundle, exists, err := s.loadBundle(ctx, direction.targetRepo, slide.ID)
 		if err != nil {
-			return fmt.Errorf("load local bundle %s: %w", slide.ID, err)
+			return fmt.Errorf("load %s bundle %s: %w", direction.targetLabel, slide.ID, err)
 		}
 		if !exists {
-			if err := s.applyBundleToLocal(ctx, cloudBundle, nil); err != nil {
-				return fmt.Errorf("pull new cloud slide %s: %w", slide.ID, err)
+			if err := direction.apply(ctx, sourceBundle, nil); err != nil {
+				return fmt.Errorf("%s new %s slide %s: %w", direction.name, direction.sourceLabel, slide.ID, err)
 			}
 			continue
 		}
 
+		localBundle := sourceBundle
+		cloudBundle := targetBundle
+		if direction.winningSide == WinnerCloud {
+			localBundle = targetBundle
+			cloudBundle = sourceBundle
+		}
+
 		_, winner, err := ResolveBundle(localBundle, cloudBundle)
 		if err != nil {
-			return fmt.Errorf("resolve pull bundle %s: %w", slide.ID, err)
+			return fmt.Errorf("resolve %s bundle %s: %w", direction.name, slide.ID, err)
 		}
-		if winner != WinnerCloud {
+		if winner != direction.winningSide {
 			continue
 		}
-		if err := s.applyBundleToLocal(ctx, cloudBundle, &localBundle); err != nil {
-			return fmt.Errorf("pull cloud slide %s: %w", slide.ID, err)
+		if err := direction.apply(ctx, sourceBundle, &targetBundle); err != nil {
+			return fmt.Errorf("%s %s slide %s: %w", direction.name, direction.sourceLabel, slide.ID, err)
 		}
 	}
 
@@ -327,18 +336,8 @@ func (s *Service) applyFiguresToCloud(
 	desired []repository.SlideFigure,
 	existing []repository.SlideFigure,
 ) error {
-	// Upload all desired figures to ensure S3 content matches local state.
-	// File content may change without metadata changes (e.g., multi-machine edits
-	// where the S3Key stays the same but the local file content differs), so we
-	// cannot skip uploads based on the reconciliation plan alone.
-	for _, figure := range desired {
-		path, err := s.localFS.ResolveFigurePath(slideID, figure.Filename)
-		if err != nil {
-			return err
-		}
-		if err := s.uploadFile(ctx, figure.S3Key, path); err != nil {
-			return err
-		}
+	if err := s.uploadDesiredFigureFiles(ctx, slideID, desired); err != nil {
+		return err
 	}
 
 	plan, err := PlanFigureReconciliation(slideID, existing, desired)
@@ -452,16 +451,8 @@ func (s *Service) applyFiguresToLocal(
 	desired []repository.SlideFigure,
 	existing []repository.SlideFigure,
 ) error {
-	// Download all desired figures to ensure local file consistency when cloud wins.
-	// Even if figure metadata is unchanged, the local file may be outdated.
-	for _, figure := range desired {
-		path, err := s.localFS.ResolveFigurePath(slideID, figure.Filename)
-		if err != nil {
-			return err
-		}
-		if err := s.downloadFile(ctx, figure.S3Key, path); err != nil {
-			return err
-		}
+	if err := s.downloadDesiredFigureFiles(ctx, slideID, desired); err != nil {
+		return err
 	}
 
 	plan, err := PlanFigureReconciliation(slideID, existing, desired)
@@ -493,6 +484,45 @@ func (s *Service) applyFiguresToLocal(
 		}
 	}
 
+	return nil
+}
+
+// uploadDesiredFigureFiles refreshes cloud figure binaries before metadata reconciliation.
+func (s *Service) uploadDesiredFigureFiles(
+	ctx context.Context,
+	slideID string,
+	desired []repository.SlideFigure,
+) error {
+	// File content may change without metadata changes, so metadata reconciliation
+	// alone is not enough to keep S3 current.
+	for _, figure := range desired {
+		path, err := s.localFS.ResolveFigurePath(slideID, figure.Filename)
+		if err != nil {
+			return err
+		}
+		if err := s.uploadFile(ctx, figure.S3Key, path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// downloadDesiredFigureFiles refreshes local figure binaries before metadata reconciliation.
+func (s *Service) downloadDesiredFigureFiles(
+	ctx context.Context,
+	slideID string,
+	desired []repository.SlideFigure,
+) error {
+	// Even if metadata is unchanged, the local binary may be stale when cloud wins.
+	for _, figure := range desired {
+		path, err := s.localFS.ResolveFigurePath(slideID, figure.Filename)
+		if err != nil {
+			return err
+		}
+		if err := s.downloadFile(ctx, figure.S3Key, path); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

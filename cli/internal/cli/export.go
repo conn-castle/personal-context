@@ -52,7 +52,7 @@ func runExport(ctx context.Context, stdout io.Writer, _ io.Writer, opts exportOp
 
 	var snapshot gitsnapshot.Snapshot
 	if opts.FromCloud {
-		cloud, err := openCloudStackFn(ctx, homeDir)
+		cloud, err := openCloudStackFn(ctx, homeDir, "")
 		if err != nil {
 			if errors.Is(err, errCloudNotConfigured) {
 				return fmt.Errorf("cloud is not configured; run 'pc setup' first")

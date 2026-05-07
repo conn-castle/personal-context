@@ -41,6 +41,7 @@ func TestCloudOnboardingFirstSyncAndDoctor(t *testing.T) {
 		"--aws-secret", cloudEnv.minioPassword,
 		"--s3-endpoint", cloudEnv.minioEndpoint,
 		"--s3-force-path-style",
+		"--api-key", cloud.APIKey,
 	)
 	if result.ExitCode != 0 {
 		t.Fatalf("cloud setup failed (exit %d):\nstdout: %s\nstderr: %s",

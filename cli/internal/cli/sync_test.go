@@ -48,13 +48,19 @@ func TestRunSyncRunnerSyncError(t *testing.T) {
 	t.Cleanup(func() { newPGXPoolFn = originalPool })
 	newPGXPoolFn = func(context.Context, string) (*pgxpool.Pool, error) { return nil, nil }
 
+	originalResolve := resolveUserIDFn
+	t.Cleanup(func() { resolveUserIDFn = originalResolve })
+	resolveUserIDFn = func(context.Context, *pgxpool.Pool, string) (string, error) {
+		return "test-user-id", nil
+	}
+
 	originalRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = originalRepo })
-	newPostgresRepoFn = func(*pgxpool.Pool) (repository.Repository, error) { return &mockRepo{}, nil }
+	newPostgresRepoFn = func(*pgxpool.Pool, string) (repository.Repository, error) { return &mockRepo{}, nil }
 
 	originalS3 := newCloudS3ClientFn
 	t.Cleanup(func() { newCloudS3ClientFn = originalS3 })
-	newCloudS3ClientFn = func(*awss3.Client, string) (*pcs3.Client, error) {
+	newCloudS3ClientFn = func(*awss3.Client, string, string) (*pcs3.Client, error) {
 		return &pcs3.Client{}, nil
 	}
 
@@ -106,13 +112,19 @@ func TestRunSyncInvokesServiceAndPrintsSuccess(t *testing.T) {
 	t.Cleanup(func() { newPGXPoolFn = originalPool })
 	newPGXPoolFn = func(context.Context, string) (*pgxpool.Pool, error) { return nil, nil }
 
+	originalResolve := resolveUserIDFn
+	t.Cleanup(func() { resolveUserIDFn = originalResolve })
+	resolveUserIDFn = func(context.Context, *pgxpool.Pool, string) (string, error) {
+		return "test-user-id", nil
+	}
+
 	originalRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = originalRepo })
-	newPostgresRepoFn = func(*pgxpool.Pool) (repository.Repository, error) { return &mockRepo{}, nil }
+	newPostgresRepoFn = func(*pgxpool.Pool, string) (repository.Repository, error) { return &mockRepo{}, nil }
 
 	originalS3 := newCloudS3ClientFn
 	t.Cleanup(func() { newCloudS3ClientFn = originalS3 })
-	newCloudS3ClientFn = func(*awss3.Client, string) (*pcs3.Client, error) {
+	newCloudS3ClientFn = func(*awss3.Client, string, string) (*pcs3.Client, error) {
 		return &pcs3.Client{}, nil
 	}
 

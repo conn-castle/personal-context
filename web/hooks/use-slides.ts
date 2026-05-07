@@ -6,8 +6,7 @@ import type {
   SlideDetail,
   PaginatedResponse,
   ProjectsResponse,
-  DeleteResponse,
-  RestoreResponse,
+  ReorderResponse,
 } from "@/lib/types";
 
 /** Filter parameters persisted across refreshes. */
@@ -77,6 +76,100 @@ function buildQuery(params?: SlideFilterParams, cursor?: string): string {
   return qs ? `?${qs}` : "";
 }
 
+interface SlideDetailResponse {
+  slide: SlideDetail;
+}
+
+const JSON_REQUEST_HEADERS = { "Content-Type": "application/json" };
+
+/**
+ * Converts unknown thrown values into a stable user-facing error string.
+ *
+ * @param error - The thrown value from a request path.
+ * @param fallback - Message to use when the thrown value is not an Error.
+ * @returns A safe message for UI state.
+ */
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
+/**
+ * Fetches JSON and throws a status-based error when the request fails.
+ *
+ * @param input - Request URL or object.
+ * @param failureMessage - Prefix for non-2xx responses.
+ * @param init - Optional fetch configuration.
+ * @returns Parsed JSON payload.
+ */
+async function fetchJsonOrThrow<T>(
+  input: RequestInfo | URL,
+  failureMessage: string,
+  init?: RequestInit
+): Promise<T> {
+  const response =
+    init === undefined ? await fetch(input) : await fetch(input, init);
+  if (!response.ok) {
+    throw new Error(`${failureMessage}: ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
+/**
+ * Sends a JSON PATCH request and returns the parsed JSON response.
+ *
+ * @param path - Request path.
+ * @param failureMessage - Prefix for non-2xx responses.
+ * @param body - JSON body to serialize.
+ * @returns Parsed JSON payload.
+ */
+function patchJsonOrThrow<T>(
+  path: string,
+  failureMessage: string,
+  body: Record<string, unknown>
+): Promise<T> {
+  return fetchJsonOrThrow<T>(path, failureMessage, {
+    method: "PATCH",
+    headers: JSON_REQUEST_HEADERS,
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Appends only slides whose ids are not already present in the list.
+ *
+ * @param existing - Current ordered slide list.
+ * @param incoming - Newly fetched slides.
+ * @returns Existing slides followed by new unique slides.
+ */
+function mergeUniqueSlides(
+  existing: SlideSummary[],
+  incoming: SlideSummary[]
+): SlideSummary[] {
+  const existingIDs = new Set(existing.map((slide) => slide.id));
+  const newSlides = incoming.filter((slide) => !existingIDs.has(slide.id));
+  return [...existing, ...newSlides];
+}
+
+/**
+ * Sorts slides using the API display order contract.
+ *
+ * @param slides - Slides to sort.
+ * @returns A new array sorted by date DESC, day_order ASC, id ASC.
+ */
+function sortSlides(slides: SlideSummary[]): SlideSummary[] {
+  return [...slides].sort((a, b) => {
+    const dateCmp = b.date.localeCompare(a.date);
+    if (dateCmp !== 0) {
+      return dateCmp;
+    }
+    const orderCmp = a.day_order.localeCompare(b.day_order);
+    if (orderCmp !== 0) {
+      return orderCmp;
+    }
+    return a.id.localeCompare(b.id);
+  });
+}
+
 /**
  * Data-fetching hook for managing slide state in the web UI.
  *
@@ -99,6 +192,24 @@ export function useSlides(): UseSlidesReturn {
   const filterParamsRef = useRef<SlideFilterParams | undefined>(undefined);
   const isFetchingMoreRef = useRef(false);
 
+  const updatePaginationState = useCallback((nextCursor: string | null) => {
+    cursorRef.current = nextCursor;
+    setHasMore(nextCursor !== null);
+  }, []);
+
+  const replaceSlidesPage = useCallback(
+    (data: PaginatedResponse<SlideSummary>) => {
+      setSlides(data.items);
+      updatePaginationState(data.next_cursor);
+    },
+    [updatePaginationState]
+  );
+
+  const removeSlideLocally = useCallback((id: string) => {
+    setSlides((prev) => prev.filter((slide) => slide.id !== id));
+    setSelectedSlide((prev) => (prev?.id === id ? null : prev));
+  }, []);
+
   const fetchSlides = useCallback(async (params?: SlideFilterParams) => {
     filterParamsRef.current = params;
     cursorRef.current = null;
@@ -106,23 +217,23 @@ export function useSlides(): UseSlidesReturn {
     setError(null);
 
     try {
-      const res = await fetch(`/api/slides${buildQuery(params)}`);
-      if (!res.ok) {
-        throw new Error(`Failed to fetch slides: ${res.status}`);
-      }
-      const data = (await res.json()) as PaginatedResponse<SlideSummary>;
-      setSlides(data.items);
-      cursorRef.current = data.next_cursor;
-      setHasMore(data.next_cursor !== null);
+      const data = await fetchJsonOrThrow<PaginatedResponse<SlideSummary>>(
+        `/api/slides${buildQuery(params)}`,
+        "Failed to fetch slides"
+      );
+      replaceSlidesPage(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to fetch slides");
+      setError(getErrorMessage(err, "Failed to fetch slides"));
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [replaceSlidesPage]);
 
   const fetchMore = useCallback(async () => {
-    if (!cursorRef.current || isFetchingMoreRef.current) return;
+    const currentCursor = cursorRef.current;
+    if (!currentCursor || isFetchingMoreRef.current) {
+      return;
+    }
 
     isFetchingMoreRef.current = true;
     setIsFetchingMore(true);
@@ -130,46 +241,33 @@ export function useSlides(): UseSlidesReturn {
     setError(null);
 
     try {
-      const res = await fetch(
-        `/api/slides${buildQuery(filterParamsRef.current, cursorRef.current)}`
+      const data = await fetchJsonOrThrow<PaginatedResponse<SlideSummary>>(
+        `/api/slides${buildQuery(filterParamsRef.current, currentCursor)}`,
+        "Failed to fetch more slides"
       );
-      if (!res.ok) {
-        throw new Error(`Failed to fetch more slides: ${res.status}`);
-      }
-      const data = (await res.json()) as PaginatedResponse<SlideSummary>;
-      setSlides((prev) => {
-        const existingIds = new Set(prev.map(s => s.id));
-        const newItems = data.items.filter(item => !existingIds.has(item.id));
-        return [...prev, ...newItems];
-      });
-      cursorRef.current = data.next_cursor;
-      setHasMore(data.next_cursor !== null);
+      setSlides((prev) => mergeUniqueSlides(prev, data.items));
+      updatePaginationState(data.next_cursor);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to fetch more slides"
-      );
+      setError(getErrorMessage(err, "Failed to fetch more slides"));
     } finally {
       isFetchingMoreRef.current = false;
       setIsFetchingMore(false);
       setIsLoading(false);
     }
-  }, []);
+  }, [updatePaginationState]);
 
   const selectSlide = useCallback(async (id: string) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      const res = await fetch(`/api/slides/${encodeURIComponent(id)}`);
-      if (!res.ok) {
-        throw new Error(`Failed to fetch slide: ${res.status}`);
-      }
-      const data = (await res.json()) as { slide: SlideDetail };
+      const data = await fetchJsonOrThrow<SlideDetailResponse>(
+        `/api/slides/${encodeURIComponent(id)}`,
+        "Failed to fetch slide"
+      );
       setSelectedSlide(data.slide);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to fetch slide detail"
-      );
+      setError(getErrorMessage(err, "Failed to fetch slide detail"));
     } finally {
       setIsLoading(false);
     }
@@ -180,23 +278,14 @@ export function useSlides(): UseSlidesReturn {
       setError(null);
 
       try {
-        const res = await fetch(`/api/slides/${encodeURIComponent(id)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          throw new Error(`Failed to update slide: ${res.status}`);
-        }
-        const data = (await res.json()) as {
-          slide: SlideDetail;
-          sync_version: number;
-        };
+        const data = await patchJsonOrThrow<SlideDetailResponse>(
+          `/api/slides/${encodeURIComponent(id)}`,
+          "Failed to update slide",
+          body
+        );
 
         // Update selectedSlide if it matches the updated slide
-        setSelectedSlide((prev) =>
-          prev?.id === id ? data.slide : prev
-        );
+        setSelectedSlide((prev) => (prev?.id === id ? data.slide : prev));
 
         // Update the summary in the slides list
         setSlides((prev) =>
@@ -213,89 +302,67 @@ export function useSlides(): UseSlidesReturn {
         );
         return true;
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to update slide"
-        );
+        setError(getErrorMessage(err, "Failed to update slide"));
         return false;
       }
     },
     []
   );
 
-  const deleteSlide = useCallback(async (id: string) => {
-    setError(null);
+  const performOptimisticRemoval = useCallback(
+    async (
+      id: string,
+      path: string,
+      method: "DELETE" | "POST",
+      failureMessage: string
+    ) => {
+      setError(null);
+      removeSlideLocally(id);
 
-    setSlides((prev) => prev.filter((s) => s.id !== id));
-    setSelectedSlide((prev) => (prev?.id === id ? null : prev));
-
-    try {
-      const res = await fetch(`/api/slides/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) {
-        throw new Error(`Failed to delete slide: ${res.status}`);
+      try {
+        await fetchJsonOrThrow<unknown>(path, failureMessage, { method });
+        return true;
+      } catch (err) {
+        setError(getErrorMessage(err, failureMessage));
+        await fetchSlides(filterParamsRef.current);
+        return false;
       }
-      (await res.json()) as DeleteResponse;
-      return true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete slide");
-      await fetchSlides(filterParamsRef.current);
-      return false;
-    }
-  }, [fetchSlides]);
+    },
+    [fetchSlides, removeSlideLocally]
+  );
+
+  const deleteSlide = useCallback(async (id: string) => {
+    return performOptimisticRemoval(
+      id,
+      `/api/slides/${encodeURIComponent(id)}`,
+      "DELETE",
+      "Failed to delete slide"
+    );
+  }, [performOptimisticRemoval]);
 
   const restoreSlide = useCallback(async (id: string) => {
-    setError(null);
-
-    setSlides((prev) => prev.filter((s) => s.id !== id));
-    setSelectedSlide((prev) => (prev?.id === id ? null : prev));
-
-    try {
-      const res = await fetch(
-        `/api/slides/${encodeURIComponent(id)}/restore`,
-        { method: "POST" }
-      );
-      if (!res.ok) {
-        throw new Error(`Failed to restore slide: ${res.status}`);
-      }
-      (await res.json()) as RestoreResponse;
-      return true;
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to restore slide"
-      );
-      await fetchSlides(filterParamsRef.current);
-      return false;
-    }
-  }, [fetchSlides]);
+    return performOptimisticRemoval(
+      id,
+      `/api/slides/${encodeURIComponent(id)}/restore`,
+      "POST",
+      "Failed to restore slide"
+    );
+  }, [performOptimisticRemoval]);
 
   const reorderSlide = useCallback(
     async (id: string, body: Record<string, unknown>) => {
       setError(null);
 
       try {
-        const res = await fetch(
+        const data = await patchJsonOrThrow<ReorderResponse>(
           `/api/slides/${encodeURIComponent(id)}/order`,
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(body),
-          }
+          "Failed to reorder slide",
+          body
         );
-        if (!res.ok) {
-          throw new Error(`Failed to reorder slide: ${res.status}`);
-        }
-        const data = (await res.json()) as {
-          id: string;
-          date: string;
-          day_order: string;
-          updated_at: string;
-          sync_version: number;
-        };
 
         setSlides((prev) =>
-          prev
-            .map((s) =>
+          sortSlides(
+            prev.map((s) =>
               s.id === id
                 ? {
                     ...s,
@@ -305,18 +372,10 @@ export function useSlides(): UseSlidesReturn {
                   }
                 : s
             )
-            .sort((a, b) => {
-              const dateCmp = b.date.localeCompare(a.date);
-              if (dateCmp !== 0) return dateCmp;
-              const orderCmp = a.day_order.localeCompare(b.day_order);
-              if (orderCmp !== 0) return orderCmp;
-              return a.id.localeCompare(b.id);
-            })
+          )
         );
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to reorder slide"
-        );
+        setError(getErrorMessage(err, "Failed to reorder slide"));
       }
     },
     []
@@ -326,41 +385,30 @@ export function useSlides(): UseSlidesReturn {
     setError(null);
 
     try {
-      const res = await fetch("/api/projects");
-      if (!res.ok) {
-        throw new Error(`Failed to fetch projects: ${res.status}`);
-      }
-      const data = (await res.json()) as ProjectsResponse;
+      const data = await fetchJsonOrThrow<ProjectsResponse>(
+        "/api/projects",
+        "Failed to fetch projects"
+      );
       setProjects(data.projects);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to fetch projects"
-      );
+      setError(getErrorMessage(err, "Failed to fetch projects"));
     }
   }, []);
 
   const refreshSlides = useCallback(async () => {
-    cursorRef.current = null;
-    setHasMore(false);
+    updatePaginationState(null);
     setError(null);
 
     try {
-      const res = await fetch(
-        `/api/slides${buildQuery(filterParamsRef.current)}`
+      const data = await fetchJsonOrThrow<PaginatedResponse<SlideSummary>>(
+        `/api/slides${buildQuery(filterParamsRef.current)}`,
+        "Failed to refresh slides"
       );
-      if (!res.ok) {
-        throw new Error(`Failed to refresh slides: ${res.status}`);
-      }
-      const data = (await res.json()) as PaginatedResponse<SlideSummary>;
-      setSlides(data.items);
-      cursorRef.current = data.next_cursor;
-      setHasMore(data.next_cursor !== null);
+      replaceSlidesPage(data);
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to refresh slides"
-      );
+      setError(getErrorMessage(err, "Failed to refresh slides"));
     }
-  }, []);
+  }, [replaceSlidesPage, updatePaginationState]);
 
   return {
     slides,

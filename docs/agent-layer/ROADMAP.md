@@ -104,7 +104,15 @@ Incomplete:
 - SettingsOverlay with sync status, data management (purge trash with AlertDialog confirmation), about info. `useLocalStorage` hook persists UI state (view mode, project filter, panel visibility, last selected slide).
 - v0.dev reference used solely for visual/UI parity; all backend, logic, and data layer implemented from scratch.
 
-## Phase 10 — Deployment, CI/CD, and Integration Testing
+## Phase 10 ✅ — Authentication & Multi-User
+- Auth.js v5 with Credentials provider and JWT sessions (90-day maxAge). Login and registration pages with shadcn/ui.
+- Per-user data isolation: `users` and `api_keys` tables (Postgres only), `slides.user_id` FK, per-user `sync_version`, S3 `users/{user_id}/` key prefix.
+- All API routes protected via `requireUser()`: Bearer token (API key) or Auth.js session. Local mode (`pc serve`) bypasses auth.
+- CLI API key system: `pc setup --init-cloud-schema` bootstraps a fresh Postgres database, `pc setup --api-key` stores the user API key, and `resolveUserIDFromAPIKey` validates against `api_keys` table. `openCloudStack` auto-resolves userID from config.
+- API key CRUD: `POST /api/api-keys` (create), `GET /api/api-keys` (list), `DELETE /api/api-keys/[id]` (revoke). Registration gating via `REGISTRATION_ENABLED` env var.
+- Tests: auth-helpers (7), password (3), register (8), api-keys CRUD (13), setup API key validation (2), resolveUserID (3). All Go and web tests pass. Aggregate Go coverage 95.5%.
+
+## Phase 11 — Deployment, CI/CD, and Integration Testing
 
 ### Goal
 - Production-ready deployment. Full CI/CD. Full system e2e tests. Complete documentation.
