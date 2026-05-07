@@ -1,0 +1,216 @@
+---
+name: ship-pr
+description: >-
+  Run the full PR lifecycle for completed local work: audit changes, commit,
+  push, open PR, monitor CI, handle review comments, and finish green. Use when
+  the user asks to ship, open, or take work to a PR. Use `fix-ci` for an
+  existing failing PR, `address-pr-comments` for review feedback, and
+  `finish-task` when no PR is needed.
+---
+
+# ship-pr
+
+This is the PR lifecycle orchestrator.
+It should:
+- audit and commit any uncommitted changes
+- push and create a PR
+- monitor CI and fix failures
+- wait for review comments
+- address every feedback comment
+- ensure CI passes at the end
+
+## Defaults
+
+- Default base branch is the repository's default branch (usually `main`).
+- Default PR title and body are auto-generated from the branch name, commit history, and the work that was done.
+- Default comment wait time is 15 minutes from PR creation.
+- If explicit PR title, body, or base branch instructions are provided, use those instead of auto-generating.
+
+## Inputs
+
+Accept any combination of:
+- explicit PR title
+- explicit PR body or description instructions
+- explicit base branch
+- explicit comment wait time (default 15 minutes)
+- whether to skip the comment wait period
+
+## Required behavior
+
+Delegate to:
+- `audit-and-fix-uncommitted-changes` for pre-commit quality gates
+- `fix-ci` for CI failure diagnosis and repair
+- `address-pr-comments` for review comment handling
+
+## Global constraints
+
+- Do not create a PR if the current branch is the default branch and there is nothing to ship.
+- Do not skip CI checks.
+- Every feedback comment (not pure bot status messages or CI notifications) must have a reply before the skill completes. Automated review comments from tools such as Copilot or CodeRabbit count as feedback.
+- The skill must end with CI passing.
+- Do not force-push unless explicitly instructed.
+
+## Human checkpoints
+
+- Required: ask when the current branch is the default branch and there are no changes to ship (no uncommitted changes, no commits ahead of the remote, and no non-default branch to PR).
+- If the working tree has no uncommitted changes but the current branch is not the default branch, proceed — the user is asking for a PR of the branch's commits.
+- Required: ask when PR creation fails due to an existing PR or branch conflict.
+- Required: ask when CI failures persist after 3 fix-ci iterations.
+- When a checkpoint involves a genuine tradeoff between substantive alternatives, present at least two options with brief pros and cons, state which you recommend and why, and let the human decide.
+- Stay autonomous during normal commit, push, PR creation, CI monitoring, and comment handling.
+
+## Orchestration loop
+
+### Phase 1: Prepare and push (Committer)
+
+1. Determine the current branch and the repository's default branch.
+2. Run `git status --porcelain` to check for uncommitted changes.
+3. If uncommitted changes exist and the current branch is the default branch:
+   a. Create a new branch with a descriptive name derived from the changes (e.g., `feat/add-widget-support` or `fix/null-pointer-in-parser`).
+   b. Switch to the new branch before continuing.
+4. If uncommitted changes exist:
+   a. Use the `audit-and-fix-uncommitted-changes` skill to stabilize the working tree.
+   b. Stage all changes: `git add -A`
+   c. Craft a commit message that describes the work done.
+   d. Commit the changes.
+5. If no uncommitted changes exist and the current branch is not the default branch, proceed — the branch's existing commits are the content to ship.
+6. If no uncommitted changes exist and the current branch is the default branch, trigger a human checkpoint — there is nothing to ship.
+7. Push the branch to the remote.
+
+### Phase 2: Create the PR (PR creator)
+
+1. Check if a PR already exists for the current branch using `gh pr view`.
+2. If no PR exists:
+   a. Auto-generate the PR title from the branch name and commit history, unless explicit title was provided.
+   b. Auto-generate the PR body summarizing what was done, unless explicit body was provided.
+   c. Create the PR: `gh pr create --title "<title>" --body "<body>" --base <base-branch>`
+3. If a PR already exists, use that PR.
+4. Record the PR number/URL and the current time as `start_time`.
+
+### Phase 3: Wait for CI and fix failures (CI monitor)
+
+1. Poll CI status using `gh pr checks <pr-number>`.
+2. Wait for all CI checks to complete.
+3. If any CI check failed:
+   a. Use the `fix-ci` skill, passing the PR number.
+   b. The fix-ci skill handles the internal loop of diagnose, fix, audit, commit, push, re-check.
+4. CI must be passing before proceeding.
+
+### Phase 4: Wait for review comments (Timer)
+
+The review-comment wait timer starts at PR creation (`start_time` from Phase 2). Time spent waiting for CI in Phase 3 counts toward this timer.
+
+1. Calculate elapsed time since `start_time`.
+2. If less than 15 minutes (or the configured wait time) have elapsed, wait for the remaining time.
+3. If the wait time has already elapsed (e.g., CI took longer than the wait period), proceed immediately.
+
+### Phase 5: Address PR comments (Comment handler)
+
+1. Read all PR comments (review comments and conversation comments).
+2. Filter out pure bot status messages and CI notifications. Automated review comments from tools such as Copilot or CodeRabbit are feedback, not status messages.
+3. If there are feedback comments to address:
+   a. Use the `address-pr-comments` skill, passing the PR number and all feedback comments.
+   b. The address-pr-comments skill handles implementation, audit, commit, push, and replies.
+   c. Every feedback comment must receive a reply.
+4. If no feedback comments exist, proceed.
+
+### Phase 6: Final CI verification (CI monitor)
+
+1. If changes were pushed in Phase 5:
+   a. Wait for CI to complete.
+   b. If CI fails, use the `fix-ci` skill again.
+   c. Repeat until CI passes.
+2. Confirm CI is green.
+
+### Phase 7: Audit comment coverage (Comment auditor)
+
+Independently verify that every review comment was properly handled. Do not
+trust the sub-skill output alone — re-read the PR state and validate.
+
+1. Re-fetch all PR comments (review comments, conversation comments, and review
+   bodies) using the same commands from Phase 5 / the address-pr-comments skill.
+2. For every feedback comment, verify:
+   a. A reply exists from this agent (not just from a human or bot).
+   b. The reply opens with one of the three bold verdicts defined in
+      "Comment reply format" below.
+   c. If the verdict is **Fixed**, the named commit exists and contains a
+      relevant change.
+   d. If the verdict is **No change**, the justification is substantive and
+      technically grounded — not vague or generic.
+   e. If the verdict is **Deferred**, the named location actually contains
+      the tracked item, and the deferral is legitimate (not a bug introduced
+      by this PR).
+3. Flag any comment that fails verification:
+   - **Missing reply:** never responded to.
+   - **Missing verdict:** reply exists but does not open with a bold verdict.
+   - **Hollow fix:** verdict says "Fixed" but no code change exists in the
+     named commit.
+   - **Unjustified decline:** verdict says "No change" but the justification
+     is vague, generic, or missing.
+   - **Lazy deferral:** verdict says "Deferred" but the item is not actually
+     tracked, or the comment points to a bug introduced by this PR.
+   - **Generic dismissal:** batch-style reply covering multiple comments
+     rather than addressing each specifically.
+4. If any comments are flagged:
+   a. Re-address them: implement the fix or write a proper justification.
+   b. Audit, commit, and push the new changes.
+   c. Post a follow-up reply on each re-addressed comment. If a previously declined suggestion was subsequently implemented, acknowledge the reversal and describe the concrete change.
+   d. Re-run this phase to confirm all flags are resolved.
+5. Only proceed when every feedback comment passes verification.
+
+### Phase 8: Close the run (Reporter)
+
+1. Confirm:
+   - CI is passing
+   - every comment has a reply that passes the Phase 7 audit
+   - all changes are committed and pushed
+2. Summarize the PR lifecycle outcome.
+
+## Comment reply format
+
+Every reply to a review comment must open with a **bold verdict** on one line,
+followed by a concise justification. There are exactly three verdicts:
+
+1. **Fixed in `<short-hash>`.** — The suggestion was implemented. Describe the
+   concrete change.
+2. **No change — `<reason>`.** — The suggestion was evaluated and declined.
+   `<reason>` is a short label: `by design`, `pre-existing behavior`,
+   `not a regression`, `testability`, etc. Follow with the technical
+   justification.
+3. **Deferred — tracked in `<location>`.** — The suggestion has merit but is
+   out of scope. `<location>` names where it was recorded (e.g.,
+   `ISSUES.md`, `BACKLOG.md`, a GitHub issue link). The suggestion must
+   actually be recorded there before using this verdict.
+
+Do not use "deferred" as a way to avoid doing work that belongs in this PR.
+A comment is only legitimately deferred when:
+- It requests a new feature or enhancement beyond the PR's scope.
+- It identifies a pre-existing issue not introduced by this PR.
+- Fixing it would require a non-trivial refactor unrelated to the PR's purpose.
+
+If the suggestion points to a bug or correctness issue introduced by this PR,
+it must be fixed, not deferred.
+
+## Guardrails
+
+- Do not skip the audit-and-fix step before committing.
+- Do not leave any feedback comment without a reply.
+- Do not end with CI failing.
+- Do not force-push or rewrite history unless explicitly instructed.
+- Do not create duplicate PRs.
+- If a previously declined suggestion is subsequently implemented, the follow-up reply must acknowledge the reversal.
+
+## Definition of done
+
+- A PR exists for the current branch and `gh pr checks` shows every required CI check passing on the final pushed commit.
+- Every feedback comment (excluding pure bot status/CI notifications) has a reply that opens with one of the three bold verdicts (`Fixed in <hash>`, `No change — <reason>`, `Deferred — tracked in <location>`) and passes the Phase 7 audit.
+- Phase 7 was executed by re-fetching the PR state; no comment is flagged as missing reply, hollow fix, unjustified decline, lazy deferral, or generic dismissal at close.
+- The skill did not force-push, did not create a duplicate PR, and did not end with CI failing.
+
+## Final handoff
+
+After the run:
+1. Echo the PR URL.
+2. Summarize: what was committed, CI status, comments addressed.
+3. State whether all comments passed the Phase 7 audit or if any require further human attention.
+4. If any comments were re-addressed during the audit, list them and explain what was corrected.

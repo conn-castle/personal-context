@@ -1,0 +1,90 @@
+[agents]
+[agents.antigravity]
+enabled = true
+
+[agents.claude]
+enabled = true
+model = 'opus'
+reasoning_effort = 'high'
+
+[agents.claude_vscode]
+enabled = true
+
+[agents.codex]
+enabled = true
+reasoning_effort = 'xhigh'
+
+[agents.codex.agent_specific]
+[agents.codex.agent_specific.features]
+multi_agent = true
+prevent_idle_sleep = true
+
+[agents.copilot_cli]
+enabled = true
+
+[agents.gemini]
+enabled = true
+
+[agents.vscode]
+enabled = true
+
+[approvals]
+mode = 'yolo'
+
+[mcp]
+[[mcp.servers]]
+args = ['-y', '@upstash/context7-mcp@2.1.1']
+command = 'npx'
+enabled = true
+id = 'context7'
+transport = 'stdio'
+
+[mcp.servers.env]
+CONTEXT7_API_KEY = '${AL_CONTEXT7_API_KEY}'
+
+[[mcp.servers]]
+enabled = true
+http_transport = 'streamable'
+id = 'tavily'
+transport = 'http'
+url = 'https://mcp.tavily.com/mcp/?tavilyApiKey=${AL_TAVILY_API_KEY}'
+
+[[mcp.servers]]
+args = ['mcp-server-fetch==2025.4.7']
+command = 'uvx'
+enabled = true
+id = 'fetch'
+transport = 'stdio'
+
+[[mcp.servers]]
+args = ['-y', '@playwright/mcp@0.0.68']
+command = 'npx'
+enabled = true
+id = 'playwright'
+transport = 'stdio'
+
+[[mcp.servers]]
+args = ['-y', 'mcp-ripgrep@0.4.0']
+clients = ['gemini', 'claude', 'codex']
+command = 'npx'
+enabled = true
+id = 'ripgrep'
+transport = 'stdio'
+
+[[mcp.servers]]
+args = ['-y', '@modelcontextprotocol/server-filesystem@2026.1.14', '${AL_REPO_ROOT}']
+clients = ['gemini', 'claude', 'codex']
+command = 'npx'
+enabled = true
+id = 'filesystem'
+transport = 'stdio'
+
+[warnings]
+instruction_token_threshold = 10000
+mcp_schema_tokens_server_threshold = 20000
+mcp_schema_tokens_total_threshold = 30000
+mcp_server_threshold = 15
+mcp_server_tools_threshold = 25
+mcp_tools_total_threshold = 60
+noise_mode = 'default'
+version_update_on_sync = true

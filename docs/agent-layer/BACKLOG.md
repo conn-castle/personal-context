@@ -28,6 +28,12 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
 
 <!-- ENTRIES START -->
 
+- Backlog 2026-05-07 artifact-terminology: Rename slides to bundles or artifacts
+    Priority: High. Area: cli, web, docs
+    Description: Replace user-facing "slide" terminology with a more accurate term because `slide.html` is optional and records can be notes/data-only.
+    Acceptance criteria: Product terminology is decided (`bundle` vs `artifact`) and reflected consistently in CLI commands/help, web UI labels, API-facing docs, README, and agent memory.
+    Notes: Preserve backward compatibility for existing IDs, storage paths, and scripts unless a separate migration is explicitly planned.
+
 - Backlog 2026-05-07 deep-search-data-files: Search extracted data-file contents
     Priority: Medium. Area: cli, search
     Description: Add or design a `pc deep-search` capability that searches extracted text from attached data files, not just record HTML/notes/project fields.
