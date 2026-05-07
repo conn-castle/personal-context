@@ -214,24 +214,22 @@ run_checksum_integrity() {
       fail "checksums.txt format is invalid"
     fi
 
-    (
-      cd "$dist_dir"
-      if command -v sha256sum >/dev/null 2>&1; then
-        if sha256sum -c checksums.txt --status 2>/dev/null || sha256sum -c checksums.txt >/dev/null 2>&1; then
-          pass "Checksums verified successfully (using sha256sum)"
-        else
-          fail "Checksum verification failed (using sha256sum)"
-        fi
-      elif command -v shasum >/dev/null 2>&1; then
-        if shasum -a 256 -c checksums.txt >/dev/null 2>&1; then
-          pass "Checksums verified successfully (using shasum)"
-        else
-          fail "Checksum verification failed (using shasum)"
-        fi
+    if command -v sha256sum >/dev/null 2>&1; then
+      if (cd "$dist_dir" && sha256sum -c checksums.txt --status 2>/dev/null) \
+        || (cd "$dist_dir" && sha256sum -c checksums.txt >/dev/null 2>&1); then
+        pass "Checksums verified successfully (using sha256sum)"
       else
-        fail "Neither sha256sum nor shasum found; cannot verify checksum content."
+        fail "Checksum verification failed (using sha256sum)"
       fi
-    )
+    elif command -v shasum >/dev/null 2>&1; then
+      if (cd "$dist_dir" && shasum -a 256 -c checksums.txt >/dev/null 2>&1); then
+        pass "Checksums verified successfully (using shasum)"
+      else
+        fail "Checksum verification failed (using shasum)"
+      fi
+    else
+      fail "Neither sha256sum nor shasum found; cannot verify checksum content."
+    fi
 
     expected_checksum_files=(
       "pc-darwin-arm64"

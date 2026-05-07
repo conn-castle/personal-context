@@ -119,7 +119,8 @@ release-changelog-check: ## Validate CHANGELOG.md has release notes (set RELEASE
 		echo "RELEASE_TAG must be a stable tag in vX.Y.Z format (got: $${RELEASE_TAG})" >&2; \
 		exit 1; \
 	fi
-	@if ! grep -Eq "^## $${RELEASE_TAG} - [0-9]{4}-[0-9]{2}-[0-9]{2}$$" CHANGELOG.md; then \
+	@TAG_RE=$$(printf '%s\n' "$${RELEASE_TAG}" | sed 's/\./\\./g'); \
+	if ! grep -Eq "^## $${TAG_RE} - [0-9]{4}-[0-9]{2}-[0-9]{2}$$" CHANGELOG.md; then \
 		echo "CHANGELOG.md missing release section: ## $${RELEASE_TAG} - YYYY-MM-DD" >&2; \
 		exit 1; \
 	fi

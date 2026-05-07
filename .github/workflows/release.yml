@@ -45,7 +45,11 @@ jobs:
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME}"
 
-          NOTES=$(sed -n "/^## ${VERSION} /,/^## v[0-9]/p" CHANGELOG.md | tail -n +2 | grep -v "^## v[0-9]" || true)
+          NOTES=$(awk -v start="## ${VERSION} " '
+            index($0, start) == 1 { capturing = 1; next }
+            capturing && /^## v[0-9]/ { capturing = 0 }
+            capturing { print }
+          ' CHANGELOG.md)
 
           NOTES=$(echo "$NOTES" | awk '
             NF { found=1 }

@@ -54,9 +54,9 @@ if [[ ! -f "$source_tgz" ]]; then
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then
-  (cd "$dist_dir" && rm -f checksums.txt && sha256sum ./* > checksums.txt)
+  (cd "$dist_dir" && rm -f checksums.txt && sha256sum pc-* *.tar.gz > checksums.txt)
 elif command -v shasum >/dev/null 2>&1; then
-  (cd "$dist_dir" && rm -f checksums.txt && shasum -a 256 ./* > checksums.txt)
+  (cd "$dist_dir" && rm -f checksums.txt && shasum -a 256 pc-* *.tar.gz > checksums.txt)
 else
   echo "ERROR: sha256sum/shasum not found; cannot generate checksums.txt" >&2
   exit 1
