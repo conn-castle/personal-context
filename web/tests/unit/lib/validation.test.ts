@@ -180,6 +180,18 @@ describe("validateSlideUpdateInput", () => {
     expect(result.valid).toBe(false);
   });
 
+  it("rejects project_id with leading or trailing whitespace", () => {
+    const trailing = validateSlideUpdateInput({ project_id: "org/proj " });
+    expect(trailing.valid).toBe(false);
+    if (!trailing.valid) expect(trailing.error).toContain("whitespace");
+
+    const leading = validateSlideUpdateInput({ project_id: " org/proj" });
+    expect(leading.valid).toBe(false);
+
+    const whitespaceOnly = validateSlideUpdateInput({ project_id: "   " });
+    expect(whitespaceOnly.valid).toBe(false);
+  });
+
   it("normalizes empty string notes to null in returned data", () => {
     const body: Record<string, unknown> = { notes: "" };
     const result = validateSlideUpdateInput(body);

@@ -1074,6 +1074,30 @@ func TestPatchSlide_RejectsEmptyProjectID(t *testing.T) {
 	}
 }
 
+func TestPatchSlide_RejectsProjectIDWithWhitespace(t *testing.T) {
+	repo := newMockRepo()
+	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	for _, body := range []string{
+		`{"project_id":"org/proj "}`,
+		`{"project_id":" org/proj"}`,
+		`{"project_id":"   "}`,
+	} {
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed for body %s: %v", body, err)
+		}
+		if resp.StatusCode != 400 {
+			t.Fatalf("expected 400 for %s, got %d", body, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+}
+
 func TestPatchSlide_InvalidGitHash(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()

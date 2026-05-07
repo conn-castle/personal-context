@@ -176,11 +176,12 @@ export function validateSlideUpdateInput(
   if ("project_id" in body) {
     if (
       typeof body.project_id !== "string" ||
-      body.project_id.trim() === ""
+      body.project_id.trim() === "" ||
+      body.project_id !== body.project_id.trim()
     ) {
       return {
         valid: false,
-        error: "project_id must be a non-empty string",
+        error: "project_id must be a non-empty string with no leading or trailing whitespace",
       };
     }
   }

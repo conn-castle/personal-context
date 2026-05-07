@@ -391,8 +391,8 @@ func validatePatchBody(body map[string]any) (map[string]any, string) {
 
 	if value, ok := body["project_id"]; ok {
 		projectID, ok := value.(string)
-		if !ok || strings.TrimSpace(projectID) == "" {
-			return nil, "project_id must be a non-empty string"
+		if !ok || projectID == "" || projectID != strings.TrimSpace(projectID) {
+			return nil, "project_id must be a non-empty string with no leading or trailing whitespace"
 		}
 		normalized["project_id"] = projectID
 	}
