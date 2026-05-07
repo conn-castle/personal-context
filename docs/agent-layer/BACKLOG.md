@@ -28,6 +28,12 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
 
 <!-- ENTRIES START -->
 
+- Backlog 2026-05-07 deep-search-data-files: Search extracted data-file contents
+    Priority: Medium. Area: cli, search
+    Description: Add or design a `pc deep-search` capability that searches extracted text from attached data files, not just record HTML/notes/project fields.
+    Acceptance criteria: There is a concrete design or implementation path for indexing/extracting data-file contents and querying them from the CLI.
+    Notes: Follow-up from vault-support handoff; keep core `pc` commands general and avoid source-specific ingest commands.
+
 - Backlog 2026-05-07 clerk-auth-eval: Evaluate Clerk instead of custom Auth.js auth
     Priority: Medium. Area: web, auth
     Description: Assess whether Clerk should replace the current custom Auth.js/NextAuth credentials and API-key implementation for web authentication.

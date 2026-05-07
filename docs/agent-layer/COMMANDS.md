@@ -221,6 +221,20 @@ make test
 ```
 Run from: repo root
 
+- Run release preflight checks
+```bash
+make release-preflight RELEASE_TAG=vX.Y.Z
+```
+Run from: repo root
+Notes: Requires a matching `CHANGELOG.md` section (`## vX.Y.Z - YYYY-MM-DD`) and validates release artifact generation with mocked Go builds.
+
+- Build release artifacts
+```bash
+make release-dist PC_VERSION=vX.Y.Z DIST_DIR=dist
+```
+Run from: repo root
+Notes: Cross-compiles `pc` binaries for macOS/Linux, creates `personal-context-X.Y.Z.tar.gz`, and writes `checksums.txt`.
+
 - Start web UI (auto-detects local vs cloud mode)
 ```bash
 make dev

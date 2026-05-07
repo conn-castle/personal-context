@@ -1,0 +1,209 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+      - name: Validate stable release tag format
+        run: |
+          set -euo pipefail
+          if [[ ! "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Unsupported release tag ${GITHUB_REF_NAME}. Release publishing supports stable tags only (vX.Y.Z)."
+            exit 1
+          fi
+      - name: Validate changelog
+        run: |
+          set -euo pipefail
+          make release-changelog-check RELEASE_TAG="${GITHUB_REF_NAME}"
+      - name: Build release artifacts
+        run: |
+          set -euo pipefail
+          make release-dist PC_VERSION="${GITHUB_REF_NAME}" DIST_DIR=dist
+
+      - name: Upload dist artifacts for downstream jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+
+          NOTES=$(sed -n "/^## ${VERSION} /,/^## v[0-9]/p" CHANGELOG.md | tail -n +2 | grep -v "^## v[0-9]" || true)
+
+          NOTES=$(echo "$NOTES" | awk '
+            NF { found=1 }
+            found { lines[++n] = $0 }
+            END {
+              for (i=n; i>=1; i--) { if (lines[i] ~ /[^ \t]/) { last=i; break } }
+              for (i=1; i<=last; i++) print lines[i]
+            }
+          ')
+
+          if [ -z "$NOTES" ]; then
+            echo "::error::No changelog entry found for ${VERSION} in CHANGELOG.md"
+            echo "::error::Ensure CHANGELOG.md has an entry like: ## ${VERSION} - YYYY-MM-DD"
+            exit 1
+          fi
+
+          echo "notes<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.changelog.outputs.notes }}
+          files: |
+            dist/*
+
+  publish-homebrew-tap:
+    needs: build-release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    concurrency:
+      group: personal-context-homebrew-tap
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout personal-context at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache: false
+
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Create GitHub App token for tap repo
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_PRIVATE_KEY }}
+          owner: conn-castle
+          repositories: homebrew-tap
+
+      - name: Checkout homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: conn-castle/homebrew-tap
+          token: ${{ steps.app-token.outputs.token }}
+          path: homebrew-tap
+
+      - name: Verify release tarball is available
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          SEMVER="${TAG#v}"
+          TARBALL="personal-context-${SEMVER}.tar.gz"
+          URL="https://github.com/conn-castle/personal-context/releases/download/${TAG}/${TARBALL}"
+
+          for i in 1 2 3 4 5; do
+            if curl -fsIL "$URL" >/dev/null; then
+              exit 0
+            fi
+            sleep 3
+          done
+
+          echo "::error::Release asset not reachable: $URL"
+          exit 1
+
+      - name: Add or update formula url + sha256
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_REF_NAME}"
+          SEMVER="${TAG#v}"
+          TARBALL="personal-context-${SEMVER}.tar.gz"
+          URL="https://github.com/conn-castle/personal-context/releases/download/${TAG}/${TARBALL}"
+
+          if [ ! -f "dist/checksums.txt" ]; then
+            echo "::error::dist/checksums.txt not found in workflow artifacts"
+            exit 1
+          fi
+
+          SHA="$(cd cli && go run -tags tools ./internal/tools/extractchecksum ../dist/checksums.txt "${TARBALL}")"
+
+          if [ -z "${SHA}" ]; then
+            echo "::error::Failed to locate sha256 for ${TARBALL} in dist/checksums.txt"
+            exit 1
+          fi
+
+          FORMULA="homebrew-tap/Formula/personal-context.rb"
+          if [ ! -f "${FORMULA}" ]; then
+            mkdir -p "$(dirname "${FORMULA}")"
+            cat > "${FORMULA}" <<'RUBY'
+class PersonalContext < Formula
+  desc "Personal structured vault for searchable knowledge, data, files, and slides"
+  homepage "https://github.com/conn-castle/personal-context"
+  url "https://github.com/conn-castle/personal-context/releases/download/v0.0.0/personal-context-0.0.0.tar.gz"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  license "PolyForm-Noncommercial-1.0.0"
+
+  depends_on "go" => :build
+
+  def install
+    cd "cli" do
+      ldflags = %W[
+        -s -w
+        -X main.version=v#{version}
+      ].join(" ")
+
+      system "go", "build", *std_go_args(output: bin/"pc", ldflags: ldflags), "./cmd/pc"
+    end
+
+    generate_completions_from_executable(
+      bin/"pc",
+      shell_parameter_format: :cobra,
+      shells:                 [:bash, :zsh, :fish],
+    )
+  end
+
+  test do
+    assert_match "Personal Context CLI", shell_output("#{bin}/pc --help")
+    assert_match "bash completion", shell_output("#{bin}/pc completion bash")
+  end
+end
+RUBY
+          fi
+
+          (cd cli && go run -tags tools ./internal/tools/updateformula "../${FORMULA}" "${URL}" "${SHA}")
+
+          git -C homebrew-tap status --porcelain
+          git -C homebrew-tap diff -- Formula/personal-context.rb
+
+      - name: Create PR in tap repo
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          path: homebrew-tap
+          branch: bump-personal-context-${{ github.ref_name }}
+          commit-message: "personal-context ${{ github.ref_name }}"
+          title: "personal-context ${{ github.ref_name }}"
+          body: "Automated formula bump for ${{ github.ref_name }}."
+          base: main

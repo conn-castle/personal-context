@@ -32,6 +32,7 @@
 # <<< agent-layer
 
 tmp/
+dist/
 .DS_Store
 
 # Phase 1 scaffolding ignores
