@@ -26,6 +26,8 @@ describe("GET /api/sync/changes", () => {
       day_order: "a0",
       html_content: "<p>Test content</p>",
       project_id: "org/proj",
+      source_device_id: "device-a",
+      source_ref: null,
       updated_at: "2026-03-01T14:00:00.000Z",
       deleted_at: null,
       figure_count: 2,
@@ -47,7 +49,39 @@ describe("GET /api/sync/changes", () => {
     const body = await res.json();
     expect(body.items).toHaveLength(1);
     expect(body.items[0].id).toBe("20260301-aabbccdd");
+    expect(body.items[0].source_device_id).toBe("device-a");
     expect(body.server_now).toBe("2026-03-09T10:00:00.000Z");
+  });
+
+  it("returns null HTML and source ref in changed slides", async () => {
+    const slideRow = {
+      id: "20260301-aabbccdd",
+      date: "2026-03-01",
+      day_order: "a0",
+      html_content: null,
+      project_id: "org/proj",
+      source_device_id: "device-a",
+      source_ref: "vault://record",
+      updated_at: "2026-03-01T14:00:00.000Z",
+      deleted_at: null,
+      figure_count: 0,
+      data_file_count: 1,
+    };
+
+    mockSql.mockResolvedValueOnce([
+      { server_now: "2026-03-09T10:00:00.000Z" },
+    ]);
+    mockQuery.mockResolvedValueOnce([slideRow]);
+
+    const req = new NextRequest(
+      "http://localhost/api/sync/changes?since=2026-03-01T00:00:00.000Z"
+    );
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.items[0].html_content).toBeNull();
+    expect(body.items[0].source_ref).toBe("vault://record");
   });
 
   it("includes soft-deleted slides in results", async () => {
@@ -56,7 +90,9 @@ describe("GET /api/sync/changes", () => {
       date: "2026-02-15",
       day_order: "a0",
       html_content: "<p>Deleted content</p>",
-      project_id: null,
+      project_id: "org/proj",
+      source_device_id: "device-a",
+      source_ref: null,
       updated_at: "2026-03-01T10:00:00.000Z",
       deleted_at: "2026-03-01T10:00:00.000Z",
       figure_count: 0,

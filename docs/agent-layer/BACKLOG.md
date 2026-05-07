@@ -34,12 +34,6 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
     Acceptance criteria: Decision includes migration scope, CLI API-key strategy, self-hosting/vendor-lock-in tradeoffs, pricing/limits, and impact on per-user data isolation.
     Notes: Compare against Decision 2026-03-13 d3e4f5 before scheduling implementation.
 
-- Backlog 2026-05-06 empty-slide-ui: Graceful UI for notes/data-only records
-    Priority: Medium. Area: web
-    Description: Handle records with missing or empty `slide.html` as notes/data-only records instead of silently showing blank visual content.
-    Acceptance criteria: The UI presents notes and attached figures/data clearly when visual slide content is absent, with no broken preview state.
-    Notes: Needed for using personal-context as the Castle Vault substrate.
-
 - Backlog 2026-04-26 n8p9q0: Enable Neon point-in-time restore on personal-context database
     Priority: High. Area: infra
     Description: Enable Neon snapshots (point-in-time restore) on the personal-context Neon Postgres database via the Neon dashboard.

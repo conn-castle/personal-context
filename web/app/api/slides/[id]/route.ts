@@ -44,6 +44,7 @@ export async function GET(
 
     const slideRows = (await sql`
       SELECT id, date, day_order, html_content, notes, project_id,
+             source_device_id, source_ref,
              git_remote_url, git_hash, created_at, updated_at, deleted_at
       FROM slides
       WHERE id = ${id} AND user_id = ${user.id}
@@ -89,9 +90,11 @@ export async function GET(
       id: row.id as string,
       date: row.date as string,
       day_order: row.day_order as string,
-      html_content: row.html_content as string,
+      html_content: (row.html_content as string | null) ?? null,
       notes: (row.notes as string | null) ?? null,
-      project_id: (row.project_id as string | null) ?? null,
+      project_id: row.project_id as string,
+      source_device_id: row.source_device_id as string,
+      source_ref: (row.source_ref as string | null) ?? null,
       git_remote_url: (row.git_remote_url as string | null) ?? null,
       git_hash: (row.git_hash as string | null) ?? null,
       created_at: row.created_at as string,

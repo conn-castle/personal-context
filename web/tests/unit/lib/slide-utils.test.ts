@@ -19,7 +19,9 @@ function makeSummary(overrides: Partial<SlideSummary> & { id: string; date: stri
   return {
     day_order: "a0",
     html_content: "<p>Test content</p>",
-    project_id: null,
+    project_id: "org/default",
+    source_device_id: "device-a",
+    source_ref: null,
     updated_at: "2025-03-04T00:00:00Z",
     deleted_at: null,
     figure_count: 0,

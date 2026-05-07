@@ -105,6 +105,8 @@ const SLIDE = {
   day_order: "a0",
   html_content: SLIDE_HTML,
   project_id: "test/markdown",
+  source_device_id: "device-a",
+  source_ref: null,
   updated_at: "2026-03-10T10:00:00Z",
   deleted_at: null,
   figure_count: 0,

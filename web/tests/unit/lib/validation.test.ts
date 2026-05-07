@@ -161,20 +161,16 @@ describe("validateSlideUpdateInput", () => {
     expect(result.valid).toBe(true);
   });
 
-  it("accepts null project_id", () => {
+  it("rejects null project_id", () => {
     const result = validateSlideUpdateInput({ project_id: null });
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
   });
 
-  it("normalizes empty string project_id to null in returned data", () => {
+  it("rejects empty string project_id", () => {
     const body: Record<string, unknown> = { project_id: "" };
     const result = validateSlideUpdateInput(body);
-    expect(result.valid).toBe(true);
-    if (result.valid) {
-      expect(result.data.project_id).toBeNull();
-      // Original body must not be mutated
-      expect(body.project_id).toBe("");
-    }
+    expect(result.valid).toBe(false);
+    expect(body.project_id).toBe("");
   });
 
   it("rejects non-string project_id", () => {
@@ -182,6 +178,18 @@ describe("validateSlideUpdateInput", () => {
       project_id: 123 as unknown as string,
     });
     expect(result.valid).toBe(false);
+  });
+
+  it("rejects project_id with leading or trailing whitespace", () => {
+    const trailing = validateSlideUpdateInput({ project_id: "org/proj " });
+    expect(trailing.valid).toBe(false);
+    if (!trailing.valid) expect(trailing.error).toContain("whitespace");
+
+    const leading = validateSlideUpdateInput({ project_id: " org/proj" });
+    expect(leading.valid).toBe(false);
+
+    const whitespaceOnly = validateSlideUpdateInput({ project_id: "   " });
+    expect(whitespaceOnly.valid).toBe(false);
   });
 
   it("normalizes empty string notes to null in returned data", () => {

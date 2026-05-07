@@ -174,8 +174,15 @@ export function validateSlideUpdateInput(
   }
 
   if ("project_id" in body) {
-    if (body.project_id !== null && typeof body.project_id !== "string") {
-      return { valid: false, error: "project_id must be a string or null" };
+    if (
+      typeof body.project_id !== "string" ||
+      body.project_id.trim() === "" ||
+      body.project_id !== body.project_id.trim()
+    ) {
+      return {
+        valid: false,
+        error: "project_id must be a non-empty string with no leading or trailing whitespace",
+      };
     }
   }
 
@@ -183,8 +190,7 @@ export function validateSlideUpdateInput(
   const data: Record<string, unknown> = {};
   for (const key of keys) {
     if (key === "project_id") {
-      // Normalize empty string to null (same convention as notes)
-      data.project_id = body.project_id === "" ? null : body.project_id;
+      data.project_id = body.project_id;
     } else if (key === "notes") {
       data.notes = normalizeNotes(body.notes as string | null | undefined);
     } else {

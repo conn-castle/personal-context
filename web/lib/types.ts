@@ -6,8 +6,10 @@ export type SlideSummary = {
   id: string;
   date: string;
   day_order: string;
-  html_content: string;
-  project_id: string | null;
+  html_content: string | null;
+  project_id: string;
+  source_device_id: string;
+  source_ref: string | null;
   updated_at: string;
   deleted_at: string | null;
   figure_count: number;
@@ -29,9 +31,11 @@ export type SlideDetail = {
   id: string;
   date: string;
   day_order: string;
-  html_content: string;
+  html_content: string | null;
   notes: string | null;
-  project_id: string | null;
+  project_id: string;
+  source_device_id: string;
+  source_ref: string | null;
   git_remote_url: string | null;
   git_hash: string | null;
   created_at: string;
@@ -43,7 +47,7 @@ export type SlideDetail = {
 
 /** Request body for PATCH /api/slides/[id]. */
 export type SlideUpdateInput = {
-  project_id?: string | null;
+  project_id?: string;
   notes?: string | null;
   git_remote_url?: string | null;
   git_hash?: string | null;

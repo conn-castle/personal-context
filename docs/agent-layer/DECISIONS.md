@@ -203,8 +203,8 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: v0.dev ScaledSlideFrame lost figure URL resolution (moved to iframe rendering context). NotesEditor doesn't key on slideId (editing state may persist across slide changes — tracked in ISSUES.md).
 
 - Decision 2026-03-10 x3y4z5a: html_content included in SlideSummary for thumbnail rendering
-    Decision: Added `html_content` to `SlideSummary` and the `GET /api/slides` + `GET /api/sync/changes` responses. Thumbnails use the same `ScaledSlideFrame` component as the main viewer.
-    Reason: v0.dev reference renders thumbnails using `ScaledSlideFrame` with actual HTML content. With 20 slides per page, the additional payload is manageable (~1MB worst case per page).
+    Decision: Keep nullable `html_content` on `SlideSummary` for `GET /api/slides` and `GET /api/sync/changes`; thumbnails render HTML in `ScaledSlideFrame` only when non-null and use a notes/data fallback when null.
+    Reason: v0.dev reference renders thumbnails from actual HTML, while Castle Vault records may legitimately omit `slide.html`. With 20 slides per page, the additional payload remains manageable.
     Tradeoffs: Larger API responses. If slide HTML grows very large (100KB+), consider a separate thumbnail content endpoint or server-side thumbnail generation.
 
 - Decision 2026-03-10 y5z6a7a: react-markdown + remark-gfm + mermaid for notes rendering

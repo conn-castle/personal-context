@@ -163,7 +163,7 @@ The web UI provides:
 
 - App Router + TypeScript
 - Real slide/project/sync/file API routes backed by Neon + S3 helpers
-- Three-panel Slide Browser with date-grouped navigation, 16:9 sandboxed preview, notes editing, attachment actions, slide delete controls, and trash counts/purge controls in Settings
+- Three-panel Slide Browser with date-grouped navigation, 16:9 sandboxed preview when HTML exists, notes/data-only fallback when HTML is absent, notes editing, attachment actions, slide delete controls, and trash counts/purge controls in Settings
 - `useSyncManager` 4-layer polling and cursor-based pagination
 - Vitest coverage thresholds (95%) plus Playwright smoke and Slide Browser e2e coverage
 - Schema-contract module referencing canonical `schema/` artifacts
@@ -286,7 +286,7 @@ Or via Makefile: `make web-all` runs lint + typecheck + coverage + build + e2e.
 
 Playwright starts Next.js with `LOCAL_BACKEND_URL=http://127.0.0.1:9876`, so browser e2e runs in local mode and bypasses cloud auth while tests mock API responses with `page.route()`.
 
-`pnpm test:e2e:slide-browser` exercises the mocked Slide Browser workflow (browse, filter, notes edit, delete/restore, sync badge, error states, pagination), so no real backend is required.
+`pnpm test:e2e:slide-browser` exercises the mocked Slide Browser workflow (browse, filter, notes/data-only rendering, notes edit, delete/restore, sync badge, error states, pagination), so no real backend is required.
 
 `pnpm test:e2e:cli-slide` requires Go on `PATH` because it executes `cli/scripts/verify_phase3_manual.sh --no-open`.
 

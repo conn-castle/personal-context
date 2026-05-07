@@ -146,6 +146,8 @@ export async function GET(
         s.day_order,
         s.html_content,
         s.project_id,
+        s.source_device_id,
+        s.source_ref,
         s.updated_at,
         s.deleted_at,
         COALESCE(fc.figure_count, 0) AS figure_count,

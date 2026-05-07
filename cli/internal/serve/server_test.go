@@ -1060,7 +1060,7 @@ func TestPatchSlide_RejectsUnknownFields(t *testing.T) {
 	}
 }
 
-func TestPatchSlide_EmptyProjectIDKeepsExistingRequiredProject(t *testing.T) {
+func TestPatchSlide_RejectsEmptyProjectID(t *testing.T) {
 	repo := newMockRepo()
 	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
@@ -1069,13 +1069,32 @@ func TestPatchSlide_EmptyProjectIDKeepsExistingRequiredProject(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(`{"project_id":""}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
-	if resp.StatusCode != 200 {
-		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	if resp.StatusCode != 400 {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
-	result := readBody(t, resp)
-	slide := result["slide"].(map[string]any)
-	if slide["project_id"] != "test/project" {
-		t.Fatalf("expected existing project_id, got %v", slide["project_id"])
+}
+
+func TestPatchSlide_RejectsProjectIDWithWhitespace(t *testing.T) {
+	repo := newMockRepo()
+	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	ts := setupTestServer(t, repo)
+	defer ts.Close()
+
+	for _, body := range []string{
+		`{"project_id":"org/proj "}`,
+		`{"project_id":" org/proj"}`,
+		`{"project_id":"   "}`,
+	} {
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed for body %s: %v", body, err)
+		}
+		if resp.StatusCode != 400 {
+			t.Fatalf("expected 400 for %s, got %d", body, resp.StatusCode)
+		}
+		_ = resp.Body.Close()
 	}
 }
 

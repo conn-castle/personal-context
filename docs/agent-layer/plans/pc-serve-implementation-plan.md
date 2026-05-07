@@ -43,7 +43,7 @@ Before starting implementation, resolve:
 The Go `Repository` interface was designed for CLI use and has two gaps that must be resolved before implementing HTTP handlers:
 
 *Gap 1: `UpdateSlideInput` is full-replacement, not patch-shaped.*
-- `UpdateSlideInput` requires all fields (ID, Date, DayOrder, HTMLContent). The web `PATCH /api/slides/:id` accepts partial updates (only `project_id`, `notes`, `git_remote_url`, `git_hash`).
+- `UpdateSlideInput` requires all fields (ID, Date, DayOrder, HTMLContent, project/device provenance). The web `PATCH /api/slides/:id` accepts partial updates (only `project_id`, `notes`, `git_remote_url`, `git_hash`).
 - **Decision**: Do NOT change the Repository interface or `UpdateSlideInput` struct. Instead, implement a read-then-merge adapter in the `serve` package: the handler fetches the existing slide via `GetSlideByID`, merges the PATCH body fields onto it, and calls `UpdateSlide` with the complete input. This keeps the Repository contract stable and matches how the web API routes work (they also read-then-write against Postgres).
 - Document this pattern in the serve package.
 
@@ -77,7 +77,7 @@ The Go `Repository` interface was designed for CLI use and has two gaps that mus
 Implement each endpoint in `cli/internal/serve/`. Each handler calls the existing `Repository` interface methods and formats responses to match the web API JSON shapes exactly (field names, types, null handling, pagination format).
 
 **B1. `GET /api/projects`**
-- Calls `repo.ListDistinctProjectIDs()`.
+- Calls `repo.ListProjects(ctx, false)` so the project list is registry-backed and excludes archived rows.
 - Response: `{"projects": ["a", "b"]}`.
 
 **B2. `GET /api/slides`**
@@ -85,7 +85,7 @@ Implement each endpoint in `cli/internal/serve/`. Each handler calls the existin
 - Calls `repo.ListSlides()` with appropriate `ListSlidesFilter`.
 - Implement cursor-based pagination (same cursor format as web API — encode `(date, day_order, id)` tuple).
 - Response: `{"items": [...SlideSummary], "next_cursor": "..." | null}`.
-- **Note**: Must include `html_content`, `figure_count`, `data_file_count` in each SlideSummary. `figure_count` and `data_file_count` require additional queries or a list+count helper.
+- **Note**: Must include nullable `html_content`, `project_id`, `source_device_id`, `source_ref`, `figure_count`, and `data_file_count` in each SlideSummary. `figure_count` and `data_file_count` require additional queries or a list+count helper.
 
 **B3. `GET /api/slides/:id`**
 - Calls `repo.GetSlideByID()`, `repo.ListSlideFiguresBySlideID()`, `repo.ListSlideDataFilesBySlideID()`.

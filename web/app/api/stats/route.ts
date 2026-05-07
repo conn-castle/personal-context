@@ -9,7 +9,7 @@ import type { ErrorResponseBody } from "@/lib/api-error";
 /**
  * GET /api/stats
  *
- * Returns total slide count, distinct project count, and trashed slide count.
+ * Returns total slide count, active registry project count, and trashed slide count.
  */
 export async function GET(
   req: NextRequest
@@ -27,7 +27,7 @@ export async function GET(
 
     const [totalResult, projectResult, trashedResult] = await Promise.all([
       sql`SELECT COUNT(*)::int AS count FROM slides WHERE user_id = ${user.id} AND deleted_at IS NULL`,
-      sql`SELECT COUNT(DISTINCT project_id)::int AS count FROM slides WHERE user_id = ${user.id} AND deleted_at IS NULL AND project_id IS NOT NULL`,
+      sql`SELECT COUNT(*)::int AS count FROM projects WHERE user_id = ${user.id} AND archived_at IS NULL`,
       sql`SELECT COUNT(*)::int AS count FROM slides WHERE user_id = ${user.id} AND deleted_at IS NOT NULL`,
     ]);
 
