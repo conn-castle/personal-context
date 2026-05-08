@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/conn-castle/personal-context/cli/internal/gitsnapshot"
+	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +41,7 @@ func runRestoreDB(ctx context.Context, stdout io.Writer, _ io.Writer, path strin
 	if err != nil {
 		return err
 	}
-	currentSnapshot, err := buildLocalSnapshot(ctx, stack)
+	currentSnapshot, err := buildLocalSnapshot(ctx, stack, repository.ListSlidesFilter{})
 	if closeErr := stack.Close(); closeErr != nil {
 		return closeErr
 	}

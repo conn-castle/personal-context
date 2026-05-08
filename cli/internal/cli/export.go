@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/conn-castle/personal-context/cli/internal/gitsnapshot"
+	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/spf13/cobra"
 )
 
@@ -16,6 +17,9 @@ type exportOptions struct {
 	Path         string
 	FromCloud    bool
 	GitHubRemote string
+	ProjectID    string
+	DateFrom     string
+	DateTo       string
 }
 
 func newExportCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
@@ -33,6 +37,9 @@ func newExportCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	cmd.Flags().StringVar(&opts.Path, "path", "", "Destination directory for templates/ and slides/")
 	cmd.Flags().BoolVar(&opts.FromCloud, "from-cloud", false, "Read from configured cloud Postgres/S3 instead of local SQLite/files")
 	cmd.Flags().StringVar(&opts.GitHubRemote, "github-remote", "", "Require this git remote to exist at --path before exporting")
+	cmd.Flags().StringVar(&opts.ProjectID, "project", "", "Export only records in this project ID")
+	cmd.Flags().StringVar(&opts.DateFrom, "from", "", "Export records on or after date (YYYY-MM-DD)")
+	cmd.Flags().StringVar(&opts.DateTo, "to", "", "Export records on or before date (YYYY-MM-DD)")
 
 	return cmd
 }
@@ -42,6 +49,10 @@ func runExport(ctx context.Context, stdout io.Writer, _ io.Writer, opts exportOp
 		return fmt.Errorf("--path is required")
 	}
 	if err := validateGitRemote(opts.Path, opts.GitHubRemote); err != nil {
+		return err
+	}
+	filter, err := buildExportFilter(opts)
+	if err != nil {
 		return err
 	}
 
@@ -60,7 +71,7 @@ func runExport(ctx context.Context, stdout io.Writer, _ io.Writer, opts exportOp
 			return fmt.Errorf("open cloud: %w", err)
 		}
 		defer func() { _ = cloud.Close() }()
-		snapshot, err = buildCloudSnapshot(ctx, homeDir, cloud)
+		snapshot, err = buildCloudSnapshot(ctx, homeDir, cloud, filter)
 		if err != nil {
 			return err
 		}
@@ -70,7 +81,7 @@ func runExport(ctx context.Context, stdout io.Writer, _ io.Writer, opts exportOp
 			return err
 		}
 		defer func() { _ = stack.Close() }()
-		snapshot, err = buildLocalSnapshot(ctx, stack)
+		snapshot, err = buildLocalSnapshot(ctx, stack, filter)
 		if err != nil {
 			return err
 		}
@@ -80,8 +91,16 @@ func runExport(ctx context.Context, stdout io.Writer, _ io.Writer, opts exportOp
 		return fmt.Errorf("write export snapshot: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(stdout, "Exported snapshot to %s\n", opts.Path)
+	_, _ = fmt.Fprintf(stdout, "Exported %d records to %s\n", len(snapshot.Slides), opts.Path)
 	return nil
+}
+
+func buildExportFilter(opts exportOptions) (repository.ListSlidesFilter, error) {
+	return buildBaseRecordFilter(recordFilterOptions{
+		ProjectID: opts.ProjectID,
+		DateFrom:  opts.DateFrom,
+		DateTo:    opts.DateTo,
+	})
 }
 
 func validateGitRemote(path string, remote string) error {

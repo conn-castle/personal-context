@@ -47,7 +47,7 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 		t.Fatalf("create custom template: %v", err)
 	}
 
-	snapshot, err := buildLocalSnapshot(ctx, sourceStack)
+	snapshot, err := buildLocalSnapshot(ctx, sourceStack, repository.ListSlidesFilter{})
 	if err != nil {
 		t.Fatalf("buildLocalSnapshot(): %v", err)
 	}
@@ -165,7 +165,7 @@ func TestRunExportImportRestoreAndVerifyLocal(t *testing.T) {
 	if err := runExport(ctx, stdout, &bytes.Buffer{}, exportOptions{Path: exportDir}); err != nil {
 		t.Fatalf("runExport(): %v", err)
 	}
-	if !strings.Contains(stdout.String(), "Exported snapshot to") {
+	if !strings.Contains(stdout.String(), "Exported 1 records to") {
 		t.Fatalf("unexpected export output: %q", stdout.String())
 	}
 
@@ -522,14 +522,14 @@ func TestBuildSnapshotErrorPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := buildSnapshot(ctx, tt.templateRepo, tt.slideRepo, tt.readFigure)
+			_, err := buildSnapshot(ctx, tt.templateRepo, tt.slideRepo, tt.readFigure, repository.ListSlidesFilter{})
 			if err == nil || !strings.Contains(err.Error(), tt.wantSubstring) {
 				t.Fatalf("buildSnapshot() error = %v, want substring %q", err, tt.wantSubstring)
 			}
 		})
 	}
 
-	if _, err := buildCloudSnapshot(ctx, filepath.Join(t.TempDir(), "missing-home"), &cloudStack{Repo: &snapshotRepoStub{}}); err == nil {
+	if _, err := buildCloudSnapshot(ctx, filepath.Join(t.TempDir(), "missing-home"), &cloudStack{Repo: &snapshotRepoStub{}}, repository.ListSlidesFilter{}); err == nil {
 		t.Fatal("expected buildCloudSnapshot to fail when local template home is missing")
 	}
 }
@@ -885,7 +885,7 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 		}
 		defer func() { _ = stack.Close() }()
 
-		if _, err := buildLocalSnapshot(ctx, stack); err == nil || !strings.Contains(err.Error(), "read local figure") {
+		if _, err := buildLocalSnapshot(ctx, stack, repository.ListSlidesFilter{}); err == nil || !strings.Contains(err.Error(), "read local figure") {
 			t.Fatalf("buildLocalSnapshot() error = %v, want local figure read failure", err)
 		}
 	})
@@ -926,7 +926,7 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 					return nil, nil
 				},
 			},
-		})
+		}, repository.ListSlidesFilter{})
 		if err != nil {
 			t.Fatalf("buildCloudSnapshot(): %v", err)
 		}

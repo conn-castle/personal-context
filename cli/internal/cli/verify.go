@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/conn-castle/personal-context/cli/internal/gitsnapshot"
+	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/spf13/cobra"
 )
 
@@ -54,7 +55,7 @@ func runVerify(ctx context.Context, stdout io.Writer, _ io.Writer, fromCloud boo
 			return fmt.Errorf("open cloud: %w", err)
 		}
 		defer func() { _ = cloud.Close() }()
-		snapshot, err = buildCloudSnapshot(ctx, homeDir, cloud)
+		snapshot, err = buildCloudSnapshot(ctx, homeDir, cloud, repository.ListSlidesFilter{})
 		if err != nil {
 			return err
 		}
@@ -64,7 +65,7 @@ func runVerify(ctx context.Context, stdout io.Writer, _ io.Writer, fromCloud boo
 			return err
 		}
 		defer func() { _ = stack.Close() }()
-		snapshot, err = buildLocalSnapshot(ctx, stack)
+		snapshot, err = buildLocalSnapshot(ctx, stack, repository.ListSlidesFilter{})
 		if err != nil {
 			return err
 		}
@@ -86,7 +87,7 @@ func runVerify(ctx context.Context, stdout io.Writer, _ io.Writer, fromCloud boo
 	if _, err := importSnapshotIntoStack(ctx, restoreStack, snapshot); err != nil {
 		return err
 	}
-	roundTripSnapshot, err := buildLocalSnapshot(ctx, restoreStack)
+	roundTripSnapshot, err := buildLocalSnapshot(ctx, restoreStack, repository.ListSlidesFilter{})
 	if err != nil {
 		return err
 	}
