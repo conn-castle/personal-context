@@ -24,7 +24,7 @@ var downloadCloudFigureFn = func(ctx context.Context, cloud *cloudStack, key str
 	return cloud.S3.Download(ctx, key)
 }
 
-func buildLocalSnapshot(ctx context.Context, stack *localStack) (gitsnapshot.Snapshot, error) {
+func buildLocalSnapshot(ctx context.Context, stack *localStack, filter repository.ListSlidesFilter) (gitsnapshot.Snapshot, error) {
 	return buildSnapshot(ctx, stack.Repo, stack.Repo, func(_ context.Context, figure repository.SlideFigure) ([]byte, error) {
 		path, err := stack.FS.ResolveFigurePath(figure.SlideID, figure.Filename)
 		if err != nil {
@@ -35,10 +35,10 @@ func buildLocalSnapshot(ctx context.Context, stack *localStack) (gitsnapshot.Sna
 			return nil, fmt.Errorf("read local figure %s: %w", path, err)
 		}
 		return content, nil
-	})
+	}, filter)
 }
 
-func buildCloudSnapshot(ctx context.Context, homeDir string, cloud *cloudStack) (gitsnapshot.Snapshot, error) {
+func buildCloudSnapshot(ctx context.Context, homeDir string, cloud *cloudStack, filter repository.ListSlidesFilter) (gitsnapshot.Snapshot, error) {
 	localStack, err := openLocalStack(homeDir)
 	if err != nil {
 		return gitsnapshot.Snapshot{}, err
@@ -56,7 +56,7 @@ func buildCloudSnapshot(ctx context.Context, homeDir string, cloud *cloudStack) 
 			return nil, fmt.Errorf("read cloud figure %s: %w", figure.S3Key, err)
 		}
 		return content, nil
-	})
+	}, filter)
 }
 
 func buildSnapshot(
@@ -64,6 +64,7 @@ func buildSnapshot(
 	templateRepo repository.Repository,
 	slideRepo repository.Repository,
 	readFigure func(context.Context, repository.SlideFigure) ([]byte, error),
+	filter repository.ListSlidesFilter,
 ) (gitsnapshot.Snapshot, error) {
 	templates, err := templateRepo.ListTemplates(ctx)
 	if err != nil {
@@ -105,7 +106,7 @@ func buildSnapshot(
 		})
 	}
 
-	slides, err := slideRepo.ListSlides(ctx, repository.ListSlidesFilter{})
+	slides, err := slideRepo.ListSlides(ctx, filter)
 	if err != nil {
 		return gitsnapshot.Snapshot{}, fmt.Errorf("list slides: %w", err)
 	}

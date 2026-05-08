@@ -293,6 +293,9 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 ### Search & Registries
 - `pc search <query>` — LIKE/ILIKE on html_content, notes, project_id (not git fields)
+- `pc list` — bounded newest-first record summaries with cursor pagination, date/project/deleted filters, `--has-html`, `--has-data`, `--all`, and `--format table|ids|json`
+- `pc stats` — local record statistics with active/deleted counts, content/attachment counts, oldest/newest dates, and explicit size fields (`recorded_data_file_bytes`, `local_attachment_bytes`, `store_file_bytes`, `local_total_bytes`)
+- `pc files list` — local record attachment inventory with figure/data rows, recorded data-file size, local file size/path, and present/missing status
 - `pc project list|add|archive|restore` — manage registered projects
 - `pc device list|register|archive|restore` — manage registered source devices
 
@@ -332,6 +335,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 ### `pc export` nightly cloud backup usage
 - Manual/local usage:
   - `pc export --path ./pc-export --github-remote origin`
+  - Use `--project`, `--from YYYY-MM-DD`, and `--to YYYY-MM-DD` to export an active-record subset.
 - Nightly data-repo workflow usage:
   - `pc export --from-cloud --path . --github-remote origin`
   - Reads slide rows from Neon and figure blobs from S3 using repository secrets; template exports still come from the seeded local template set because templates are not cloud-synced.

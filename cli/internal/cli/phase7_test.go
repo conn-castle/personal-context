@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/gitsnapshot"
+	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
 func TestExportCommandWritesSnapshot(t *testing.T) {
@@ -456,7 +457,7 @@ func TestBuildCloudSnapshotAndCloudPhase7Commands(t *testing.T) {
 	}
 	defer func() { _ = stack.Close() }()
 
-	snapshot, err := buildCloudSnapshot(context.Background(), homeDir, &cloudStack{Repo: stack.Repo})
+	snapshot, err := buildCloudSnapshot(context.Background(), homeDir, &cloudStack{Repo: stack.Repo}, repository.ListSlidesFilter{})
 	if err != nil {
 		t.Fatalf("buildCloudSnapshot: %v", err)
 	}

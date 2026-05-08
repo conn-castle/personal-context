@@ -28,11 +28,11 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
 
 <!-- ENTRIES START -->
 
-- Backlog 2026-05-07 artifact-terminology: Rename slides to bundles or artifacts
+- Backlog 2026-05-07 record-terminology: Rename slides to records
     Priority: High. Area: cli, web, docs
     Description: Replace user-facing "slide" terminology with a more accurate term because `slide.html` is optional and records can be notes/data-only.
-    Acceptance criteria: Product terminology is decided (`bundle` vs `artifact`) and reflected consistently in CLI commands/help, web UI labels, API-facing docs, README, and agent memory.
-    Notes: Preserve backward compatibility for existing IDs, storage paths, and scripts unless a separate migration is explicitly planned.
+    Acceptance criteria: Product terminology uses "record" consistently in CLI commands/help, web UI labels, API-facing docs, README, and agent memory.
+    Notes: New CLI discovery commands use "record"; broader web/API/docs terminology remains. Preserve backward compatibility for existing IDs, storage paths, and scripts unless a separate migration is explicitly planned.
 
 - Backlog 2026-05-07 deep-search-data-files: Search extracted data-file contents
     Priority: Medium. Area: cli, search

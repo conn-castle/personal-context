@@ -5,14 +5,14 @@ enabled = true
 [agents.claude]
 enabled = true
 model = 'opus'
-reasoning_effort = 'high'
+reasoning_effort = 'xhigh'
 
 [agents.claude_vscode]
 enabled = true
 
 [agents.codex]
 enabled = true
-reasoning_effort = 'xhigh'
+reasoning_effort = 'high'
 
 [agents.codex.agent_specific]
 [agents.codex.agent_specific.features]
