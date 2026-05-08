@@ -139,11 +139,11 @@ func createInputFolder(t *testing.T, opts inputFolderOpts) string {
 	dir := t.TempDir()
 
 	if opts.HTMLContent == "" {
-		opts.HTMLContent = "<html><body><h1>Test Slide</h1></body></html>"
+		opts.HTMLContent = "<html><body><h1>Test Record</h1></body></html>"
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte(opts.HTMLContent), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte(opts.HTMLContent), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 
 	if opts.Notes != "" {

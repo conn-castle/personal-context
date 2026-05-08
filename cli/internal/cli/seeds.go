@@ -1,16 +1,16 @@
 package cli
 
-// seedSlide defines a tutorial/demo slide to be created by `pc seed`.
-type seedSlide struct {
+// seedRecord defines a tutorial/demo record to be created by `pc seed`.
+type seedRecord struct {
 	HTMLContent string
 	Notes       string
 	ProjectID   string
 }
 
-// builtinSeeds returns the tutorial slides that demonstrate how to use Personal Context.
-// Each slide is designed for 1920x1080 rendering with px-based sizing.
-func builtinSeeds() []seedSlide {
-	return []seedSlide{
+// builtinSeeds returns the tutorial records that demonstrate how to use Personal Context.
+// Each record is designed for 1920x1080 rendering with px-based sizing.
+func builtinSeeds() []seedRecord {
+	return []seedRecord{
 		{
 			ProjectID: "personal-context/tutorial",
 			Notes: `## Welcome to Personal Context
@@ -18,14 +18,14 @@ func builtinSeeds() []seedSlide {
 Personal Context (` + "`pc`" + `) is a CLI-first engineering notebook designed for long-term use (10+ years).
 
 ### Key concepts
-- **Slides** are the atomic unit — each is an HTML file with optional figures, data files, and notes
-- **Projects** organize slides by work stream (e.g., ` + "`ml/sleep-staging`" + `)
+- **Records** are the atomic unit — each is an HTML file with optional figures, data files, and notes
+- **Projects** organize records by work stream (e.g., ` + "`ml/sleep-staging`" + `)
 - **Local-first** — everything works offline with SQLite; cloud sync is optional
-- **Web UI** — browse your slides in a three-panel viewer via ` + "`pc serve`" + `
+- **Web UI** — browse your records in a three-panel viewer via ` + "`pc serve`" + `
 
 ### Getting started
 1. Run ` + "`pc setup`" + ` to initialize your local environment
-2. Run ` + "`pc add <folder>`" + ` to create your first slide
+2. Run ` + "`pc add <folder>`" + ` to create your first record
 3. Run ` + "`pc serve`" + ` + ` + "`pnpm dev`" + ` to browse in the web UI`,
 			HTMLContent: `<!DOCTYPE html>
 <html lang="en">
@@ -47,17 +47,17 @@ Personal Context (` + "`pc`" + `) is a CLI-first engineering notebook designed f
 <body>
   <div class="container">
     <h1>Personal Context</h1>
-    <p class="subtitle">A local-first engineering notebook for capturing your daily work<br>as browsable, searchable slides.</p>
+    <p class="subtitle">A local-first engineering notebook for capturing your daily work<br>as browsable, searchable records.</p>
     <div class="features">
       <div class="feature">
         <div class="icon">&#128196;</div>
-        <h3>HTML Slides</h3>
-        <p>Each entry is a rich HTML slide with figures, data files, and markdown notes.</p>
+        <h3>HTML Records</h3>
+        <p>Each entry is a rich HTML record with figures, data files, and markdown notes.</p>
       </div>
       <div class="feature">
         <div class="icon">&#128193;</div>
         <h3>Organized by Date</h3>
-        <p>Slides are sorted chronologically and grouped by project.</p>
+        <p>Records are sorted chronologically and grouped by project.</p>
       </div>
       <div class="feature">
         <div class="icon">&#9729;&#65039;</div>
@@ -71,7 +71,7 @@ Personal Context (` + "`pc`" + `) is a CLI-first engineering notebook designed f
 		},
 		{
 			ProjectID: "personal-context/tutorial",
-			Notes: `## Adding slides
+			Notes: `## Adding records
 
 ### Basic usage
 ` + "```bash" + `
@@ -81,28 +81,28 @@ pc add path/to/folder/
 ### With options
 ` + "```bash" + `
 # Assign to a project
-pc add my-slide/ --project "ml/sleep-staging"
+pc add my-record/ --project "ml/sleep-staging"
 
 # Set a specific date (default is today)
-pc add my-slide/ --date 2026-03-01
+pc add my-record/ --date 2026-03-01
 
 # Place at a specific position
-pc add my-slide/ --first
-pc add my-slide/ --last
-pc add my-slide/ --after 20260310-abc12345
-pc add my-slide/ --before 20260310-def67890
+pc add my-record/ --first
+pc add my-record/ --last
+pc add my-record/ --after 20260310-abc12345
+pc add my-record/ --before 20260310-def67890
 ` + "```" + `
 
 ### What happens when you add
-1. ` + "`slide.html`" + ` is read and stored as ` + "`html_content`" + `
+1. ` + "`record.html`" + ` is read and stored as ` + "`html_content`" + `
 2. ` + "`notes.md`" + ` (if present) is stored as markdown notes
-3. ` + "`figures/*`" + ` files are copied to ` + "`~/personal-context/figures/{slide_id}/`" + `
-4. ` + "`data/*`" + ` files are copied to ` + "`~/personal-context/data/{slide_id}/`" + ` with SHA-256 hashes
+3. ` + "`figures/*`" + ` files are copied to ` + "`~/personal-context/figures/{record_id}/`" + `
+4. ` + "`data/*`" + ` files are copied to ` + "`~/personal-context/data/{record_id}/`" + ` with SHA-256 hashes
 5. ` + "`metadata.json`" + ` fields are applied (project_id, git_remote_url, git_hash)
-6. A unique slide ID is generated: ` + "`YYYYMMDD-8hexchars`" + `
+6. A unique record ID is generated: ` + "`YYYYMMDD-8hexchars`" + `
 
 ### Figure references
-In your ` + "`slide.html`" + `, reference figures with relative paths:
+In your ` + "`record.html`" + `, reference figures with relative paths:
 ` + "```html" + `
 <img src="figures/chart.png" alt="My chart">
 ` + "```" + `
@@ -129,17 +129,17 @@ In your ` + "`slide.html`" + `, reference figures with relative paths:
 </style>
 </head>
 <body>
-  <h1>Adding Slides</h1>
-  <p class="subtitle">Create slides from folders using <code style="color:#2563eb; font-weight:600">pc add</code></p>
+  <h1>Adding Records</h1>
+  <p class="subtitle">Create records from folders using <code style="color:#2563eb; font-weight:600">pc add</code></p>
   <div class="content">
     <div class="steps">
       <div class="step">
         <div class="step-num">1</div>
         <div class="step-content">
-          <h3>Create a folder with slide.html</h3>
-          <p>The only required file is <code>slide.html</code>.</p>
-          <pre>mkdir my-slide
-echo '&lt;h1&gt;Hello&lt;/h1&gt;' &gt; my-slide/slide.html</pre>
+          <h3>Create a folder with record.html</h3>
+          <p>The only required file is <code>record.html</code>.</p>
+          <pre>mkdir my-record
+echo '&lt;h1&gt;Hello&lt;/h1&gt;' &gt; my-record/record.html</pre>
         </div>
       </div>
       <div class="step">
@@ -153,17 +153,17 @@ echo '&lt;h1&gt;Hello&lt;/h1&gt;' &gt; my-slide/slide.html</pre>
         <div class="step-num">3</div>
         <div class="step-content">
           <h3>Run pc add</h3>
-          <pre>pc add my-slide/
-pc add my-slide/ --project "ml/experiment"
-pc add my-slide/ --date 2026-03-01
-pc add my-slide/ --first</pre>
+          <pre>pc add my-record/
+pc add my-record/ --project "ml/experiment"
+pc add my-record/ --date 2026-03-01
+pc add my-record/ --first</pre>
         </div>
       </div>
     </div>
     <div class="folder">
       <h4>Folder Structure</h4>
-      <pre>my-slide/
-&#x251C;&#x2500;&#x2500; slide.html        # optional
+      <pre>my-record/
+&#x251C;&#x2500;&#x2500; record.html        # optional
 &#x251C;&#x2500;&#x2500; notes.md          # optional
 &#x251C;&#x2500;&#x2500; metadata.json     # optional
 &#x251C;&#x2500;&#x2500; figures/           # optional
@@ -179,7 +179,7 @@ pc add my-slide/ --first</pre>
 		},
 		{
 			ProjectID: "personal-context/tutorial",
-			Notes: `## Managing slides
+			Notes: `## Managing records
 
 ### Viewing
 ` + "```bash" + `
@@ -188,13 +188,13 @@ pc show <id> --format json   # JSON output for scripting
 ` + "```" + `
 
 ### Editing
-` + "`pc edit`" + ` does a **full replacement** — the new folder completely replaces the slide's content, notes, figures, and data files. The ` + "`updated_at`" + ` timestamp is auto-bumped by a database trigger.
+` + "`pc edit`" + ` does a **full replacement** — the new folder completely replaces the record's content, notes, figures, and data files. The ` + "`updated_at`" + ` timestamp is auto-bumped by a database trigger.
 
 ### Moving
-Slides are ordered by ` + "`(date, day_order, id)`" + `. The ` + "`--first`" + `, ` + "`--last`" + `, ` + "`--before`" + `, ` + "`--after`" + ` flags change the fractional index without touching other slides.
+Records are ordered by ` + "`(date, day_order, id)`" + `. The ` + "`--first`" + `, ` + "`--last`" + `, ` + "`--before`" + `, ` + "`--after`" + ` flags change the fractional index without touching other records.
 
 ### Soft delete
-` + "`pc delete`" + ` sets ` + "`deleted_at`" + ` — the slide is hidden but recoverable. ` + "`pc restore`" + ` clears it. ` + "`pc gc`" + ` permanently removes slides deleted more than 30 days ago.
+` + "`pc delete`" + ` sets ` + "`deleted_at`" + ` — the record is hidden but recoverable. ` + "`pc restore`" + ` clears it. ` + "`pc gc`" + ` permanently removes records deleted more than 30 days ago.
 
 ### Searching
 Search matches against ` + "`html_content`" + `, ` + "`notes`" + `, and ` + "`project_id`" + `. Results are sorted by date (newest first).`,
@@ -215,30 +215,30 @@ Search matches against ` + "`html_content`" + `, ` + "`notes`" + `, and ` + "`pr
 </style>
 </head>
 <body>
-  <h1>Managing Slides</h1>
-  <p class="subtitle">View, edit, move, delete, and restore your slides</p>
+  <h1>Managing Records</h1>
+  <p class="subtitle">View, edit, move, delete, and restore your records</p>
   <div class="commands">
     <div class="cmd">
       <h3>pc show &lt;id&gt;</h3>
-      <p>Display slide metadata, notes, figures, and data files.</p>
+      <p>Display record metadata, notes, figures, and data files.</p>
       <pre>pc show 20260310-ad5613b6
 pc show 20260310-ad5613b6 --format json</pre>
     </div>
     <div class="cmd">
       <h3>pc edit &lt;id&gt; &lt;path&gt;</h3>
-      <p>Full replacement of slide content, notes, figures, and data files from a folder.</p>
-      <pre>pc edit 20260310-ad5613b6 updated-slide/</pre>
+      <p>Full replacement of record content, notes, figures, and data files from a folder.</p>
+      <pre>pc edit 20260310-ad5613b6 updated-record/</pre>
     </div>
     <div class="cmd">
       <h3>pc move &lt;id&gt;</h3>
-      <p>Change a slide's date or position within a day.</p>
+      <p>Change a record's date or position within a day.</p>
       <pre>pc move &lt;id&gt; --date 2026-03-09
 pc move &lt;id&gt; --first
 pc move &lt;id&gt; --after &lt;other-id&gt;</pre>
     </div>
     <div class="cmd">
       <h3>pc delete / restore</h3>
-      <p>Soft-delete a slide (recoverable) or undo a deletion.</p>
+      <p>Soft-delete a record (recoverable) or undo a deletion.</p>
       <pre>pc delete 20260310-ad5613b6
 pc restore 20260310-ad5613b6</pre>
     </div>
@@ -251,7 +251,7 @@ pc search "TODO" --format json</pre>
     </div>
     <div class="cmd">
       <h3>pc trash / gc</h3>
-      <p>List deleted slides or permanently remove old trash (&gt;30 days).</p>
+      <p>List deleted records or permanently remove old trash (&gt;30 days).</p>
       <pre>pc trash
 pc gc</pre>
     </div>
@@ -269,13 +269,13 @@ Projects and source devices are first-class registries. Each record must name a 
 ` + "```bash" + `
 pc project add "ml/sleep-staging"
 pc device register "work-laptop"
-pc add slide1/ --project "ml/sleep-staging" --device "work-laptop"
+pc add record1/ --project "ml/sleep-staging" --device "work-laptop"
 pc project list
 pc device list
 ` + "```" + `
 
 ### Web UI filtering
-In the web UI, use the project picker in the left panel to filter slides by project. Multiple projects can be selected.`,
+In the web UI, use the project picker in the left panel to filter records by project. Multiple projects can be selected.`,
 			HTMLContent: `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -302,7 +302,7 @@ In the web UI, use the project picker in the left panel to filter slides by proj
 </head>
 <body>
   <h1>Projects</h1>
-  <p class="subtitle">Organize slides by work stream using slash-convention project IDs</p>
+  <p class="subtitle">Organize records by work stream using slash-convention project IDs</p>
   <div class="grid">
     <div class="left">
       <div class="section">
@@ -310,7 +310,7 @@ In the web UI, use the project picker in the left panel to filter slides by proj
         <p>Register projects and devices, then pass explicit provenance when adding records.</p>
         <pre>pc project add "ml/sleep-staging"
 pc device register "work-laptop"
-pc add my-slide/ --project "ml/sleep-staging" --device "work-laptop"
+pc add my-record/ --project "ml/sleep-staging" --device "work-laptop"
 
 pc project list    # show all projects</pre>
       </div>
@@ -335,7 +335,7 @@ pc project list    # show all projects</pre>
       </div>
       <div class="web-note">
         <h3>Web UI Filtering</h3>
-        <p>Use the project picker in the navigation panel to filter slides by one or more projects. Edit a slide's project from the metadata bar above the viewer.</p>
+        <p>Use the project picker in the navigation panel to filter records by one or more projects. Edit a record's project from the metadata bar above the viewer.</p>
       </div>
     </div>
   </div>
@@ -356,8 +356,8 @@ make dev-local
 ` + "```" + `
 
 ### Features
-- **Slide browser**: Navigate slides grouped by date, filter by project
-- **Preview**: 16:9 scaled iframe rendering of slide HTML
+- **Record browser**: Navigate records grouped by date, filter by project
+- **Preview**: 16:9 scaled iframe rendering of record HTML
 - **Notes**: Edit markdown notes inline with full GFM + mermaid support
 - **Attachments**: View figures with preview dialog, download data files
 - **Sync**: 4-layer smart polling detects CLI changes automatically
@@ -394,21 +394,21 @@ make dev-local
 </head>
 <body>
   <h1>Web UI</h1>
-  <p class="subtitle">Browse your slides in a three-panel viewer</p>
+  <p class="subtitle">Browse your records in a three-panel viewer</p>
   <div class="panels">
     <div class="panel">
       <h3>Navigation</h3>
       <ul>
-        <li>Date-grouped slide list</li>
+        <li>Date-grouped record list</li>
         <li>Strip or grid view</li>
         <li>Project filter</li>
-        <li>Slide count badge</li>
+        <li>Record count badge</li>
         <li>Trash view</li>
       </ul>
     </div>
     <div class="panel">
-      <h3>Slide Viewer</h3>
-      <p>16:9 sandboxed iframe preview of the selected slide's HTML content. Figures are resolved via the API — presigned S3 URLs in cloud mode, direct file serving in local mode.</p>
+      <h3>Record Viewer</h3>
+      <p>16:9 sandboxed iframe preview of the selected record's HTML content. Figures are resolved via the API — presigned S3 URLs in cloud mode, direct file serving in local mode.</p>
     </div>
     <div class="panel">
       <h3>Details</h3>
@@ -537,8 +537,8 @@ pc verify</pre>
     </div>
     <div class="cmd">
       <h3>pc fetch</h3>
-      <p>Download data files from S3 on demand — by slide, project, or time window.</p>
-      <pre>pc fetch &lt;slide-id&gt;
+      <p>Download data files from S3 on demand — by record, project, or time window.</p>
+      <pre>pc fetch &lt;record-id&gt;
 pc fetch --project "ml/exp"
 pc fetch --recent 2w</pre>
     </div>

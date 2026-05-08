@@ -7,38 +7,38 @@ import (
 	"time"
 )
 
-// addSlideHelper sets up a home dir, runs pc setup, adds a minimal slide,
-// and returns the homeDir and the slide ID.
-func addSlideHelper(t *testing.T) (string, string) {
+// addRecordHelper sets up a home dir, runs pc setup, adds a minimal record,
+// and returns the homeDir and the record ID.
+func addRecordHelper(t *testing.T) (string, string) {
 	t.Helper()
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
-	if len(slideID) == 0 {
-		t.Fatal("expected slide ID in stdout")
+	recordID := strings.TrimSpace(stdout)
+	if len(recordID) == 0 {
+		t.Fatal("expected record ID in stdout")
 	}
-	return homeDir, slideID
+	return homeDir, recordID
 }
 
-// queryDeletedAt returns the deleted_at value for a slide as a sql.NullString.
-func queryDeletedAt(t *testing.T, db *sql.DB, slideID string) sql.NullString {
+// queryDeletedAt returns the deleted_at value for a record as a sql.NullString.
+func queryDeletedAt(t *testing.T, db *sql.DB, recordID string) sql.NullString {
 	t.Helper()
 	var deletedAt sql.NullString
-	if err := db.QueryRow("SELECT deleted_at FROM slides WHERE id = ?", slideID).Scan(&deletedAt); err != nil {
+	if err := db.QueryRow("SELECT deleted_at FROM records WHERE id = ?", recordID).Scan(&deletedAt); err != nil {
 		t.Fatalf("query deleted_at: %v", err)
 	}
 	return deletedAt
 }
 
-// queryUpdatedAt returns the raw updated_at value for a slide as a string.
+// queryUpdatedAt returns the raw updated_at value for a record as a string.
 // The column stores millisecond-precision timestamps (e.g. 2026-03-06T14:23:18.123Z).
-func queryUpdatedAt(t *testing.T, db *sql.DB, slideID string) string {
+func queryUpdatedAt(t *testing.T, db *sql.DB, recordID string) string {
 	t.Helper()
 	var updatedAt string
-	if err := db.QueryRow("SELECT updated_at FROM slides WHERE id = ?", slideID).Scan(&updatedAt); err != nil {
+	if err := db.QueryRow("SELECT updated_at FROM records WHERE id = ?", recordID).Scan(&updatedAt); err != nil {
 		t.Fatalf("query updated_at: %v", err)
 	}
 	return updatedAt
@@ -46,27 +46,27 @@ func queryUpdatedAt(t *testing.T, db *sql.DB, slideID string) string {
 
 // backdateUpdatedAt sets updated_at to 1 hour in the past so that the next
 // trigger-generated timestamp is guaranteed to differ, without relying on sleep.
-func backdateUpdatedAt(t *testing.T, db *sql.DB, slideID string) {
+func backdateUpdatedAt(t *testing.T, db *sql.DB, recordID string) {
 	t.Helper()
 	past := time.Now().UTC().Add(-time.Hour).Format("2006-01-02T15:04:05.000Z")
-	if _, err := db.Exec(`UPDATE slides SET updated_at = ? WHERE id = ?`, past, slideID); err != nil {
-		t.Fatalf("backdate updated_at for %s: %v", slideID, err)
+	if _, err := db.Exec(`UPDATE records SET updated_at = ? WHERE id = ?`, past, recordID); err != nil {
+		t.Fatalf("backdate updated_at for %s: %v", recordID, err)
 	}
 }
 
 func TestDeleteSetsDeletedAt(t *testing.T) {
-	homeDir, slideID := addSlideHelper(t)
+	homeDir, recordID := addRecordHelper(t)
 
 	// Confirm deleted_at is NULL before delete.
 	db := openTestDB(t, homeDir)
-	before := queryDeletedAt(t, db, slideID)
+	before := queryDeletedAt(t, db, recordID)
 	if before.Valid {
 		t.Fatalf("expected deleted_at to be NULL before delete, got %q", before.String)
 	}
 
-	runPCSuccess(t, homeDir, "delete", slideID)
+	runPCSuccess(t, homeDir, "delete", recordID)
 
-	after := queryDeletedAt(t, db, slideID)
+	after := queryDeletedAt(t, db, recordID)
 	if !after.Valid {
 		t.Fatal("expected deleted_at to be NOT NULL after delete")
 	}
@@ -83,29 +83,29 @@ func TestDeleteNonexistentID(t *testing.T) {
 }
 
 func TestDeleteOutputMessage(t *testing.T) {
-	homeDir, slideID := addSlideHelper(t)
+	homeDir, recordID := addRecordHelper(t)
 
-	stdout := runPCSuccess(t, homeDir, "delete", slideID)
-	expected := "Slide " + slideID + " deleted"
+	stdout := runPCSuccess(t, homeDir, "delete", recordID)
+	expected := "Record " + recordID + " deleted"
 	if !strings.Contains(stdout, expected) {
 		t.Fatalf("expected stdout to contain %q, got %q", expected, stdout)
 	}
 }
 
 func TestRestoreClearsDeletedAt(t *testing.T) {
-	homeDir, slideID := addSlideHelper(t)
+	homeDir, recordID := addRecordHelper(t)
 
-	runPCSuccess(t, homeDir, "delete", slideID)
+	runPCSuccess(t, homeDir, "delete", recordID)
 
 	db := openTestDB(t, homeDir)
-	afterDelete := queryDeletedAt(t, db, slideID)
+	afterDelete := queryDeletedAt(t, db, recordID)
 	if !afterDelete.Valid {
 		t.Fatal("expected deleted_at to be NOT NULL after delete")
 	}
 
-	runPCSuccess(t, homeDir, "restore", slideID)
+	runPCSuccess(t, homeDir, "restore", recordID)
 
-	afterRestore := queryDeletedAt(t, db, slideID)
+	afterRestore := queryDeletedAt(t, db, recordID)
 	if afterRestore.Valid {
 		t.Fatalf("expected deleted_at to be NULL after restore, got %q", afterRestore.String)
 	}
@@ -122,60 +122,60 @@ func TestRestoreNonexistentID(t *testing.T) {
 }
 
 func TestRestoreOutputMessage(t *testing.T) {
-	homeDir, slideID := addSlideHelper(t)
+	homeDir, recordID := addRecordHelper(t)
 
-	runPCSuccess(t, homeDir, "delete", slideID)
-	stdout := runPCSuccess(t, homeDir, "restore", slideID)
+	runPCSuccess(t, homeDir, "delete", recordID)
+	stdout := runPCSuccess(t, homeDir, "restore", recordID)
 
-	expected := "Slide " + slideID + " restored"
+	expected := "Record " + recordID + " restored"
 	if !strings.Contains(stdout, expected) {
 		t.Fatalf("expected stdout to contain %q, got %q", expected, stdout)
 	}
 }
 
 func TestDeleteUpdatesUpdatedAt(t *testing.T) {
-	homeDir, slideID := addSlideHelper(t)
+	homeDir, recordID := addRecordHelper(t)
 
 	db := openTestDB(t, homeDir)
 
 	// Backdate updated_at so the trigger produces a distinguishable timestamp.
-	backdateUpdatedAt(t, db, slideID)
-	before := queryUpdatedAt(t, db, slideID)
+	backdateUpdatedAt(t, db, recordID)
+	before := queryUpdatedAt(t, db, recordID)
 
-	runPCSuccess(t, homeDir, "delete", slideID)
+	runPCSuccess(t, homeDir, "delete", recordID)
 
-	after := queryUpdatedAt(t, db, slideID)
+	after := queryUpdatedAt(t, db, recordID)
 	if after <= before {
 		t.Fatalf("expected updated_at to advance after delete: before=%q after=%q", before, after)
 	}
 }
 
 func TestRestoreUpdatesUpdatedAt(t *testing.T) {
-	homeDir, slideID := addSlideHelper(t)
+	homeDir, recordID := addRecordHelper(t)
 
-	runPCSuccess(t, homeDir, "delete", slideID)
+	runPCSuccess(t, homeDir, "delete", recordID)
 
 	db := openTestDB(t, homeDir)
 
 	// Backdate updated_at so the trigger produces a distinguishable timestamp.
-	backdateUpdatedAt(t, db, slideID)
-	before := queryUpdatedAt(t, db, slideID)
+	backdateUpdatedAt(t, db, recordID)
+	before := queryUpdatedAt(t, db, recordID)
 
-	runPCSuccess(t, homeDir, "restore", slideID)
+	runPCSuccess(t, homeDir, "restore", recordID)
 
-	after := queryUpdatedAt(t, db, slideID)
+	after := queryUpdatedAt(t, db, recordID)
 	if after <= before {
 		t.Fatalf("expected updated_at to advance after restore: before=%q after=%q", before, after)
 	}
 }
 
-func TestDeletedSlideStillShowable(t *testing.T) {
-	homeDir, slideID := addSlideHelper(t)
+func TestDeletedRecordStillShowable(t *testing.T) {
+	homeDir, recordID := addRecordHelper(t)
 
-	runPCSuccess(t, homeDir, "delete", slideID)
+	runPCSuccess(t, homeDir, "delete", recordID)
 
-	stdout := runPCSuccess(t, homeDir, "show", slideID)
+	stdout := runPCSuccess(t, homeDir, "show", recordID)
 	if !strings.Contains(strings.ToLower(stdout), "deleted") {
-		t.Fatalf("expected 'deleted' in show output for soft-deleted slide, got %q", stdout)
+		t.Fatalf("expected 'deleted' in show output for soft-deleted record, got %q", stdout)
 	}
 }

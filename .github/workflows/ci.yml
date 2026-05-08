@@ -145,11 +145,11 @@ jobs:
       - name: Run Playwright smoke e2e
         run: pnpm test:e2e:smoke
 
-      - name: Run Playwright Slide Browser e2e
-        run: pnpm test:e2e:slide-browser
+      - name: Run Playwright Record Browser e2e
+        run: pnpm test:e2e:record-browser
 
-      - name: Run Playwright standalone CLI slide e2e
-        run: pnpm test:e2e:cli-slide
+      - name: Run Playwright standalone CLI record e2e
+        run: pnpm test:e2e:cli-record
 
       - name: Run Playwright local demo e2e
         run: pnpm test:e2e:cli-demo

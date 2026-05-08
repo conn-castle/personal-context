@@ -42,7 +42,7 @@ describe("local-proxy", () => {
   describe("proxyToLocal", () => {
     it("throws when LOCAL_BACKEND_URL is not set", async () => {
       delete process.env.LOCAL_BACKEND_URL;
-      const request = new Request("http://localhost:3000/api/slides");
+      const request = new Request("http://localhost:3000/api/records");
       await expect(proxyToLocal(request)).rejects.toThrow(
         "LOCAL_BACKEND_URL is not set"
       );
@@ -59,12 +59,12 @@ describe("local-proxy", () => {
       globalThis.fetch = mockFetch;
 
       const request = new Request(
-        "http://localhost:3000/api/slides?limit=10&project=alpha"
+        "http://localhost:3000/api/records?limit=10&project=alpha"
       );
       const response = await proxyToLocal(request);
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "http://127.0.0.1:9876/api/slides?limit=10&project=alpha",
+        "http://127.0.0.1:9876/api/records?limit=10&project=alpha",
         expect.objectContaining({ method: "GET" })
       );
       expect(response.status).toBe(200);
@@ -74,14 +74,14 @@ describe("local-proxy", () => {
 
     it("throws when LOCAL_BACKEND_URL is non-loopback", async () => {
       process.env.LOCAL_BACKEND_URL = "https://example.com";
-      const request = new Request("http://localhost:3000/api/slides");
+      const request = new Request("http://localhost:3000/api/records");
       await expect(proxyToLocal(request)).rejects.toThrow(/loopback host/);
     });
 
     it("proxies a PATCH request with body", async () => {
       process.env.LOCAL_BACKEND_URL = "http://127.0.0.1:9876";
       const mockFetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ slide: { id: "test" } }), {
+        new Response(JSON.stringify({ record: { id: "test" } }), {
           status: 200,
           headers: { "content-type": "application/json" },
         })
@@ -89,7 +89,7 @@ describe("local-proxy", () => {
       globalThis.fetch = mockFetch;
 
       const request = new Request(
-        "http://localhost:3000/api/slides/20260310-aaaaaaaa",
+        "http://localhost:3000/api/records/20260310-aaaaaaaa",
         {
           method: "PATCH",
           headers: { "content-type": "application/json" },
@@ -99,7 +99,7 @@ describe("local-proxy", () => {
       const response = await proxyToLocal(request);
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "http://127.0.0.1:9876/api/slides/20260310-aaaaaaaa",
+        "http://127.0.0.1:9876/api/records/20260310-aaaaaaaa",
         expect.objectContaining({
           method: "PATCH",
           body: JSON.stringify({ project_id: "alpha" }),
@@ -118,7 +118,7 @@ describe("local-proxy", () => {
       );
       globalThis.fetch = mockFetch;
 
-      const request = new Request("http://localhost:3000/api/slides", {
+      const request = new Request("http://localhost:3000/api/records", {
         method: "PATCH",
         headers: {
           "content-type": "application/json",
@@ -155,7 +155,7 @@ describe("local-proxy", () => {
       );
       globalThis.fetch = mockFetch;
 
-      const request = new Request("http://localhost:3000/api/slides");
+      const request = new Request("http://localhost:3000/api/records");
       const response = await proxyToLocal(request);
 
       expect(response.headers.get("content-type")).toBe("application/json");
@@ -175,7 +175,7 @@ describe("local-proxy", () => {
       );
       globalThis.fetch = mockFetch;
 
-      const request = new Request("http://localhost:3000/api/slides");
+      const request = new Request("http://localhost:3000/api/records");
       const response = await proxyToLocal(request);
 
       expect(response.headers.get("content-type")).toBe("application/json");
@@ -196,7 +196,7 @@ describe("local-proxy", () => {
       globalThis.fetch = mockFetch;
 
       const request = new Request(
-        "http://localhost:3000/api/slides/20260310-zzzzzzzz"
+        "http://localhost:3000/api/records/20260310-zzzzzzzz"
       );
       const response = await proxyToLocal(request);
 
@@ -210,7 +210,7 @@ describe("local-proxy", () => {
         .mockRejectedValue(new Error("connect ECONNREFUSED"));
       globalThis.fetch = mockFetch;
 
-      const request = new Request("http://localhost:3000/api/slides");
+      const request = new Request("http://localhost:3000/api/records");
       const response = await proxyToLocal(request);
 
       expect(response.status).toBe(502);
@@ -231,7 +231,7 @@ describe("local-proxy", () => {
       const mockFetch = vi.fn().mockResolvedValue(fakeResponse);
       globalThis.fetch = mockFetch;
 
-      const request = new Request("http://localhost:3000/api/slides");
+      const request = new Request("http://localhost:3000/api/records");
       const response = await proxyToLocal(request);
 
       // With no content-type from the Go server, none is set on the proxy response.
@@ -248,7 +248,7 @@ describe("local-proxy", () => {
       );
       globalThis.fetch = mockFetch;
 
-      const request = new Request("http://localhost:3000/api/slides");
+      const request = new Request("http://localhost:3000/api/records");
       await proxyToLocal(request);
 
       const callArgs = mockFetch.mock.calls[0] as [string, RequestInit];
@@ -266,13 +266,13 @@ describe("local-proxy", () => {
       globalThis.fetch = mockFetch;
 
       const request = new Request(
-        "http://localhost:3000/api/slides/20260310-aaaaaaaa",
+        "http://localhost:3000/api/records/20260310-aaaaaaaa",
         { method: "DELETE" }
       );
       const response = await proxyToLocal(request);
 
       expect(mockFetch).toHaveBeenCalledWith(
-        "http://127.0.0.1:9876/api/slides/20260310-aaaaaaaa",
+        "http://127.0.0.1:9876/api/records/20260310-aaaaaaaa",
         expect.objectContaining({ method: "DELETE" })
       );
       expect(response.status).toBe(200);

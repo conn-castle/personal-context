@@ -11,7 +11,7 @@ import (
 
 func TestShowTextWithAllFields(t *testing.T) {
 	setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`,
 		"my notes",
 		`{"project_id":"proj1","git_remote_url":"https://github.com/org/repo","git_hash":"abcdef1234567890abcdef1234567890abcdef12"}`,
@@ -36,7 +36,7 @@ func TestShowTextWithAllFields(t *testing.T) {
 
 func TestShowJSONWithAllFields(t *testing.T) {
 	setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/chart.png">body</html>`,
 		"json notes",
 		`{"project_id":"proj-json","git_remote_url":"https://example.com","git_hash":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}`,
@@ -78,11 +78,11 @@ func TestShowJSONWithAllFields(t *testing.T) {
 	}
 }
 
-func TestShowDeletedSlideText(t *testing.T) {
+func TestShowDeletedRecordText(t *testing.T) {
 	setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
-	// Delete the slide
+	// Delete the record
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", id})
 	if err := delCmd.Execute(); err != nil {
@@ -102,9 +102,9 @@ func TestShowDeletedSlideText(t *testing.T) {
 	}
 }
 
-func TestShowDeletedSlideJSON(t *testing.T) {
+func TestShowDeletedRecordJSON(t *testing.T) {
 	setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", id})
@@ -131,7 +131,7 @@ func TestShowDeletedSlideJSON(t *testing.T) {
 
 func TestShowTextNoNotes(t *testing.T) {
 	setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -149,7 +149,7 @@ func TestShowTextNoNotes(t *testing.T) {
 
 func TestShowCommandTextFormat(t *testing.T) {
 	setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -162,7 +162,7 @@ func TestShowCommandTextFormat(t *testing.T) {
 
 	out := stdout.String()
 	if !strings.Contains(out, id) {
-		t.Fatalf("expected output to contain slide ID %q, got %q", id, out)
+		t.Fatalf("expected output to contain record ID %q, got %q", id, out)
 	}
 	if !strings.Contains(out, "Date:") {
 		t.Fatalf("expected output to contain 'Date:', got %q", out)
@@ -171,7 +171,7 @@ func TestShowCommandTextFormat(t *testing.T) {
 
 func TestShowCommandJSONFormat(t *testing.T) {
 	setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -182,7 +182,7 @@ func TestShowCommandJSONFormat(t *testing.T) {
 		t.Fatalf("show --format json failed: %v", err)
 	}
 
-	var parsed slideJSON
+	var parsed recordJSON
 	if err := json.Unmarshal(stdout.Bytes(), &parsed); err != nil {
 		t.Fatalf("expected valid JSON, got parse error: %v\nraw output: %s", err, stdout.String())
 	}
@@ -201,7 +201,7 @@ func TestShowCommandNotFound(t *testing.T) {
 
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for nonexistent slide")
+		t.Fatal("expected error for nonexistent record")
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected 'not found' error, got %q", err.Error())
@@ -210,7 +210,7 @@ func TestShowCommandNotFound(t *testing.T) {
 
 func TestShowCommandInvalidFormat(t *testing.T) {
 	setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}

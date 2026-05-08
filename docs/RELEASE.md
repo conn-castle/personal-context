@@ -9,7 +9,7 @@ Releases follow the same tag-driven pattern as Agent Layer: GitHub Actions build
 - All release changes committed.
 - `CHANGELOG.md` has an entry for the exact release tag.
 - The tap formula uses:
-  - `desc "Personal structured vault for searchable knowledge, data, files, and slides"`
+  - `desc "Personal structured vault for searchable knowledge, data, files, and records"`
   - `license "PolyForm-Noncommercial-1.0.0"`
 - This repository has the Homebrew tap GitHub App secrets configured:
   - `HOMEBREW_TAP_APP_ID`

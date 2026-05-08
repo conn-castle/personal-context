@@ -11,7 +11,7 @@ func TestFetchWithoutCloudConfiguredFails(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	result := runPC(t, homeDir, "fetch", "some-slide-id")
+	result := runPC(t, homeDir, "fetch", "some-record-id")
 	if result.ExitCode == 0 {
 		t.Fatalf("pc fetch unexpectedly succeeded:\nstdout: %s\nstderr: %s", result.Stdout, result.Stderr)
 	}
@@ -28,7 +28,7 @@ func TestFetchWithoutModeSelector(t *testing.T) {
 	if result.ExitCode == 0 {
 		t.Fatalf("pc fetch without args unexpectedly succeeded:\nstdout: %s", result.Stdout)
 	}
-	if !strings.Contains(result.Stderr, "specify a slide ID") {
+	if !strings.Contains(result.Stderr, "specify a record ID") {
 		t.Fatalf("expected mode selector error, got stderr %q", result.Stderr)
 	}
 }
@@ -37,7 +37,7 @@ func TestFetchMutuallyExclusiveModes(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	result := runPC(t, homeDir, "fetch", "slide-id", "--project", "org/proj")
+	result := runPC(t, homeDir, "fetch", "record-id", "--project", "org/proj")
 	if result.ExitCode == 0 {
 		t.Fatal("expected error for mutually exclusive modes")
 	}

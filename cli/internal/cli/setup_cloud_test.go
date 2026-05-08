@@ -687,14 +687,14 @@ func TestRunSetupInteractiveCloudAccepted(t *testing.T) {
 		return "validated-user-id", nil
 	}
 
-	// Mock the merge preview: localRepo returns 3 slides, cloudRepo returns 5.
+	// Mock the merge preview: localRepo returns 3 records, cloudRepo returns 5.
 	origPostgresRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = origPostgresRepo })
 	newPostgresRepoFn = func(_ *pgxpool.Pool, userID string) (repository.Repository, error) {
 		if userID != "validated-user-id" {
 			t.Fatalf("expected validated user ID for preview repo, got %q", userID)
 		}
-		return &mockRepoWithSlideCount{count: 5}, nil
+		return &mockRepoWithRecordCount{count: 5}, nil
 	}
 
 	// Interactive input: accept cloud, provide credentials, accept merge preview.
@@ -778,7 +778,7 @@ func TestRunSetupInteractiveMergePreviewDeclined(t *testing.T) {
 		if userID != "validated-user-id" {
 			t.Fatalf("expected validated user ID for preview repo, got %q", userID)
 		}
-		return &mockRepoWithSlideCount{count: 0}, nil
+		return &mockRepoWithRecordCount{count: 0}, nil
 	}
 
 	// Accept cloud, provide creds, but decline at merge preview.
@@ -1168,7 +1168,7 @@ func TestRunSetupCloudInteractiveMergePreviewRepoError(t *testing.T) {
 	}
 }
 
-func TestRunSetupCloudInteractiveLocalSlidesCountError(t *testing.T) {
+func TestRunSetupCloudInteractiveLocalRecordsCountError(t *testing.T) {
 	homeDir := setupHomeWithConfig(t)
 	store, _ := config.NewStore(homeDir)
 
@@ -1180,21 +1180,21 @@ func TestRunSetupCloudInteractiveLocalSlidesCountError(t *testing.T) {
 		return &mockRepo{}, nil
 	}
 
-	localRepo := &mockRepoWithListSlidesError{err: errors.New("db error")}
+	localRepo := &mockRepoWithListRecordsError{err: errors.New("db error")}
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("y\n"),
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
 		"", false, "pc_key_valid",
 		localRepo, true)
 	if err == nil {
-		t.Fatal("expected error when local slide count fails")
+		t.Fatal("expected error when local record count fails")
 	}
-	if !strings.Contains(err.Error(), "count local slides") {
+	if !strings.Contains(err.Error(), "count local records") {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
 
-func TestRunSetupCloudInteractiveCloudSlidesCountError(t *testing.T) {
+func TestRunSetupCloudInteractiveCloudRecordsCountError(t *testing.T) {
 	homeDir := setupHomeWithConfig(t)
 	store, _ := config.NewStore(homeDir)
 
@@ -1203,20 +1203,20 @@ func TestRunSetupCloudInteractiveCloudSlidesCountError(t *testing.T) {
 	origPostgresRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = origPostgresRepo })
 	newPostgresRepoFn = func(*pgxpool.Pool, string) (repository.Repository, error) {
-		return &mockRepoWithListSlidesError{err: errors.New("cloud db error")}, nil
+		return &mockRepoWithListRecordsError{err: errors.New("cloud db error")}, nil
 	}
 
 	// localRepo succeeds, cloudRepo fails.
-	localRepo := &mockRepoWithSlideCount{count: 2}
+	localRepo := &mockRepoWithRecordCount{count: 2}
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("y\n"),
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
 		"", false, "pc_key_valid",
 		localRepo, true)
 	if err == nil {
-		t.Fatal("expected error when cloud slide count fails")
+		t.Fatal("expected error when cloud record count fails")
 	}
-	if !strings.Contains(err.Error(), "count cloud slides") {
+	if !strings.Contains(err.Error(), "count cloud records") {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
@@ -1230,7 +1230,7 @@ func TestRunSetupCloudInteractiveConfirmReadError(t *testing.T) {
 	origPostgresRepo := newPostgresRepoFn
 	t.Cleanup(func() { newPostgresRepoFn = origPostgresRepo })
 	newPostgresRepoFn = func(*pgxpool.Pool, string) (repository.Repository, error) {
-		return &mockRepoWithSlideCount{count: 0}, nil
+		return &mockRepoWithRecordCount{count: 0}, nil
 	}
 
 	origPrompt := promptConfirmFn
@@ -1239,7 +1239,7 @@ func TestRunSetupCloudInteractiveConfirmReadError(t *testing.T) {
 		return false, errors.New("read error")
 	}
 
-	localRepo := &mockRepoWithSlideCount{count: 0}
+	localRepo := &mockRepoWithRecordCount{count: 0}
 	err := runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader(""),
 		homeDir, store,
 		"postgres://user:pass@host/db", "my-bucket", "us-east-1", "KEY", "SECRET",
@@ -1527,27 +1527,27 @@ func mockAllCloudDeps(t *testing.T) {
 	removeAWSProfileFn = func(string, string) error { return nil }
 }
 
-// mockRepoWithSlideCount is a mock repo that returns a fixed number of slides.
-type mockRepoWithSlideCount struct {
+// mockRepoWithRecordCount is a mock repo that returns a fixed number of records.
+type mockRepoWithRecordCount struct {
 	mockRepo
 	count int
 }
 
-func (m *mockRepoWithSlideCount) ListSlides(_ context.Context, _ repository.ListSlidesFilter) ([]repository.Slide, error) {
-	slides := make([]repository.Slide, m.count)
-	for i := range slides {
-		slides[i] = repository.Slide{ID: "test-slide"}
+func (m *mockRepoWithRecordCount) ListRecords(_ context.Context, _ repository.ListRecordsFilter) ([]repository.Record, error) {
+	records := make([]repository.Record, m.count)
+	for i := range records {
+		records[i] = repository.Record{ID: "test-record"}
 	}
-	return slides, nil
+	return records, nil
 }
 
-// mockRepoWithListSlidesError is a mock repo that returns an error from ListSlides.
-type mockRepoWithListSlidesError struct {
+// mockRepoWithListRecordsError is a mock repo that returns an error from ListRecords.
+type mockRepoWithListRecordsError struct {
 	mockRepo
 	err error
 }
 
-func (m *mockRepoWithListSlidesError) ListSlides(_ context.Context, _ repository.ListSlidesFilter) ([]repository.Slide, error) {
+func (m *mockRepoWithListRecordsError) ListRecords(_ context.Context, _ repository.ListRecordsFilter) ([]repository.Record, error) {
 	return nil, m.err
 }
 

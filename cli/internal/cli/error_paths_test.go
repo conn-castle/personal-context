@@ -102,7 +102,7 @@ func TestAddAfterNonexistentRef(t *testing.T) {
 	setupEnv(t)
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>x</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	writeDefaultProvenanceMetadata(t, dir)
@@ -237,7 +237,7 @@ func TestAddWithoutSetup(t *testing.T) {
 	t.Setenv("PC_HOME", homeDir)
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>x</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -264,7 +264,7 @@ func TestEditWithoutSetup(t *testing.T) {
 	t.Setenv("PC_HOME", homeDir)
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>x</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -499,8 +499,8 @@ func TestServeSignalShutdown(t *testing.T) {
 func TestComputeDayOrderUnknownKind(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	// Add a slide on the target date so the list is non-empty and the switch is reached
-	addSlide(t, "--date", "2025-01-01")
+	// Add a record on the target date so the list is non-empty and the switch is reached
+	addRecord(t, "--date", "2025-01-01")
 
 	stack, err := openLocalStack(homeDir)
 	if err != nil {
@@ -518,14 +518,14 @@ func TestComputeDayOrderUnknownKind(t *testing.T) {
 
 type errorListRepo struct{ mockRepo }
 
-func (r *errorListRepo) ListSlides(_ context.Context, _ repository.ListSlidesFilter) ([]repository.Slide, error) {
+func (r *errorListRepo) ListRecords(_ context.Context, _ repository.ListRecordsFilter) ([]repository.Record, error) {
 	return nil, errors.New("list error")
 }
 
 func TestComputeDayOrderListError(t *testing.T) {
 	_, err := computeDayOrder(context.Background(), &errorListRepo{}, "2025-01-01", "", position{kind: "last"})
 	if err == nil {
-		t.Fatal("expected error from ListSlides")
+		t.Fatal("expected error from ListRecords")
 	}
 }
 
@@ -599,118 +599,118 @@ func hasRegularFiles(root string) (bool, error) {
 
 func TestDeleteDBError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
-	corruptTable(t, homeDir, "slides")
+	corruptTable(t, homeDir, "records")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"delete", id})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slides table missing")
+		t.Fatal("expected error when records table missing")
 	}
 }
 
 func TestRestoreDBError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
-	corruptTable(t, homeDir, "slides")
+	corruptTable(t, homeDir, "records")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"restore", id})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slides table missing")
+		t.Fatal("expected error when records table missing")
 	}
 }
 
 func TestShowFiguresError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
-	corruptTable(t, homeDir, "slide_figures")
+	corruptTable(t, homeDir, "record_figures")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"show", id})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slide_figures table missing")
+		t.Fatal("expected error when record_figures table missing")
 	}
 }
 
 func TestShowDataFilesError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
-	corruptTable(t, homeDir, "slide_data_files")
-
-	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"show", id})
-	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slide_data_files table missing")
-	}
-}
-
-func TestShowSlidesError(t *testing.T) {
-	homeDir := setupEnv(t)
-	id := addSlide(t)
-
-	corruptTable(t, homeDir, "slides")
+	corruptTable(t, homeDir, "record_data_files")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"show", id})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slides table missing")
+		t.Fatal("expected error when record_data_files table missing")
 	}
 }
 
-func TestEditGetSlideError(t *testing.T) {
+func TestShowRecordsError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
-	corruptTable(t, homeDir, "slides")
+	corruptTable(t, homeDir, "records")
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"show", id})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error when records table missing")
+	}
+}
+
+func TestEditGetRecordError(t *testing.T) {
+	homeDir := setupEnv(t)
+	id := addRecord(t)
+
+	corruptTable(t, homeDir, "records")
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>x</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"edit", id, dir})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slides table missing")
+		t.Fatal("expected error when records table missing")
 	}
 }
 
 func TestEditInputParseError(t *testing.T) {
 	setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	emptyDir := t.TempDir()
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"edit", id, emptyDir})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error for missing slide.html in edit")
+		t.Fatal("expected error for missing record.html in edit")
 	}
 }
 
-func TestMoveGetSlideError(t *testing.T) {
+func TestMoveGetRecordError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
-	corruptTable(t, homeDir, "slides")
+	corruptTable(t, homeDir, "records")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"move", id, "--date", "2025-01-01"})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slides table missing")
+		t.Fatal("expected error when records table missing")
 	}
 }
 
 func TestMoveAfterNonexistentRef(t *testing.T) {
 	setupEnv(t)
-	addSlide(t, "--date", "2025-07-01")
+	addRecord(t, "--date", "2025-07-01")
 
-	id2 := addSlide(t, "--date", "2025-07-01")
+	id2 := addRecord(t, "--date", "2025-07-01")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"move", id2, "--after", "nonexistent-ref"})
@@ -723,23 +723,23 @@ func TestMoveAfterNonexistentRef(t *testing.T) {
 
 func TestEditOldFiguresListError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`, "", "",
 		map[string][]byte{"fig.png": []byte("data")}, nil,
 	)
 
-	// Drop slide_figures to trigger error when listing old figures
-	corruptTable(t, homeDir, "slide_figures")
+	// Drop record_figures to trigger error when listing old figures
+	corruptTable(t, homeDir, "record_figures")
 
 	newDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(newDir, "slide.html"), []byte("<html>new</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(newDir, "record.html"), []byte("<html>new</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"edit", id, newDir})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slide_figures table missing")
+		t.Fatal("expected error when record_figures table missing")
 	}
 }
 
@@ -747,42 +747,42 @@ func TestEditOldFiguresListError(t *testing.T) {
 
 func TestEditOldDataFilesListError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		"<html>body</html>", "", "",
 		nil, map[string][]byte{"d.csv": []byte("x")},
 	)
 
-	// Drop slide_data_files to trigger error when listing old data files
-	corruptTable(t, homeDir, "slide_data_files")
+	// Drop record_data_files to trigger error when listing old data files
+	corruptTable(t, homeDir, "record_data_files")
 
 	newDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(newDir, "slide.html"), []byte("<html>new</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(newDir, "record.html"), []byte("<html>new</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"edit", id, newDir})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slide_data_files table missing")
+		t.Fatal("expected error when record_data_files table missing")
 	}
 }
 
-// --- Add: create slide DB error ---
+// --- Add: create record DB error ---
 
-func TestAddCreateSlideError(t *testing.T) {
+func TestAddCreateRecordError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	corruptTable(t, homeDir, "slides")
+	corruptTable(t, homeDir, "records")
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>x</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", dir})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slides table missing")
+		t.Fatal("expected error when records table missing")
 	}
 }
 
@@ -790,7 +790,7 @@ func TestAddCreateSlideError(t *testing.T) {
 
 func TestMoveMutuallyExclusiveFlags(t *testing.T) {
 	setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"move", id, "--first", "--last"})
@@ -815,7 +815,7 @@ func TestAddFigureCopyError(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(figuresDir, 0o755) })
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte(`<html><img src="figures/fig.png">x</html>`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte(`<html><img src="figures/fig.png">x</html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(`{"project_id":"test/default-project","source_device_id":"test-device"}`), 0o644); err != nil {
@@ -852,7 +852,7 @@ func TestAddDataFileCopyError(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dataDir, 0o755) })
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>x</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "metadata.json"), []byte(`{"project_id":"test/default-project","source_device_id":"test-device"}`), 0o644); err != nil {
@@ -877,7 +877,7 @@ func TestAddDataFileCopyError(t *testing.T) {
 
 func TestEditFigureCopyError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	// Make the figures directory unwritable
 	figuresDir := filepath.Join(homeDir, "personal-context", "figures")
@@ -890,7 +890,7 @@ func TestEditFigureCopyError(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(figuresDir, 0o755) })
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte(`<html><img src="figures/new.png">x</html>`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte(`<html><img src="figures/new.png">x</html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	figDir := filepath.Join(dir, "figures")
@@ -912,7 +912,7 @@ func TestEditFigureCopyError(t *testing.T) {
 
 func TestEditDataFileCopyError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	// Make the data directory unwritable
 	dataDir := filepath.Join(homeDir, "personal-context", "data")
@@ -925,7 +925,7 @@ func TestEditDataFileCopyError(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dataDir, 0o755) })
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>x</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	dDir := filepath.Join(dir, "data")
@@ -986,7 +986,7 @@ func TestSetupEnsureConfigWriteError(t *testing.T) {
 
 func TestMoveMultiplePositionFlags(t *testing.T) {
 	setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	// --first and --after together should fail
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -996,15 +996,15 @@ func TestMoveMultiplePositionFlags(t *testing.T) {
 	}
 }
 
-// --- Add: CreateSlideFigure error (drop slide_figures, keep slides) ---
+// --- Add: CreateRecordFigure error (drop record_figures, keep records) ---
 
-func TestAddCreateSlideFigureError(t *testing.T) {
+func TestAddCreateRecordFigureError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	corruptTable(t, homeDir, "slide_figures")
+	corruptTable(t, homeDir, "record_figures")
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte(`<html><img src="figures/fig.png">x</html>`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte(`<html><img src="figures/fig.png">x</html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	figDir := filepath.Join(dir, "figures")
@@ -1018,16 +1018,16 @@ func TestAddCreateSlideFigureError(t *testing.T) {
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", dir})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slide_figures table missing")
+		t.Fatal("expected error when record_figures table missing")
 	}
 
 	db := openErrorPathsDB(t, homeDir)
-	var slideCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slides").Scan(&slideCount); err != nil {
-		t.Fatalf("count slides: %v", err)
+	var recordCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM records").Scan(&recordCount); err != nil {
+		t.Fatalf("count records: %v", err)
 	}
-	if slideCount != 0 {
-		t.Fatalf("expected no slide rows after failed add, got %d", slideCount)
+	if recordCount != 0 {
+		t.Fatalf("expected no record rows after failed add, got %d", recordCount)
 	}
 
 	figuresRoot := filepath.Join(homeDir, "personal-context", "figures")
@@ -1040,15 +1040,15 @@ func TestAddCreateSlideFigureError(t *testing.T) {
 	}
 }
 
-// --- Add: CreateSlideDataFile error (drop slide_data_files, keep slides) ---
+// --- Add: CreateRecordDataFile error (drop record_data_files, keep records) ---
 
-func TestAddCreateSlideDataFileError(t *testing.T) {
+func TestAddCreateRecordDataFileError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	corruptTable(t, homeDir, "slide_data_files")
+	corruptTable(t, homeDir, "record_data_files")
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>x</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	dDir := filepath.Join(dir, "data")
@@ -1062,16 +1062,16 @@ func TestAddCreateSlideDataFileError(t *testing.T) {
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", dir})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slide_data_files table missing")
+		t.Fatal("expected error when record_data_files table missing")
 	}
 
 	db := openErrorPathsDB(t, homeDir)
-	var slideCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slides").Scan(&slideCount); err != nil {
-		t.Fatalf("count slides: %v", err)
+	var recordCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM records").Scan(&recordCount); err != nil {
+		t.Fatalf("count records: %v", err)
 	}
-	if slideCount != 0 {
-		t.Fatalf("expected no slide rows after failed add, got %d", slideCount)
+	if recordCount != 0 {
+		t.Fatalf("expected no record rows after failed add, got %d", recordCount)
 	}
 
 	dataRoot := filepath.Join(homeDir, "personal-context", "data")
@@ -1115,22 +1115,22 @@ func TestSetupEnsureConfigDirectoryBlock(t *testing.T) {
 	}
 }
 
-// --- Edit: UpdateSlide error (rename slides to something that SELECT works on but UPDATE triggers fail) ---
+// --- Edit: UpdateRecord error (rename records to something that SELECT works on but UPDATE triggers fail) ---
 // Note: renaming the table makes SELECT fail too, so we use ALTER TABLE to drop a required column.
 // This is not cleanly testable without mocking; we cover via different approaches.
 
-// --- Edit: CreateSlideFigure error after successful UpdateSlide ---
-// We'd need slide_figures to not exist for INSERT but exist for SELECT (ListSlideFiguresBySlideID).
+// --- Edit: CreateRecordFigure error after successful UpdateRecord ---
+// We'd need record_figures to not exist for INSERT but exist for SELECT (ListRecordFiguresByRecordID).
 // Since both operations hit the same table, this requires mocking. Covered by edit figure copy error instead.
 
 // --- Move: runMove resolveHomeDir and update error paths ---
 
-func TestMoveUpdateSlideError(t *testing.T) {
+func TestMoveUpdateRecordError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t, "--date", "2025-08-01")
+	id := addRecord(t, "--date", "2025-08-01")
 
-	// Drop the sync_version table to make UpdateSlide's trigger fail
-	// (the slides_sync_bump_after_update trigger references sync_version)
+	// Drop the sync_version table to make UpdateRecord's trigger fail
+	// (the records_sync_bump_after_update trigger references sync_version)
 	corruptTable(t, homeDir, "sync_version")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -1140,22 +1140,22 @@ func TestMoveUpdateSlideError(t *testing.T) {
 	}
 }
 
-// --- Edit: UpdateSlide error via trigger failure ---
-// Slide has no old figures/data, so delete loops are skipped. UpdateSlide trigger fails.
+// --- Edit: UpdateRecord error via trigger failure ---
+// Record has no old figures/data, so delete loops are skipped. UpdateRecord trigger fails.
 
-func TestEditUpdateSlideError(t *testing.T) {
+func TestEditUpdateRecordError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/old.png"></html>`, "", "",
 		map[string][]byte{"old.png": []byte("old-figure")},
 		map[string][]byte{"old.csv": []byte("old,data")},
 	)
 
-	// Drop sync_version to make the slides_sync_bump_after_update trigger fail
+	// Drop sync_version to make the records_sync_bump_after_update trigger fail
 	corruptTable(t, homeDir, "sync_version")
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>new content</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>new content</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1168,16 +1168,16 @@ func TestEditUpdateSlideError(t *testing.T) {
 
 	db := openErrorPathsDB(t, homeDir)
 	var figureCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slide_figures WHERE slide_id = ?", id).Scan(&figureCount); err != nil {
-		t.Fatalf("count slide_figures: %v", err)
+	if err := db.QueryRow("SELECT COUNT(*) FROM record_figures WHERE record_id = ?", id).Scan(&figureCount); err != nil {
+		t.Fatalf("count record_figures: %v", err)
 	}
 	if figureCount != 1 {
 		t.Fatalf("expected figure rows to remain unchanged, got %d", figureCount)
 	}
 
 	var dataCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slide_data_files WHERE slide_id = ?", id).Scan(&dataCount); err != nil {
-		t.Fatalf("count slide_data_files: %v", err)
+	if err := db.QueryRow("SELECT COUNT(*) FROM record_data_files WHERE record_id = ?", id).Scan(&dataCount); err != nil {
+		t.Fatalf("count record_data_files: %v", err)
 	}
 	if dataCount != 1 {
 		t.Fatalf("expected data file rows to remain unchanged, got %d", dataCount)
@@ -1194,12 +1194,12 @@ func TestEditUpdateSlideError(t *testing.T) {
 	}
 }
 
-// --- Edit: DeleteSlideFigure error via trigger failure ---
-// Slide has old figures. Drop sync_version. Edit with no new figures → figure delete trigger fails.
+// --- Edit: DeleteRecordFigure error via trigger failure ---
+// Record has old figures. Drop sync_version. Edit with no new figures → figure delete trigger fails.
 
-func TestEditDeleteSlideFigureError(t *testing.T) {
+func TestEditDeleteRecordFigureError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/old.png">body</html>`, "", "",
 		map[string][]byte{"old.png": []byte("data")}, nil,
 	)
@@ -1208,7 +1208,7 @@ func TestEditDeleteSlideFigureError(t *testing.T) {
 	corruptTable(t, homeDir, "sync_version")
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>no figures</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>no figures</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1220,12 +1220,12 @@ func TestEditDeleteSlideFigureError(t *testing.T) {
 	}
 }
 
-// --- Edit: DeleteSlideDataFile error via trigger failure ---
-// Slide has old data files. Drop sync_version. Edit with no new data → data delete trigger fails.
+// --- Edit: DeleteRecordDataFile error via trigger failure ---
+// Record has old data files. Drop sync_version. Edit with no new data → data delete trigger fails.
 
-func TestEditDeleteSlideDataFileError(t *testing.T) {
+func TestEditDeleteRecordDataFileError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		"<html>body</html>", "", "",
 		nil, map[string][]byte{"old.csv": []byte("x")},
 	)
@@ -1234,7 +1234,7 @@ func TestEditDeleteSlideDataFileError(t *testing.T) {
 	corruptTable(t, homeDir, "sync_version")
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>no data</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>no data</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1246,37 +1246,37 @@ func TestEditDeleteSlideDataFileError(t *testing.T) {
 	}
 }
 
-// --- Edit: CreateSlideFigure error ---
-// Slide has no old figures/data. Drop sync_version AND slide_figures.
-// Edit with new figures → UpdateSlide needs sync trigger. But UpdateSlide trigger fires first.
-// Actually, we need UpdateSlide to succeed but CreateSlideFigure to fail.
-// Approach: add slide, drop slide_figures (not sync_version). Edit with new figures.
-// ListSlideFiguresBySlideID fails before we get to create... so use different approach:
-// Add slide without figures. Edit with new figures. Drop slide_figures table before edit.
-// GetSlideByID: OK. ParseInputFolder: OK. CopyFigure: OK (filesystem).
-// ListSlideFiguresBySlideID: FAILS (table dropped) → covers line 89, not 127.
-// So to reach CreateSlideFigure, we need ListSlideFiguresBySlideID to succeed...
+// --- Edit: CreateRecordFigure error ---
+// Record has no old figures/data. Drop sync_version AND record_figures.
+// Edit with new figures → UpdateRecord needs sync trigger. But UpdateRecord trigger fires first.
+// Actually, we need UpdateRecord to succeed but CreateRecordFigure to fail.
+// Approach: add record, drop record_figures (not sync_version). Edit with new figures.
+// ListRecordFiguresByRecordID fails before we get to create... so use different approach:
+// Add record without figures. Edit with new figures. Drop record_figures table before edit.
+// GetRecordByID: OK. ParseInputFolder: OK. CopyFigure: OK (filesystem).
+// ListRecordFiguresByRecordID: FAILS (table dropped) → covers line 89, not 127.
+// So to reach CreateRecordFigure, we need ListRecordFiguresByRecordID to succeed...
 // This is only possible with mocking. Skip for now.
 
-// --- Add: CreateSlide error (corrupt slides to make INSERT fail) ---
-// computeDayOrder uses ListSlides which SELECT from slides. If slides exists but INSERT fails...
-// Drop the sync_version table: INSERT into slides fires the sync_bump_after_insert trigger.
+// --- Add: CreateRecord error (corrupt records to make INSERT fail) ---
+// computeDayOrder uses ListRecords which SELECT from records. If records exists but INSERT fails...
+// Drop the sync_version table: INSERT into records fires the sync_bump_after_insert trigger.
 
-func TestAddCreateSlideTriggError(t *testing.T) {
+func TestAddCreateRecordTriggError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	// Drop sync_version to make the slides_sync_bump_after_insert trigger fail
+	// Drop sync_version to make the records_sync_bump_after_insert trigger fail
 	corruptTable(t, homeDir, "sync_version")
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>x</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"add", dir})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slide insert trigger fails")
+		t.Fatal("expected error when record insert trigger fails")
 	}
 }
 
@@ -1284,10 +1284,10 @@ func TestAddCreateSlideTriggError(t *testing.T) {
 
 func TestDeleteTriggerError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
-	// Drop sync_version to make the slides_sync_bump_after_update trigger fail
-	// (SoftDeleteSlide does an UPDATE SET deleted_at)
+	// Drop sync_version to make the records_sync_bump_after_update trigger fail
+	// (SoftDeleteRecord does an UPDATE SET deleted_at)
 	corruptTable(t, homeDir, "sync_version")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -1301,7 +1301,7 @@ func TestDeleteTriggerError(t *testing.T) {
 
 func TestRestoreTriggerError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	// Delete first (so there's something to restore)
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})

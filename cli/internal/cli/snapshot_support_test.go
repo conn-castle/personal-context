@@ -25,7 +25,7 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 	ctx := context.Background()
 	sourceHome := setupEnv(t)
 
-	slideID := addSlideWithContent(
+	recordID := addRecordWithContent(
 		t,
 		`<html><body><img src="figures/original.png">source</body></html>`,
 		"source-notes",
@@ -47,15 +47,15 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 		t.Fatalf("create custom template: %v", err)
 	}
 
-	snapshot, err := buildLocalSnapshot(ctx, sourceStack, repository.ListSlidesFilter{})
+	snapshot, err := buildLocalSnapshot(ctx, sourceStack, repository.ListRecordsFilter{})
 	if err != nil {
 		t.Fatalf("buildLocalSnapshot(): %v", err)
 	}
 	if len(snapshot.Templates) < 3 {
 		t.Fatalf("expected builtin templates plus custom template, got %d", len(snapshot.Templates))
 	}
-	if len(snapshot.Slides) != 1 {
-		t.Fatalf("expected 1 slide in snapshot, got %d", len(snapshot.Slides))
+	if len(snapshot.Records) != 1 {
+		t.Fatalf("expected 1 record in snapshot, got %d", len(snapshot.Records))
 	}
 
 	targetHome := t.TempDir()
@@ -78,37 +78,37 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 
 	updatedSnapshot := snapshot
 	updatedSnapshot.Templates = append([]gitsnapshot.Template(nil), snapshot.Templates...)
-	updatedSnapshot.Slides = append([]gitsnapshot.Slide(nil), snapshot.Slides...)
+	updatedSnapshot.Records = append([]gitsnapshot.Record(nil), snapshot.Records...)
 
 	for i := range updatedSnapshot.Templates {
 		if updatedSnapshot.Templates[i].Name == "text-only" {
 			updatedSnapshot.Templates[i].HTMLContent = "<html>text-only-updated</html>"
 		}
 	}
-	updatedSlide := updatedSnapshot.Slides[0]
-	updatedSlide.HTMLContent = strPtr(`<html><body><img src="figures/fresh.png">updated</body></html>`)
-	updatedSlide.UpdatedAt = updatedSlide.UpdatedAt.Add(time.Minute)
-	updatedSlide.Notes = strPtr("updated-notes")
-	updatedSlide.ProjectID = "phase7/updated"
+	updatedRecord := updatedSnapshot.Records[0]
+	updatedRecord.HTMLContent = strPtr(`<html><body><img src="figures/fresh.png">updated</body></html>`)
+	updatedRecord.UpdatedAt = updatedRecord.UpdatedAt.Add(time.Minute)
+	updatedRecord.Notes = strPtr("updated-notes")
+	updatedRecord.ProjectID = "phase7/updated"
 	updatedSnapshot.Projects = append(updatedSnapshot.Projects, gitsnapshot.RegistryEntry{
 		ID:        "phase7/updated",
-		CreatedAt: updatedSlide.UpdatedAt,
-		UpdatedAt: updatedSlide.UpdatedAt,
+		CreatedAt: updatedRecord.UpdatedAt,
+		UpdatedAt: updatedRecord.UpdatedAt,
 	})
-	updatedSlide.GitRemoteURL = strPtr("https://github.com/org/updated")
-	updatedSlide.GitHash = strPtr("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-	updatedSlide.Figures = []gitsnapshot.Figure{{
+	updatedRecord.GitRemoteURL = strPtr("https://github.com/org/updated")
+	updatedRecord.GitHash = strPtr("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	updatedRecord.Figures = []gitsnapshot.Figure{{
 		Filename: "fresh.png",
-		S3Key:    filepath.ToSlash(filepath.Join("figures", slideID, "fresh.png")),
+		S3Key:    filepath.ToSlash(filepath.Join("figures", recordID, "fresh.png")),
 		Content:  []byte("fresh-figure"),
 	}}
-	updatedSlide.DataFiles = []gitsnapshot.DataFile{{
+	updatedRecord.DataFiles = []gitsnapshot.DataFile{{
 		Filename: "fresh.csv",
-		S3Key:    filepath.ToSlash(filepath.Join("data", slideID, "fresh.csv")),
+		S3Key:    filepath.ToSlash(filepath.Join("data", recordID, "fresh.csv")),
 		Size:     int64(len("fresh,data\n")),
 		Hash:     hashData("fresh,data\n"),
 	}}
-	updatedSnapshot.Slides[0] = updatedSlide
+	updatedSnapshot.Records[0] = updatedRecord
 
 	stats, err = importSnapshotIntoStack(ctx, targetStack, updatedSnapshot)
 	if err != nil {
@@ -118,21 +118,21 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 		t.Fatalf("update stats = %+v", stats)
 	}
 
-	figures, err := targetStack.Repo.ListSlideFiguresBySlideID(ctx, slideID)
+	figures, err := targetStack.Repo.ListRecordFiguresByRecordID(ctx, recordID)
 	if err != nil {
-		t.Fatalf("ListSlideFiguresBySlideID(): %v", err)
+		t.Fatalf("ListRecordFiguresByRecordID(): %v", err)
 	}
 	if len(figures) != 1 || figures[0].Filename != "fresh.png" {
 		t.Fatalf("figures after update = %+v", figures)
 	}
-	dataFiles, err := targetStack.Repo.ListSlideDataFilesBySlideID(ctx, slideID)
+	dataFiles, err := targetStack.Repo.ListRecordDataFilesByRecordID(ctx, recordID)
 	if err != nil {
-		t.Fatalf("ListSlideDataFilesBySlideID(): %v", err)
+		t.Fatalf("ListRecordDataFilesByRecordID(): %v", err)
 	}
 	if len(dataFiles) != 1 || dataFiles[0].Filename != "fresh.csv" {
 		t.Fatalf("data files after update = %+v", dataFiles)
 	}
-	if _, err := os.Stat(filepath.Join(basePath(targetHome), "figures", slideID, "original.png")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(basePath(targetHome), "figures", recordID, "original.png")); !os.IsNotExist(err) {
 		t.Fatalf("original figure should be removed after update, stat err = %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestRunExportImportRestoreAndVerifyLocal(t *testing.T) {
 	t.Setenv(pcHomeEnvVar, sourceHome)
 	withResolvedHomeDir(t, sourceHome)
 
-	originalID := addSlideWithContent(
+	originalID := addRecordWithContent(
 		t,
 		`<html><body><img src="figures/export.png">export</body></html>`,
 		"export-notes",
@@ -192,9 +192,9 @@ func TestRunExportImportRestoreAndVerifyLocal(t *testing.T) {
 		t.Fatalf("unexpected verify output: %q", stdout.String())
 	}
 
-	extraID := addSlideWithContent(
+	extraID := addRecordWithContent(
 		t,
-		"<html><body>extra-slide</body></html>",
+		"<html><body>extra-record</body></html>",
 		"",
 		"",
 		nil,
@@ -213,11 +213,11 @@ func TestRunExportImportRestoreAndVerifyLocal(t *testing.T) {
 		t.Fatalf("openLocalStack(target after restore): %v", err)
 	}
 	defer func() { _ = stack.Close() }()
-	if _, err := stack.Repo.GetSlideByID(ctx, originalID); err != nil {
-		t.Fatalf("GetSlideByID(original): %v", err)
+	if _, err := stack.Repo.GetRecordByID(ctx, originalID); err != nil {
+		t.Fatalf("GetRecordByID(original): %v", err)
 	}
-	if _, err := stack.Repo.GetSlideByID(ctx, extraID); !errors.Is(err, repository.ErrNotFound) {
-		t.Fatalf("extra slide should be removed by restore-db, err = %v", err)
+	if _, err := stack.Repo.GetRecordByID(ctx, extraID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("extra record should be removed by restore-db, err = %v", err)
 	}
 }
 
@@ -333,16 +333,16 @@ func hashData(value string) string {
 type snapshotRepoStub struct {
 	mockRepo
 	listTemplatesFn     func(context.Context) ([]repository.Template, error)
-	listSlidesFn        func(context.Context, repository.ListSlidesFilter) ([]repository.Slide, error)
-	listFiguresFn       func(context.Context, string) ([]repository.SlideFigure, error)
-	listDataFilesFn     func(context.Context, string) ([]repository.SlideDataFile, error)
-	getSlideByIDFn      func(context.Context, string) (repository.Slide, error)
-	createSlideFn       func(context.Context, repository.CreateSlideInput) (repository.Slide, error)
-	updateSlideFn       func(context.Context, repository.UpdateSlideInput) (repository.Slide, error)
-	deleteSlideFigureFn func(context.Context, int64) error
-	deleteSlideDataFn   func(context.Context, int64) error
-	createSlideFigureFn func(context.Context, repository.CreateSlideFigureInput) (repository.SlideFigure, error)
-	createSlideDataFn   func(context.Context, repository.CreateSlideDataFileInput) (repository.SlideDataFile, error)
+	listRecordsFn        func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error)
+	listFiguresFn       func(context.Context, string) ([]repository.RecordFigure, error)
+	listDataFilesFn     func(context.Context, string) ([]repository.RecordDataFile, error)
+	getRecordByIDFn      func(context.Context, string) (repository.Record, error)
+	createRecordFn       func(context.Context, repository.CreateRecordInput) (repository.Record, error)
+	updateRecordFn       func(context.Context, repository.UpdateRecordInput) (repository.Record, error)
+	deleteRecordFigureFn func(context.Context, int64) error
+	deleteRecordDataFn   func(context.Context, int64) error
+	createRecordFigureFn func(context.Context, repository.CreateRecordFigureInput) (repository.RecordFigure, error)
+	createRecordDataFn   func(context.Context, repository.CreateRecordDataFileInput) (repository.RecordDataFile, error)
 }
 
 func (s *snapshotRepoStub) ListTemplates(ctx context.Context) ([]repository.Template, error) {
@@ -352,74 +352,74 @@ func (s *snapshotRepoStub) ListTemplates(ctx context.Context) ([]repository.Temp
 	return s.mockRepo.ListTemplates(ctx)
 }
 
-func (s *snapshotRepoStub) ListSlides(ctx context.Context, filter repository.ListSlidesFilter) ([]repository.Slide, error) {
-	if s.listSlidesFn != nil {
-		return s.listSlidesFn(ctx, filter)
+func (s *snapshotRepoStub) ListRecords(ctx context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error) {
+	if s.listRecordsFn != nil {
+		return s.listRecordsFn(ctx, filter)
 	}
-	return s.mockRepo.ListSlides(ctx, filter)
+	return s.mockRepo.ListRecords(ctx, filter)
 }
 
-func (s *snapshotRepoStub) ListSlideFiguresBySlideID(ctx context.Context, slideID string) ([]repository.SlideFigure, error) {
+func (s *snapshotRepoStub) ListRecordFiguresByRecordID(ctx context.Context, recordID string) ([]repository.RecordFigure, error) {
 	if s.listFiguresFn != nil {
-		return s.listFiguresFn(ctx, slideID)
+		return s.listFiguresFn(ctx, recordID)
 	}
-	return s.mockRepo.ListSlideFiguresBySlideID(ctx, slideID)
+	return s.mockRepo.ListRecordFiguresByRecordID(ctx, recordID)
 }
 
-func (s *snapshotRepoStub) ListSlideDataFilesBySlideID(ctx context.Context, slideID string) ([]repository.SlideDataFile, error) {
+func (s *snapshotRepoStub) ListRecordDataFilesByRecordID(ctx context.Context, recordID string) ([]repository.RecordDataFile, error) {
 	if s.listDataFilesFn != nil {
-		return s.listDataFilesFn(ctx, slideID)
+		return s.listDataFilesFn(ctx, recordID)
 	}
-	return s.mockRepo.ListSlideDataFilesBySlideID(ctx, slideID)
+	return s.mockRepo.ListRecordDataFilesByRecordID(ctx, recordID)
 }
 
-func (s *snapshotRepoStub) GetSlideByID(ctx context.Context, slideID string) (repository.Slide, error) {
-	if s.getSlideByIDFn != nil {
-		return s.getSlideByIDFn(ctx, slideID)
+func (s *snapshotRepoStub) GetRecordByID(ctx context.Context, recordID string) (repository.Record, error) {
+	if s.getRecordByIDFn != nil {
+		return s.getRecordByIDFn(ctx, recordID)
 	}
-	return s.mockRepo.GetSlideByID(ctx, slideID)
+	return s.mockRepo.GetRecordByID(ctx, recordID)
 }
 
-func (s *snapshotRepoStub) CreateSlide(ctx context.Context, input repository.CreateSlideInput) (repository.Slide, error) {
-	if s.createSlideFn != nil {
-		return s.createSlideFn(ctx, input)
+func (s *snapshotRepoStub) CreateRecord(ctx context.Context, input repository.CreateRecordInput) (repository.Record, error) {
+	if s.createRecordFn != nil {
+		return s.createRecordFn(ctx, input)
 	}
-	return s.mockRepo.CreateSlide(ctx, input)
+	return s.mockRepo.CreateRecord(ctx, input)
 }
 
-func (s *snapshotRepoStub) UpdateSlide(ctx context.Context, input repository.UpdateSlideInput) (repository.Slide, error) {
-	if s.updateSlideFn != nil {
-		return s.updateSlideFn(ctx, input)
+func (s *snapshotRepoStub) UpdateRecord(ctx context.Context, input repository.UpdateRecordInput) (repository.Record, error) {
+	if s.updateRecordFn != nil {
+		return s.updateRecordFn(ctx, input)
 	}
-	return s.mockRepo.UpdateSlide(ctx, input)
+	return s.mockRepo.UpdateRecord(ctx, input)
 }
 
-func (s *snapshotRepoStub) DeleteSlideFigure(ctx context.Context, id int64) error {
-	if s.deleteSlideFigureFn != nil {
-		return s.deleteSlideFigureFn(ctx, id)
+func (s *snapshotRepoStub) DeleteRecordFigure(ctx context.Context, id int64) error {
+	if s.deleteRecordFigureFn != nil {
+		return s.deleteRecordFigureFn(ctx, id)
 	}
-	return s.mockRepo.DeleteSlideFigure(ctx, id)
+	return s.mockRepo.DeleteRecordFigure(ctx, id)
 }
 
-func (s *snapshotRepoStub) DeleteSlideDataFile(ctx context.Context, id int64) error {
-	if s.deleteSlideDataFn != nil {
-		return s.deleteSlideDataFn(ctx, id)
+func (s *snapshotRepoStub) DeleteRecordDataFile(ctx context.Context, id int64) error {
+	if s.deleteRecordDataFn != nil {
+		return s.deleteRecordDataFn(ctx, id)
 	}
-	return s.mockRepo.DeleteSlideDataFile(ctx, id)
+	return s.mockRepo.DeleteRecordDataFile(ctx, id)
 }
 
-func (s *snapshotRepoStub) CreateSlideFigure(ctx context.Context, input repository.CreateSlideFigureInput) (repository.SlideFigure, error) {
-	if s.createSlideFigureFn != nil {
-		return s.createSlideFigureFn(ctx, input)
+func (s *snapshotRepoStub) CreateRecordFigure(ctx context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
+	if s.createRecordFigureFn != nil {
+		return s.createRecordFigureFn(ctx, input)
 	}
-	return s.mockRepo.CreateSlideFigure(ctx, input)
+	return s.mockRepo.CreateRecordFigure(ctx, input)
 }
 
-func (s *snapshotRepoStub) CreateSlideDataFile(ctx context.Context, input repository.CreateSlideDataFileInput) (repository.SlideDataFile, error) {
-	if s.createSlideDataFn != nil {
-		return s.createSlideDataFn(ctx, input)
+func (s *snapshotRepoStub) CreateRecordDataFile(ctx context.Context, input repository.CreateRecordDataFileInput) (repository.RecordDataFile, error) {
+	if s.createRecordDataFn != nil {
+		return s.createRecordDataFn(ctx, input)
 	}
-	return s.mockRepo.CreateSlideDataFile(ctx, input)
+	return s.mockRepo.CreateRecordDataFile(ctx, input)
 }
 
 type templateRepoStub struct {
@@ -436,14 +436,14 @@ func (s *templateRepoStub) UpdateTemplate(ctx context.Context, input repository.
 
 func TestBuildSnapshotErrorPaths(t *testing.T) {
 	ctx := context.Background()
-	baseSlide := repository.Slide{ID: "20260309-deadbeef"}
-	baseFigure := repository.SlideFigure{SlideID: baseSlide.ID, Filename: "plot.png"}
+	baseRecord := repository.Record{ID: "20260309-deadbeef"}
+	baseFigure := repository.RecordFigure{RecordID: baseRecord.ID, Filename: "plot.png"}
 
 	tests := []struct {
 		name          string
 		templateRepo  repository.Repository
-		slideRepo     repository.Repository
-		readFigure    func(context.Context, repository.SlideFigure) ([]byte, error)
+		recordRepo     repository.Repository
+		readFigure    func(context.Context, repository.RecordFigure) ([]byte, error)
 		wantSubstring string
 	}{
 		{
@@ -453,67 +453,67 @@ func TestBuildSnapshotErrorPaths(t *testing.T) {
 					return nil, errors.New("templates failed")
 				},
 			},
-			slideRepo:     &snapshotRepoStub{},
-			readFigure:    func(context.Context, repository.SlideFigure) ([]byte, error) { return nil, nil },
+			recordRepo:     &snapshotRepoStub{},
+			readFigure:    func(context.Context, repository.RecordFigure) ([]byte, error) { return nil, nil },
 			wantSubstring: "list templates",
 		},
 		{
-			name:         "list slides",
+			name:         "list records",
 			templateRepo: &snapshotRepoStub{},
-			slideRepo: &snapshotRepoStub{
-				listSlidesFn: func(context.Context, repository.ListSlidesFilter) ([]repository.Slide, error) {
-					return nil, errors.New("slides failed")
+			recordRepo: &snapshotRepoStub{
+				listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+					return nil, errors.New("records failed")
 				},
 			},
-			readFigure:    func(context.Context, repository.SlideFigure) ([]byte, error) { return nil, nil },
-			wantSubstring: "list slides",
+			readFigure:    func(context.Context, repository.RecordFigure) ([]byte, error) { return nil, nil },
+			wantSubstring: "list records",
 		},
 		{
 			name:         "list figures",
 			templateRepo: &snapshotRepoStub{},
-			slideRepo: &snapshotRepoStub{
-				listSlidesFn: func(context.Context, repository.ListSlidesFilter) ([]repository.Slide, error) {
-					return []repository.Slide{baseSlide}, nil
+			recordRepo: &snapshotRepoStub{
+				listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+					return []repository.Record{baseRecord}, nil
 				},
-				listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 					return nil, errors.New("figures failed")
 				},
 			},
-			readFigure:    func(context.Context, repository.SlideFigure) ([]byte, error) { return nil, nil },
+			readFigure:    func(context.Context, repository.RecordFigure) ([]byte, error) { return nil, nil },
 			wantSubstring: "list figures",
 		},
 		{
 			name:         "list data files",
 			templateRepo: &snapshotRepoStub{},
-			slideRepo: &snapshotRepoStub{
-				listSlidesFn: func(context.Context, repository.ListSlidesFilter) ([]repository.Slide, error) {
-					return []repository.Slide{baseSlide}, nil
+			recordRepo: &snapshotRepoStub{
+				listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+					return []repository.Record{baseRecord}, nil
 				},
-				listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 					return nil, nil
 				},
-				listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
+				listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
 					return nil, errors.New("data files failed")
 				},
 			},
-			readFigure:    func(context.Context, repository.SlideFigure) ([]byte, error) { return nil, nil },
+			readFigure:    func(context.Context, repository.RecordFigure) ([]byte, error) { return nil, nil },
 			wantSubstring: "list data files",
 		},
 		{
 			name:         "read figure",
 			templateRepo: &snapshotRepoStub{},
-			slideRepo: &snapshotRepoStub{
-				listSlidesFn: func(context.Context, repository.ListSlidesFilter) ([]repository.Slide, error) {
-					return []repository.Slide{baseSlide}, nil
+			recordRepo: &snapshotRepoStub{
+				listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+					return []repository.Record{baseRecord}, nil
 				},
-				listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
-					return []repository.SlideFigure{baseFigure}, nil
+				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+					return []repository.RecordFigure{baseFigure}, nil
 				},
-				listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
+				listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
 					return nil, nil
 				},
 			},
-			readFigure: func(context.Context, repository.SlideFigure) ([]byte, error) {
+			readFigure: func(context.Context, repository.RecordFigure) ([]byte, error) {
 				return nil, errors.New("figure download failed")
 			},
 			wantSubstring: "load figure",
@@ -522,14 +522,14 @@ func TestBuildSnapshotErrorPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := buildSnapshot(ctx, tt.templateRepo, tt.slideRepo, tt.readFigure, repository.ListSlidesFilter{})
+			_, err := buildSnapshot(ctx, tt.templateRepo, tt.recordRepo, tt.readFigure, repository.ListRecordsFilter{})
 			if err == nil || !strings.Contains(err.Error(), tt.wantSubstring) {
 				t.Fatalf("buildSnapshot() error = %v, want substring %q", err, tt.wantSubstring)
 			}
 		})
 	}
 
-	if _, err := buildCloudSnapshot(ctx, filepath.Join(t.TempDir(), "missing-home"), &cloudStack{Repo: &snapshotRepoStub{}}, repository.ListSlidesFilter{}); err == nil {
+	if _, err := buildCloudSnapshot(ctx, filepath.Join(t.TempDir(), "missing-home"), &cloudStack{Repo: &snapshotRepoStub{}}, repository.ListRecordsFilter{}); err == nil {
 		t.Fatal("expected buildCloudSnapshot to fail when local template home is missing")
 	}
 }
@@ -544,7 +544,7 @@ func TestImportSnapshotIntoStackErrorPaths(t *testing.T) {
 	defer func() { _ = stack.Close() }()
 
 	snapshot := gitsnapshot.Snapshot{
-		Slides: []gitsnapshot.Slide{{
+		Records: []gitsnapshot.Record{{
 			ID:             "20260309-beadfeed",
 			Date:           "2026-03-09",
 			DayOrder:       "a",
@@ -573,51 +573,51 @@ func TestImportSnapshotIntoStackErrorPaths(t *testing.T) {
 		wantSubstring string
 	}{
 		{
-			name: "get slide",
+			name: "get record",
 			repo: &snapshotRepoStub{
-				getSlideByIDFn: func(context.Context, string) (repository.Slide, error) {
-					return repository.Slide{}, errors.New("lookup failed")
+				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+					return repository.Record{}, errors.New("lookup failed")
 				},
 			},
-			wantSubstring: "get slide",
+			wantSubstring: "get record",
 		},
 		{
-			name: "create slide",
+			name: "create record",
 			repo: &snapshotRepoStub{
-				getSlideByIDFn: func(context.Context, string) (repository.Slide, error) {
-					return repository.Slide{}, repository.ErrNotFound
+				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+					return repository.Record{}, repository.ErrNotFound
 				},
-				createSlideFn: func(context.Context, repository.CreateSlideInput) (repository.Slide, error) {
-					return repository.Slide{}, errors.New("create failed")
+				createRecordFn: func(context.Context, repository.CreateRecordInput) (repository.Record, error) {
+					return repository.Record{}, errors.New("create failed")
 				},
 			},
-			wantSubstring: "create slide",
+			wantSubstring: "create record",
 		},
 		{
-			name: "update slide",
+			name: "update record",
 			repo: &snapshotRepoStub{
-				getSlideByIDFn: func(context.Context, string) (repository.Slide, error) {
-					return repository.Slide{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
+				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+					return repository.Record{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
 				},
-				updateSlideFn: func(context.Context, repository.UpdateSlideInput) (repository.Slide, error) {
-					return repository.Slide{}, errors.New("update failed")
+				updateRecordFn: func(context.Context, repository.UpdateRecordInput) (repository.Record, error) {
+					return repository.Record{}, errors.New("update failed")
 				},
 			},
-			wantSubstring: "update slide",
+			wantSubstring: "update record",
 		},
 		{
 			name: "delete figure",
 			repo: &snapshotRepoStub{
-				getSlideByIDFn: func(context.Context, string) (repository.Slide, error) {
-					return repository.Slide{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
+				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+					return repository.Record{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
 				},
-				updateSlideFn: func(context.Context, repository.UpdateSlideInput) (repository.Slide, error) {
-					return repository.Slide{}, nil
+				updateRecordFn: func(context.Context, repository.UpdateRecordInput) (repository.Record, error) {
+					return repository.Record{}, nil
 				},
-				listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
-					return []repository.SlideFigure{{ID: 1, SlideID: "20260309-beadfeed", Filename: "old.png"}}, nil
+				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+					return []repository.RecordFigure{{ID: 1, RecordID: "20260309-beadfeed", Filename: "old.png"}}, nil
 				},
-				deleteSlideFigureFn: func(context.Context, int64) error {
+				deleteRecordFigureFn: func(context.Context, int64) error {
 					return errors.New("delete figure failed")
 				},
 			},
@@ -626,19 +626,19 @@ func TestImportSnapshotIntoStackErrorPaths(t *testing.T) {
 		{
 			name: "delete data file",
 			repo: &snapshotRepoStub{
-				getSlideByIDFn: func(context.Context, string) (repository.Slide, error) {
-					return repository.Slide{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
+				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+					return repository.Record{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
 				},
-				updateSlideFn: func(context.Context, repository.UpdateSlideInput) (repository.Slide, error) {
-					return repository.Slide{}, nil
+				updateRecordFn: func(context.Context, repository.UpdateRecordInput) (repository.Record, error) {
+					return repository.Record{}, nil
 				},
-				listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 					return nil, nil
 				},
-				listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
-					return []repository.SlideDataFile{{ID: 1, SlideID: "20260309-beadfeed", Filename: "old.csv"}}, nil
+				listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
+					return []repository.RecordDataFile{{ID: 1, RecordID: "20260309-beadfeed", Filename: "old.csv"}}, nil
 				},
-				deleteSlideDataFn: func(context.Context, int64) error {
+				deleteRecordDataFn: func(context.Context, int64) error {
 					return errors.New("delete data file failed")
 				},
 			},
@@ -647,16 +647,16 @@ func TestImportSnapshotIntoStackErrorPaths(t *testing.T) {
 		{
 			name: "list existing data files",
 			repo: &snapshotRepoStub{
-				getSlideByIDFn: func(context.Context, string) (repository.Slide, error) {
-					return repository.Slide{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
+				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+					return repository.Record{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
 				},
-				updateSlideFn: func(context.Context, repository.UpdateSlideInput) (repository.Slide, error) {
-					return repository.Slide{}, nil
+				updateRecordFn: func(context.Context, repository.UpdateRecordInput) (repository.Record, error) {
+					return repository.Record{}, nil
 				},
-				listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 					return nil, nil
 				},
-				listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
+				listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
 					return nil, errors.New("list data files failed")
 				},
 			},
@@ -665,14 +665,14 @@ func TestImportSnapshotIntoStackErrorPaths(t *testing.T) {
 		{
 			name: "create figure row",
 			repo: &snapshotRepoStub{
-				getSlideByIDFn: func(context.Context, string) (repository.Slide, error) {
-					return repository.Slide{}, repository.ErrNotFound
+				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+					return repository.Record{}, repository.ErrNotFound
 				},
-				createSlideFn: func(context.Context, repository.CreateSlideInput) (repository.Slide, error) {
-					return repository.Slide{}, nil
+				createRecordFn: func(context.Context, repository.CreateRecordInput) (repository.Record, error) {
+					return repository.Record{}, nil
 				},
-				createSlideFigureFn: func(context.Context, repository.CreateSlideFigureInput) (repository.SlideFigure, error) {
-					return repository.SlideFigure{}, errors.New("create figure row failed")
+				createRecordFigureFn: func(context.Context, repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
+					return repository.RecordFigure{}, errors.New("create figure row failed")
 				},
 			},
 			wantSubstring: "create figure row",
@@ -680,14 +680,14 @@ func TestImportSnapshotIntoStackErrorPaths(t *testing.T) {
 		{
 			name: "create data file row",
 			repo: &snapshotRepoStub{
-				getSlideByIDFn: func(context.Context, string) (repository.Slide, error) {
-					return repository.Slide{}, repository.ErrNotFound
+				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+					return repository.Record{}, repository.ErrNotFound
 				},
-				createSlideFn: func(context.Context, repository.CreateSlideInput) (repository.Slide, error) {
-					return repository.Slide{}, nil
+				createRecordFn: func(context.Context, repository.CreateRecordInput) (repository.Record, error) {
+					return repository.Record{}, nil
 				},
-				createSlideDataFn: func(context.Context, repository.CreateSlideDataFileInput) (repository.SlideDataFile, error) {
-					return repository.SlideDataFile{}, errors.New("create data file row failed")
+				createRecordDataFn: func(context.Context, repository.CreateRecordDataFileInput) (repository.RecordDataFile, error) {
+					return repository.RecordDataFile{}, errors.New("create data file row failed")
 				},
 			},
 			wantSubstring: "create data file row",
@@ -813,7 +813,7 @@ func TestPhase7CommandAdditionalErrorPaths(t *testing.T) {
 		t.Setenv(pcHomeEnvVar, homeDir)
 		withResolvedHomeDir(t, homeDir)
 
-		slide := repository.Slide{
+		record := repository.Record{
 			ID:             "20260309-clouddead",
 			Date:           "2026-03-09",
 			DayOrder:       "a0",
@@ -823,19 +823,19 @@ func TestPhase7CommandAdditionalErrorPaths(t *testing.T) {
 			CreatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 			UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 		}
-		figure := repository.SlideFigure{
-			SlideID:  slide.ID,
+		figure := repository.RecordFigure{
+			RecordID:  record.ID,
 			Filename: "cloud.png",
 			S3Key:    "figures/20260309-clouddead/cloud.png",
 		}
 		repo := &snapshotRepoStub{
-			listSlidesFn: func(context.Context, repository.ListSlidesFilter) ([]repository.Slide, error) {
-				return []repository.Slide{slide}, nil
+			listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+				return []repository.Record{record}, nil
 			},
-			listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
-				return []repository.SlideFigure{figure}, nil
+			listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+				return []repository.RecordFigure{figure}, nil
 			},
-			listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
+			listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
 				return nil, nil
 			},
 		}
@@ -867,7 +867,7 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 
 	t.Run("buildLocalSnapshot missing figure content", func(t *testing.T) {
 		homeDir := setupEnv(t)
-		slideID := addSlideWithContent(
+		recordID := addRecordWithContent(
 			t,
 			`<html><body><img src="figures/missing.png">broken</body></html>`,
 			"",
@@ -875,7 +875,7 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 			map[string][]byte{"missing.png": []byte("figure")},
 			nil,
 		)
-		if err := os.Remove(filepath.Join(basePath(homeDir), "figures", slideID, "missing.png")); err != nil {
+		if err := os.Remove(filepath.Join(basePath(homeDir), "figures", recordID, "missing.png")); err != nil {
 			t.Fatalf("remove local figure: %v", err)
 		}
 
@@ -885,14 +885,14 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 		}
 		defer func() { _ = stack.Close() }()
 
-		if _, err := buildLocalSnapshot(ctx, stack, repository.ListSlidesFilter{}); err == nil || !strings.Contains(err.Error(), "read local figure") {
+		if _, err := buildLocalSnapshot(ctx, stack, repository.ListRecordsFilter{}); err == nil || !strings.Contains(err.Error(), "read local figure") {
 			t.Fatalf("buildLocalSnapshot() error = %v, want local figure read failure", err)
 		}
 	})
 
 	t.Run("buildCloudSnapshot downloads figure content", func(t *testing.T) {
 		homeDir := setupEnv(t)
-		slide := repository.Slide{
+		record := repository.Record{
 			ID:             "20260309-cloudbeef",
 			Date:           "2026-03-09",
 			DayOrder:       "a0",
@@ -902,8 +902,8 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 			CreatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 			UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 		}
-		figure := repository.SlideFigure{
-			SlideID:  slide.ID,
+		figure := repository.RecordFigure{
+			RecordID:  record.ID,
 			Filename: "cloud.png",
 			S3Key:    "figures/20260309-cloudbeef/cloud.png",
 		}
@@ -916,21 +916,21 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 
 		snapshot, err := buildCloudSnapshot(ctx, homeDir, &cloudStack{
 			Repo: &snapshotRepoStub{
-				listSlidesFn: func(context.Context, repository.ListSlidesFilter) ([]repository.Slide, error) {
-					return []repository.Slide{slide}, nil
+				listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+					return []repository.Record{record}, nil
 				},
-				listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
-					return []repository.SlideFigure{figure}, nil
+				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+					return []repository.RecordFigure{figure}, nil
 				},
-				listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
+				listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
 					return nil, nil
 				},
 			},
-		}, repository.ListSlidesFilter{})
+		}, repository.ListRecordsFilter{})
 		if err != nil {
 			t.Fatalf("buildCloudSnapshot(): %v", err)
 		}
-		if got := string(snapshot.Slides[0].Figures[0].Content); got != "cloud-bytes" {
+		if got := string(snapshot.Records[0].Figures[0].Content); got != "cloud-bytes" {
 			t.Fatalf("cloud figure content = %q, want %q", got, "cloud-bytes")
 		}
 	})
@@ -1023,7 +1023,7 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 		}
 	})
 
-	t.Run("import registry and slide lookup errors", func(t *testing.T) {
+	t.Run("import registry and record lookup errors", func(t *testing.T) {
 		projectErr := errors.New("project upsert failed")
 		_, err := importSnapshotIntoStack(ctx, &localStack{Repo: &mockRepo{
 			upsertProjectFn: func(context.Context, repository.Project) (bool, error) {
@@ -1048,16 +1048,16 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 			t.Fatalf("importSnapshotIntoStack(device error) = %v", err)
 		}
 
-		getSlideErr := errors.New("slide lookup failed")
+		getRecordErr := errors.New("record lookup failed")
 		_, err = importSnapshotIntoStack(ctx, &localStack{Repo: &mockRepo{
-			getSlideByIDFn: func(context.Context, string) (repository.Slide, error) {
-				return repository.Slide{}, getSlideErr
+			getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+				return repository.Record{}, getRecordErr
 			},
 		}}, gitsnapshot.Snapshot{
-			Slides: []gitsnapshot.Slide{{ID: "slide-a"}},
+			Records: []gitsnapshot.Record{{ID: "record-a"}},
 		})
-		if !errors.Is(err, getSlideErr) || !strings.Contains(err.Error(), "get slide") {
-			t.Fatalf("importSnapshotIntoStack(slide lookup error) = %v", err)
+		if !errors.Is(err, getRecordErr) || !strings.Contains(err.Error(), "get record") {
+			t.Fatalf("importSnapshotIntoStack(record lookup error) = %v", err)
 		}
 	})
 

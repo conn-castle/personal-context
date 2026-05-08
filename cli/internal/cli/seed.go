@@ -10,15 +10,15 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/fractionalindex"
 	"github.com/conn-castle/personal-context/cli/internal/notes"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
-	"github.com/conn-castle/personal-context/cli/internal/slideid"
+	"github.com/conn-castle/personal-context/cli/internal/recordid"
 	"github.com/spf13/cobra"
 )
 
 func newSeedCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "seed",
-		Short: "Create tutorial slides for development",
-		Long:  "Creates 6 tutorial slides under the personal-context/tutorial project. Idempotent — backfills any missing built-in tutorial slides and skips only when the full set already exists.",
+		Short: "Create tutorial records for development",
+		Long:  "Creates 6 tutorial records under the personal-context/tutorial project. Idempotent — backfills any missing built-in tutorial records and skips only when the full set already exists.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSeed(cmd.Context(), stdout, stderr)
@@ -39,8 +39,8 @@ func runSeed(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 	}
 	defer func() { _ = stack.Close() }()
 
-	// Check which built-in tutorial slides already exist.
-	existing, err := stack.Repo.ListSlides(ctx, repository.ListSlidesFilter{
+	// Check which built-in tutorial records already exist.
+	existing, err := stack.Repo.ListRecords(ctx, repository.ListRecordsFilter{
 		ProjectID: strPtr("personal-context/tutorial"),
 	})
 	if err != nil {
@@ -48,15 +48,15 @@ func runSeed(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 	}
 
 	seeds := builtinSeeds()
-	// Keyed by HTML content: if a user edits a seeded slide's HTML, re-running
+	// Keyed by HTML content: if a user edits a seeded record's HTML, re-running
 	// seed will not recognise it and will create a duplicate. This is a known
 	// limitation of the v1 content-based identity approach. Stable seed IDs
 	// would require a schema column (e.g. seed_key) and migration support.
 	// See ISSUES.md t1u2v3a.
 	existingByHTML := make(map[string]string, len(existing))
-	for _, slide := range existing {
-		if slide.HTMLContent != nil {
-			existingByHTML[*slide.HTMLContent] = slide.DayOrder
+	for _, record := range existing {
+		if record.HTMLContent != nil {
+			existingByHTML[*record.HTMLContent] = record.DayOrder
 		}
 	}
 
@@ -70,9 +70,9 @@ func runSeed(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 			continue
 		}
 
-		id, err := slideid.GenerateForDate(now)
+		id, err := recordid.GenerateForDate(now)
 		if err != nil {
-			return fmt.Errorf("generate slide ID: %w", err)
+			return fmt.Errorf("generate record ID: %w", err)
 		}
 
 		nextOrder := ""
@@ -115,7 +115,7 @@ func runSeed(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 			}
 		}
 
-		input := repository.CreateSlideInput{
+		input := repository.CreateRecordInput{
 			ID:             id,
 			Date:           now.Format("2006-01-02"),
 			DayOrder:       order,
@@ -125,8 +125,8 @@ func runSeed(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 			SourceDeviceID: seedDeviceID,
 		}
 
-		if _, err := stack.Repo.CreateSlide(ctx, input); err != nil {
-			return fmt.Errorf("create seed slide %d: %w", i+1, err)
+		if _, err := stack.Repo.CreateRecord(ctx, input); err != nil {
+			return fmt.Errorf("create seed record %d: %w", i+1, err)
 		}
 		existingByHTML[seed.HTMLContent] = order
 		created++
@@ -135,20 +135,20 @@ func runSeed(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 	}
 
 	if created == 0 {
-		_, _ = fmt.Fprintln(stdout, "Tutorial slides already exist — skipping seed.")
+		_, _ = fmt.Fprintln(stdout, "Tutorial records already exist — skipping seed.")
 		return nil
 	}
 
-	_, _ = fmt.Fprintf(stdout, "\nCreated %d tutorial slides (project: personal-context/tutorial)\n", created)
+	_, _ = fmt.Fprintf(stdout, "\nCreated %d tutorial records (project: personal-context/tutorial)\n", created)
 	return nil
 }
 
-// seedTitle returns a human-readable title for each seed slide by index.
+// seedTitle returns a human-readable title for each seed record by index.
 func seedTitle(i int) string {
 	titles := []string{
 		"Welcome to Personal Context",
-		"Adding Slides",
-		"Managing Slides",
+		"Adding Records",
+		"Managing Records",
 		"Projects",
 		"Web UI",
 		"Cloud Sync & Backup",
@@ -156,5 +156,5 @@ func seedTitle(i int) string {
 	if i < len(titles) {
 		return titles[i]
 	}
-	return fmt.Sprintf("Slide %d", i+1)
+	return fmt.Sprintf("Record %d", i+1)
 }

@@ -30,7 +30,7 @@ func TestWriteReadAndManifestRoundTrip(t *testing.T) {
 			CreatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC),
 			UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC),
 		}},
-		Slides: []Slide{
+		Records: []Record{
 			{
 				ID:             "20260309-aaaabbbb",
 				Date:           "2026-03-09",
@@ -101,7 +101,7 @@ func TestWriteReadAndManifestRoundTrip(t *testing.T) {
 		t.Fatalf("deterministic manifest mismatch\nfirst=%v\nsecond=%v", firstManifest, secondManifest)
 	}
 
-	metadataBytes, err := os.ReadFile(filepath.Join(firstDir, "slides", "20260309-aaaabbbb", "metadata.json"))
+	metadataBytes, err := os.ReadFile(filepath.Join(firstDir, "records", "20260309-aaaabbbb", "metadata.json"))
 	if err != nil {
 		t.Fatalf("read metadata.json: %v", err)
 	}
@@ -119,8 +119,8 @@ func TestReadRejectsGitLFSPointerFigures(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "templates"), 0o755); err != nil {
 		t.Fatalf("mkdir templates: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(root, "slides", "20260309-aaaabbbb", "figures"), 0o755); err != nil {
-		t.Fatalf("mkdir slide dir: %v", err)
+	if err := os.MkdirAll(filepath.Join(root, "records", "20260309-aaaabbbb", "figures"), 0o755); err != nil {
+		t.Fatalf("mkdir record dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "templates", "text-only.html"), []byte("<html>template</html>"), 0o644); err != nil {
 		t.Fatalf("write template: %v", err)
@@ -145,14 +145,14 @@ func TestReadRejectsGitLFSPointerFigures(t *testing.T) {
   "created_at": "2026-03-09T12:00:00Z",
   "updated_at": "2026-03-09T12:00:00Z"
 }`
-	if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "metadata.json"), []byte(metadata), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "records", "20260309-aaaabbbb", "metadata.json"), []byte(metadata), 0o644); err != nil {
 		t.Fatalf("write metadata.json: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "slide.html"), []byte("<html><img src=\"figures/plot.png\"></html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(root, "records", "20260309-aaaabbbb", "record.html"), []byte("<html><img src=\"figures/plot.png\"></html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	if err := os.WriteFile(
-		filepath.Join(root, "slides", "20260309-aaaabbbb", "figures", "plot.png"),
+		filepath.Join(root, "records", "20260309-aaaabbbb", "figures", "plot.png"),
 		[]byte("version https://git-lfs.github.com/spec/v1\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\nsize 42\n"),
 		0o644,
 	); err != nil {
@@ -173,8 +173,8 @@ func TestReadRejectsGitLFSPointerWithCRLF(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "templates"), 0o755); err != nil {
 		t.Fatalf("mkdir templates: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(root, "slides", "20260309-aaaabbbb", "figures"), 0o755); err != nil {
-		t.Fatalf("mkdir slide dir: %v", err)
+	if err := os.MkdirAll(filepath.Join(root, "records", "20260309-aaaabbbb", "figures"), 0o755); err != nil {
+		t.Fatalf("mkdir record dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "templates", "text-only.html"), []byte("<html>template</html>"), 0o644); err != nil {
 		t.Fatalf("write template: %v", err)
@@ -199,15 +199,15 @@ func TestReadRejectsGitLFSPointerWithCRLF(t *testing.T) {
   "created_at": "2026-03-09T12:00:00Z",
   "updated_at": "2026-03-09T12:00:00Z"
 }`
-	if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "metadata.json"), []byte(metadata), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "records", "20260309-aaaabbbb", "metadata.json"), []byte(metadata), 0o644); err != nil {
 		t.Fatalf("write metadata.json: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "slide.html"), []byte("<html>slide</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(root, "records", "20260309-aaaabbbb", "record.html"), []byte("<html>record</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	// CRLF line endings
 	if err := os.WriteFile(
-		filepath.Join(root, "slides", "20260309-aaaabbbb", "figures", "plot.png"),
+		filepath.Join(root, "records", "20260309-aaaabbbb", "figures", "plot.png"),
 		[]byte("version https://git-lfs.github.com/spec/v1\r\noid sha256:4d7a214614ab2935c943f9e0ff69d22eadbb8f32b1258daaa5e2ca24d17e2393\r\nsize 42\r\n"),
 		0o644,
 	); err != nil {
@@ -232,7 +232,7 @@ func TestWriteRejectsInvalidPathSegments(t *testing.T) {
 	}
 
 	err = Write(t.TempDir(), Snapshot{
-		Slides: []Slide{{
+		Records: []Record{{
 			ID:          "bad/name",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
@@ -242,12 +242,12 @@ func TestWriteRejectsInvalidPathSegments(t *testing.T) {
 		}},
 	})
 	if err == nil {
-		t.Fatal("expected invalid slide id to fail")
+		t.Fatal("expected invalid record id to fail")
 	}
 
 	// data file filename with path separator
 	err = Write(t.TempDir(), Snapshot{
-		Slides: []Slide{{
+		Records: []Record{{
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
@@ -271,7 +271,7 @@ func TestWriteRejectsInvalidPathSegments(t *testing.T) {
 
 	// backslash path separator (portable validation)
 	err = Write(t.TempDir(), Snapshot{
-		Slides: []Slide{{
+		Records: []Record{{
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
@@ -297,8 +297,8 @@ func TestReadRejectsStructuralMismatches(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(root, "templates", "nested"), 0o755); err != nil {
 			t.Fatalf("mkdir nested: %v", err)
 		}
-		if err := os.MkdirAll(filepath.Join(root, "slides"), 0o755); err != nil {
-			t.Fatalf("mkdir slides: %v", err)
+		if err := os.MkdirAll(filepath.Join(root, "records"), 0o755); err != nil {
+			t.Fatalf("mkdir records: %v", err)
 		}
 		if _, err := Read(root); err == nil {
 			t.Fatal("expected nested template directory to fail")
@@ -336,7 +336,7 @@ func TestReadRejectsStructuralMismatches(t *testing.T) {
   "created_at": "2026-03-09T12:00:00Z",
   "updated_at": "2026-03-09T12:00:00Z"
 }`)
-		if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "notes.md"), []byte("unexpected"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "records", "20260309-aaaabbbb", "notes.md"), []byte("unexpected"), 0o644); err != nil {
 			t.Fatalf("write notes.md: %v", err)
 		}
 		if _, err := Read(root); err == nil {
@@ -357,10 +357,10 @@ func TestReadRejectsStructuralMismatches(t *testing.T) {
   "created_at": "2026-03-09T12:00:00Z",
   "updated_at": "2026-03-09T12:00:00Z"
 }`)
-		if err := os.MkdirAll(filepath.Join(root, "slides", "20260309-aaaabbbb", "figures"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(root, "records", "20260309-aaaabbbb", "figures"), 0o755); err != nil {
 			t.Fatalf("mkdir figures: %v", err)
 		}
-		if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "figures", "extra.png"), []byte("extra"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "records", "20260309-aaaabbbb", "figures", "extra.png"), []byte("extra"), 0o644); err != nil {
 			t.Fatalf("write extra figure: %v", err)
 		}
 		if _, err := Read(root); err == nil {
@@ -423,7 +423,7 @@ func TestReadRejectsStructuralMismatches(t *testing.T) {
   "created_at": "2026-03-09T12:00:00Z",
   "updated_at": "2026-03-09T12:00:00Z"
 }`)
-		if err := os.MkdirAll(filepath.Join(root, "slides", "20260309-aaaabbbb", "figures"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(root, "records", "20260309-aaaabbbb", "figures"), 0o755); err != nil {
 			t.Fatalf("mkdir figures: %v", err)
 		}
 		if _, err := Read(root); err == nil {
@@ -454,17 +454,17 @@ func TestInternalReadersErrorPaths(t *testing.T) {
 		}
 	})
 
-	t.Run("readSlides unexpected file", func(t *testing.T) {
+	t.Run("readRecords unexpected file", func(t *testing.T) {
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "not-a-dir"), []byte("x"), 0o644); err != nil {
 			t.Fatalf("write unexpected file: %v", err)
 		}
-		if _, err := readSlides(dir); err == nil {
-			t.Fatal("expected readSlides to reject plain files")
+		if _, err := readRecords(dir); err == nil {
+			t.Fatal("expected readRecords to reject plain files")
 		}
 	})
 
-	t.Run("readSlide bad timestamp", func(t *testing.T) {
+	t.Run("readRecord bad timestamp", func(t *testing.T) {
 		root := t.TempDir()
 		writeMinimalSnapshotTree(t, root, `{
   "format_version": 1,
@@ -477,8 +477,8 @@ func TestInternalReadersErrorPaths(t *testing.T) {
   "created_at": "bad",
   "updated_at": "2026-03-09T12:00:00Z"
 }`)
-		if _, err := readSlide(filepath.Join(root, "slides", "20260309-aaaabbbb"), "20260309-aaaabbbb"); err == nil {
-			t.Fatal("expected readSlide to reject bad created_at")
+		if _, err := readRecord(filepath.Join(root, "records", "20260309-aaaabbbb"), "20260309-aaaabbbb"); err == nil {
+			t.Fatal("expected readRecord to reject bad created_at")
 		}
 	})
 
@@ -495,14 +495,14 @@ func TestInternalReadersErrorPaths(t *testing.T) {
   "created_at": "2026-03-09T12:00:00Z",
   "updated_at": "2026-03-09T12:00:00Z"
 }`)
-		figuresDir := filepath.Join(root, "slides", "20260309-aaaabbbb", "figures")
+		figuresDir := filepath.Join(root, "records", "20260309-aaaabbbb", "figures")
 		if err := os.MkdirAll(filepath.Join(figuresDir, "nested"), 0o755); err != nil {
 			t.Fatalf("mkdir nested: %v", err)
 		}
 		if err := os.WriteFile(filepath.Join(figuresDir, "plot.png"), []byte("plot"), 0o644); err != nil {
 			t.Fatalf("write plot.png: %v", err)
 		}
-		if _, err := readFigures(filepath.Join(root, "slides", "20260309-aaaabbbb"), "20260309-aaaabbbb", []figureFile{{
+		if _, err := readFigures(filepath.Join(root, "records", "20260309-aaaabbbb"), "20260309-aaaabbbb", []figureFile{{
 			Filename: "plot.png",
 			S3Key:    "figures/20260309-aaaabbbb/plot.png",
 		}}); err == nil {
@@ -539,8 +539,8 @@ func writeMinimalSnapshotTree(t *testing.T, root string, metadata string) {
 	if err := os.MkdirAll(filepath.Join(root, "templates"), 0o755); err != nil {
 		t.Fatalf("mkdir templates: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(root, "slides", "20260309-aaaabbbb"), 0o755); err != nil {
-		t.Fatalf("mkdir slide dir: %v", err)
+	if err := os.MkdirAll(filepath.Join(root, "records", "20260309-aaaabbbb"), 0o755); err != nil {
+		t.Fatalf("mkdir record dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "templates", "text-only.html"), []byte("<html>template</html>"), 0o644); err != nil {
 		t.Fatalf("write template: %v", err)
@@ -560,7 +560,7 @@ func writeMinimalSnapshotTree(t *testing.T, root string, metadata string) {
 		t.Fatalf("marshal metadata fixture: %v", err)
 	}
 	metadataBytes = append(metadataBytes, '\n')
-	if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "metadata.json"), metadataBytes, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "records", "20260309-aaaabbbb", "metadata.json"), metadataBytes, 0o644); err != nil {
 		t.Fatalf("write metadata.json: %v", err)
 	}
 	if err := writeRegistryFile(filepath.Join(root, "projects.json"), []RegistryEntry{{
@@ -577,8 +577,8 @@ func writeMinimalSnapshotTree(t *testing.T, root string, metadata string) {
 	}}); err != nil {
 		t.Fatalf("write devices.json: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "slides", "20260309-aaaabbbb", "slide.html"), []byte("<html>slide</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(root, "records", "20260309-aaaabbbb", "record.html"), []byte("<html>record</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 }
 
@@ -610,9 +610,9 @@ func TestWriteRejectsInvalidInputs(t *testing.T) {
 			want: "template name",
 		},
 		{
-			name: "invalid slide id",
+			name: "invalid record id",
 			snapshot: Snapshot{
-				Slides: []Slide{{
+				Records: []Record{{
 					ID:          "bad/id",
 					Date:        "2026-03-09",
 					DayOrder:    "a0",
@@ -621,12 +621,12 @@ func TestWriteRejectsInvalidInputs(t *testing.T) {
 					UpdatedAt:   now,
 				}},
 			},
-			want: "slide id",
+			want: "record id",
 		},
 		{
 			name: "invalid figure filename",
 			snapshot: Snapshot{
-				Slides: []Slide{{
+				Records: []Record{{
 					ID:          "20260309-aaaabbbb",
 					Date:        "2026-03-09",
 					DayOrder:    "a0",
@@ -665,10 +665,10 @@ func TestWriteRejectsInvalidInputs(t *testing.T) {
 	}
 }
 
-func TestWriteSortsSlidesFiguresAndDataFiles(t *testing.T) {
+func TestWriteSortsRecordsFiguresAndDataFiles(t *testing.T) {
 	root := t.TempDir()
 	snapshot := Snapshot{
-		Slides: []Slide{
+		Records: []Record{
 			{
 				ID:             "20260310-ccccdddd",
 				Date:           "2026-03-10",
@@ -714,23 +714,23 @@ func TestWriteSortsSlidesFiguresAndDataFiles(t *testing.T) {
 		t.Fatalf("Write(root) error = %v", err)
 	}
 
-	slides, err := readSlides(filepath.Join(root, "slides"))
+	records, err := readRecords(filepath.Join(root, "records"))
 	if err != nil {
-		t.Fatalf("readSlides(slides) error = %v", err)
+		t.Fatalf("readRecords(records) error = %v", err)
 	}
-	gotIDs := []string{slides[0].ID, slides[1].ID, slides[2].ID}
+	gotIDs := []string{records[0].ID, records[1].ID, records[2].ID}
 	wantIDs := []string{"20260309-aaaaaaaa", "20260309-bbbbbbbb", "20260310-ccccdddd"}
 	if !reflect.DeepEqual(gotIDs, wantIDs) {
-		t.Fatalf("slide order = %v, want %v", gotIDs, wantIDs)
+		t.Fatalf("record order = %v, want %v", gotIDs, wantIDs)
 	}
-	if len(slides[0].Figures) != 2 || slides[0].Figures[0].Filename != "alpha.png" || slides[0].Figures[1].Filename != "zeta.png" {
-		t.Fatalf("figure order = %#v, want alpha.png then zeta.png", slides[0].Figures)
+	if len(records[0].Figures) != 2 || records[0].Figures[0].Filename != "alpha.png" || records[0].Figures[1].Filename != "zeta.png" {
+		t.Fatalf("figure order = %#v, want alpha.png then zeta.png", records[0].Figures)
 	}
-	if len(slides[0].DataFiles) != 2 || slides[0].DataFiles[0].Filename != "alpha.csv" || slides[0].DataFiles[1].Filename != "zeta.csv" {
-		t.Fatalf("data file order = %#v, want alpha.csv then zeta.csv", slides[0].DataFiles)
+	if len(records[0].DataFiles) != 2 || records[0].DataFiles[0].Filename != "alpha.csv" || records[0].DataFiles[1].Filename != "zeta.csv" {
+		t.Fatalf("data file order = %#v, want alpha.csv then zeta.csv", records[0].DataFiles)
 	}
 
-	metadataBytes, err := os.ReadFile(filepath.Join(root, "slides", "20260309-aaaaaaaa", "metadata.json"))
+	metadataBytes, err := os.ReadFile(filepath.Join(root, "records", "20260309-aaaaaaaa", "metadata.json"))
 	if err != nil {
 		t.Fatalf("read metadata.json: %v", err)
 	}
@@ -799,8 +799,8 @@ func TestRegistryFilesReadWriteAndValidation(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(missingRoot, "templates"), 0o755); err != nil {
 		t.Fatalf("mkdir templates: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(missingRoot, "slides"), 0o755); err != nil {
-		t.Fatalf("mkdir slides: %v", err)
+	if err := os.MkdirAll(filepath.Join(missingRoot, "records"), 0o755); err != nil {
+		t.Fatalf("mkdir records: %v", err)
 	}
 	if _, err := Read(missingRoot); err == nil || !strings.Contains(err.Error(), "read projects.json") {
 		t.Fatalf("expected missing projects.json read error, got %v", err)
@@ -830,9 +830,9 @@ func TestWriteRejectsFilesystemFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("reset slides dir", func(t *testing.T) {
+	t.Run("reset records dir", func(t *testing.T) {
 		root := t.TempDir()
-		mustWriteFileSnapshot(t, filepath.Join(root, "slides", "existing", "metadata.json"), "{}\n")
+		mustWriteFileSnapshot(t, filepath.Join(root, "records", "existing", "metadata.json"), "{}\n")
 		if err := os.Chmod(root, 0o555); err != nil {
 			t.Fatalf("chmod root: %v", err)
 		}
@@ -841,8 +841,8 @@ func TestWriteRejectsFilesystemFailures(t *testing.T) {
 				t.Fatalf("restore root permissions: %v", err)
 			}
 		}()
-		if err := Write(root, Snapshot{}); err == nil || !strings.Contains(err.Error(), "reset slides dir") {
-			t.Fatalf("Write(root) error = %v, want reset slides dir failure", err)
+		if err := Write(root, Snapshot{}); err == nil || !strings.Contains(err.Error(), "reset records dir") {
+			t.Fatalf("Write(root) error = %v, want reset records dir failure", err)
 		}
 	})
 
@@ -872,10 +872,10 @@ func TestWriteRejectsFilesystemFailures(t *testing.T) {
 		}
 	})
 
-	t.Run("create slide dir", func(t *testing.T) {
+	t.Run("create record dir", func(t *testing.T) {
 		root := t.TempDir()
 		err := Write(root, Snapshot{
-			Slides: []Slide{{
+			Records: []Record{{
 				ID:          strings.Repeat("s", 256),
 				Date:        "2026-03-09",
 				DayOrder:    "a0",
@@ -884,15 +884,15 @@ func TestWriteRejectsFilesystemFailures(t *testing.T) {
 				UpdatedAt:   time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 			}},
 		})
-		if err == nil || !strings.Contains(err.Error(), "create slide dir") {
-			t.Fatalf("Write(root) error = %v, want create slide dir failure", err)
+		if err == nil || !strings.Contains(err.Error(), "create record dir") {
+			t.Fatalf("Write(root) error = %v, want create record dir failure", err)
 		}
 	})
 
 	t.Run("write figure", func(t *testing.T) {
 		root := t.TempDir()
 		err := Write(root, Snapshot{
-			Slides: []Slide{{
+			Records: []Record{{
 				ID:          "20260309-aaaabbbb",
 				Date:        "2026-03-09",
 				DayOrder:    "a0",
@@ -971,56 +971,56 @@ func TestReadRejectsTemplateDirectoryProblems(t *testing.T) {
 	})
 }
 
-func TestReadSlidesRejectsUnexpectedFile(t *testing.T) {
-	t.Run("missing slides dir", func(t *testing.T) {
-		if _, err := readSlides(filepath.Join(t.TempDir(), "missing")); err == nil || !strings.Contains(err.Error(), "read slides dir") {
-			t.Fatalf("readSlides error = %v, want missing dir failure", err)
+func TestReadRecordsRejectsUnexpectedFile(t *testing.T) {
+	t.Run("missing records dir", func(t *testing.T) {
+		if _, err := readRecords(filepath.Join(t.TempDir(), "missing")); err == nil || !strings.Contains(err.Error(), "read records dir") {
+			t.Fatalf("readRecords error = %v, want missing dir failure", err)
 		}
 	})
 
 	t.Run("unexpected file", func(t *testing.T) {
-		dir := filepath.Join(t.TempDir(), "slides")
+		dir := filepath.Join(t.TempDir(), "records")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir slides dir: %v", err)
+			t.Fatalf("mkdir records dir: %v", err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "not-a-slide.txt"), []byte("x"), 0o644); err != nil {
-			t.Fatalf("write unexpected slide file: %v", err)
+		if err := os.WriteFile(filepath.Join(dir, "not-a-record.txt"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write unexpected record file: %v", err)
 		}
-		if _, err := readSlides(dir); err == nil || !strings.Contains(err.Error(), "unexpected file in slides export") {
-			t.Fatalf("readSlides error = %v, want unexpected file failure", err)
+		if _, err := readRecords(dir); err == nil || !strings.Contains(err.Error(), "unexpected file in records export") {
+			t.Fatalf("readRecords error = %v, want unexpected file failure", err)
 		}
 	})
 }
 
-func TestReadSlideRejectsMetadataAndNotesProblems(t *testing.T) {
-	t.Run("invalid slide id", func(t *testing.T) {
-		_, slideDir := writeSnapshotFixture(t)
-		if _, err := readSlide(slideDir, "bad/id"); err == nil || !strings.Contains(err.Error(), "slide id") {
-			t.Fatalf("readSlide error = %v, want slide id validation failure", err)
+func TestReadRecordRejectsMetadataAndNotesProblems(t *testing.T) {
+	t.Run("invalid record id", func(t *testing.T) {
+		_, recordDir := writeSnapshotFixture(t)
+		if _, err := readRecord(recordDir, "bad/id"); err == nil || !strings.Contains(err.Error(), "record id") {
+			t.Fatalf("readRecord error = %v, want record id validation failure", err)
 		}
 	})
 
 	t.Run("missing metadata file", func(t *testing.T) {
-		_, slideDir := writeSnapshotFixture(t)
-		if err := os.Remove(filepath.Join(slideDir, "metadata.json")); err != nil {
+		_, recordDir := writeSnapshotFixture(t)
+		if err := os.Remove(filepath.Join(recordDir, "metadata.json")); err != nil {
 			t.Fatalf("remove metadata.json: %v", err)
 		}
-		if _, err := readSlide(slideDir, filepath.Base(slideDir)); err == nil || !strings.Contains(err.Error(), "read metadata") {
-			t.Fatalf("readSlide error = %v, want metadata read failure", err)
+		if _, err := readRecord(recordDir, filepath.Base(recordDir)); err == nil || !strings.Contains(err.Error(), "read metadata") {
+			t.Fatalf("readRecord error = %v, want metadata read failure", err)
 		}
 	})
 
 	t.Run("malformed metadata json", func(t *testing.T) {
-		_, slideDir := writeSnapshotFixture(t)
-		mustWriteFileSnapshot(t, filepath.Join(slideDir, "metadata.json"), "{not-json}\n")
-		if _, err := readSlide(slideDir, filepath.Base(slideDir)); err == nil || !strings.Contains(err.Error(), "parse metadata") {
-			t.Fatalf("readSlide error = %v, want metadata parse failure", err)
+		_, recordDir := writeSnapshotFixture(t)
+		mustWriteFileSnapshot(t, filepath.Join(recordDir, "metadata.json"), "{not-json}\n")
+		if _, err := readRecord(recordDir, filepath.Base(recordDir)); err == nil || !strings.Contains(err.Error(), "parse metadata") {
+			t.Fatalf("readRecord error = %v, want metadata parse failure", err)
 		}
 	})
 
 	t.Run("unsupported format version", func(t *testing.T) {
-		root, slideDir := writeSnapshotFixture(t)
-		writeMetadataJSON(t, slideDir, map[string]any{
+		root, recordDir := writeSnapshotFixture(t)
+		writeMetadataJSON(t, recordDir, map[string]any{
 			"format_version": 2,
 			"id":             "20260309-aaaabbbb",
 			"date":           "2026-03-09",
@@ -1031,15 +1031,15 @@ func TestReadSlideRejectsMetadataAndNotesProblems(t *testing.T) {
 			"created_at":     "2026-03-09T12:00:00Z",
 			"updated_at":     "2026-03-09T12:00:00Z",
 		})
-		_, err := readSlide(slideDir, filepath.Base(slideDir))
+		_, err := readRecord(recordDir, filepath.Base(recordDir))
 		if err == nil || !strings.Contains(err.Error(), "unsupported format_version") {
-			t.Fatalf("readSlide(%s) error = %v", root, err)
+			t.Fatalf("readRecord(%s) error = %v", root, err)
 		}
 	})
 
 	t.Run("metadata id mismatch", func(t *testing.T) {
-		_, slideDir := writeSnapshotFixture(t)
-		writeMetadataJSON(t, slideDir, map[string]any{
+		_, recordDir := writeSnapshotFixture(t)
+		writeMetadataJSON(t, recordDir, map[string]any{
 			"format_version": 1,
 			"id":             "20260309-ccccdddd",
 			"date":           "2026-03-09",
@@ -1050,15 +1050,15 @@ func TestReadSlideRejectsMetadataAndNotesProblems(t *testing.T) {
 			"created_at":     "2026-03-09T12:00:00Z",
 			"updated_at":     "2026-03-09T12:00:00Z",
 		})
-		_, err := readSlide(slideDir, filepath.Base(slideDir))
-		if err == nil || !strings.Contains(err.Error(), "does not match slide dir") {
-			t.Fatalf("readSlide error = %v, want metadata id mismatch", err)
+		_, err := readRecord(recordDir, filepath.Base(recordDir))
+		if err == nil || !strings.Contains(err.Error(), "does not match record dir") {
+			t.Fatalf("readRecord error = %v, want metadata id mismatch", err)
 		}
 	})
 
 	t.Run("invalid timestamps", func(t *testing.T) {
-		_, slideDir := writeSnapshotFixture(t)
-		writeMetadataJSON(t, slideDir, map[string]any{
+		_, recordDir := writeSnapshotFixture(t)
+		writeMetadataJSON(t, recordDir, map[string]any{
 			"format_version": 1,
 			"id":             "20260309-aaaabbbb",
 			"date":           "2026-03-09",
@@ -1073,15 +1073,15 @@ func TestReadSlideRejectsMetadataAndNotesProblems(t *testing.T) {
 			"created_at": "not-a-time",
 			"updated_at": "still-not-a-time",
 		})
-		_, err := readSlide(slideDir, filepath.Base(slideDir))
+		_, err := readRecord(recordDir, filepath.Base(recordDir))
 		if err == nil || !strings.Contains(err.Error(), "parse created_at") {
-			t.Fatalf("readSlide error = %v, want created_at parse failure", err)
+			t.Fatalf("readRecord error = %v, want created_at parse failure", err)
 		}
 	})
 
 	t.Run("invalid updated_at", func(t *testing.T) {
-		_, slideDir := writeSnapshotFixture(t)
-		writeMetadataJSON(t, slideDir, map[string]any{
+		_, recordDir := writeSnapshotFixture(t)
+		writeMetadataJSON(t, recordDir, map[string]any{
 			"format_version": 1,
 			"id":             "20260309-aaaabbbb",
 			"date":           "2026-03-09",
@@ -1096,39 +1096,39 @@ func TestReadSlideRejectsMetadataAndNotesProblems(t *testing.T) {
 			"created_at": "2026-03-09T12:00:00Z",
 			"updated_at": "not-a-time",
 		})
-		if _, err := readSlide(slideDir, filepath.Base(slideDir)); err == nil || !strings.Contains(err.Error(), "parse updated_at") {
-			t.Fatalf("readSlide error = %v, want updated_at parse failure", err)
+		if _, err := readRecord(recordDir, filepath.Base(recordDir)); err == nil || !strings.Contains(err.Error(), "parse updated_at") {
+			t.Fatalf("readRecord error = %v, want updated_at parse failure", err)
 		}
 	})
 
-	t.Run("missing slide html is null", func(t *testing.T) {
-		_, slideDir := writeSnapshotFixture(t)
-		if err := os.Remove(filepath.Join(slideDir, "slide.html")); err != nil {
-			t.Fatalf("remove slide.html: %v", err)
+	t.Run("missing record html is null", func(t *testing.T) {
+		_, recordDir := writeSnapshotFixture(t)
+		if err := os.Remove(filepath.Join(recordDir, "record.html")); err != nil {
+			t.Fatalf("remove record.html: %v", err)
 		}
-		slide, err := readSlide(slideDir, filepath.Base(slideDir))
+		record, err := readRecord(recordDir, filepath.Base(recordDir))
 		if err != nil {
-			t.Fatalf("readSlide error = %v", err)
+			t.Fatalf("readRecord error = %v", err)
 		}
-		if slide.HTMLContent != nil {
-			t.Fatalf("HTMLContent = %q, want nil", *slide.HTMLContent)
+		if record.HTMLContent != nil {
+			t.Fatalf("HTMLContent = %q, want nil", *record.HTMLContent)
 		}
 	})
 
 	t.Run("notes required when has_notes is true", func(t *testing.T) {
-		_, slideDir := writeSnapshotFixture(t)
-		if err := os.Remove(filepath.Join(slideDir, "notes.md")); err != nil {
+		_, recordDir := writeSnapshotFixture(t)
+		if err := os.Remove(filepath.Join(recordDir, "notes.md")); err != nil {
 			t.Fatalf("remove notes.md: %v", err)
 		}
-		_, err := readSlide(slideDir, filepath.Base(slideDir))
+		_, err := readRecord(recordDir, filepath.Base(recordDir))
 		if err == nil || !strings.Contains(err.Error(), "read notes.md") {
-			t.Fatalf("readSlide error = %v, want missing notes failure", err)
+			t.Fatalf("readRecord error = %v, want missing notes failure", err)
 		}
 	})
 
 	t.Run("notes forbidden when has_notes is false", func(t *testing.T) {
-		_, slideDir := writeSnapshotFixture(t)
-		writeMetadataJSON(t, slideDir, map[string]any{
+		_, recordDir := writeSnapshotFixture(t)
+		writeMetadataJSON(t, recordDir, map[string]any{
 			"format_version": 1,
 			"id":             "20260309-aaaabbbb",
 			"date":           "2026-03-09",
@@ -1143,9 +1143,9 @@ func TestReadSlideRejectsMetadataAndNotesProblems(t *testing.T) {
 			"created_at": "2026-03-09T12:00:00Z",
 			"updated_at": "2026-03-09T12:00:00Z",
 		})
-		_, err := readSlide(slideDir, filepath.Base(slideDir))
+		_, err := readRecord(recordDir, filepath.Base(recordDir))
 		if err == nil || !strings.Contains(err.Error(), "notes.md present") {
-			t.Fatalf("readSlide error = %v, want forbidden notes failure", err)
+			t.Fatalf("readRecord error = %v, want forbidden notes failure", err)
 		}
 	})
 }
@@ -1172,7 +1172,7 @@ func TestReadFiguresRejectsDirectoryAndPointerProblems(t *testing.T) {
 	})
 
 	t.Run("extra figure file", func(t *testing.T) {
-		root := filepath.Join(t.TempDir(), "slide")
+		root := filepath.Join(t.TempDir(), "record")
 		figuresDir := filepath.Join(root, "figures")
 		if err := os.MkdirAll(figuresDir, 0o755); err != nil {
 			t.Fatalf("mkdir figures dir: %v", err)
@@ -1189,7 +1189,7 @@ func TestReadFiguresRejectsDirectoryAndPointerProblems(t *testing.T) {
 	})
 
 	t.Run("nested figure directory", func(t *testing.T) {
-		root := filepath.Join(t.TempDir(), "slide")
+		root := filepath.Join(t.TempDir(), "record")
 		figuresDir := filepath.Join(root, "figures")
 		if err := os.MkdirAll(filepath.Join(figuresDir, "nested"), 0o755); err != nil {
 			t.Fatalf("mkdir nested figures dir: %v", err)
@@ -1205,7 +1205,7 @@ func TestReadFiguresRejectsDirectoryAndPointerProblems(t *testing.T) {
 	})
 
 	t.Run("unexpected figures when metadata is empty", func(t *testing.T) {
-		root := filepath.Join(t.TempDir(), "slide")
+		root := filepath.Join(t.TempDir(), "record")
 		figuresDir := filepath.Join(root, "figures")
 		if err := os.MkdirAll(figuresDir, 0o755); err != nil {
 			t.Fatalf("mkdir figures dir: %v", err)
@@ -1228,9 +1228,9 @@ func TestReadFiguresRejectsDirectoryAndPointerProblems(t *testing.T) {
 	})
 
 	t.Run("metadata empty but figures path is not a directory", func(t *testing.T) {
-		root := filepath.Join(t.TempDir(), "slide")
+		root := filepath.Join(t.TempDir(), "record")
 		if err := os.MkdirAll(root, 0o755); err != nil {
-			t.Fatalf("mkdir slide dir: %v", err)
+			t.Fatalf("mkdir record dir: %v", err)
 		}
 		mustWriteFileSnapshot(t, filepath.Join(root, "figures"), "not-a-directory")
 		if _, err := readFigures(root, "20260309-aaaabbbb", nil); err == nil || !strings.Contains(err.Error(), "read figures dir") {
@@ -1239,7 +1239,7 @@ func TestReadFiguresRejectsDirectoryAndPointerProblems(t *testing.T) {
 	})
 
 	t.Run("metadata present but figure dir cannot be listed", func(t *testing.T) {
-		root := filepath.Join(t.TempDir(), "slide")
+		root := filepath.Join(t.TempDir(), "record")
 		figuresDir := filepath.Join(root, "figures")
 		if err := os.MkdirAll(figuresDir, 0o755); err != nil {
 			t.Fatalf("mkdir figures dir: %v", err)
@@ -1262,7 +1262,7 @@ func TestReadFiguresRejectsDirectoryAndPointerProblems(t *testing.T) {
 	})
 
 	t.Run("rejects lfs pointer", func(t *testing.T) {
-		root := filepath.Join(t.TempDir(), "slide")
+		root := filepath.Join(t.TempDir(), "record")
 		figuresDir := filepath.Join(root, "figures")
 		if err := os.MkdirAll(figuresDir, 0o755); err != nil {
 			t.Fatalf("mkdir figures dir: %v", err)
@@ -1278,7 +1278,7 @@ func TestReadFiguresRejectsDirectoryAndPointerProblems(t *testing.T) {
 	})
 }
 
-func TestReadPropagatesSlidesDirFailureAfterTemplatesLoad(t *testing.T) {
+func TestReadPropagatesRecordsDirFailureAfterTemplatesLoad(t *testing.T) {
 	root := t.TempDir()
 	templatesDir := filepath.Join(root, "templates")
 	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
@@ -1286,8 +1286,8 @@ func TestReadPropagatesSlidesDirFailureAfterTemplatesLoad(t *testing.T) {
 	}
 	mustWriteFileSnapshot(t, filepath.Join(templatesDir, "text-only.html"), "<html>template</html>")
 
-	if _, err := Read(root); err == nil || !strings.Contains(err.Error(), "read slides dir") {
-		t.Fatalf("Read(root) error = %v, want slides dir failure", err)
+	if _, err := Read(root); err == nil || !strings.Contains(err.Error(), "read records dir") {
+		t.Fatalf("Read(root) error = %v, want records dir failure", err)
 	}
 }
 
@@ -1389,11 +1389,11 @@ func TestWriteFaultInjectionErrorPaths(t *testing.T) {
 	now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
 	baseSnapshot := Snapshot{
 		Templates: []Template{{Name: "text-only", HTMLContent: "<html>template</html>"}},
-		Slides: []Slide{{
+		Records: []Record{{
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
-			HTMLContent: strPtrSnapshot("<html>slide</html>"),
+			HTMLContent: strPtrSnapshot("<html>record</html>"),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}},
@@ -1421,23 +1421,23 @@ func TestWriteFaultInjectionErrorPaths(t *testing.T) {
 		}
 	})
 
-	t.Run("slide close failure", func(t *testing.T) {
+	t.Run("record close failure", func(t *testing.T) {
 		createTempFileFn = func(_ string, _ string) (tempFile, error) {
-			return &stubTempFile{name: filepath.Join(t.TempDir(), "slide.tmp"), closeErr: errors.New("close failed")}, nil
+			return &stubTempFile{name: filepath.Join(t.TempDir(), "record.tmp"), closeErr: errors.New("close failed")}, nil
 		}
 
 		err := Write(t.TempDir(), Snapshot{
-			Slides: []Slide{{
+			Records: []Record{{
 				ID:          "20260309-beadfeed",
 				Date:        "2026-03-09",
 				DayOrder:    "a0",
-				HTMLContent: strPtrSnapshot("<html>slide</html>"),
+				HTMLContent: strPtrSnapshot("<html>record</html>"),
 				CreatedAt:   now,
 				UpdatedAt:   now,
 			}},
 		})
-		if err == nil || !strings.Contains(err.Error(), "write slide.html for 20260309-beadfeed") {
-			t.Fatalf("Write() error = %v, want wrapped slide close failure", err)
+		if err == nil || !strings.Contains(err.Error(), "write record.html for 20260309-beadfeed") {
+			t.Fatalf("Write() error = %v, want wrapped record close failure", err)
 		}
 	})
 
@@ -1460,16 +1460,16 @@ func TestWriteFaultInjectionErrorPaths(t *testing.T) {
 		}
 
 		err := Write(tempDir, Snapshot{
-			Slides: []Slide{{
+			Records: []Record{{
 				ID:          "20260309-feedface",
 				Date:        "2026-03-09",
 				DayOrder:    "a0",
-				HTMLContent: strPtrSnapshot("<html>slide</html>"),
+				HTMLContent: strPtrSnapshot("<html>record</html>"),
 				CreatedAt:   now,
 				UpdatedAt:   now,
 			}},
 		})
-		if err == nil || !strings.Contains(err.Error(), "write slide.html for 20260309-feedface") {
+		if err == nil || !strings.Contains(err.Error(), "write record.html for 20260309-feedface") {
 			t.Fatalf("Write() error = %v, want wrapped rename failure", err)
 		}
 		if _, statErr := os.Stat(tempPath); !os.IsNotExist(statErr) {
@@ -1517,14 +1517,14 @@ func (s *stubTempFile) Name() string {
 	return s.name
 }
 
-func writeSnapshotFixture(t *testing.T) (root string, slideDir string) {
+func writeSnapshotFixture(t *testing.T) (root string, recordDir string) {
 	t.Helper()
 
 	root = t.TempDir()
 	notes := "fixture notes"
 	snapshot := Snapshot{
 		Templates: []Template{{Name: "text-only", HTMLContent: "<html>template</html>"}},
-		Slides: []Slide{{
+		Records: []Record{{
 			ID:             "20260309-aaaabbbb",
 			Date:           "2026-03-09",
 			DayOrder:       "a0",
@@ -1544,10 +1544,10 @@ func writeSnapshotFixture(t *testing.T) (root string, slideDir string) {
 	if err := Write(root, snapshot); err != nil {
 		t.Fatalf("Write(root) error = %v", err)
 	}
-	return root, filepath.Join(root, "slides", "20260309-aaaabbbb")
+	return root, filepath.Join(root, "records", "20260309-aaaabbbb")
 }
 
-func writeMetadataJSON(t *testing.T, slideDir string, metadata map[string]any) {
+func writeMetadataJSON(t *testing.T, recordDir string, metadata map[string]any) {
 	t.Helper()
 	if _, ok := metadata["project_id"]; !ok {
 		metadata["project_id"] = "phase7/unit"
@@ -1561,7 +1561,7 @@ func writeMetadataJSON(t *testing.T, slideDir string, metadata map[string]any) {
 		t.Fatalf("marshal metadata: %v", err)
 	}
 	raw = append(raw, '\n')
-	if err := os.WriteFile(filepath.Join(slideDir, "metadata.json"), raw, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(recordDir, "metadata.json"), raw, 0o644); err != nil {
 		t.Fatalf("write metadata.json: %v", err)
 	}
 }

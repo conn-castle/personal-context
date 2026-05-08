@@ -20,7 +20,7 @@ func newMoveCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "move <id>",
-		Short: "Change a slide's date and/or position",
+		Short: "Change a record's date and/or position",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			posExplicit := posFirst || posLast || afterFlag != "" || beforeFlag != ""
@@ -34,11 +34,11 @@ func newMoveCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dateFlag, "date", "", "New slide date (YYYY-MM-DD)")
+	cmd.Flags().StringVar(&dateFlag, "date", "", "New record date (YYYY-MM-DD)")
 	cmd.Flags().BoolVar(&posFirst, "first", false, "Move to the start of the day")
 	cmd.Flags().BoolVar(&posLast, "last", false, "Move to the end of the day")
-	cmd.Flags().StringVar(&afterFlag, "after", "", "Move after this slide ID")
-	cmd.Flags().StringVar(&beforeFlag, "before", "", "Move before this slide ID")
+	cmd.Flags().StringVar(&afterFlag, "after", "", "Move after this record ID")
+	cmd.Flags().StringVar(&beforeFlag, "before", "", "Move before this record ID")
 
 	return cmd
 }
@@ -59,13 +59,13 @@ func runMove(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 	}
 	defer func() { _ = stack.Close() }()
 
-	// Fail fast if slide doesn't exist
-	existing, err := stack.Repo.GetSlideByID(ctx, id)
+	// Fail fast if record doesn't exist
+	existing, err := stack.Repo.GetRecordByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return fmt.Errorf("slide %q not found", id)
+			return fmt.Errorf("record %q not found", id)
 		}
-		return fmt.Errorf("get slide: %w", err)
+		return fmt.Errorf("get record: %w", err)
 	}
 
 	// Resolve date
@@ -77,14 +77,14 @@ func runMove(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 		dateField = dateStr
 	}
 
-	// Compute day_order (exclude current slide so it doesn't conflict with itself)
+	// Compute day_order (exclude current record so it doesn't conflict with itself)
 	dayOrder, err := computeDayOrder(ctx, stack.Repo, dateField, id, pos)
 	if err != nil {
 		return fmt.Errorf("compute position: %w", err)
 	}
 
-	// Update slide (full replacement, preserve all fields except Date and DayOrder)
-	if _, err := stack.Repo.UpdateSlide(ctx, repository.UpdateSlideInput{
+	// Update record (full replacement, preserve all fields except Date and DayOrder)
+	if _, err := stack.Repo.UpdateRecord(ctx, repository.UpdateRecordInput{
 		ID:             id,
 		Date:           dateField,
 		DayOrder:       dayOrder,
@@ -97,10 +97,10 @@ func runMove(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 		GitHash:        existing.GitHash,
 		DeletedAt:      existing.DeletedAt,
 	}); err != nil {
-		return fmt.Errorf("update slide: %w", err)
+		return fmt.Errorf("update record: %w", err)
 	}
 
 	_ = runAutoSyncFn(ctx, stderr)
-	_, _ = fmt.Fprintf(stdout, "Slide %s moved\n", id)
+	_, _ = fmt.Fprintf(stdout, "Record %s moved\n", id)
 	return nil
 }

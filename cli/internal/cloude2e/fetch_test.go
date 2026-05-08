@@ -12,13 +12,13 @@ import (
 func TestFetchSuccessPathFromRealCloudState(t *testing.T) {
 	cloud := newCloudTestEnv(t)
 
-	// Set up homeA to produce slides, homeB to fetch them.
+	// Set up homeA to produce records, homeB to fetch them.
 	// First home applies the Postgres schema; second home reuses it.
 	homeA, userHomeA := setupCloudHome(t, cloud)
 	homeB, userHomeB := setupCloudHomeNoSchema(t, cloud)
 
-	// --- Phase 1: Create 3 slides on homeA — 2 in project "alpha", 1 in "beta" ---
-	// Alpha slide 1 with data file.
+	// --- Phase 1: Create 3 records on homeA — 2 in project "alpha", 1 in "beta" ---
+	// Alpha record 1 with data file.
 	inputAlpha1 := createInputFolder(t,
 		"<html>Alpha 1</html>",
 		"",
@@ -28,7 +28,7 @@ func TestFetchSuccessPathFromRealCloudState(t *testing.T) {
 	alpha1ID := strings.TrimSpace(runPCSuccessNoStderr(t, homeA, userHomeA,
 		"add", "--project", "alpha", inputAlpha1))
 
-	// Alpha slide 2 with data file.
+	// Alpha record 2 with data file.
 	inputAlpha2 := createInputFolder(t,
 		"<html>Alpha 2</html>",
 		"",
@@ -38,7 +38,7 @@ func TestFetchSuccessPathFromRealCloudState(t *testing.T) {
 	alpha2ID := strings.TrimSpace(runPCSuccessNoStderr(t, homeA, userHomeA,
 		"add", "--project", "alpha", inputAlpha2))
 
-	// Beta slide with data file.
+	// Beta record with data file.
 	inputBeta := createInputFolder(t,
 		"<html>Beta</html>",
 		"",
@@ -80,7 +80,7 @@ func TestFetchSuccessPathFromRealCloudState(t *testing.T) {
 		t.Fatalf("expected exact fetch output %q, got %q", expectedFetchLine, fetchOut)
 	}
 
-	// Verify files are written under <customOutput>/<slideID>/<filename>.
+	// Verify files are written under <customOutput>/<recordID>/<filename>.
 	alpha1Path := filepath.Join(customOutput, alpha1ID, "dataset1.csv")
 	alpha2Path := filepath.Join(customOutput, alpha2ID, "results.json")
 

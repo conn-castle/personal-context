@@ -7,14 +7,14 @@ import (
 	"io"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
-	"github.com/conn-castle/personal-context/cli/internal/slideio"
+	"github.com/conn-castle/personal-context/cli/internal/recordio"
 	"github.com/spf13/cobra"
 )
 
 func newEditCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "edit <id> <path>",
-		Short: "Replace slide content from an input folder",
+		Short: "Replace record content from an input folder",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runEdit(cmd.Context(), stdout, stderr, args[0], args[1])
@@ -23,7 +23,7 @@ func newEditCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-// runEdit replaces a slide and its local assets from an input folder, rolling
+// runEdit replaces a record and its local assets from an input folder, rolling
 // back database and filesystem mutations if any stage fails.
 func runEdit(ctx context.Context, stdout io.Writer, stderr io.Writer, id string, inputPath string) (err error) {
 	homeDir, err := resolveHomeDir()
@@ -37,13 +37,13 @@ func runEdit(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 	}
 	defer func() { _ = stack.Close() }()
 
-	// Fail fast if slide doesn't exist
-	existing, err := stack.Repo.GetSlideByID(ctx, id)
+	// Fail fast if record doesn't exist
+	existing, err := stack.Repo.GetRecordByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return fmt.Errorf("slide %q not found", id)
+			return fmt.Errorf("record %q not found", id)
 		}
-		return fmt.Errorf("get slide: %w", err)
+		return fmt.Errorf("get record: %w", err)
 	}
 
 	mutations := &editMutationState{}
@@ -54,7 +54,7 @@ func runEdit(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 		mutations.rollbackRepository(context.Background(), stack.Repo, existing)
 	}()
 
-	input, err := slideio.ParseInputFolder(inputPath)
+	input, err := recordio.ParseInputFolder(inputPath)
 	if err != nil {
 		return err
 	}
@@ -81,8 +81,8 @@ func runEdit(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 		mutations.finalizeCommittedFiles(err == nil)
 	}()
 
-	// Update slide (full replacement, preserve immutable fields)
-	if _, err := stack.Repo.UpdateSlide(ctx, repository.UpdateSlideInput{
+	// Update record (full replacement, preserve immutable fields)
+	if _, err := stack.Repo.UpdateRecord(ctx, repository.UpdateRecordInput{
 		ID:             id,
 		Date:           existing.Date,
 		DayOrder:       existing.DayOrder,
@@ -95,9 +95,9 @@ func runEdit(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 		GitHash:        input.GitHash,
 		DeletedAt:      existing.DeletedAt,
 	}); err != nil {
-		return fmt.Errorf("update slide: %w", err)
+		return fmt.Errorf("update record: %w", err)
 	}
-	mutations.slideUpdated = true
+	mutations.recordUpdated = true
 
 	stagedInput, err := stageEditInputFiles(id, input, stack, mutations)
 	if err != nil {
@@ -127,6 +127,6 @@ func runEdit(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 	deleteEditFiles(stack, id, figureFilenamesToDelete, dataFilenamesToDelete)
 
 	_ = runAutoSyncFn(ctx, stderr)
-	_, _ = fmt.Fprintf(stdout, "Slide %s updated\n", id)
+	_, _ = fmt.Fprintf(stdout, "Record %s updated\n", id)
 	return nil
 }

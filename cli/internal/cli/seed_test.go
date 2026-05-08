@@ -26,7 +26,7 @@ func TestNewSeedCommand(t *testing.T) {
 	}
 }
 
-func TestSeedCreatesSlides(t *testing.T) {
+func TestSeedCreatesRecords(t *testing.T) {
 	setupEnv(t)
 
 	var stdout, stderr bytes.Buffer
@@ -38,9 +38,9 @@ func TestSeedCreatesSlides(t *testing.T) {
 
 	output := stdout.String()
 
-	// Should have created 6 slides.
-	if !strings.Contains(output, "Created 6 tutorial slides") {
-		t.Errorf("expected 'Created 6 tutorial slides' in output, got: %s", output)
+	// Should have created 6 records.
+	if !strings.Contains(output, "Created 6 tutorial records") {
+		t.Errorf("expected 'Created 6 tutorial records' in output, got: %s", output)
 	}
 
 	// Should mention the project.
@@ -48,11 +48,11 @@ func TestSeedCreatesSlides(t *testing.T) {
 		t.Errorf("expected project name in output, got: %s", output)
 	}
 
-	// Should list each slide title.
+	// Should list each record title.
 	for _, title := range []string{
 		"Welcome to Personal Context",
-		"Adding Slides",
-		"Managing Slides",
+		"Adding Records",
+		"Managing Records",
 		"Projects",
 		"Web UI",
 		"Cloud Sync & Backup",
@@ -62,7 +62,7 @@ func TestSeedCreatesSlides(t *testing.T) {
 		}
 	}
 
-	// Verify slides are in the database by listing them.
+	// Verify records are in the database by listing them.
 	stdout.Reset()
 	stderr.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: &stdout, Stderr: &stderr})
@@ -71,7 +71,7 @@ func TestSeedCreatesSlides(t *testing.T) {
 		t.Fatalf("search: %v", err)
 	}
 
-	// All seed slides have the project set.
+	// All seed records have the project set.
 	if !strings.Contains(stdout.String(), "personal-context/tutorial") {
 		t.Errorf("expected search results to contain project, got: %s", stdout.String())
 	}
@@ -87,8 +87,8 @@ func TestSeedIdempotent(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
-	if !strings.Contains(stdout1.String(), "Created 6 tutorial slides") {
-		t.Fatalf("first seed should create slides, got: %s", stdout1.String())
+	if !strings.Contains(stdout1.String(), "Created 6 tutorial records") {
+		t.Fatalf("first seed should create records, got: %s", stdout1.String())
 	}
 
 	// Second seed — should skip.
@@ -119,20 +119,20 @@ func TestSeedRepairsPartialSeed(t *testing.T) {
 		t.Fatalf("open local stack: %v", err)
 	}
 	ctx := context.Background()
-	slides, err := stack.Repo.ListSlides(ctx, repository.ListSlidesFilter{
+	records, err := stack.Repo.ListRecords(ctx, repository.ListRecordsFilter{
 		ProjectID: strPtr("personal-context/tutorial"),
 	})
 	if err != nil {
 		_ = stack.Close()
-		t.Fatalf("list seeded slides: %v", err)
+		t.Fatalf("list seeded records: %v", err)
 	}
-	if len(slides) != 6 {
+	if len(records) != 6 {
 		_ = stack.Close()
-		t.Fatalf("expected 6 tutorial slides after first seed, got %d", len(slides))
+		t.Fatalf("expected 6 tutorial records after first seed, got %d", len(records))
 	}
-	if err := stack.Repo.DeleteSlide(ctx, slides[0].ID); err != nil {
+	if err := stack.Repo.DeleteRecord(ctx, records[0].ID); err != nil {
 		_ = stack.Close()
-		t.Fatalf("delete one tutorial slide: %v", err)
+		t.Fatalf("delete one tutorial record: %v", err)
 	}
 	if err := stack.Close(); err != nil {
 		t.Fatalf("close local stack: %v", err)
@@ -145,8 +145,8 @@ func TestSeedRepairsPartialSeed(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("repair seed: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "Created 1 tutorial slides") {
-		t.Fatalf("expected one missing tutorial slide to be recreated, got: %s", stdout.String())
+	if !strings.Contains(stdout.String(), "Created 1 tutorial records") {
+		t.Fatalf("expected one missing tutorial record to be recreated, got: %s", stdout.String())
 	}
 
 	stack, err = openLocalStack(homeDir)
@@ -155,28 +155,28 @@ func TestSeedRepairsPartialSeed(t *testing.T) {
 	}
 	defer func() { _ = stack.Close() }()
 
-	slides, err = stack.Repo.ListSlides(ctx, repository.ListSlidesFilter{
+	records, err = stack.Repo.ListRecords(ctx, repository.ListRecordsFilter{
 		ProjectID: strPtr("personal-context/tutorial"),
 	})
 	if err != nil {
-		t.Fatalf("list repaired tutorial slides: %v", err)
+		t.Fatalf("list repaired tutorial records: %v", err)
 	}
-	if len(slides) != 6 {
-		t.Fatalf("expected repaired tutorial deck to contain 6 slides, got %d", len(slides))
+	if len(records) != 6 {
+		t.Fatalf("expected repaired tutorial deck to contain 6 records, got %d", len(records))
 	}
 }
 
 func TestSeedDBCorrupted(t *testing.T) {
-	// Covers the ListSlides error path in runSeed.
+	// Covers the ListRecords error path in runSeed.
 	homeDir := setupEnv(t)
-	corruptTable(t, homeDir, "slides")
+	corruptTable(t, homeDir, "records")
 
 	var stdout, stderr bytes.Buffer
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &stdout, Stderr: &stderr})
 	cmd.SetArgs([]string{"seed"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when slides table is corrupted")
+		t.Fatal("expected error when records table is corrupted")
 	}
 }
 
@@ -208,8 +208,8 @@ func TestSeedHomeDirError(t *testing.T) {
 	})
 }
 
-func TestSeedCreateSlideError(t *testing.T) {
-	// Covers the CreateSlide error path in runSeed by dropping sync_version
+func TestSeedCreateRecordError(t *testing.T) {
+	// Covers the CreateRecord error path in runSeed by dropping sync_version
 	// so the INSERT trigger fails.
 	homeDir := setupEnv(t)
 	corruptTable(t, homeDir, "sync_version")
@@ -318,13 +318,13 @@ func TestSeedTitle(t *testing.T) {
 		expected string
 	}{
 		{0, "Welcome to Personal Context"},
-		{1, "Adding Slides"},
-		{2, "Managing Slides"},
+		{1, "Adding Records"},
+		{2, "Managing Records"},
 		{3, "Projects"},
 		{4, "Web UI"},
 		{5, "Cloud Sync & Backup"},
-		{6, "Slide 7"},
-		{99, "Slide 100"},
+		{6, "Record 7"},
+		{99, "Record 100"},
 	}
 	for _, tt := range tests {
 		got := seedTitle(tt.index)
@@ -351,12 +351,12 @@ func TestBuiltinSeeds(t *testing.T) {
 		if seed.Notes == "" {
 			t.Errorf("seed %d: empty Notes", i)
 		}
-		// All seed slides should be full HTML documents (for 1920x1080 rendering).
+		// All seed records should be full HTML documents (for 1920x1080 rendering).
 		lower := strings.ToLower(seed.HTMLContent)
 		if !strings.Contains(lower, "<!doctype html>") && !strings.Contains(lower, "<html") {
 			t.Errorf("seed %d: HTMLContent should be a full document", i)
 		}
-		// All seed slides should specify 1920x1080 dimensions.
+		// All seed records should specify 1920x1080 dimensions.
 		if !strings.Contains(seed.HTMLContent, "1920px") || !strings.Contains(seed.HTMLContent, "1080px") {
 			t.Errorf("seed %d: HTMLContent should contain 1920x1080 dimensions", i)
 		}

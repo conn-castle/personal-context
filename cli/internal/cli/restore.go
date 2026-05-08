@@ -13,7 +13,7 @@ import (
 func newRestoreCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "restore <id>",
-		Short: "Restore a soft-deleted slide",
+		Short: "Restore a soft-deleted record",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runRestore(cmd.Context(), stdout, stderr, args[0])
@@ -34,14 +34,14 @@ func runRestore(ctx context.Context, stdout io.Writer, stderr io.Writer, id stri
 	}
 	defer func() { _ = stack.Close() }()
 
-	if err := stack.Repo.RestoreSlide(ctx, id); err != nil {
+	if err := stack.Repo.RestoreRecord(ctx, id); err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return fmt.Errorf("slide %q not found", id)
+			return fmt.Errorf("record %q not found", id)
 		}
-		return fmt.Errorf("restore slide: %w", err)
+		return fmt.Errorf("restore record: %w", err)
 	}
 
 	_ = runAutoSyncFn(ctx, stderr)
-	_, _ = fmt.Fprintf(stdout, "Slide %s restored\n", id)
+	_, _ = fmt.Fprintf(stdout, "Record %s restored\n", id)
 	return nil
 }

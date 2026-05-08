@@ -35,16 +35,16 @@ func runGC(ctx context.Context, stdout io.Writer, stderr io.Writer) error {
 	}
 	defer func() { _ = stack.Close() }()
 
-	slides, err := stack.Repo.ListSlides(ctx, repository.ListSlidesFilter{OnlyDeleted: true})
+	records, err := stack.Repo.ListRecords(ctx, repository.ListRecordsFilter{OnlyDeleted: true})
 	if err != nil {
-		return fmt.Errorf("list deleted slides: %w", err)
+		return fmt.Errorf("list deleted records: %w", err)
 	}
 
 	const gcThreshold = 30 * 24 * time.Hour
 
-	var expired []repository.Slide
+	var expired []repository.Record
 	now := time.Now()
-	for _, s := range slides {
+	for _, s := range records {
 		if s.DeletedAt != nil && now.Sub(*s.DeletedAt) > gcThreshold {
 			expired = append(expired, s)
 		}
@@ -65,33 +65,33 @@ func runGC(ctx context.Context, stdout io.Writer, stderr io.Writer) error {
 	case errors.Is(cloudErr, errCloudNotConfigured):
 		// Local-only mode — no cloud deletion needed.
 	default:
-		_, _ = fmt.Fprintf(stderr, "warning: cloud unreachable, locally deleted slides may reappear after sync: %v\n", cloudErr)
+		_, _ = fmt.Fprintf(stderr, "warning: cloud unreachable, locally deleted records may reappear after sync: %v\n", cloudErr)
 	}
 
 	removed := 0
 	for _, s := range expired {
 		// Delete from cloud first (if configured) to prevent sync re-creation.
 		if cloudRepo != nil {
-			if err := cloudRepo.DeleteSlide(ctx, s.ID); err != nil {
+			if err := cloudRepo.DeleteRecord(ctx, s.ID); err != nil {
 				if !errors.Is(err, repository.ErrNotFound) {
-					_, _ = fmt.Fprintf(stderr, "Warning: failed to delete slide %s from cloud, skipping: %v\n", s.ID, err)
+					_, _ = fmt.Fprintf(stderr, "Warning: failed to delete record %s from cloud, skipping: %v\n", s.ID, err)
 					continue
 				}
 			}
 		}
 
-		if err := stack.Repo.DeleteSlide(ctx, s.ID); err != nil {
-			return fmt.Errorf("hard delete slide %s: %w", s.ID, err)
+		if err := stack.Repo.DeleteRecord(ctx, s.ID); err != nil {
+			return fmt.Errorf("hard delete record %s: %w", s.ID, err)
 		}
 		removed++
-		if err := stack.FS.DeleteSlideDir(s.ID); err != nil {
-			_, _ = fmt.Fprintf(stderr, "Warning: failed to remove files for slide %s: %v\n", s.ID, err)
+		if err := stack.FS.DeleteRecordDir(s.ID); err != nil {
+			_, _ = fmt.Fprintf(stderr, "Warning: failed to remove files for record %s: %v\n", s.ID, err)
 		}
 		_, _ = fmt.Fprintf(stdout, "Deleted %s\n", s.ID)
 	}
 
 	_ = runAutoSyncFn(ctx, stderr)
 
-	_, _ = fmt.Fprintf(stdout, "Removed %d slide(s).\n", removed)
+	_, _ = fmt.Fprintf(stdout, "Removed %d record(s).\n", removed)
 	return nil
 }

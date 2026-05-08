@@ -19,8 +19,8 @@ describe("GET /api/sync/changes", () => {
     mockQuery.mockReset();
   });
 
-  it("returns changed slides since timestamp", async () => {
-    const slideRow = {
+  it("returns changed records since timestamp", async () => {
+    const recordRow = {
       id: "20260301-aabbccdd",
       date: "2026-03-01",
       day_order: "a0",
@@ -34,11 +34,11 @@ describe("GET /api/sync/changes", () => {
       data_file_count: 1,
     };
 
-    // sql`` for server_now (called first), then sql.query() for slides
+    // sql`` for server_now (called first), then sql.query() for records
     mockSql.mockResolvedValueOnce([
       { server_now: "2026-03-09T10:00:00.000Z" },
     ]);
-    mockQuery.mockResolvedValueOnce([slideRow]);
+    mockQuery.mockResolvedValueOnce([recordRow]);
 
     const req = new NextRequest(
       "http://localhost/api/sync/changes?since=2026-03-01T00:00:00.000Z"
@@ -53,8 +53,8 @@ describe("GET /api/sync/changes", () => {
     expect(body.server_now).toBe("2026-03-09T10:00:00.000Z");
   });
 
-  it("returns null HTML and source ref in changed slides", async () => {
-    const slideRow = {
+  it("returns null HTML and source ref in changed records", async () => {
+    const recordRow = {
       id: "20260301-aabbccdd",
       date: "2026-03-01",
       day_order: "a0",
@@ -71,7 +71,7 @@ describe("GET /api/sync/changes", () => {
     mockSql.mockResolvedValueOnce([
       { server_now: "2026-03-09T10:00:00.000Z" },
     ]);
-    mockQuery.mockResolvedValueOnce([slideRow]);
+    mockQuery.mockResolvedValueOnce([recordRow]);
 
     const req = new NextRequest(
       "http://localhost/api/sync/changes?since=2026-03-01T00:00:00.000Z"
@@ -84,8 +84,8 @@ describe("GET /api/sync/changes", () => {
     expect(body.items[0].source_ref).toBe("vault://record");
   });
 
-  it("includes soft-deleted slides in results", async () => {
-    const deletedSlide = {
+  it("includes soft-deleted records in results", async () => {
+    const deletedRecord = {
       id: "20260215-11223344",
       date: "2026-02-15",
       day_order: "a0",
@@ -102,7 +102,7 @@ describe("GET /api/sync/changes", () => {
     mockSql.mockResolvedValueOnce([
       { server_now: "2026-03-09T10:00:00.000Z" },
     ]);
-    mockQuery.mockResolvedValueOnce([deletedSlide]);
+    mockQuery.mockResolvedValueOnce([deletedRecord]);
 
     const req = new NextRequest(
       "http://localhost/api/sync/changes?since=2026-02-01T00:00:00.000Z"
@@ -179,7 +179,7 @@ describe("GET /api/sync/changes", () => {
     );
     await GET(req);
 
-    // The slides query uses sql.query(queryString, params) — verify it uses >=
+    // The records query uses sql.query(queryString, params) — verify it uses >=
     const firstCall = mockQuery.mock.calls[0];
     expect(firstCall[0]).toContain(">=");
   });

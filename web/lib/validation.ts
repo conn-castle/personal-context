@@ -1,17 +1,17 @@
-const SLIDE_ID_REGEX = /^\d{8}-[0-9a-f]{8}$/;
+const RECORD_ID_REGEX = /^\d{8}-[0-9a-f]{8}$/;
 const GIT_HASH_REGEX = /^[0-9a-f]{40}$/;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const ISO_TIMESTAMP_REGEX =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 
 /**
- * Validates a slide ID matches the `{YYYYMMDD}-{8hex}` format.
+ * Validates a record ID matches the `{YYYYMMDD}-{8hex}` format.
  *
- * @param id - The slide ID to validate.
+ * @param id - The record ID to validate.
  * @returns True if the ID is valid.
  */
-export function isValidSlideId(id: string): boolean {
-  return SLIDE_ID_REGEX.test(id);
+export function isValidRecordId(id: string): boolean {
+  return RECORD_ID_REGEX.test(id);
 }
 
 /**
@@ -111,13 +111,13 @@ export function normalizeNotes(
 }
 
 /**
- * Validates a PATCH /api/slides/[id] request body.
+ * Validates a PATCH /api/records/[id] request body.
  * Checks for allowed fields, type correctness, and format constraints.
  *
  * @param body - The parsed request body.
  * @returns Validation result with data or error message.
  */
-export function validateSlideUpdateInput(
+export function validateRecordUpdateInput(
   body: Record<string, unknown>
 ):
   | { valid: true; data: Record<string, unknown> }

@@ -30,11 +30,11 @@ func New(db *sql.DB) (*Repository, error) {
 	return &Repository{db: db}, nil
 }
 
-// CreateSlide inserts a slide row.
-func (r *Repository) CreateSlide(ctx context.Context, input repository.CreateSlideInput) (repository.Slide, error) {
+// CreateRecord inserts a record row.
+func (r *Repository) CreateRecord(ctx context.Context, input repository.CreateRecordInput) (repository.Record, error) {
 	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.Date) == "" ||
 		strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.SourceDeviceID) == "" {
-		return repository.Slide{}, repository.ErrInvalidArgument
+		return repository.Record{}, repository.ErrInvalidArgument
 	}
 	if strings.TrimSpace(input.DayOrder) == "" {
 		input.DayOrder = "n"
@@ -42,7 +42,7 @@ func (r *Repository) CreateSlide(ctx context.Context, input repository.CreateSli
 
 	_, err := r.db.ExecContext(
 		ctx,
-		`INSERT INTO slides (id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at)
+		`INSERT INTO records (id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), ?);`,
 		input.ID,
 		input.Date,
@@ -59,37 +59,37 @@ func (r *Repository) CreateSlide(ctx context.Context, input repository.CreateSli
 		nullableTime(input.DeletedAt),
 	)
 	if err != nil {
-		return repository.Slide{}, mapSQLiteError(err)
+		return repository.Record{}, mapSQLiteError(err)
 	}
 
-	return r.GetSlideByID(ctx, input.ID)
+	return r.GetRecordByID(ctx, input.ID)
 }
 
-// GetSlideByID fetches one slide by ID.
-func (r *Repository) GetSlideByID(ctx context.Context, id string) (repository.Slide, error) {
+// GetRecordByID fetches one record by ID.
+func (r *Repository) GetRecordByID(ctx context.Context, id string) (repository.Record, error) {
 	if strings.TrimSpace(id) == "" {
-		return repository.Slide{}, repository.ErrInvalidArgument
+		return repository.Record{}, repository.ErrInvalidArgument
 	}
 
 	row := r.db.QueryRowContext(
 		ctx,
 		`SELECT id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at
-         FROM slides WHERE id = ?;`,
+         FROM records WHERE id = ?;`,
 		id,
 	)
-	return scanSlide(row)
+	return scanRecord(row)
 }
 
-// UpdateSlide updates mutable slide fields.
-func (r *Repository) UpdateSlide(ctx context.Context, input repository.UpdateSlideInput) (repository.Slide, error) {
+// UpdateRecord updates mutable record fields.
+func (r *Repository) UpdateRecord(ctx context.Context, input repository.UpdateRecordInput) (repository.Record, error) {
 	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.Date) == "" || strings.TrimSpace(input.DayOrder) == "" ||
 		strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.SourceDeviceID) == "" {
-		return repository.Slide{}, repository.ErrInvalidArgument
+		return repository.Record{}, repository.ErrInvalidArgument
 	}
 
 	result, err := r.db.ExecContext(
 		ctx,
-		`UPDATE slides
+		`UPDATE records
          SET date = ?, day_order = ?, html_content = ?, notes = ?, project_id = ?, source_device_id = ?, source_ref = ?, git_remote_url = ?, git_hash = ?,
              updated_at = COALESCE(?, updated_at),
              deleted_at = ?
@@ -108,17 +108,17 @@ func (r *Repository) UpdateSlide(ctx context.Context, input repository.UpdateSli
 		input.ID,
 	)
 	if err != nil {
-		return repository.Slide{}, mapSQLiteError(err)
+		return repository.Record{}, mapSQLiteError(err)
 	}
 	if err := ensureRowsAffected(result); err != nil {
-		return repository.Slide{}, err
+		return repository.Record{}, err
 	}
 
-	return r.GetSlideByID(ctx, input.ID)
+	return r.GetRecordByID(ctx, input.ID)
 }
 
-// ListSlides returns slides sorted by (date, day_order, id).
-func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlidesFilter) ([]repository.Slide, error) {
+// ListRecords returns records sorted by (date, day_order, id).
+func (r *Repository) ListRecords(ctx context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error) {
 	if filter.Limit < 0 {
 		return nil, repository.ErrInvalidArgument
 	}
@@ -132,7 +132,7 @@ func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlide
 	}
 
 	builder := strings.Builder{}
-	builder.WriteString(`SELECT id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM slides WHERE 1=1`)
+	builder.WriteString(`SELECT id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM records WHERE 1=1`)
 	args := make([]any, 0, 4)
 
 	if filter.OnlyDeleted {
@@ -178,29 +178,29 @@ func (r *Repository) ListSlides(ctx context.Context, filter repository.ListSlide
 	}
 	defer func() { _ = rows.Close() }()
 
-	slides := make([]repository.Slide, 0)
+	records := make([]repository.Record, 0)
 	for rows.Next() {
-		slide, err := scanSlideRows(rows)
+		record, err := scanRecordRows(rows)
 		if err != nil {
 			return nil, err
 		}
-		slides = append(slides, slide)
+		records = append(records, record)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, mapSQLiteError(err)
 	}
-	return slides, nil
+	return records, nil
 }
 
-// SoftDeleteSlide sets deleted_at when not already set.
-func (r *Repository) SoftDeleteSlide(ctx context.Context, id string) error {
+// SoftDeleteRecord sets deleted_at when not already set.
+func (r *Repository) SoftDeleteRecord(ctx context.Context, id string) error {
 	if strings.TrimSpace(id) == "" {
 		return repository.ErrInvalidArgument
 	}
 
 	result, err := r.db.ExecContext(
 		ctx,
-		`UPDATE slides
+		`UPDATE records
          SET deleted_at = COALESCE(deleted_at, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now'))
          WHERE id = ?;`,
 		id,
@@ -211,76 +211,76 @@ func (r *Repository) SoftDeleteSlide(ctx context.Context, id string) error {
 	return ensureRowsAffected(result)
 }
 
-// RestoreSlide clears deleted_at.
-func (r *Repository) RestoreSlide(ctx context.Context, id string) error {
+// RestoreRecord clears deleted_at.
+func (r *Repository) RestoreRecord(ctx context.Context, id string) error {
 	if strings.TrimSpace(id) == "" {
 		return repository.ErrInvalidArgument
 	}
 
-	result, err := r.db.ExecContext(ctx, `UPDATE slides SET deleted_at = NULL WHERE id = ?;`, id)
+	result, err := r.db.ExecContext(ctx, `UPDATE records SET deleted_at = NULL WHERE id = ?;`, id)
 	if err != nil {
 		return mapSQLiteError(err)
 	}
 	return ensureRowsAffected(result)
 }
 
-// DeleteSlide hard-deletes a slide row.
-func (r *Repository) DeleteSlide(ctx context.Context, id string) error {
+// DeleteRecord hard-deletes a record row.
+func (r *Repository) DeleteRecord(ctx context.Context, id string) error {
 	if strings.TrimSpace(id) == "" {
 		return repository.ErrInvalidArgument
 	}
 
-	result, err := r.db.ExecContext(ctx, `DELETE FROM slides WHERE id = ?;`, id)
+	result, err := r.db.ExecContext(ctx, `DELETE FROM records WHERE id = ?;`, id)
 	if err != nil {
 		return mapSQLiteError(err)
 	}
 	return ensureRowsAffected(result)
 }
 
-// CreateSlideFigure inserts a figure row.
-func (r *Repository) CreateSlideFigure(ctx context.Context, input repository.CreateSlideFigureInput) (repository.SlideFigure, error) {
-	if strings.TrimSpace(input.SlideID) == "" || strings.TrimSpace(input.Filename) == "" || strings.TrimSpace(input.S3Key) == "" {
-		return repository.SlideFigure{}, repository.ErrInvalidArgument
+// CreateRecordFigure inserts a figure row.
+func (r *Repository) CreateRecordFigure(ctx context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
+	if strings.TrimSpace(input.RecordID) == "" || strings.TrimSpace(input.Filename) == "" || strings.TrimSpace(input.S3Key) == "" {
+		return repository.RecordFigure{}, repository.ErrInvalidArgument
 	}
 
 	result, err := r.db.ExecContext(
 		ctx,
-		`INSERT INTO slide_figures(slide_id, filename, s3_key, alt_text) VALUES(?, ?, ?, ?);`,
-		input.SlideID,
+		`INSERT INTO record_figures(record_id, filename, s3_key, alt_text) VALUES(?, ?, ?, ?);`,
+		input.RecordID,
 		input.Filename,
 		input.S3Key,
 		nullableString(input.AltText),
 	)
 	if err != nil {
-		return repository.SlideFigure{}, mapSQLiteError(err)
+		return repository.RecordFigure{}, mapSQLiteError(err)
 	}
 	id, err := result.LastInsertId()
 	if err != nil {
-		return repository.SlideFigure{}, fmt.Errorf("last insert id: %w", err)
+		return repository.RecordFigure{}, fmt.Errorf("last insert id: %w", err)
 	}
 
-	return r.GetSlideFigureByID(ctx, id)
+	return r.GetRecordFigureByID(ctx, id)
 }
 
-// GetSlideFigureByID fetches a figure by id.
-func (r *Repository) GetSlideFigureByID(ctx context.Context, id int64) (repository.SlideFigure, error) {
+// GetRecordFigureByID fetches a figure by id.
+func (r *Repository) GetRecordFigureByID(ctx context.Context, id int64) (repository.RecordFigure, error) {
 	if id <= 0 {
-		return repository.SlideFigure{}, repository.ErrInvalidArgument
+		return repository.RecordFigure{}, repository.ErrInvalidArgument
 	}
 
 	row := r.db.QueryRowContext(
 		ctx,
-		`SELECT id, slide_id, filename, s3_key, alt_text, created_at FROM slide_figures WHERE id = ?;`,
+		`SELECT id, record_id, filename, s3_key, alt_text, created_at FROM record_figures WHERE id = ?;`,
 		id,
 	)
 	return scanFigure(row)
 }
 
-// UpdateSlideFigure updates mutable figure fields.
+// UpdateRecordFigure updates mutable figure fields.
 // Patch semantics: empty Filename/S3Key preserve existing values; nil AltText preserves existing.
-func (r *Repository) UpdateSlideFigure(ctx context.Context, input repository.UpdateSlideFigureInput) (repository.SlideFigure, error) {
+func (r *Repository) UpdateRecordFigure(ctx context.Context, input repository.UpdateRecordFigureInput) (repository.RecordFigure, error) {
 	if input.ID <= 0 {
-		return repository.SlideFigure{}, repository.ErrInvalidArgument
+		return repository.RecordFigure{}, repository.ErrInvalidArgument
 	}
 
 	setClauses := []string{
@@ -295,39 +295,39 @@ func (r *Repository) UpdateSlideFigure(ctx context.Context, input repository.Upd
 	}
 
 	args = append(args, input.ID)
-	query := fmt.Sprintf(`UPDATE slide_figures SET %s WHERE id = ?;`, strings.Join(setClauses, ", "))
+	query := fmt.Sprintf(`UPDATE record_figures SET %s WHERE id = ?;`, strings.Join(setClauses, ", "))
 
 	result, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
-		return repository.SlideFigure{}, mapSQLiteError(err)
+		return repository.RecordFigure{}, mapSQLiteError(err)
 	}
 	if err := ensureRowsAffected(result); err != nil {
-		return repository.SlideFigure{}, err
+		return repository.RecordFigure{}, err
 	}
 
-	return r.GetSlideFigureByID(ctx, input.ID)
+	return r.GetRecordFigureByID(ctx, input.ID)
 }
 
-// ListSlideFiguresBySlideID lists figures for a slide.
-func (r *Repository) ListSlideFiguresBySlideID(ctx context.Context, slideID string) ([]repository.SlideFigure, error) {
-	if strings.TrimSpace(slideID) == "" {
+// ListRecordFiguresByRecordID lists figures for a record.
+func (r *Repository) ListRecordFiguresByRecordID(ctx context.Context, recordID string) ([]repository.RecordFigure, error) {
+	if strings.TrimSpace(recordID) == "" {
 		return nil, repository.ErrInvalidArgument
 	}
 
 	rows, err := r.db.QueryContext(
 		ctx,
-		`SELECT id, slide_id, filename, s3_key, alt_text, created_at
-         FROM slide_figures
-         WHERE slide_id = ?
+		`SELECT id, record_id, filename, s3_key, alt_text, created_at
+         FROM record_figures
+         WHERE record_id = ?
          ORDER BY id;`,
-		slideID,
+		recordID,
 	)
 	if err != nil {
 		return nil, mapSQLiteError(err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	figures := make([]repository.SlideFigure, 0)
+	figures := make([]repository.RecordFigure, 0)
 	for rows.Next() {
 		figure, err := scanFigureRows(rows)
 		if err != nil {
@@ -342,33 +342,33 @@ func (r *Repository) ListSlideFiguresBySlideID(ctx context.Context, slideID stri
 	return figures, nil
 }
 
-// DeleteSlideFigure deletes a figure row.
-func (r *Repository) DeleteSlideFigure(ctx context.Context, id int64) error {
+// DeleteRecordFigure deletes a figure row.
+func (r *Repository) DeleteRecordFigure(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return repository.ErrInvalidArgument
 	}
 
-	result, err := r.db.ExecContext(ctx, `DELETE FROM slide_figures WHERE id = ?;`, id)
+	result, err := r.db.ExecContext(ctx, `DELETE FROM record_figures WHERE id = ?;`, id)
 	if err != nil {
 		return mapSQLiteError(err)
 	}
 	return ensureRowsAffected(result)
 }
 
-// CreateSlideDataFile inserts a data-file row.
-func (r *Repository) CreateSlideDataFile(ctx context.Context, input repository.CreateSlideDataFileInput) (repository.SlideDataFile, error) {
-	if strings.TrimSpace(input.SlideID) == "" || strings.TrimSpace(input.Filename) == "" || strings.TrimSpace(input.S3Key) == "" || strings.TrimSpace(input.Hash) == "" {
-		return repository.SlideDataFile{}, repository.ErrInvalidArgument
+// CreateRecordDataFile inserts a data-file row.
+func (r *Repository) CreateRecordDataFile(ctx context.Context, input repository.CreateRecordDataFileInput) (repository.RecordDataFile, error) {
+	if strings.TrimSpace(input.RecordID) == "" || strings.TrimSpace(input.Filename) == "" || strings.TrimSpace(input.S3Key) == "" || strings.TrimSpace(input.Hash) == "" {
+		return repository.RecordDataFile{}, repository.ErrInvalidArgument
 	}
 	if input.Size < 0 {
-		return repository.SlideDataFile{}, repository.ErrInvalidArgument
+		return repository.RecordDataFile{}, repository.ErrInvalidArgument
 	}
 
 	result, err := r.db.ExecContext(
 		ctx,
-		`INSERT INTO slide_data_files(slide_id, filename, s3_key, size, hash, description)
+		`INSERT INTO record_data_files(record_id, filename, s3_key, size, hash, description)
          VALUES(?, ?, ?, ?, ?, ?);`,
-		input.SlideID,
+		input.RecordID,
 		input.Filename,
 		input.S3Key,
 		input.Size,
@@ -376,37 +376,37 @@ func (r *Repository) CreateSlideDataFile(ctx context.Context, input repository.C
 		nullableString(input.Description),
 	)
 	if err != nil {
-		return repository.SlideDataFile{}, mapSQLiteError(err)
+		return repository.RecordDataFile{}, mapSQLiteError(err)
 	}
 	id, err := result.LastInsertId()
 	if err != nil {
-		return repository.SlideDataFile{}, fmt.Errorf("last insert id: %w", err)
+		return repository.RecordDataFile{}, fmt.Errorf("last insert id: %w", err)
 	}
 
-	return r.GetSlideDataFileByID(ctx, id)
+	return r.GetRecordDataFileByID(ctx, id)
 }
 
-// GetSlideDataFileByID fetches one data-file row.
-func (r *Repository) GetSlideDataFileByID(ctx context.Context, id int64) (repository.SlideDataFile, error) {
+// GetRecordDataFileByID fetches one data-file row.
+func (r *Repository) GetRecordDataFileByID(ctx context.Context, id int64) (repository.RecordDataFile, error) {
 	if id <= 0 {
-		return repository.SlideDataFile{}, repository.ErrInvalidArgument
+		return repository.RecordDataFile{}, repository.ErrInvalidArgument
 	}
 
 	row := r.db.QueryRowContext(
 		ctx,
-		`SELECT id, slide_id, filename, s3_key, size, hash, description, created_at FROM slide_data_files WHERE id = ?;`,
+		`SELECT id, record_id, filename, s3_key, size, hash, description, created_at FROM record_data_files WHERE id = ?;`,
 		id,
 	)
 	return scanDataFile(row)
 }
 
-// UpdateSlideDataFile updates mutable data-file fields.
-func (r *Repository) UpdateSlideDataFile(ctx context.Context, input repository.UpdateSlideDataFileInput) (repository.SlideDataFile, error) {
+// UpdateRecordDataFile updates mutable data-file fields.
+func (r *Repository) UpdateRecordDataFile(ctx context.Context, input repository.UpdateRecordDataFileInput) (repository.RecordDataFile, error) {
 	if input.ID <= 0 {
-		return repository.SlideDataFile{}, repository.ErrInvalidArgument
+		return repository.RecordDataFile{}, repository.ErrInvalidArgument
 	}
 	if input.Size != nil && *input.Size < 0 {
-		return repository.SlideDataFile{}, repository.ErrInvalidArgument
+		return repository.RecordDataFile{}, repository.ErrInvalidArgument
 	}
 
 	setClauses := []string{
@@ -423,39 +423,39 @@ func (r *Repository) UpdateSlideDataFile(ctx context.Context, input repository.U
 	}
 
 	args = append(args, input.ID)
-	query := fmt.Sprintf(`UPDATE slide_data_files SET %s WHERE id = ?;`, strings.Join(setClauses, ", "))
+	query := fmt.Sprintf(`UPDATE record_data_files SET %s WHERE id = ?;`, strings.Join(setClauses, ", "))
 
 	result, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
-		return repository.SlideDataFile{}, mapSQLiteError(err)
+		return repository.RecordDataFile{}, mapSQLiteError(err)
 	}
 	if err := ensureRowsAffected(result); err != nil {
-		return repository.SlideDataFile{}, err
+		return repository.RecordDataFile{}, err
 	}
 
-	return r.GetSlideDataFileByID(ctx, input.ID)
+	return r.GetRecordDataFileByID(ctx, input.ID)
 }
 
-// ListSlideDataFilesBySlideID lists data files for a slide.
-func (r *Repository) ListSlideDataFilesBySlideID(ctx context.Context, slideID string) ([]repository.SlideDataFile, error) {
-	if strings.TrimSpace(slideID) == "" {
+// ListRecordDataFilesByRecordID lists data files for a record.
+func (r *Repository) ListRecordDataFilesByRecordID(ctx context.Context, recordID string) ([]repository.RecordDataFile, error) {
+	if strings.TrimSpace(recordID) == "" {
 		return nil, repository.ErrInvalidArgument
 	}
 
 	rows, err := r.db.QueryContext(
 		ctx,
-		`SELECT id, slide_id, filename, s3_key, size, hash, description, created_at
-         FROM slide_data_files
-         WHERE slide_id = ?
+		`SELECT id, record_id, filename, s3_key, size, hash, description, created_at
+         FROM record_data_files
+         WHERE record_id = ?
          ORDER BY id;`,
-		slideID,
+		recordID,
 	)
 	if err != nil {
 		return nil, mapSQLiteError(err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	files := make([]repository.SlideDataFile, 0)
+	files := make([]repository.RecordDataFile, 0)
 	for rows.Next() {
 		file, err := scanDataFileRows(rows)
 		if err != nil {
@@ -470,13 +470,13 @@ func (r *Repository) ListSlideDataFilesBySlideID(ctx context.Context, slideID st
 	return files, nil
 }
 
-// DeleteSlideDataFile deletes a data-file row.
-func (r *Repository) DeleteSlideDataFile(ctx context.Context, id int64) error {
+// DeleteRecordDataFile deletes a data-file row.
+func (r *Repository) DeleteRecordDataFile(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return repository.ErrInvalidArgument
 	}
 
-	result, err := r.db.ExecContext(ctx, `DELETE FROM slide_data_files WHERE id = ?;`, id)
+	result, err := r.db.ExecContext(ctx, `DELETE FROM record_data_files WHERE id = ?;`, id)
 	if err != nil {
 		return mapSQLiteError(err)
 	}
@@ -765,30 +765,30 @@ func (r *Repository) UpsertDeviceForImport(ctx context.Context, device repositor
 	return upsertDeviceForImport(ctx, r, device)
 }
 
-// CountActiveSlides returns the number of non-deleted slides.
-func (r *Repository) CountActiveSlides(ctx context.Context) (int, error) {
+// CountActiveRecords returns the number of non-deleted records.
+func (r *Repository) CountActiveRecords(ctx context.Context) (int, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM slides WHERE deleted_at IS NULL`).Scan(&count)
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM records WHERE deleted_at IS NULL`).Scan(&count)
 	if err != nil {
 		return 0, mapSQLiteError(err)
 	}
 	return count, nil
 }
 
-// CountTrashedSlides returns the number of soft-deleted slides.
-func (r *Repository) CountTrashedSlides(ctx context.Context) (int, error) {
+// CountTrashedRecords returns the number of soft-deleted records.
+func (r *Repository) CountTrashedRecords(ctx context.Context) (int, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM slides WHERE deleted_at IS NOT NULL`).Scan(&count)
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM records WHERE deleted_at IS NOT NULL`).Scan(&count)
 	if err != nil {
 		return 0, mapSQLiteError(err)
 	}
 	return count, nil
 }
 
-// PurgeDeletedSlides hard-deletes all soft-deleted slides and returns their IDs.
-func (r *Repository) PurgeDeletedSlides(ctx context.Context) ([]string, error) {
+// PurgeDeletedRecords hard-deletes all soft-deleted records and returns their IDs.
+func (r *Repository) PurgeDeletedRecords(ctx context.Context) ([]string, error) {
 	// Collect IDs first (needed by callers for filesystem cleanup).
-	rows, err := r.db.QueryContext(ctx, `SELECT id FROM slides WHERE deleted_at IS NOT NULL`)
+	rows, err := r.db.QueryContext(ctx, `SELECT id FROM records WHERE deleted_at IS NOT NULL`)
 	if err != nil {
 		return nil, mapSQLiteError(err)
 	}
@@ -810,14 +810,14 @@ func (r *Repository) PurgeDeletedSlides(ctx context.Context) ([]string, error) {
 	}
 
 	// Bulk delete (CASCADE handles child rows).
-	_, err = r.db.ExecContext(ctx, `DELETE FROM slides WHERE deleted_at IS NOT NULL`)
+	_, err = r.db.ExecContext(ctx, `DELETE FROM records WHERE deleted_at IS NOT NULL`)
 	if err != nil {
 		return nil, mapSQLiteError(err)
 	}
 	return ids, nil
 }
 
-type slideRow struct {
+type recordRow struct {
 	ID             string
 	Date           string
 	DayOrder       string
@@ -833,21 +833,21 @@ type slideRow struct {
 	DeletedAt      sql.NullString
 }
 
-func (r slideRow) toModel() (repository.Slide, error) {
+func (r recordRow) toModel() (repository.Record, error) {
 	createdAt, err := parseTimestamp(r.CreatedAt)
 	if err != nil {
-		return repository.Slide{}, err
+		return repository.Record{}, err
 	}
 	updatedAt, err := parseTimestamp(r.UpdatedAt)
 	if err != nil {
-		return repository.Slide{}, err
+		return repository.Record{}, err
 	}
 	deletedAt, err := parseNullableTimestamp(r.DeletedAt)
 	if err != nil {
-		return repository.Slide{}, err
+		return repository.Record{}, err
 	}
 
-	return repository.Slide{
+	return repository.Record{
 		ID:             r.ID,
 		Date:           r.Date,
 		DayOrder:       r.DayOrder,
@@ -864,8 +864,8 @@ func (r slideRow) toModel() (repository.Slide, error) {
 	}, nil
 }
 
-func scanSlide(row *sql.Row) (repository.Slide, error) {
-	var scanned slideRow
+func scanRecord(row *sql.Row) (repository.Record, error) {
+	var scanned recordRow
 	if err := row.Scan(
 		&scanned.ID,
 		&scanned.Date,
@@ -881,13 +881,13 @@ func scanSlide(row *sql.Row) (repository.Slide, error) {
 		&scanned.UpdatedAt,
 		&scanned.DeletedAt,
 	); err != nil {
-		return repository.Slide{}, mapSQLiteError(err)
+		return repository.Record{}, mapSQLiteError(err)
 	}
 	return scanned.toModel()
 }
 
-func scanSlideRows(rows *sql.Rows) (repository.Slide, error) {
-	var scanned slideRow
+func scanRecordRows(rows *sql.Rows) (repository.Record, error) {
+	var scanned recordRow
 	if err := rows.Scan(
 		&scanned.ID,
 		&scanned.Date,
@@ -903,7 +903,7 @@ func scanSlideRows(rows *sql.Rows) (repository.Slide, error) {
 		&scanned.UpdatedAt,
 		&scanned.DeletedAt,
 	); err != nil {
-		return repository.Slide{}, mapSQLiteError(err)
+		return repository.Record{}, mapSQLiteError(err)
 	}
 	return scanned.toModel()
 }
@@ -1033,21 +1033,21 @@ func upsertDeviceForImport(ctx context.Context, r *Repository, device repository
 
 type figureRow struct {
 	ID        int64
-	SlideID   string
+	RecordID   string
 	Filename  string
 	S3Key     string
 	AltText   sql.NullString
 	CreatedAt string
 }
 
-func (r figureRow) toModel() (repository.SlideFigure, error) {
+func (r figureRow) toModel() (repository.RecordFigure, error) {
 	createdAt, err := parseTimestamp(r.CreatedAt)
 	if err != nil {
-		return repository.SlideFigure{}, err
+		return repository.RecordFigure{}, err
 	}
-	return repository.SlideFigure{
+	return repository.RecordFigure{
 		ID:        r.ID,
-		SlideID:   r.SlideID,
+		RecordID:   r.RecordID,
 		Filename:  r.Filename,
 		S3Key:     r.S3Key,
 		AltText:   nullableStringPtr(r.AltText),
@@ -1055,25 +1055,25 @@ func (r figureRow) toModel() (repository.SlideFigure, error) {
 	}, nil
 }
 
-func scanFigure(row *sql.Row) (repository.SlideFigure, error) {
+func scanFigure(row *sql.Row) (repository.RecordFigure, error) {
 	var scanned figureRow
-	if err := row.Scan(&scanned.ID, &scanned.SlideID, &scanned.Filename, &scanned.S3Key, &scanned.AltText, &scanned.CreatedAt); err != nil {
-		return repository.SlideFigure{}, mapSQLiteError(err)
+	if err := row.Scan(&scanned.ID, &scanned.RecordID, &scanned.Filename, &scanned.S3Key, &scanned.AltText, &scanned.CreatedAt); err != nil {
+		return repository.RecordFigure{}, mapSQLiteError(err)
 	}
 	return scanned.toModel()
 }
 
-func scanFigureRows(rows *sql.Rows) (repository.SlideFigure, error) {
+func scanFigureRows(rows *sql.Rows) (repository.RecordFigure, error) {
 	var scanned figureRow
-	if err := rows.Scan(&scanned.ID, &scanned.SlideID, &scanned.Filename, &scanned.S3Key, &scanned.AltText, &scanned.CreatedAt); err != nil {
-		return repository.SlideFigure{}, mapSQLiteError(err)
+	if err := rows.Scan(&scanned.ID, &scanned.RecordID, &scanned.Filename, &scanned.S3Key, &scanned.AltText, &scanned.CreatedAt); err != nil {
+		return repository.RecordFigure{}, mapSQLiteError(err)
 	}
 	return scanned.toModel()
 }
 
 type dataFileRow struct {
 	ID          int64
-	SlideID     string
+	RecordID     string
 	Filename    string
 	S3Key       string
 	Size        int64
@@ -1082,14 +1082,14 @@ type dataFileRow struct {
 	CreatedAt   string
 }
 
-func (r dataFileRow) toModel() (repository.SlideDataFile, error) {
+func (r dataFileRow) toModel() (repository.RecordDataFile, error) {
 	createdAt, err := parseTimestamp(r.CreatedAt)
 	if err != nil {
-		return repository.SlideDataFile{}, err
+		return repository.RecordDataFile{}, err
 	}
-	return repository.SlideDataFile{
+	return repository.RecordDataFile{
 		ID:          r.ID,
-		SlideID:     r.SlideID,
+		RecordID:     r.RecordID,
 		Filename:    r.Filename,
 		S3Key:       r.S3Key,
 		Size:        r.Size,
@@ -1099,18 +1099,18 @@ func (r dataFileRow) toModel() (repository.SlideDataFile, error) {
 	}, nil
 }
 
-func scanDataFile(row *sql.Row) (repository.SlideDataFile, error) {
+func scanDataFile(row *sql.Row) (repository.RecordDataFile, error) {
 	var scanned dataFileRow
-	if err := row.Scan(&scanned.ID, &scanned.SlideID, &scanned.Filename, &scanned.S3Key, &scanned.Size, &scanned.Hash, &scanned.Description, &scanned.CreatedAt); err != nil {
-		return repository.SlideDataFile{}, mapSQLiteError(err)
+	if err := row.Scan(&scanned.ID, &scanned.RecordID, &scanned.Filename, &scanned.S3Key, &scanned.Size, &scanned.Hash, &scanned.Description, &scanned.CreatedAt); err != nil {
+		return repository.RecordDataFile{}, mapSQLiteError(err)
 	}
 	return scanned.toModel()
 }
 
-func scanDataFileRows(rows *sql.Rows) (repository.SlideDataFile, error) {
+func scanDataFileRows(rows *sql.Rows) (repository.RecordDataFile, error) {
 	var scanned dataFileRow
-	if err := rows.Scan(&scanned.ID, &scanned.SlideID, &scanned.Filename, &scanned.S3Key, &scanned.Size, &scanned.Hash, &scanned.Description, &scanned.CreatedAt); err != nil {
-		return repository.SlideDataFile{}, mapSQLiteError(err)
+	if err := rows.Scan(&scanned.ID, &scanned.RecordID, &scanned.Filename, &scanned.S3Key, &scanned.Size, &scanned.Hash, &scanned.Description, &scanned.CreatedAt); err != nil {
+		return repository.RecordDataFile{}, mapSQLiteError(err)
 	}
 	return scanned.toModel()
 }

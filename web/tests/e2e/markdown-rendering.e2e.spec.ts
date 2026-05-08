@@ -2,7 +2,7 @@
  * Markdown rendering e2e tests.
  *
  * Verifies that the MarkdownRenderer component correctly renders all supported
- * markdown syntax in the slide detail Notes tab, including mermaid diagrams.
+ * markdown syntax in the record detail Notes tab, including mermaid diagrams.
  *
  * Uses self-describing text (e.g. "# Header 1") so visual inspection of
  * screenshots immediately reveals rendering correctness.
@@ -89,21 +89,21 @@ graph TD
 `;
 
 // ---------------------------------------------------------------------------
-// Minimal slide data — only one slide, focused on notes rendering
+// Minimal record data — only one record, focused on notes rendering
 // ---------------------------------------------------------------------------
 
-const SLIDE_HTML = [
+const RECORD_HTML = [
   '<div style="display:flex;flex-direction:column;justify-content:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif">',
-  '<h1 style="font-size:72px;font-weight:700;color:#1a1a2e;margin-bottom:32px">Markdown Test Slide</h1>',
-  '<p style="font-size:36px;color:#4a4a6a;line-height:1.5">This slide has comprehensive markdown notes.</p>',
+  '<h1 style="font-size:72px;font-weight:700;color:#1a1a2e;margin-bottom:32px">Markdown Test Record</h1>',
+  '<p style="font-size:36px;color:#4a4a6a;line-height:1.5">This record has comprehensive markdown notes.</p>',
   "</div>",
 ].join("");
 
-const SLIDE = {
+const RECORD = {
   id: "20260310-md000001",
   date: "2026-03-10",
   day_order: "a0",
-  html_content: SLIDE_HTML,
+  html_content: RECORD_HTML,
   project_id: "test/markdown",
   source_device_id: "device-a",
   source_ref: null,
@@ -113,8 +113,8 @@ const SLIDE = {
   data_file_count: 0,
 };
 
-const SLIDE_DETAIL = {
-  ...SLIDE,
+const RECORD_DETAIL = {
+  ...RECORD,
   notes: FULL_MARKDOWN_NOTES,
   git_remote_url: null,
   git_hash: null,
@@ -139,17 +139,17 @@ function isExpectedDevWarning(msg: string): boolean {
   );
 }
 
-/** Sets up API route interception with the markdown test slide. */
+/** Sets up API route interception with the markdown test record. */
 async function setupMockApi(page: Page) {
-  await page.route("**/api/slides?*", async (route: Route) => {
+  await page.route("**/api/records?*", async (route: Route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ items: [SLIDE], next_cursor: null }),
+      body: JSON.stringify({ items: [RECORD], next_cursor: null }),
     });
   });
 
-  await page.route("**/api/slides", async (route: Route) => {
+  await page.route("**/api/records", async (route: Route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
@@ -157,17 +157,17 @@ async function setupMockApi(page: Page) {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ items: [SLIDE], next_cursor: null }),
+      body: JSON.stringify({ items: [RECORD], next_cursor: null }),
     });
   });
 
   await page.route(
-    `**/api/slides/${SLIDE.id}`,
+    `**/api/records/${RECORD.id}`,
     async (route: Route) => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ slide: SLIDE_DETAIL }),
+        body: JSON.stringify({ record: RECORD_DETAIL }),
       });
     }
   );
@@ -287,8 +287,8 @@ test.describe("Markdown rendering @e2e @visual", () => {
     await setupMockApi(page);
     await page.goto("/");
 
-    // Wait for the slide to load and auto-select
-    await expect(page.getByText("1 slide")).toBeVisible();
+    // Wait for the record to load and auto-select
+    await expect(page.getByText("1 record")).toBeVisible();
 
     // Wait for notes to render in the detail panel
     const notesArea = page.locator(".prose");
@@ -423,7 +423,7 @@ test.describe("Markdown rendering @e2e @visual", () => {
     // -----------------------------------------------------------------------
     await page.keyboard.press("[");
     await expect(
-      page.getByRole("heading", { name: "Slides" })
+      page.getByRole("heading", { name: "Records" })
     ).not.toBeVisible();
 
     // Drag the resize handle between viewer and details panels to the left
@@ -490,7 +490,7 @@ test.describe("Markdown rendering @e2e @visual", () => {
   }) => {
     await setupMockApi(page);
     await page.goto("/");
-    await expect(page.getByText("1 slide")).toBeVisible();
+    await expect(page.getByText("1 record")).toBeVisible();
 
     // Wait for rendered notes to appear
     const notesArea = page.locator(".prose");
@@ -499,7 +499,7 @@ test.describe("Markdown rendering @e2e @visual", () => {
     // Hide nav panel and maximise details panel (same as render test)
     await page.keyboard.press("[");
     await expect(
-      page.getByRole("heading", { name: "Slides" })
+      page.getByRole("heading", { name: "Records" })
     ).not.toBeVisible();
 
     const handle = page.locator('[role="separator"]');
@@ -546,7 +546,7 @@ test.describe("Markdown rendering @e2e @visual", () => {
   }) => {
     await setupMockApi(page);
     await page.goto("/");
-    await expect(page.getByText("1 slide")).toBeVisible();
+    await expect(page.getByText("1 record")).toBeVisible();
 
     const notesArea = page.locator(".prose");
     await expect(notesArea).toBeVisible();

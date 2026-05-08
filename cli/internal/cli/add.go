@@ -9,8 +9,8 @@ import (
 
 	"github.com/conn-castle/personal-context/cli/internal/fractionalindex"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
-	"github.com/conn-castle/personal-context/cli/internal/slideid"
-	"github.com/conn-castle/personal-context/cli/internal/slideio"
+	"github.com/conn-castle/personal-context/cli/internal/recordid"
+	"github.com/conn-castle/personal-context/cli/internal/recordio"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +26,7 @@ func newAddCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "add <path>",
-		Short: "Create a slide from an input folder",
+		Short: "Create a record from an input folder",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pos, err := resolvePositionFlags(posFirst, posLast, afterFlag, beforeFlag)
@@ -37,14 +37,14 @@ func newAddCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&dateFlag, "date", "", "Slide date (YYYY-MM-DD, default: today)")
+	cmd.Flags().StringVar(&dateFlag, "date", "", "Record date (YYYY-MM-DD, default: today)")
 	cmd.Flags().StringVar(&projectFlag, "project", "", "Project ID (must match metadata.json when both are present)")
 	cmd.Flags().StringVar(&deviceFlag, "device", "", "Source device ID (must match metadata.json when both are present)")
 	cmd.Flags().StringVar(&sourceRefFlag, "source-ref", "", "Opaque source reference (must match metadata.json when both are present)")
 	cmd.Flags().BoolVar(&posFirst, "first", false, "Insert at the start of the day")
 	cmd.Flags().BoolVar(&posLast, "last", false, "Insert at the end of the day")
-	cmd.Flags().StringVar(&afterFlag, "after", "", "Insert after this slide ID")
-	cmd.Flags().StringVar(&beforeFlag, "before", "", "Insert before this slide ID")
+	cmd.Flags().StringVar(&afterFlag, "after", "", "Insert after this record ID")
+	cmd.Flags().StringVar(&beforeFlag, "before", "", "Insert before this record ID")
 
 	return cmd
 }
@@ -99,24 +99,24 @@ func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath s
 	}
 	defer func() { _ = stack.Close() }()
 
-	var createdSlideID string
+	var createdRecordID string
 	copiedFigures := make([]string, 0)
 	copiedDataFiles := make([]string, 0)
 	defer func() {
-		if err == nil || createdSlideID == "" {
+		if err == nil || createdRecordID == "" {
 			return
 		}
 		rollbackCtx := context.Background()
-		_ = stack.Repo.DeleteSlide(rollbackCtx, createdSlideID)
+		_ = stack.Repo.DeleteRecord(rollbackCtx, createdRecordID)
 		for _, filename := range copiedFigures {
-			_ = stack.FS.DeleteFigure(createdSlideID, filename)
+			_ = stack.FS.DeleteFigure(createdRecordID, filename)
 		}
 		for _, filename := range copiedDataFiles {
-			_ = stack.FS.DeleteDataFile(createdSlideID, filename)
+			_ = stack.FS.DeleteDataFile(createdRecordID, filename)
 		}
 	}()
 
-	input, err := slideio.ParseInputFolder(inputPath)
+	input, err := recordio.ParseInputFolder(inputPath)
 	if err != nil {
 		return err
 	}
@@ -131,24 +131,24 @@ func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath s
 
 	// Resolve date
 	now := time.Now()
-	var slideDate time.Time
+	var recordDate time.Time
 	if dateStr != "" {
 		parsed, err := time.Parse("2006-01-02", dateStr)
 		if err != nil {
 			return fmt.Errorf("invalid date %q: expected YYYY-MM-DD", dateStr)
 		}
-		slideDate = parsed
+		recordDate = parsed
 	} else {
-		slideDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+		recordDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	}
 
-	// Generate slide ID — date prefix must match the slide's date field
-	id, err := slideid.GenerateForDate(slideDate)
+	// Generate record ID — date prefix must match the record's date field
+	id, err := recordid.GenerateForDate(recordDate)
 	if err != nil {
-		return fmt.Errorf("generate slide ID: %w", err)
+		return fmt.Errorf("generate record ID: %w", err)
 	}
 
-	dateField := slideDate.Format("2006-01-02")
+	dateField := recordDate.Format("2006-01-02")
 
 	// Compute day_order
 	dayOrder, err := computeDayOrder(ctx, stack.Repo, dateField, id, pos)
@@ -156,8 +156,8 @@ func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath s
 		return fmt.Errorf("compute position: %w", err)
 	}
 
-	// Create slide in DB
-	slide, err := stack.Repo.CreateSlide(ctx, repository.CreateSlideInput{
+	// Create record in DB
+	record, err := stack.Repo.CreateRecord(ctx, repository.CreateRecordInput{
 		ID:             id,
 		Date:           dateField,
 		DayOrder:       dayOrder,
@@ -170,19 +170,19 @@ func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath s
 		GitHash:        input.GitHash,
 	})
 	if err != nil {
-		return fmt.Errorf("create slide: %w", err)
+		return fmt.Errorf("create record: %w", err)
 	}
-	createdSlideID = slide.ID
+	createdRecordID = record.ID
 
 	// Copy figures
 	for _, figurePath := range input.Figures {
-		stored, err := stack.FS.CopyFigure(slide.ID, figurePath)
+		stored, err := stack.FS.CopyFigure(record.ID, figurePath)
 		if err != nil {
 			return fmt.Errorf("copy figure %s: %w", filepath.Base(figurePath), err)
 		}
 		copiedFigures = append(copiedFigures, stored.Filename)
-		if _, err := stack.Repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-			SlideID:  slide.ID,
+		if _, err := stack.Repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID:  record.ID,
 			Filename: stored.Filename,
 			S3Key:    stored.S3Key,
 		}); err != nil {
@@ -192,17 +192,17 @@ func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath s
 
 	// Copy data files
 	for _, dataPath := range input.DataFiles {
-		stored, err := stack.FS.CopyDataFile(slide.ID, dataPath)
+		stored, err := stack.FS.CopyDataFile(record.ID, dataPath)
 		if err != nil {
 			return fmt.Errorf("copy data file %s: %w", filepath.Base(dataPath), err)
 		}
 		copiedDataFiles = append(copiedDataFiles, stored.Filename)
-		hash, err := slideio.HashFile(dataPath)
+		hash, err := recordio.HashFile(dataPath)
 		if err != nil {
 			return fmt.Errorf("hash data file %s: %w", stored.Filename, err)
 		}
-		if _, err := stack.Repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-			SlideID:  slide.ID,
+		if _, err := stack.Repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+			RecordID:  record.ID,
 			Filename: stored.Filename,
 			S3Key:    stored.S3Key,
 			Size:     stored.Size,
@@ -213,23 +213,23 @@ func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath s
 	}
 
 	_ = runAutoSyncFn(ctx, stderr)
-	_, _ = fmt.Fprintln(stdout, slide.ID)
+	_, _ = fmt.Fprintln(stdout, record.ID)
 	return nil
 }
 
-// computeDayOrder determines the fractional index for the slide within a given date.
+// computeDayOrder determines the fractional index for the record within a given date.
 func computeDayOrder(ctx context.Context, repo repository.Repository, date string, excludeID string, pos position) (string, error) {
-	slides, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+	records, err := repo.ListRecords(ctx, repository.ListRecordsFilter{
 		DateFrom: &date,
 		DateTo:   &date,
 	})
 	if err != nil {
-		return "", fmt.Errorf("list slides for date %s: %w", date, err)
+		return "", fmt.Errorf("list records for date %s: %w", date, err)
 	}
 
-	// Filter out the slide being moved (for pc move)
-	filtered := make([]repository.Slide, 0, len(slides))
-	for _, s := range slides {
+	// Filter out the record being moved (for pc move)
+	filtered := make([]repository.Record, 0, len(records))
+	for _, s := range records {
 		if s.ID != excludeID {
 			filtered = append(filtered, s)
 		}
@@ -237,7 +237,7 @@ func computeDayOrder(ctx context.Context, repo repository.Repository, date strin
 
 	if len(filtered) == 0 {
 		if pos.kind == "after" || pos.kind == "before" {
-			return "", fmt.Errorf("reference slide %q not found on date %s", pos.referenceID, date)
+			return "", fmt.Errorf("reference record %q not found on date %s", pos.referenceID, date)
 		}
 		return fractionalindex.GenerateAtEnd("")
 	}
@@ -256,7 +256,7 @@ func computeDayOrder(ctx context.Context, repo repository.Repository, date strin
 				return fractionalindex.GenerateBetween(s.DayOrder, filtered[i+1].DayOrder)
 			}
 		}
-		return "", fmt.Errorf("reference slide %q not found on date %s", pos.referenceID, date)
+		return "", fmt.Errorf("reference record %q not found on date %s", pos.referenceID, date)
 	case "before":
 		for i, s := range filtered {
 			if s.ID == pos.referenceID {
@@ -266,7 +266,7 @@ func computeDayOrder(ctx context.Context, repo repository.Repository, date strin
 				return fractionalindex.GenerateBetween(filtered[i-1].DayOrder, s.DayOrder)
 			}
 		}
-		return "", fmt.Errorf("reference slide %q not found on date %s", pos.referenceID, date)
+		return "", fmt.Errorf("reference record %q not found on date %s", pos.referenceID, date)
 	default:
 		return "", fmt.Errorf("unknown position kind: %q", pos.kind)
 	}

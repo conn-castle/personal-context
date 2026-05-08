@@ -66,14 +66,14 @@ Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `
 Run from: `cli/`
 Notes: Fails when any tested package drops below 95%. Same exclusions as the aggregate coverage script. Integration-only packages (`postgres`, `s3client`, `cloude2e`) are tested with Docker via `-tags integration`.
 
-- Run full Phase 3 manual verification flow (opens slide preview in browser)
+- Run full Phase 3 manual verification flow (opens record preview in browser)
 ```bash
 ./scripts/verify_phase3_manual.sh
 ```
 Run from: `cli/`
 Notes: Use `--no-open` in non-interactive environments. Prints artifact paths and cleanup command.
 
-- Run generalized local demo verification flow (opens summary + persisted slide previews in browser)
+- Run generalized local demo verification flow (opens summary + persisted record previews in browser)
 ```bash
 ./scripts/verify_local_demo.sh
 ```
@@ -173,9 +173,9 @@ Run from: `web/`
 Prerequisites: `pnpm exec playwright install` for browser binaries.
 Notes: `playwright.config.ts` starts Next.js with `LOCAL_BACKEND_URL=http://127.0.0.1:9876`, so this runs in local mode and bypasses cloud auth while the test mocks API responses.
 
-- Run Playwright Slide Browser e2e tests
+- Run Playwright Record Browser e2e tests
 ```bash
-pnpm test:e2e:slide-browser
+pnpm test:e2e:record-browser
 ```
 Run from: `web/`
 Prerequisites: `pnpm exec playwright install` for browser binaries.
@@ -189,13 +189,13 @@ Run from: `web/`
 Prerequisites: `pnpm exec playwright install` for browser binaries.
 Notes: Verifies all markdown elements (H1–H6, bold, italic, strikethrough, code, lists, tables, task lists, blockquotes, links, mermaid diagrams) render correctly in the Notes panel. Includes visual snapshots.
 
-- Run Playwright e2e for standalone CLI slide preview flow
+- Run Playwright e2e for standalone CLI record preview flow
 ```bash
-pnpm test:e2e:cli-slide
+pnpm test:e2e:cli-record
 ```
 Run from: `web/`
 Prerequisites: Go toolchain and `pnpm exec playwright install` for browser binaries.
-Notes: Executes `cli/scripts/verify_phase3_manual.sh --no-open`, then loads the generated `slide.html` in Chromium.
+Notes: Executes `cli/scripts/verify_phase3_manual.sh --no-open`, then loads the generated `record.html` in Chromium.
 
 - Run Playwright e2e for the generalized local demo artifact
 ```bash
@@ -262,12 +262,12 @@ make serve
 ```
 Run from: repo root
 
-- Seed tutorial slides (idempotent)
+- Seed tutorial records (idempotent)
 ```bash
 make seed
 ```
 Run from: repo root
-Notes: Creates 6 tutorial slides under `personal-context/tutorial` project. Automatically run by `make dev-local`.
+Notes: Creates 6 tutorial records under `personal-context/tutorial` project. Automatically run by `make dev-local`.
 
 - Run all web checks (lint + typecheck + coverage + build + e2e)
 ```bash

@@ -24,9 +24,9 @@ var downloadCloudFigureFn = func(ctx context.Context, cloud *cloudStack, key str
 	return cloud.S3.Download(ctx, key)
 }
 
-func buildLocalSnapshot(ctx context.Context, stack *localStack, filter repository.ListSlidesFilter) (gitsnapshot.Snapshot, error) {
-	return buildSnapshot(ctx, stack.Repo, stack.Repo, func(_ context.Context, figure repository.SlideFigure) ([]byte, error) {
-		path, err := stack.FS.ResolveFigurePath(figure.SlideID, figure.Filename)
+func buildLocalSnapshot(ctx context.Context, stack *localStack, filter repository.ListRecordsFilter) (gitsnapshot.Snapshot, error) {
+	return buildSnapshot(ctx, stack.Repo, stack.Repo, func(_ context.Context, figure repository.RecordFigure) ([]byte, error) {
+		path, err := stack.FS.ResolveFigurePath(figure.RecordID, figure.Filename)
 		if err != nil {
 			return nil, err
 		}
@@ -38,14 +38,14 @@ func buildLocalSnapshot(ctx context.Context, stack *localStack, filter repositor
 	}, filter)
 }
 
-func buildCloudSnapshot(ctx context.Context, homeDir string, cloud *cloudStack, filter repository.ListSlidesFilter) (gitsnapshot.Snapshot, error) {
+func buildCloudSnapshot(ctx context.Context, homeDir string, cloud *cloudStack, filter repository.ListRecordsFilter) (gitsnapshot.Snapshot, error) {
 	localStack, err := openLocalStack(homeDir)
 	if err != nil {
 		return gitsnapshot.Snapshot{}, err
 	}
 	defer func() { _ = localStack.Close() }()
 
-	return buildSnapshot(ctx, localStack.Repo, cloud.Repo, func(ctx context.Context, figure repository.SlideFigure) ([]byte, error) {
+	return buildSnapshot(ctx, localStack.Repo, cloud.Repo, func(ctx context.Context, figure repository.RecordFigure) ([]byte, error) {
 		body, err := downloadCloudFigureFn(ctx, cloud, figure.S3Key)
 		if err != nil {
 			return nil, err
@@ -62,9 +62,9 @@ func buildCloudSnapshot(ctx context.Context, homeDir string, cloud *cloudStack, 
 func buildSnapshot(
 	ctx context.Context,
 	templateRepo repository.Repository,
-	slideRepo repository.Repository,
-	readFigure func(context.Context, repository.SlideFigure) ([]byte, error),
-	filter repository.ListSlidesFilter,
+	recordRepo repository.Repository,
+	readFigure func(context.Context, repository.RecordFigure) ([]byte, error),
+	filter repository.ListRecordsFilter,
 ) (gitsnapshot.Snapshot, error) {
 	templates, err := templateRepo.ListTemplates(ctx)
 	if err != nil {
@@ -79,7 +79,7 @@ func buildSnapshot(
 			HTMLContent: template.HTMLContent,
 		})
 	}
-	projects, err := slideRepo.ListProjects(ctx, true)
+	projects, err := recordRepo.ListProjects(ctx, true)
 	if err != nil {
 		return gitsnapshot.Snapshot{}, fmt.Errorf("list projects: %w", err)
 	}
@@ -92,7 +92,7 @@ func buildSnapshot(
 			ArchivedAt: project.ArchivedAt,
 		})
 	}
-	devices, err := slideRepo.ListDevices(ctx, true)
+	devices, err := recordRepo.ListDevices(ctx, true)
 	if err != nil {
 		return gitsnapshot.Snapshot{}, fmt.Errorf("list devices: %w", err)
 	}
@@ -106,26 +106,26 @@ func buildSnapshot(
 		})
 	}
 
-	slides, err := slideRepo.ListSlides(ctx, filter)
+	records, err := recordRepo.ListRecords(ctx, filter)
 	if err != nil {
-		return gitsnapshot.Snapshot{}, fmt.Errorf("list slides: %w", err)
+		return gitsnapshot.Snapshot{}, fmt.Errorf("list records: %w", err)
 	}
-	snapshot.Slides = make([]gitsnapshot.Slide, 0, len(slides))
-	for _, slide := range slides {
-		figures, err := slideRepo.ListSlideFiguresBySlideID(ctx, slide.ID)
+	snapshot.Records = make([]gitsnapshot.Record, 0, len(records))
+	for _, record := range records {
+		figures, err := recordRepo.ListRecordFiguresByRecordID(ctx, record.ID)
 		if err != nil {
-			return gitsnapshot.Snapshot{}, fmt.Errorf("list figures for %s: %w", slide.ID, err)
+			return gitsnapshot.Snapshot{}, fmt.Errorf("list figures for %s: %w", record.ID, err)
 		}
-		dataFiles, err := slideRepo.ListSlideDataFilesBySlideID(ctx, slide.ID)
+		dataFiles, err := recordRepo.ListRecordDataFilesByRecordID(ctx, record.ID)
 		if err != nil {
-			return gitsnapshot.Snapshot{}, fmt.Errorf("list data files for %s: %w", slide.ID, err)
+			return gitsnapshot.Snapshot{}, fmt.Errorf("list data files for %s: %w", record.ID, err)
 		}
 
 		exportFigures := make([]gitsnapshot.Figure, 0, len(figures))
 		for _, figure := range figures {
 			content, err := readFigure(ctx, figure)
 			if err != nil {
-				return gitsnapshot.Snapshot{}, fmt.Errorf("load figure %s/%s: %w", slide.ID, figure.Filename, err)
+				return gitsnapshot.Snapshot{}, fmt.Errorf("load figure %s/%s: %w", record.ID, figure.Filename, err)
 			}
 			exportFigures = append(exportFigures, gitsnapshot.Figure{
 				Filename: figure.Filename,
@@ -145,21 +145,21 @@ func buildSnapshot(
 			})
 		}
 
-		snapshot.Slides = append(snapshot.Slides, gitsnapshot.Slide{
-			ID:             slide.ID,
-			Date:           slide.Date,
-			DayOrder:       slide.DayOrder,
-			ProjectID:      slide.ProjectID,
-			SourceDeviceID: slide.SourceDeviceID,
-			SourceRef:      slide.SourceRef,
-			GitRemoteURL:   slide.GitRemoteURL,
-			GitHash:        slide.GitHash,
-			HTMLContent:    slide.HTMLContent,
-			Notes:          slide.Notes,
+		snapshot.Records = append(snapshot.Records, gitsnapshot.Record{
+			ID:             record.ID,
+			Date:           record.Date,
+			DayOrder:       record.DayOrder,
+			ProjectID:      record.ProjectID,
+			SourceDeviceID: record.SourceDeviceID,
+			SourceRef:      record.SourceRef,
+			GitRemoteURL:   record.GitRemoteURL,
+			GitHash:        record.GitHash,
+			HTMLContent:    record.HTMLContent,
+			Notes:          record.Notes,
 			Figures:        exportFigures,
 			DataFiles:      exportDataFiles,
-			CreatedAt:      slide.CreatedAt,
-			UpdatedAt:      slide.UpdatedAt,
+			CreatedAt:      record.CreatedAt,
+			UpdatedAt:      record.UpdatedAt,
 		})
 	}
 	return snapshot, nil
@@ -194,23 +194,23 @@ func importSnapshotIntoStack(ctx context.Context, stack *localStack, snapshot gi
 		}
 	}
 
-	for _, slide := range snapshot.Slides {
-		existing, err := stack.Repo.GetSlideByID(ctx, slide.ID)
+	for _, record := range snapshot.Records {
+		existing, err := stack.Repo.GetRecordByID(ctx, record.ID)
 		if err != nil && !errors.Is(err, repository.ErrNotFound) {
-			return stats, fmt.Errorf("get slide %s: %w", slide.ID, err)
+			return stats, fmt.Errorf("get record %s: %w", record.ID, err)
 		}
 		if errors.Is(err, repository.ErrNotFound) {
-			if err := createImportedSlide(ctx, stack, slide); err != nil {
+			if err := createImportedRecord(ctx, stack, record); err != nil {
 				return stats, err
 			}
 			stats.Created++
 			continue
 		}
-		if !slide.UpdatedAt.After(existing.UpdatedAt) {
+		if !record.UpdatedAt.After(existing.UpdatedAt) {
 			stats.Skipped++
 			continue
 		}
-		if err := updateImportedSlide(ctx, stack, slide); err != nil {
+		if err := updateImportedRecord(ctx, stack, record); err != nil {
 			return stats, err
 		}
 		stats.Updated++
@@ -245,103 +245,103 @@ func upsertTemplate(ctx context.Context, repo repository.Repository, tmpl gitsna
 	return nil
 }
 
-func createImportedSlide(ctx context.Context, stack *localStack, slide gitsnapshot.Slide) error {
-	createdAt := slide.CreatedAt.UTC()
-	updatedAt := slide.UpdatedAt.UTC()
-	if _, err := stack.Repo.CreateSlide(ctx, repository.CreateSlideInput{
-		ID:             slide.ID,
-		Date:           slide.Date,
-		DayOrder:       slide.DayOrder,
-		HTMLContent:    slide.HTMLContent,
-		Notes:          slide.Notes,
-		ProjectID:      slide.ProjectID,
-		SourceDeviceID: slide.SourceDeviceID,
-		SourceRef:      slide.SourceRef,
-		GitRemoteURL:   slide.GitRemoteURL,
-		GitHash:        slide.GitHash,
+func createImportedRecord(ctx context.Context, stack *localStack, record gitsnapshot.Record) error {
+	createdAt := record.CreatedAt.UTC()
+	updatedAt := record.UpdatedAt.UTC()
+	if _, err := stack.Repo.CreateRecord(ctx, repository.CreateRecordInput{
+		ID:             record.ID,
+		Date:           record.Date,
+		DayOrder:       record.DayOrder,
+		HTMLContent:    record.HTMLContent,
+		Notes:          record.Notes,
+		ProjectID:      record.ProjectID,
+		SourceDeviceID: record.SourceDeviceID,
+		SourceRef:      record.SourceRef,
+		GitRemoteURL:   record.GitRemoteURL,
+		GitHash:        record.GitHash,
 		CreatedAt:      &createdAt,
 		UpdatedAt:      &updatedAt,
 	}); err != nil {
-		return fmt.Errorf("create slide %s: %w", slide.ID, err)
+		return fmt.Errorf("create record %s: %w", record.ID, err)
 	}
-	if err := replaceSlideChildren(ctx, stack, slide); err != nil {
+	if err := replaceRecordChildren(ctx, stack, record); err != nil {
 		return err
 	}
 	return nil
 }
 
-func updateImportedSlide(ctx context.Context, stack *localStack, slide gitsnapshot.Slide) error {
-	updatedAt := slide.UpdatedAt.UTC()
-	if _, err := stack.Repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-		ID:             slide.ID,
-		Date:           slide.Date,
-		DayOrder:       slide.DayOrder,
-		HTMLContent:    slide.HTMLContent,
-		Notes:          slide.Notes,
-		ProjectID:      slide.ProjectID,
-		SourceDeviceID: slide.SourceDeviceID,
-		SourceRef:      slide.SourceRef,
-		GitRemoteURL:   slide.GitRemoteURL,
-		GitHash:        slide.GitHash,
+func updateImportedRecord(ctx context.Context, stack *localStack, record gitsnapshot.Record) error {
+	updatedAt := record.UpdatedAt.UTC()
+	if _, err := stack.Repo.UpdateRecord(ctx, repository.UpdateRecordInput{
+		ID:             record.ID,
+		Date:           record.Date,
+		DayOrder:       record.DayOrder,
+		HTMLContent:    record.HTMLContent,
+		Notes:          record.Notes,
+		ProjectID:      record.ProjectID,
+		SourceDeviceID: record.SourceDeviceID,
+		SourceRef:      record.SourceRef,
+		GitRemoteURL:   record.GitRemoteURL,
+		GitHash:        record.GitHash,
 		UpdatedAt:      &updatedAt,
 	}); err != nil {
-		return fmt.Errorf("update slide %s: %w", slide.ID, err)
+		return fmt.Errorf("update record %s: %w", record.ID, err)
 	}
-	if err := replaceSlideChildren(ctx, stack, slide); err != nil {
+	if err := replaceRecordChildren(ctx, stack, record); err != nil {
 		return err
 	}
 	return nil
 }
 
-func replaceSlideChildren(ctx context.Context, stack *localStack, slide gitsnapshot.Slide) error {
-	existingFigures, err := stack.Repo.ListSlideFiguresBySlideID(ctx, slide.ID)
+func replaceRecordChildren(ctx context.Context, stack *localStack, record gitsnapshot.Record) error {
+	existingFigures, err := stack.Repo.ListRecordFiguresByRecordID(ctx, record.ID)
 	if err != nil {
-		return fmt.Errorf("list existing figures for %s: %w", slide.ID, err)
+		return fmt.Errorf("list existing figures for %s: %w", record.ID, err)
 	}
 	for _, figure := range existingFigures {
-		if err := stack.Repo.DeleteSlideFigure(ctx, figure.ID); err != nil {
-			return fmt.Errorf("delete existing figure %s/%s: %w", slide.ID, figure.Filename, err)
+		if err := stack.Repo.DeleteRecordFigure(ctx, figure.ID); err != nil {
+			return fmt.Errorf("delete existing figure %s/%s: %w", record.ID, figure.Filename, err)
 		}
 	}
-	existingDataFiles, err := stack.Repo.ListSlideDataFilesBySlideID(ctx, slide.ID)
+	existingDataFiles, err := stack.Repo.ListRecordDataFilesByRecordID(ctx, record.ID)
 	if err != nil {
-		return fmt.Errorf("list existing data files for %s: %w", slide.ID, err)
+		return fmt.Errorf("list existing data files for %s: %w", record.ID, err)
 	}
 	for _, file := range existingDataFiles {
-		if err := stack.Repo.DeleteSlideDataFile(ctx, file.ID); err != nil {
-			return fmt.Errorf("delete existing data file %s/%s: %w", slide.ID, file.Filename, err)
+		if err := stack.Repo.DeleteRecordDataFile(ctx, file.ID); err != nil {
+			return fmt.Errorf("delete existing data file %s/%s: %w", record.ID, file.Filename, err)
 		}
 	}
-	if err := stack.FS.DeleteSlideDir(slide.ID); err != nil {
-		return fmt.Errorf("reset local files for %s: %w", slide.ID, err)
+	if err := stack.FS.DeleteRecordDir(record.ID); err != nil {
+		return fmt.Errorf("reset local files for %s: %w", record.ID, err)
 	}
-	for _, figure := range slide.Figures {
-		path, err := stack.FS.ResolveFigurePath(slide.ID, figure.Filename)
+	for _, figure := range record.Figures {
+		path, err := stack.FS.ResolveFigurePath(record.ID, figure.Filename)
 		if err != nil {
 			return err
 		}
 		if err := writeTextFileAtomically(path, figure.Content, 0o700, 0o644); err != nil {
-			return fmt.Errorf("write local figure %s/%s: %w", slide.ID, figure.Filename, err)
+			return fmt.Errorf("write local figure %s/%s: %w", record.ID, figure.Filename, err)
 		}
-		if _, err := stack.Repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-			SlideID:  slide.ID,
+		if _, err := stack.Repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID:  record.ID,
 			Filename: figure.Filename,
 			S3Key:    figure.S3Key,
 			AltText:  figure.AltText,
 		}); err != nil {
-			return fmt.Errorf("create figure row %s/%s: %w", slide.ID, figure.Filename, err)
+			return fmt.Errorf("create figure row %s/%s: %w", record.ID, figure.Filename, err)
 		}
 	}
-	for _, file := range slide.DataFiles {
-		if _, err := stack.Repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-			SlideID:     slide.ID,
+	for _, file := range record.DataFiles {
+		if _, err := stack.Repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+			RecordID:     record.ID,
 			Filename:    file.Filename,
 			S3Key:       file.S3Key,
 			Size:        file.Size,
 			Hash:        file.Hash,
 			Description: file.Description,
 		}); err != nil {
-			return fmt.Errorf("create data file row %s/%s: %w", slide.ID, file.Filename, err)
+			return fmt.Errorf("create data file row %s/%s: %w", record.ID, file.Filename, err)
 		}
 	}
 	return nil

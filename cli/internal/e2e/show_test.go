@@ -15,11 +15,11 @@ func TestShowTextFormat(t *testing.T) {
 		MetadataJSON: `{"project_id":"show-test"}`,
 	})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
-	showOut := runPCSuccess(t, homeDir, "show", slideID)
+	showOut := runPCSuccess(t, homeDir, "show", recordID)
 
-	checks := []string{"ID:", slideID, "Date:", "Project:", "show-test", "Notes:", "Important notes here"}
+	checks := []string{"ID:", recordID, "Date:", "Project:", "show-test", "Notes:", "Important notes here"}
 	for _, check := range checks {
 		if !strings.Contains(showOut, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, showOut)
@@ -37,17 +37,17 @@ func TestShowJSONFormat(t *testing.T) {
 		DataFiles:   map[string][]byte{"metrics.csv": []byte("a,b\n1,2\n")},
 	})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
-	showOut := runPCSuccess(t, homeDir, "show", "--format", "json", slideID)
+	showOut := runPCSuccess(t, homeDir, "show", "--format", "json", recordID)
 
 	var result map[string]interface{}
 	if err := json.Unmarshal([]byte(showOut), &result); err != nil {
 		t.Fatalf("failed to parse JSON: %v\noutput: %s", err, showOut)
 	}
 
-	if result["id"] != slideID {
-		t.Fatalf("expected id=%s, got %v", slideID, result["id"])
+	if result["id"] != recordID {
+		t.Fatalf("expected id=%s, got %v", recordID, result["id"])
 	}
 	if result["html_content"] == nil {
 		t.Fatal("expected html_content in JSON output")
@@ -80,9 +80,9 @@ func TestShowWithNoNotes(t *testing.T) {
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
-	showOut := runPCSuccess(t, homeDir, "show", slideID)
+	showOut := runPCSuccess(t, homeDir, "show", recordID)
 	if !strings.Contains(showOut, "(none)") {
 		t.Fatalf("expected (none) for notes, got:\n%s", showOut)
 	}
@@ -94,9 +94,9 @@ func TestShowInvalidFormat(t *testing.T) {
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
-	stderr := runPCFailure(t, homeDir, "show", "--format", "xml", slideID)
+	stderr := runPCFailure(t, homeDir, "show", "--format", "xml", recordID)
 	if !strings.Contains(stderr, "unknown format") {
 		t.Fatalf("expected format error, got %q", stderr)
 	}

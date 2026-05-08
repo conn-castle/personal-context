@@ -36,7 +36,7 @@ func TestScreenshot(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	// Create a slide with known content.
+	// Create a record with known content.
 	inputDir := createInputFolder(t, inputFolderOpts{
 		HTMLContent: `<!DOCTYPE html>
 <html>
@@ -50,12 +50,12 @@ h1 { font-size: 120px; }
 </html>`,
 	})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	// Take a screenshot with explicit --output.
 	outputDir := t.TempDir()
 	explicitOut := filepath.Join(outputDir, "test-output.png")
-	stdout = runPCSuccess(t, homeDir, "screenshot", slideID, "--output", explicitOut)
+	stdout = runPCSuccess(t, homeDir, "screenshot", recordID, "--output", explicitOut)
 
 	// Verify output file exists and has reasonable size.
 	info, err := os.Stat(explicitOut)
@@ -125,11 +125,11 @@ func TestScreenshot_ShortFlag(t *testing.T) {
 		HTMLContent: `<html><body><h1>Flag Test</h1></body></html>`,
 	})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	outputDir := t.TempDir()
 	out := filepath.Join(outputDir, "short-flag.png")
-	runPCSuccess(t, homeDir, "screenshot", slideID, "-o", out)
+	runPCSuccess(t, homeDir, "screenshot", recordID, "-o", out)
 
 	if _, err := os.Stat(out); err != nil {
 		t.Fatalf("screenshot file not created with -o flag: %v", err)

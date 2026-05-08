@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestAddMinimalSlide(t *testing.T) {
+func TestAddMinimalRecord(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 	runPCSuccess(t, homeDir, "project", "add", "test/default-project")
@@ -16,23 +16,23 @@ func TestAddMinimalSlide(t *testing.T) {
 	inputDir := createInputFolder(t, inputFolderOpts{})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
 
-	slideID := strings.TrimSpace(stdout)
-	if len(slideID) == 0 {
-		t.Fatal("expected slide ID in stdout")
+	recordID := strings.TrimSpace(stdout)
+	if len(recordID) == 0 {
+		t.Fatal("expected record ID in stdout")
 	}
 
 	// Verify DB
 	db := openTestDB(t, homeDir)
 	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slides WHERE id = ?", slideID).Scan(&count); err != nil {
-		t.Fatalf("query slide: %v", err)
+	if err := db.QueryRow("SELECT COUNT(*) FROM records WHERE id = ?", recordID).Scan(&count); err != nil {
+		t.Fatalf("query record: %v", err)
 	}
 	if count != 1 {
-		t.Fatalf("expected 1 slide, got %d", count)
+		t.Fatalf("expected 1 record, got %d", count)
 	}
 }
 
-func TestAddMissingSlideHTML(t *testing.T) {
+func TestAddMissingRecordHTML(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
@@ -42,7 +42,7 @@ func TestAddMissingSlideHTML(t *testing.T) {
 	}
 	stdout := runPCSuccess(t, homeDir, "add", emptyDir)
 	if strings.TrimSpace(stdout) == "" {
-		t.Fatal("expected slide ID for folder without slide.html")
+		t.Fatal("expected record ID for folder without record.html")
 	}
 }
 
@@ -54,12 +54,12 @@ func TestAddWithMetadataJSON(t *testing.T) {
 		MetadataJSON: `{"project_id":"test/proj","git_remote_url":"https://github.com/org/repo","git_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
 	})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	db := openTestDB(t, homeDir)
 	var projectID, gitRemoteURL, gitHash string
-	if err := db.QueryRow("SELECT project_id, git_remote_url, git_hash FROM slides WHERE id = ?", slideID).Scan(&projectID, &gitRemoteURL, &gitHash); err != nil {
-		t.Fatalf("query slide: %v", err)
+	if err := db.QueryRow("SELECT project_id, git_remote_url, git_hash FROM records WHERE id = ?", recordID).Scan(&projectID, &gitRemoteURL, &gitHash); err != nil {
+		t.Fatalf("query record: %v", err)
 	}
 	if projectID != "test/proj" {
 		t.Fatalf("expected project_id=test/proj, got %q", projectID)
@@ -93,12 +93,12 @@ func TestAddWithDateFlag(t *testing.T) {
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
 	stdout := runPCSuccess(t, homeDir, "add", "--date", "2025-06-15", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	db := openTestDB(t, homeDir)
 	var date string
-	if err := db.QueryRow("SELECT date FROM slides WHERE id = ?", slideID).Scan(&date); err != nil {
-		t.Fatalf("query slide: %v", err)
+	if err := db.QueryRow("SELECT date FROM records WHERE id = ?", recordID).Scan(&date); err != nil {
+		t.Fatalf("query record: %v", err)
 	}
 	if date != "2025-06-15" {
 		t.Fatalf("expected date=2025-06-15, got %q", date)
@@ -114,10 +114,10 @@ func TestAddWithFigures(t *testing.T) {
 		Figures:     map[string][]byte{"plot.png": []byte("fake-png-data")},
 	})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	// Verify figure file on disk
-	figPath := filepath.Join(homeDir, "personal-context", "figures", slideID, "plot.png")
+	figPath := filepath.Join(homeDir, "personal-context", "figures", recordID, "plot.png")
 	content, err := os.ReadFile(figPath)
 	if err != nil {
 		t.Fatalf("read figure file: %v", err)
@@ -129,7 +129,7 @@ func TestAddWithFigures(t *testing.T) {
 	// Verify DB figure row
 	db := openTestDB(t, homeDir)
 	var figCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slide_figures WHERE slide_id = ?", slideID).Scan(&figCount); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM record_figures WHERE record_id = ?", recordID).Scan(&figCount); err != nil {
 		t.Fatalf("query figures: %v", err)
 	}
 	if figCount != 1 {
@@ -145,10 +145,10 @@ func TestAddWithDataFiles(t *testing.T) {
 		DataFiles: map[string][]byte{"metrics.csv": []byte("col1,col2\n1,2\n")},
 	})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	// Verify data file on disk
-	dataPath := filepath.Join(homeDir, "personal-context", "data", slideID, "metrics.csv")
+	dataPath := filepath.Join(homeDir, "personal-context", "data", recordID, "metrics.csv")
 	if _, err := os.Stat(dataPath); err != nil {
 		t.Fatalf("data file not found: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestAddWithDataFiles(t *testing.T) {
 	// Verify hash in DB
 	db := openTestDB(t, homeDir)
 	var hash string
-	if err := db.QueryRow("SELECT hash FROM slide_data_files WHERE slide_id = ?", slideID).Scan(&hash); err != nil {
+	if err := db.QueryRow("SELECT hash FROM record_data_files WHERE record_id = ?", recordID).Scan(&hash); err != nil {
 		t.Fatalf("query data file hash: %v", err)
 	}
 	if len(hash) != 64 {
@@ -179,10 +179,10 @@ func TestAddDayOrderIncreases(t *testing.T) {
 
 	db := openTestDB(t, homeDir)
 	var order1, order2 string
-	if err := db.QueryRow("SELECT day_order FROM slides WHERE id = ?", id1).Scan(&order1); err != nil {
+	if err := db.QueryRow("SELECT day_order FROM records WHERE id = ?", id1).Scan(&order1); err != nil {
 		t.Fatalf("query day_order 1: %v", err)
 	}
-	if err := db.QueryRow("SELECT day_order FROM slides WHERE id = ?", id2).Scan(&order2); err != nil {
+	if err := db.QueryRow("SELECT day_order FROM records WHERE id = ?", id2).Scan(&order2); err != nil {
 		t.Fatalf("query day_order 2: %v", err)
 	}
 
@@ -206,11 +206,11 @@ func TestAddPositionFirst(t *testing.T) {
 	// Verify id2 has the smallest day_order
 	db := openTestDB(t, homeDir)
 	var firstID string
-	if err := db.QueryRow("SELECT id FROM slides WHERE date = ? ORDER BY day_order ASC LIMIT 1", date).Scan(&firstID); err != nil {
-		t.Fatalf("query first slide: %v", err)
+	if err := db.QueryRow("SELECT id FROM records WHERE date = ? ORDER BY day_order ASC LIMIT 1", date).Scan(&firstID); err != nil {
+		t.Fatalf("query first record: %v", err)
 	}
 	if firstID != id2 {
-		t.Fatalf("expected slide %s to be first, but %s is first", id2, firstID)
+		t.Fatalf("expected record %s to be first, but %s is first", id2, firstID)
 	}
 }
 

@@ -24,8 +24,8 @@ func TestExportCommandWritesSnapshot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(inputDir, "figures"), 0o755); err != nil {
 		t.Fatalf("mkdir figures: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte(`<html><img src="figures/plot.png"></html>`), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte(`<html><img src="figures/plot.png"></html>`), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 	if err := os.WriteFile(filepath.Join(inputDir, "figures", "plot.png"), []byte("plot-bytes"), 0o644); err != nil {
@@ -69,7 +69,7 @@ func TestImportCommandAppliesSnapshot(t *testing.T) {
 	exportDir := t.TempDir()
 	writeSnapshotForCLITest(t, exportDir, gitsnapshot.Snapshot{
 		Templates: []gitsnapshot.Template{{Name: "text-only", HTMLContent: "<html>template</html>"}},
-		Slides: []gitsnapshot.Slide{{
+		Records: []gitsnapshot.Record{{
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
@@ -92,7 +92,7 @@ func TestImportCommandAppliesSnapshot(t *testing.T) {
 		t.Fatalf("show: %v", err)
 	}
 	if !strings.Contains(showStdout.String(), "20260309-aaaabbbb") {
-		t.Fatalf("expected imported slide in show output, got %q", showStdout.String())
+		t.Fatalf("expected imported record in show output, got %q", showStdout.String())
 	}
 }
 
@@ -102,8 +102,8 @@ func TestRestoreDBCommandReportsBackupPath(t *testing.T) {
 	runSetupCommandForTest(t, homeDir)
 
 	inputDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>before restore</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte("<html>before restore</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 	addOut := &bytes.Buffer{}
@@ -116,7 +116,7 @@ func TestRestoreDBCommandReportsBackupPath(t *testing.T) {
 	exportDir := t.TempDir()
 	writeSnapshotForCLITest(t, exportDir, gitsnapshot.Snapshot{
 		Templates: []gitsnapshot.Template{{Name: "text-only", HTMLContent: "<html>template</html>"}},
-		Slides: []gitsnapshot.Slide{{
+		Records: []gitsnapshot.Record{{
 			ID:          "20260309-ccccdddd",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
@@ -146,8 +146,8 @@ func TestVerifyCommandLocalRoundTrip(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(inputDir, "figures"), 0o755); err != nil {
 		t.Fatalf("mkdir figures: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte(`<html><img src="figures/verify.png"></html>`), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte(`<html><img src="figures/verify.png"></html>`), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 	if err := os.WriteFile(filepath.Join(inputDir, "notes.md"), []byte("verify notes"), 0o644); err != nil {
@@ -231,7 +231,7 @@ func TestRestoreDBSurfacesHomeResolutionFailure(t *testing.T) {
 
 func TestRestoreDBSurfacesCurrentSnapshotFailure(t *testing.T) {
 	homeDir := setupEnv(t)
-	slideID := addSlideWithContent(
+	recordID := addRecordWithContent(
 		t,
 		`<html><body><img src="figures/missing.png"></body></html>`,
 		"",
@@ -239,7 +239,7 @@ func TestRestoreDBSurfacesCurrentSnapshotFailure(t *testing.T) {
 		map[string][]byte{"missing.png": []byte("figure")},
 		nil,
 	)
-	if err := os.Remove(filepath.Join(basePath(homeDir), "figures", slideID, "missing.png")); err != nil {
+	if err := os.Remove(filepath.Join(basePath(homeDir), "figures", recordID, "missing.png")); err != nil {
 		t.Fatalf("remove local figure: %v", err)
 	}
 	snapshotDir := t.TempDir()
@@ -251,7 +251,7 @@ func TestRestoreDBSurfacesCurrentSnapshotFailure(t *testing.T) {
 	}
 }
 
-func TestImportSnapshotIntoStackCreatesAndUpdatesSlides(t *testing.T) {
+func TestImportSnapshotIntoStackCreatesAndUpdatesRecords(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("PC_HOME", homeDir)
 	runSetupCommandForTest(t, homeDir)
@@ -269,7 +269,7 @@ func TestImportSnapshotIntoStackCreatesAndUpdatesSlides(t *testing.T) {
 	updatedAt := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
 	createSnapshot := gitsnapshot.Snapshot{
 		Templates: []gitsnapshot.Template{{Name: "text-only", HTMLContent: templateHTML}},
-		Slides: []gitsnapshot.Slide{{
+		Records: []gitsnapshot.Record{{
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-09",
 			DayOrder:    "a0",
@@ -309,7 +309,7 @@ func TestImportSnapshotIntoStackCreatesAndUpdatesSlides(t *testing.T) {
 
 	newNotes := "updated notes"
 	updateSnapshot := gitsnapshot.Snapshot{
-		Slides: []gitsnapshot.Slide{{
+		Records: []gitsnapshot.Record{{
 			ID:          "20260309-aaaabbbb",
 			Date:        "2026-03-10",
 			DayOrder:    "b0",
@@ -339,24 +339,24 @@ func TestImportSnapshotIntoStackCreatesAndUpdatesSlides(t *testing.T) {
 		t.Fatalf("update stats = %+v", stats)
 	}
 
-	slide, err := stack.Repo.GetSlideByID(ctx, "20260309-aaaabbbb")
+	record, err := stack.Repo.GetRecordByID(ctx, "20260309-aaaabbbb")
 	if err != nil {
-		t.Fatalf("GetSlideByID: %v", err)
+		t.Fatalf("GetRecordByID: %v", err)
 	}
-	if slide.HTMLContent == nil || *slide.HTMLContent != "<html><body>updated</body></html>" {
-		t.Fatalf("slide html = %v", slide.HTMLContent)
+	if record.HTMLContent == nil || *record.HTMLContent != "<html><body>updated</body></html>" {
+		t.Fatalf("record html = %v", record.HTMLContent)
 	}
-	figures, err := stack.Repo.ListSlideFiguresBySlideID(ctx, slide.ID)
+	figures, err := stack.Repo.ListRecordFiguresByRecordID(ctx, record.ID)
 	if err != nil {
-		t.Fatalf("ListSlideFiguresBySlideID: %v", err)
+		t.Fatalf("ListRecordFiguresByRecordID: %v", err)
 	}
 	if len(figures) != 1 || figures[0].Filename != "fresh.png" {
 		t.Fatalf("figures = %#v", figures)
 	}
-	if _, err := os.Stat(filepath.Join(homeDir, "personal-context", "figures", slide.ID, "plot.png")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(homeDir, "personal-context", "figures", record.ID, "plot.png")); !os.IsNotExist(err) {
 		t.Fatalf("expected old figure to be removed, stat err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(homeDir, "personal-context", "figures", slide.ID, "fresh.png")); err != nil {
+	if _, err := os.Stat(filepath.Join(homeDir, "personal-context", "figures", record.ID, "fresh.png")); err != nil {
 		t.Fatalf("expected new figure to exist: %v", err)
 	}
 }
@@ -375,8 +375,8 @@ func TestEnsureLocalEnvironmentAndWipeLocalState(t *testing.T) {
 	}
 
 	for _, path := range []string{
-		filepath.Join(basePath(homeDir), "figures", "slide-1", "plot.png"),
-		filepath.Join(basePath(homeDir), "data", "slide-1", "metrics.csv"),
+		filepath.Join(basePath(homeDir), "figures", "record-1", "plot.png"),
+		filepath.Join(basePath(homeDir), "data", "record-1", "metrics.csv"),
 		dbPath(homeDir) + "-wal",
 		dbPath(homeDir) + "-shm",
 		filepath.Join(basePath(homeDir), ".pc", "last_sync"),
@@ -441,8 +441,8 @@ func TestBuildCloudSnapshotAndCloudPhase7Commands(t *testing.T) {
 	runSetupCommandForTest(t, homeDir)
 
 	inputDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html><body>cloud-backed</body></html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte("<html><body>cloud-backed</body></html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -457,15 +457,15 @@ func TestBuildCloudSnapshotAndCloudPhase7Commands(t *testing.T) {
 	}
 	defer func() { _ = stack.Close() }()
 
-	snapshot, err := buildCloudSnapshot(context.Background(), homeDir, &cloudStack{Repo: stack.Repo}, repository.ListSlidesFilter{})
+	snapshot, err := buildCloudSnapshot(context.Background(), homeDir, &cloudStack{Repo: stack.Repo}, repository.ListRecordsFilter{})
 	if err != nil {
 		t.Fatalf("buildCloudSnapshot: %v", err)
 	}
 	if len(snapshot.Templates) == 0 {
 		t.Fatal("expected buildCloudSnapshot to include local seeded templates")
 	}
-	if len(snapshot.Slides) != 1 {
-		t.Fatalf("expected 1 cloud-backed slide, got %d", len(snapshot.Slides))
+	if len(snapshot.Records) != 1 {
+		t.Fatalf("expected 1 cloud-backed record, got %d", len(snapshot.Records))
 	}
 
 	previousOpenCloudStackFn := openCloudStackFn
@@ -481,8 +481,8 @@ func TestBuildCloudSnapshotAndCloudPhase7Commands(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("runExport(from-cloud): %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(exportDir, "slides")); err != nil {
-		t.Fatalf("expected from-cloud export slides dir: %v", err)
+	if _, err := os.Stat(filepath.Join(exportDir, "records")); err != nil {
+		t.Fatalf("expected from-cloud export records dir: %v", err)
 	}
 	if err := runVerify(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, true); err != nil {
 		t.Fatalf("runVerify(from-cloud): %v", err)
@@ -529,12 +529,12 @@ func withCLISnapshotDefaults(snapshot gitsnapshot.Snapshot) gitsnapshot.Snapshot
 			UpdatedAt: defaultCreatedAt,
 		}}
 	}
-	for i := range snapshot.Slides {
-		if snapshot.Slides[i].ProjectID == "" {
-			snapshot.Slides[i].ProjectID = "test/default-project"
+	for i := range snapshot.Records {
+		if snapshot.Records[i].ProjectID == "" {
+			snapshot.Records[i].ProjectID = "test/default-project"
 		}
-		if snapshot.Slides[i].SourceDeviceID == "" {
-			snapshot.Slides[i].SourceDeviceID = "test-device"
+		if snapshot.Records[i].SourceDeviceID == "" {
+			snapshot.Records[i].SourceDeviceID = "test-device"
 		}
 	}
 	return snapshot

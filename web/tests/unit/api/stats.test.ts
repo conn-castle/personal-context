@@ -17,7 +17,7 @@ describe("GET /api/stats", () => {
     mockSql.mockReset();
   });
 
-  it("returns counts for slides, projects, and trashed", async () => {
+  it("returns counts for records, projects, and trashed", async () => {
     mockSql
       .mockResolvedValueOnce([{ count: 42 }])
       .mockResolvedValueOnce([{ count: 5 }])
@@ -28,9 +28,9 @@ describe("GET /api/stats", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.total_slides).toBe(42);
+    expect(body.total_records).toBe(42);
     expect(body.total_projects).toBe(5);
-    expect(body.trashed_slides).toBe(3);
+    expect(body.trashed_records).toBe(3);
   });
 
   it("returns zeros when database is empty", async () => {
@@ -44,9 +44,9 @@ describe("GET /api/stats", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.total_slides).toBe(0);
+    expect(body.total_records).toBe(0);
     expect(body.total_projects).toBe(0);
-    expect(body.trashed_slides).toBe(0);
+    expect(body.trashed_records).toBe(0);
   });
 
   it("returns 500 on database error", async () => {
@@ -71,8 +71,8 @@ describe("GET /api/stats", () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.total_slides).toBe(0);
+    expect(body.total_records).toBe(0);
     expect(body.total_projects).toBe(0);
-    expect(body.trashed_slides).toBe(0);
+    expect(body.trashed_records).toBe(0);
   });
 });

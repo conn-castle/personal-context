@@ -31,10 +31,10 @@ const SNAPSHOT_OPTS = {
 
 // ---------------------------------------------------------------------------
 // Presentation-style HTML templates — styled to fill the 1920×1080 iframe
-// like a real slide deck, not bare unstyled text.
+// like a real record deck, not bare unstyled text.
 // ---------------------------------------------------------------------------
 
-const SLIDE_A_HTML = [
+const RECORD_A_HTML = [
   '<div style="display:flex;flex-direction:column;justify-content:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif">',
   '<h1 style="font-size:72px;font-weight:700;color:#1a1a2e;margin-bottom:32px">Experiment Results</h1>',
   '<p style="font-size:36px;color:#4a4a6a;line-height:1.5;margin-bottom:24px">Analysis of the Q1 dataset reveals a 23% improvement in convergence rate across all test conditions.</p>',
@@ -42,7 +42,7 @@ const SLIDE_A_HTML = [
   "</div>",
 ].join("");
 
-const SLIDE_B_HTML = [
+const RECORD_B_HTML = [
   '<div style="display:flex;flex-direction:column;justify-content:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif">',
   '<h1 style="font-size:72px;font-weight:700;color:#1a1a2e;margin-bottom:48px">Methodology</h1>',
   '<ul style="font-size:32px;color:#4a4a6a;line-height:2;list-style:disc;padding-left:48px">',
@@ -54,7 +54,7 @@ const SLIDE_B_HTML = [
   "</div>",
 ].join("");
 
-const SLIDE_C_HTML = [
+const RECORD_C_HTML = [
   '<div style="display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;padding:80px 120px;font-family:system-ui,sans-serif;text-align:center">',
   '<div style="font-size:20px;font-weight:600;color:#6366f1;text-transform:uppercase;letter-spacing:4px;margin-bottom:24px">org/beta</div>',
   '<h1 style="font-size:64px;font-weight:700;color:#1a1a2e;margin-bottom:32px">Infrastructure Migration Plan</h1>',
@@ -62,11 +62,11 @@ const SLIDE_C_HTML = [
   "</div>",
 ].join("");
 
-const SLIDE_A = {
+const RECORD_A = {
   id: "20260309-aabbccdd",
   date: "2026-03-09",
   day_order: "a0",
-  html_content: SLIDE_A_HTML,
+  html_content: RECORD_A_HTML,
   project_id: "org/alpha",
   source_device_id: "device-a",
   source_ref: null,
@@ -76,11 +76,11 @@ const SLIDE_A = {
   data_file_count: 1,
 };
 
-const SLIDE_B = {
+const RECORD_B = {
   id: "20260309-11223344",
   date: "2026-03-09",
   day_order: "a1",
-  html_content: SLIDE_B_HTML,
+  html_content: RECORD_B_HTML,
   project_id: "org/beta",
   source_device_id: "device-a",
   source_ref: null,
@@ -90,11 +90,11 @@ const SLIDE_B = {
   data_file_count: 0,
 };
 
-const SLIDE_C = {
+const RECORD_C = {
   id: "20260308-55667788",
   date: "2026-03-08",
   day_order: "a0",
-  html_content: SLIDE_C_HTML,
+  html_content: RECORD_C_HTML,
   project_id: "org/beta",
   source_device_id: "device-b",
   source_ref: null,
@@ -104,11 +104,11 @@ const SLIDE_C = {
   data_file_count: 0,
 };
 
-const SLIDE_A_DETAIL = {
+const RECORD_A_DETAIL = {
   id: "20260309-aabbccdd",
   date: "2026-03-09",
   day_order: "a0",
-  html_content: SLIDE_A_HTML,
+  html_content: RECORD_A_HTML,
   notes: "# Important\n\nThese are **bold** notes.\n\n- Item one\n- Item two",
   project_id: "org/alpha",
   source_device_id: "device-a",
@@ -121,20 +121,20 @@ const SLIDE_A_DETAIL = {
   figures: [
     {
       filename: "plot1.png",
-      s3_key: "slides/20260309-aabbccdd/figures/plot1.png",
+      s3_key: "records/20260309-aabbccdd/figures/plot1.png",
       size: 45056,
       alt_text: "Plot 1",
     },
     {
       filename: "chart.svg",
-      s3_key: "slides/20260309-aabbccdd/figures/chart.svg",
+      s3_key: "records/20260309-aabbccdd/figures/chart.svg",
       size: 12288,
     },
   ],
   data_files: [
     {
       filename: "results.csv",
-      s3_key: "slides/20260309-aabbccdd/data/results.csv",
+      s3_key: "records/20260309-aabbccdd/data/results.csv",
       size: 2048,
       description: "Experiment results",
     },
@@ -167,24 +167,24 @@ function isExpectedDevWarning(msg: string): boolean {
 async function setupMockApi(
   page: Page,
   overrides?: {
-    slides?: unknown;
+    records?: unknown;
     projects?: unknown;
   }
 ) {
-  await page.route("**/api/slides?*", async (route: Route) => {
+  await page.route("**/api/records?*", async (route: Route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(
-        overrides?.slides ?? {
-          items: [SLIDE_A, SLIDE_B, SLIDE_C],
+        overrides?.records ?? {
+          items: [RECORD_A, RECORD_B, RECORD_C],
           next_cursor: null,
         }
       ),
     });
   });
 
-  await page.route("**/api/slides", async (route: Route) => {
+  await page.route("**/api/records", async (route: Route) => {
     if (route.request().method() !== "GET") {
       await route.continue();
       return;
@@ -193,8 +193,8 @@ async function setupMockApi(
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(
-        overrides?.slides ?? {
-          items: [SLIDE_A, SLIDE_B, SLIDE_C],
+        overrides?.records ?? {
+          items: [RECORD_A, RECORD_B, RECORD_C],
           next_cursor: null,
         }
       ),
@@ -202,14 +202,14 @@ async function setupMockApi(
   });
 
   await page.route(
-    "**/api/slides/20260309-aabbccdd",
+    "**/api/records/20260309-aabbccdd",
     async (route: Route) => {
       const method = route.request().method();
       if (method === "GET") {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ slide: SLIDE_A_DETAIL }),
+          body: JSON.stringify({ record: RECORD_A_DETAIL }),
         });
       } else if (method === "PATCH") {
         const body = route.request().postDataJSON();
@@ -217,8 +217,8 @@ async function setupMockApi(
           status: 200,
           contentType: "application/json",
           body: JSON.stringify({
-            slide: {
-              ...SLIDE_A_DETAIL,
+            record: {
+              ...RECORD_A_DETAIL,
               ...(body as Record<string, unknown>),
             },
             sync_version: 2,
@@ -344,45 +344,45 @@ test.describe("UI snapshots and console health @visual", () => {
     });
   });
 
-  test("initial load: three-panel layout with auto-selected slide @visual", async ({
+  test("initial load: three-panel layout with auto-selected record @visual", async ({
     page,
   }) => {
     await setupMockApi(page);
     await page.goto("/");
 
     // Wait for the UI to fully render
-    await expect(page.getByText("3 slides")).toBeVisible();
+    await expect(page.getByText("3 records")).toBeVisible();
     await expect(
       page.getByRole("heading", { name: "Personal Context" })
     ).toBeVisible();
 
-    // Navigation panel has slide thumbnails (rendered as ScaledSlideFrame iframes)
+    // Navigation panel has record thumbnails (rendered as ScaledRecordFrame iframes)
     // Verify thumbnails are present by checking the thumbnail buttons
     const thumbnailButtons = page.locator(
       ".aspect-video"
     );
     await expect(thumbnailButtons.first()).toBeVisible();
 
-    // Most recent slide (SLIDE_A) is auto-selected — iframe renders the HTML content
-    const iframe = page.locator('[data-testid="slide-viewer"]').frameLocator('iframe[title="Slide content"]');
+    // Most recent record (RECORD_A) is auto-selected — iframe renders the HTML content
+    const iframe = page.locator('[data-testid="record-viewer"]').frameLocator('iframe[title="Record content"]');
     await expect(iframe.locator("h1")).toBeVisible();
 
-    // Notes should be visible in detail panel (auto-selected slide's notes)
+    // Notes should be visible in detail panel (auto-selected record's notes)
     await expect(page.getByText("Important")).toBeVisible();
 
     await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
     await expect(page).toHaveScreenshot("01-initial-load.png", SNAPSHOT_OPTS);
   });
 
-  test("slide selected: content and details visible @visual", async ({
+  test("record selected: content and details visible @visual", async ({
     page,
   }) => {
     await setupMockApi(page);
     await page.goto("/");
-    await expect(page.getByText("3 slides")).toBeVisible();
+    await expect(page.getByText("3 records")).toBeVisible();
 
-    // SLIDE_A is auto-selected on load. Wait for detail to load.
-    const iframe = page.locator('[data-testid="slide-viewer"]').frameLocator('iframe[title="Slide content"]');
+    // RECORD_A is auto-selected on load. Wait for detail to load.
+    const iframe = page.locator('[data-testid="record-viewer"]').frameLocator('iframe[title="Record content"]');
     await expect(iframe.locator("h1")).toBeVisible();
 
     // Notes should be visible in detail panel (default tab)
@@ -393,7 +393,7 @@ test.describe("UI snapshots and console health @visual", () => {
     await expect(page.getByText("abc1234d")).toBeVisible();
 
     await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
-    await expect(page).toHaveScreenshot("02-slide-selected.png", SNAPSHOT_OPTS);
+    await expect(page).toHaveScreenshot("02-record-selected.png", SNAPSHOT_OPTS);
   });
 
   test("panel toggles: keyboard shortcuts hide and show panels @visual", async ({
@@ -401,18 +401,18 @@ test.describe("UI snapshots and console health @visual", () => {
   }) => {
     await setupMockApi(page);
     await page.goto("/");
-    await expect(page.getByText("3 slides")).toBeVisible();
+    await expect(page.getByText("3 records")).toBeVisible();
 
-    // SLIDE_A is auto-selected — wait for content to load
+    // RECORD_A is auto-selected — wait for content to load
     await expect(
-      page.locator('[data-testid="slide-viewer"]').frameLocator('iframe[title="Slide content"]').locator("h1")
+      page.locator('[data-testid="record-viewer"]').frameLocator('iframe[title="Record content"]').locator("h1")
     ).toBeVisible();
 
     // Hide navigation panel with [ key
     await page.keyboard.press("[");
     // Navigation panel heading should disappear
     await expect(
-      page.getByRole("heading", { name: "Slides" })
+      page.getByRole("heading", { name: "Records" })
     ).not.toBeVisible();
 
     await expect(page).toHaveScreenshot("03-nav-hidden.png", SNAPSHOT_OPTS);
@@ -428,7 +428,7 @@ test.describe("UI snapshots and console health @visual", () => {
     await page.keyboard.press("[");
     await page.keyboard.press("]");
     await expect(
-      page.getByRole("heading", { name: "Slides" })
+      page.getByRole("heading", { name: "Records" })
     ).toBeVisible();
     await expect(page.getByText("Important")).toBeVisible();
 
@@ -450,9 +450,9 @@ test.describe("UI snapshots and console health @visual", () => {
   }) => {
     await setupMockApi(page);
     await page.goto("/");
-    await expect(page.getByText("3 slides")).toBeVisible();
+    await expect(page.getByText("3 records")).toBeVisible();
 
-    // SLIDE_A is auto-selected — wait for notes to render
+    // RECORD_A is auto-selected — wait for notes to render
     await expect(page.getByText("Important")).toBeVisible();
 
     // Switch to Figures tab using role locator — tab text is hidden at narrow
@@ -481,7 +481,7 @@ test.describe("UI snapshots and console health @visual", () => {
   }) => {
     await setupMockApi(page);
     await page.goto("/");
-    await expect(page.getByText("3 slides")).toBeVisible();
+    await expect(page.getByText("3 records")).toBeVisible();
 
     // Find and click the dark mode toggle (Moon icon button in header)
     const themeButton = page.locator(
@@ -509,7 +509,7 @@ test.describe("UI snapshots and console health @visual", () => {
   }) => {
     await setupMockApi(page);
     await page.goto("/");
-    await expect(page.getByText("3 slides")).toBeVisible();
+    await expect(page.getByText("3 records")).toBeVisible();
 
     // Open settings (gear icon button in header)
     const settingsButton = page.locator(
@@ -537,16 +537,16 @@ test.describe("UI snapshots and console health @visual", () => {
     await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
   });
 
-  test("empty state: placeholder when no slides exist @visual", async ({
+  test("empty state: placeholder when no records exist @visual", async ({
     page,
   }) => {
     await setupMockApi(page, {
-      slides: { items: [], next_cursor: null },
+      records: { items: [], next_cursor: null },
       projects: { projects: [] },
     });
     await page.goto("/");
 
-    await expect(page.getByText("0 slides")).toBeVisible();
+    await expect(page.getByText("0 records")).toBeVisible();
     await expect(
       page.getByText("Empty project", { exact: true })
     ).toBeVisible();
@@ -560,12 +560,12 @@ test.describe("UI snapshots and console health @visual", () => {
   }) => {
     await setupMockApi(page);
     await page.goto("/");
-    await expect(page.getByText("3 slides")).toBeVisible();
+    await expect(page.getByText("3 records")).toBeVisible();
 
     // Click the Grid view button (title="Grid view")
     await page.getByTitle("Grid view").click();
 
-    // Verify grid class is applied to the slide container (multiple date
+    // Verify grid class is applied to the record container (multiple date
     // groups may each have a grid, so use .first())
     await expect(
       page.locator(".grid.grid-cols-2").first()

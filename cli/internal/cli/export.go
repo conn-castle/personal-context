@@ -27,14 +27,14 @@ func newExportCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "export",
-		Short: "Export active slides to deterministic git snapshot format",
+		Short: "Export active records to deterministic git snapshot format",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runExport(cmd.Context(), stdout, stderr, opts)
 		},
 	}
 
-	cmd.Flags().StringVar(&opts.Path, "path", "", "Destination directory for templates/ and slides/")
+	cmd.Flags().StringVar(&opts.Path, "path", "", "Destination directory for templates/ and records/")
 	cmd.Flags().BoolVar(&opts.FromCloud, "from-cloud", false, "Read from configured cloud Postgres/S3 instead of local SQLite/files")
 	cmd.Flags().StringVar(&opts.GitHubRemote, "github-remote", "", "Require this git remote to exist at --path before exporting")
 	cmd.Flags().StringVar(&opts.ProjectID, "project", "", "Export only records in this project ID")
@@ -91,11 +91,11 @@ func runExport(ctx context.Context, stdout io.Writer, _ io.Writer, opts exportOp
 		return fmt.Errorf("write export snapshot: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(stdout, "Exported %d records to %s\n", len(snapshot.Slides), opts.Path)
+	_, _ = fmt.Fprintf(stdout, "Exported %d records to %s\n", len(snapshot.Records), opts.Path)
 	return nil
 }
 
-func buildExportFilter(opts exportOptions) (repository.ListSlidesFilter, error) {
+func buildExportFilter(opts exportOptions) (repository.ListRecordsFilter, error) {
 	return buildBaseRecordFilter(recordFilterOptions{
 		ProjectID: opts.ProjectID,
 		DateFrom:  opts.DateFrom,

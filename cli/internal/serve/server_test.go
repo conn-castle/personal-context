@@ -22,20 +22,20 @@ import (
 // --- Mock repository ---
 
 type mockRepo struct {
-	slides     []repository.Slide
-	figures    map[string][]repository.SlideFigure
-	dataFiles  map[string][]repository.SlideDataFile
+	records     []repository.Record
+	figures    map[string][]repository.RecordFigure
+	dataFiles  map[string][]repository.RecordDataFile
 	projectIDs []string
 	syncVer    repository.SyncVersion
 
 	// Error injection
-	listSlidesErr     error
-	getSlideErr       error
-	updateSlideErr    error
+	listRecordsErr     error
+	getRecordErr       error
+	updateRecordErr    error
 	softDeleteErr     error
 	restoreErr        error
-	deleteSlideErr    error
-	countSlidesErr    error
+	deleteRecordErr    error
+	countRecordsErr    error
 	purgeDeletedErr   error
 	listFiguresErr    error
 	listDataFilesErr  error
@@ -45,8 +45,8 @@ type mockRepo struct {
 
 func newMockRepo() *mockRepo {
 	return &mockRepo{
-		figures:   make(map[string][]repository.SlideFigure),
-		dataFiles: make(map[string][]repository.SlideDataFile),
+		figures:   make(map[string][]repository.RecordFigure),
+		dataFiles: make(map[string][]repository.RecordDataFile),
 		syncVer: repository.SyncVersion{
 			ID:        1,
 			Version:   1,
@@ -119,12 +119,12 @@ func (m *mockRepo) UpsertDeviceForImport(_ context.Context, device repository.De
 	return true, nil
 }
 
-func (m *mockRepo) ListSlides(_ context.Context, filter repository.ListSlidesFilter) ([]repository.Slide, error) {
-	if m.listSlidesErr != nil {
-		return nil, m.listSlidesErr
+func (m *mockRepo) ListRecords(_ context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error) {
+	if m.listRecordsErr != nil {
+		return nil, m.listRecordsErr
 	}
-	var result []repository.Slide
-	for _, s := range m.slides {
+	var result []repository.Record
+	for _, s := range m.records {
 		if !filter.IncludeDeleted && s.DeletedAt != nil {
 			continue
 		}
@@ -157,51 +157,51 @@ func (m *mockRepo) ListSlides(_ context.Context, filter repository.ListSlidesFil
 	return result, nil
 }
 
-func (m *mockRepo) GetSlideByID(_ context.Context, id string) (repository.Slide, error) {
-	if m.getSlideErr != nil {
-		return repository.Slide{}, m.getSlideErr
+func (m *mockRepo) GetRecordByID(_ context.Context, id string) (repository.Record, error) {
+	if m.getRecordErr != nil {
+		return repository.Record{}, m.getRecordErr
 	}
-	for _, s := range m.slides {
+	for _, s := range m.records {
 		if s.ID == id {
 			return s, nil
 		}
 	}
-	return repository.Slide{}, repository.ErrNotFound
+	return repository.Record{}, repository.ErrNotFound
 }
 
-func (m *mockRepo) UpdateSlide(_ context.Context, input repository.UpdateSlideInput) (repository.Slide, error) {
-	if m.updateSlideErr != nil {
-		return repository.Slide{}, m.updateSlideErr
+func (m *mockRepo) UpdateRecord(_ context.Context, input repository.UpdateRecordInput) (repository.Record, error) {
+	if m.updateRecordErr != nil {
+		return repository.Record{}, m.updateRecordErr
 	}
-	for i, s := range m.slides {
+	for i, s := range m.records {
 		if s.ID == input.ID {
-			m.slides[i].Date = input.Date
-			m.slides[i].DayOrder = input.DayOrder
-			m.slides[i].HTMLContent = input.HTMLContent
-			m.slides[i].Notes = input.Notes
-			m.slides[i].ProjectID = input.ProjectID
-			m.slides[i].SourceDeviceID = input.SourceDeviceID
-			m.slides[i].SourceRef = input.SourceRef
-			m.slides[i].GitRemoteURL = input.GitRemoteURL
-			m.slides[i].GitHash = input.GitHash
-			m.slides[i].DeletedAt = input.DeletedAt
-			m.slides[i].UpdatedAt = time.Now().UTC()
+			m.records[i].Date = input.Date
+			m.records[i].DayOrder = input.DayOrder
+			m.records[i].HTMLContent = input.HTMLContent
+			m.records[i].Notes = input.Notes
+			m.records[i].ProjectID = input.ProjectID
+			m.records[i].SourceDeviceID = input.SourceDeviceID
+			m.records[i].SourceRef = input.SourceRef
+			m.records[i].GitRemoteURL = input.GitRemoteURL
+			m.records[i].GitHash = input.GitHash
+			m.records[i].DeletedAt = input.DeletedAt
+			m.records[i].UpdatedAt = time.Now().UTC()
 			m.syncVer.Version++
-			return m.slides[i], nil
+			return m.records[i], nil
 		}
 	}
-	return repository.Slide{}, repository.ErrNotFound
+	return repository.Record{}, repository.ErrNotFound
 }
 
-func (m *mockRepo) SoftDeleteSlide(_ context.Context, id string) error {
+func (m *mockRepo) SoftDeleteRecord(_ context.Context, id string) error {
 	if m.softDeleteErr != nil {
 		return m.softDeleteErr
 	}
-	for i, s := range m.slides {
+	for i, s := range m.records {
 		if s.ID == id {
 			now := time.Now().UTC()
-			m.slides[i].DeletedAt = &now
-			m.slides[i].UpdatedAt = now
+			m.records[i].DeletedAt = &now
+			m.records[i].UpdatedAt = now
 			m.syncVer.Version++
 			return nil
 		}
@@ -209,14 +209,14 @@ func (m *mockRepo) SoftDeleteSlide(_ context.Context, id string) error {
 	return repository.ErrNotFound
 }
 
-func (m *mockRepo) RestoreSlide(_ context.Context, id string) error {
+func (m *mockRepo) RestoreRecord(_ context.Context, id string) error {
 	if m.restoreErr != nil {
 		return m.restoreErr
 	}
-	for i, s := range m.slides {
+	for i, s := range m.records {
 		if s.ID == id {
-			m.slides[i].DeletedAt = nil
-			m.slides[i].UpdatedAt = time.Now().UTC()
+			m.records[i].DeletedAt = nil
+			m.records[i].UpdatedAt = time.Now().UTC()
 			m.syncVer.Version++
 			return nil
 		}
@@ -224,18 +224,18 @@ func (m *mockRepo) RestoreSlide(_ context.Context, id string) error {
 	return repository.ErrNotFound
 }
 
-func (m *mockRepo) ListSlideFiguresBySlideID(_ context.Context, slideID string) ([]repository.SlideFigure, error) {
+func (m *mockRepo) ListRecordFiguresByRecordID(_ context.Context, recordID string) ([]repository.RecordFigure, error) {
 	if m.listFiguresErr != nil {
 		return nil, m.listFiguresErr
 	}
-	return m.figures[slideID], nil
+	return m.figures[recordID], nil
 }
 
-func (m *mockRepo) ListSlideDataFilesBySlideID(_ context.Context, slideID string) ([]repository.SlideDataFile, error) {
+func (m *mockRepo) ListRecordDataFilesByRecordID(_ context.Context, recordID string) ([]repository.RecordDataFile, error) {
 	if m.listDataFilesErr != nil {
 		return nil, m.listDataFilesErr
 	}
-	return m.dataFiles[slideID], nil
+	return m.dataFiles[recordID], nil
 }
 
 func (m *mockRepo) GetSyncVersion(_ context.Context) (repository.SyncVersion, error) {
@@ -246,16 +246,16 @@ func (m *mockRepo) GetSyncVersion(_ context.Context) (repository.SyncVersion, er
 }
 
 // Unused Repository methods — satisfy the interface.
-func (m *mockRepo) CreateSlide(context.Context, repository.CreateSlideInput) (repository.Slide, error) {
-	return repository.Slide{}, repository.ErrNotFound
+func (m *mockRepo) CreateRecord(context.Context, repository.CreateRecordInput) (repository.Record, error) {
+	return repository.Record{}, repository.ErrNotFound
 }
-func (m *mockRepo) DeleteSlide(_ context.Context, id string) error {
-	if m.deleteSlideErr != nil {
-		return m.deleteSlideErr
+func (m *mockRepo) DeleteRecord(_ context.Context, id string) error {
+	if m.deleteRecordErr != nil {
+		return m.deleteRecordErr
 	}
-	for i, s := range m.slides {
+	for i, s := range m.records {
 		if s.ID == id {
-			m.slides = append(m.slides[:i], m.slides[i+1:]...)
+			m.records = append(m.records[:i], m.records[i+1:]...)
 			delete(m.figures, id)
 			delete(m.dataFiles, id)
 			m.syncVer.Version++
@@ -264,28 +264,28 @@ func (m *mockRepo) DeleteSlide(_ context.Context, id string) error {
 	}
 	return repository.ErrNotFound
 }
-func (m *mockRepo) CreateSlideFigure(context.Context, repository.CreateSlideFigureInput) (repository.SlideFigure, error) {
-	return repository.SlideFigure{}, repository.ErrNotFound
+func (m *mockRepo) CreateRecordFigure(context.Context, repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
+	return repository.RecordFigure{}, repository.ErrNotFound
 }
-func (m *mockRepo) GetSlideFigureByID(context.Context, int64) (repository.SlideFigure, error) {
-	return repository.SlideFigure{}, repository.ErrNotFound
+func (m *mockRepo) GetRecordFigureByID(context.Context, int64) (repository.RecordFigure, error) {
+	return repository.RecordFigure{}, repository.ErrNotFound
 }
-func (m *mockRepo) UpdateSlideFigure(context.Context, repository.UpdateSlideFigureInput) (repository.SlideFigure, error) {
-	return repository.SlideFigure{}, repository.ErrNotFound
+func (m *mockRepo) UpdateRecordFigure(context.Context, repository.UpdateRecordFigureInput) (repository.RecordFigure, error) {
+	return repository.RecordFigure{}, repository.ErrNotFound
 }
-func (m *mockRepo) DeleteSlideFigure(context.Context, int64) error {
+func (m *mockRepo) DeleteRecordFigure(context.Context, int64) error {
 	return repository.ErrNotFound
 }
-func (m *mockRepo) CreateSlideDataFile(context.Context, repository.CreateSlideDataFileInput) (repository.SlideDataFile, error) {
-	return repository.SlideDataFile{}, repository.ErrNotFound
+func (m *mockRepo) CreateRecordDataFile(context.Context, repository.CreateRecordDataFileInput) (repository.RecordDataFile, error) {
+	return repository.RecordDataFile{}, repository.ErrNotFound
 }
-func (m *mockRepo) GetSlideDataFileByID(context.Context, int64) (repository.SlideDataFile, error) {
-	return repository.SlideDataFile{}, repository.ErrNotFound
+func (m *mockRepo) GetRecordDataFileByID(context.Context, int64) (repository.RecordDataFile, error) {
+	return repository.RecordDataFile{}, repository.ErrNotFound
 }
-func (m *mockRepo) UpdateSlideDataFile(context.Context, repository.UpdateSlideDataFileInput) (repository.SlideDataFile, error) {
-	return repository.SlideDataFile{}, repository.ErrNotFound
+func (m *mockRepo) UpdateRecordDataFile(context.Context, repository.UpdateRecordDataFileInput) (repository.RecordDataFile, error) {
+	return repository.RecordDataFile{}, repository.ErrNotFound
 }
-func (m *mockRepo) DeleteSlideDataFile(context.Context, int64) error {
+func (m *mockRepo) DeleteRecordDataFile(context.Context, int64) error {
 	return repository.ErrNotFound
 }
 func (m *mockRepo) CreateTemplate(context.Context, repository.CreateTemplateInput) (repository.Template, error) {
@@ -303,37 +303,37 @@ func (m *mockRepo) ListTemplates(context.Context) ([]repository.Template, error)
 func (m *mockRepo) DeleteTemplate(context.Context, string) error {
 	return repository.ErrNotFound
 }
-func (m *mockRepo) CountActiveSlides(_ context.Context) (int, error) {
-	if m.countSlidesErr != nil {
-		return 0, m.countSlidesErr
+func (m *mockRepo) CountActiveRecords(_ context.Context) (int, error) {
+	if m.countRecordsErr != nil {
+		return 0, m.countRecordsErr
 	}
 	count := 0
-	for _, s := range m.slides {
+	for _, s := range m.records {
 		if s.DeletedAt == nil {
 			count++
 		}
 	}
 	return count, nil
 }
-func (m *mockRepo) CountTrashedSlides(_ context.Context) (int, error) {
-	if m.countSlidesErr != nil {
-		return 0, m.countSlidesErr
+func (m *mockRepo) CountTrashedRecords(_ context.Context) (int, error) {
+	if m.countRecordsErr != nil {
+		return 0, m.countRecordsErr
 	}
 	count := 0
-	for _, s := range m.slides {
+	for _, s := range m.records {
 		if s.DeletedAt != nil {
 			count++
 		}
 	}
 	return count, nil
 }
-func (m *mockRepo) PurgeDeletedSlides(_ context.Context) ([]string, error) {
+func (m *mockRepo) PurgeDeletedRecords(_ context.Context) ([]string, error) {
 	if m.purgeDeletedErr != nil {
 		return nil, m.purgeDeletedErr
 	}
 	var ids []string
-	var remaining []repository.Slide
-	for _, s := range m.slides {
+	var remaining []repository.Record
+	for _, s := range m.records {
 		if s.DeletedAt != nil {
 			ids = append(ids, s.ID)
 			delete(m.figures, s.ID)
@@ -342,7 +342,7 @@ func (m *mockRepo) PurgeDeletedSlides(_ context.Context) ([]string, error) {
 			remaining = append(remaining, s)
 		}
 	}
-	m.slides = remaining
+	m.records = remaining
 	if len(ids) > 0 {
 		m.syncVer.Version++
 	}
@@ -403,7 +403,7 @@ func TestDecodeJSONObject_RejectsNonObjectBodies(t *testing.T) {
 	tests := []string{"[]", "null"}
 
 	for _, body := range tests {
-		req := httptest.NewRequest(http.MethodPatch, "/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+		req := httptest.NewRequest(http.MethodPatch, "/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 		_, errMsg := decodeJSONObject(req)
 		if errMsg != "Request body must be a JSON object" {
 			t.Fatalf("body %q: expected object error, got %q", body, errMsg)
@@ -412,27 +412,27 @@ func TestDecodeJSONObject_RejectsNonObjectBodies(t *testing.T) {
 }
 
 func TestDecodeJSONObject_InvalidJSON(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPatch, "/api/slides/20260310-aaaaaaaa", strings.NewReader("{bad-json"))
+	req := httptest.NewRequest(http.MethodPatch, "/api/records/20260310-aaaaaaaa", strings.NewReader("{bad-json"))
 	_, errMsg := decodeJSONObject(req)
 	if errMsg != "Invalid JSON body" {
 		t.Fatalf("expected invalid JSON error, got %q", errMsg)
 	}
 }
 
-func TestBuildSlideSummary_LookupErrors(t *testing.T) {
-	slide := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+func TestBuildRecordSummary_LookupErrors(t *testing.T) {
+	record := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 
 	repo := newMockRepo()
 	repo.listFiguresErr = fmt.Errorf("figures unavailable")
 	srv := &Server{repo: repo}
-	if _, err := srv.buildSlideSummary(context.Background(), slide); err == nil {
+	if _, err := srv.buildRecordSummary(context.Background(), record); err == nil {
 		t.Fatal("expected figure lookup error")
 	}
 
 	repo = newMockRepo()
 	repo.listDataFilesErr = fmt.Errorf("data files unavailable")
 	srv = &Server{repo: repo}
-	if _, err := srv.buildSlideSummary(context.Background(), slide); err == nil {
+	if _, err := srv.buildRecordSummary(context.Background(), record); err == nil {
 		t.Fatal("expected data file lookup error")
 	}
 }
@@ -584,11 +584,11 @@ func TestListProjects_Error(t *testing.T) {
 	}
 }
 
-// --- List slides tests ---
+// --- List records tests ---
 
-func testSlide(id, date, dayOrder string) repository.Slide {
+func testRecord(id, date, dayOrder string) repository.Record {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
-	return repository.Slide{
+	return repository.Record{
 		ID:             id,
 		Date:           date,
 		DayOrder:       dayOrder,
@@ -600,11 +600,11 @@ func testSlide(id, date, dayOrder string) repository.Slide {
 	}
 }
 
-func TestListSlides_Empty(t *testing.T) {
+func TestListRecords_Empty(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides")
+	resp, _ := http.Get(ts.URL + "/api/records")
 	body := readBody(t, resp)
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -618,23 +618,23 @@ func TestListSlides_Empty(t *testing.T) {
 	}
 }
 
-func TestListSlides_SortOrder(t *testing.T) {
+func TestListRecords_SortOrder(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
-		testSlide("20260308-aaaaaaaa", "2026-03-08", "a0"),
-		testSlide("20260310-bbbbbbbb", "2026-03-10", "a0"),
-		testSlide("20260310-cccccccc", "2026-03-10", "a1"),
+	repo.records = []repository.Record{
+		testRecord("20260308-aaaaaaaa", "2026-03-08", "a0"),
+		testRecord("20260310-bbbbbbbb", "2026-03-10", "a0"),
+		testRecord("20260310-cccccccc", "2026-03-10", "a1"),
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides")
+	resp, _ := http.Get(ts.URL + "/api/records")
 	body := readBody(t, resp)
 	items := body["items"].([]any)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items, got %d", len(items))
 	}
-	// Should be date DESC: 2026-03-10 slides first, then 2026-03-08
+	// Should be date DESC: 2026-03-10 records first, then 2026-03-08
 	first := items[0].(map[string]any)
 	last := items[2].(map[string]any)
 	if first["date"] != "2026-03-10" {
@@ -649,17 +649,17 @@ func TestListSlides_SortOrder(t *testing.T) {
 	}
 }
 
-func TestListSlides_ProjectFilter(t *testing.T) {
+func TestListRecords_ProjectFilter(t *testing.T) {
 	repo := newMockRepo()
 	proj := "alpha"
-	s1 := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s1 := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	s1.ProjectID = proj
-	s2 := testSlide("20260310-bbbbbbbb", "2026-03-10", "a1")
-	repo.slides = []repository.Slide{s1, s2}
+	s2 := testRecord("20260310-bbbbbbbb", "2026-03-10", "a1")
+	repo.records = []repository.Record{s1, s2}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides?project=alpha")
+	resp, _ := http.Get(ts.URL + "/api/records?project=alpha")
 	body := readBody(t, resp)
 	items := body["items"].([]any)
 	if len(items) != 1 {
@@ -667,18 +667,18 @@ func TestListSlides_ProjectFilter(t *testing.T) {
 	}
 }
 
-func TestListSlides_DeletedFilter(t *testing.T) {
+func TestListRecords_DeletedFilter(t *testing.T) {
 	repo := newMockRepo()
-	s1 := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s1 := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	now := time.Now().UTC()
 	s1.DeletedAt = &now
-	s2 := testSlide("20260310-bbbbbbbb", "2026-03-10", "a1")
-	repo.slides = []repository.Slide{s1, s2}
+	s2 := testRecord("20260310-bbbbbbbb", "2026-03-10", "a1")
+	repo.records = []repository.Record{s1, s2}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	// Active only
-	resp, _ := http.Get(ts.URL + "/api/slides")
+	resp, _ := http.Get(ts.URL + "/api/records")
 	body := readBody(t, resp)
 	items := body["items"].([]any)
 	if len(items) != 1 {
@@ -686,7 +686,7 @@ func TestListSlides_DeletedFilter(t *testing.T) {
 	}
 
 	// Deleted only
-	resp2, _ := http.Get(ts.URL + "/api/slides?deleted=true")
+	resp2, _ := http.Get(ts.URL + "/api/records?deleted=true")
 	body2 := readBody(t, resp2)
 	items2 := body2["items"].([]any)
 	if len(items2) != 1 {
@@ -694,18 +694,18 @@ func TestListSlides_DeletedFilter(t *testing.T) {
 	}
 }
 
-func TestListSlides_Pagination(t *testing.T) {
+func TestListRecords_Pagination(t *testing.T) {
 	repo := newMockRepo()
-	// Create 3 slides, request limit=2
-	repo.slides = []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a0"),
-		testSlide("20260310-bbbbbbbb", "2026-03-10", "a1"),
-		testSlide("20260310-cccccccc", "2026-03-10", "a2"),
+	// Create 3 records, request limit=2
+	repo.records = []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a0"),
+		testRecord("20260310-bbbbbbbb", "2026-03-10", "a1"),
+		testRecord("20260310-cccccccc", "2026-03-10", "a2"),
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides?limit=2")
+	resp, _ := http.Get(ts.URL + "/api/records?limit=2")
 	body := readBody(t, resp)
 	items := body["items"].([]any)
 	if len(items) != 2 {
@@ -717,7 +717,7 @@ func TestListSlides_Pagination(t *testing.T) {
 
 	// Use cursor for next page
 	cursor := body["next_cursor"].(string)
-	resp2, _ := http.Get(ts.URL + "/api/slides?limit=2&cursor=" + cursor)
+	resp2, _ := http.Get(ts.URL + "/api/records?limit=2&cursor=" + cursor)
 	body2 := readBody(t, resp2)
 	items2 := body2["items"].([]any)
 	if len(items2) != 1 {
@@ -728,18 +728,18 @@ func TestListSlides_Pagination(t *testing.T) {
 	}
 }
 
-func TestListSlides_UsesNewestPageAfterRepoAscendingLimit(t *testing.T) {
+func TestListRecords_UsesNewestPageAfterRepoAscendingLimit(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
-		testSlide("20260308-aaaaaaaa", "2026-03-08", "a0"),
-		testSlide("20260309-bbbbbbbb", "2026-03-09", "a0"),
-		testSlide("20260310-cccccccc", "2026-03-10", "a0"),
-		testSlide("20260311-dddddddd", "2026-03-11", "a0"),
+	repo.records = []repository.Record{
+		testRecord("20260308-aaaaaaaa", "2026-03-08", "a0"),
+		testRecord("20260309-bbbbbbbb", "2026-03-09", "a0"),
+		testRecord("20260310-cccccccc", "2026-03-10", "a0"),
+		testRecord("20260311-dddddddd", "2026-03-11", "a0"),
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides?limit=2")
+	resp, _ := http.Get(ts.URL + "/api/records?limit=2")
 	body := readBody(t, resp)
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -750,78 +750,78 @@ func TestListSlides_UsesNewestPageAfterRepoAscendingLimit(t *testing.T) {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
 	if items[0].(map[string]any)["id"] != "20260311-dddddddd" {
-		t.Fatalf("expected newest slide first, got %v", items[0].(map[string]any)["id"])
+		t.Fatalf("expected newest record first, got %v", items[0].(map[string]any)["id"])
 	}
 	if items[1].(map[string]any)["id"] != "20260310-cccccccc" {
-		t.Fatalf("expected second-newest slide second, got %v", items[1].(map[string]any)["id"])
+		t.Fatalf("expected second-newest record second, got %v", items[1].(map[string]any)["id"])
 	}
 	if body["next_cursor"] == nil {
 		t.Fatal("expected next_cursor")
 	}
 }
 
-func TestListSlides_InvalidCursor(t *testing.T) {
+func TestListRecords_InvalidCursor(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides?cursor=not-valid-base64!")
+	resp, _ := http.Get(ts.URL + "/api/records?cursor=not-valid-base64!")
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
 
-func TestListSlides_InvalidUpdatedAfter(t *testing.T) {
+func TestListRecords_InvalidUpdatedAfter(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides?updated_after=not-a-time")
+	resp, _ := http.Get(ts.URL + "/api/records?updated_after=not-a-time")
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
 
-func TestListSlides_LimitClamped(t *testing.T) {
+func TestListRecords_LimitClamped(t *testing.T) {
 	repo := newMockRepo()
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	// limit=0 should be clamped to 1; limit=200 to 100
-	resp, _ := http.Get(ts.URL + "/api/slides?limit=0")
+	resp, _ := http.Get(ts.URL + "/api/records?limit=0")
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	resp2, _ := http.Get(ts.URL + "/api/slides?limit=200")
+	resp2, _ := http.Get(ts.URL + "/api/records?limit=200")
 	if resp2.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp2.StatusCode)
 	}
 }
 
-func TestListSlides_Error(t *testing.T) {
+func TestListRecords_Error(t *testing.T) {
 	repo := newMockRepo()
-	repo.listSlidesErr = fmt.Errorf("broken")
+	repo.listRecordsErr = fmt.Errorf("broken")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides")
+	resp, _ := http.Get(ts.URL + "/api/records")
 	if resp.StatusCode != 500 {
 		t.Fatalf("expected 500, got %d", resp.StatusCode)
 	}
 }
 
-func TestListSlides_FigureAndDataFileCount(t *testing.T) {
+func TestListRecords_FigureAndDataFileCount(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
-	repo.figures["20260310-aaaaaaaa"] = []repository.SlideFigure{
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.figures["20260310-aaaaaaaa"] = []repository.RecordFigure{
 		{Filename: "fig1.png", S3Key: "figures/20260310-aaaaaaaa/fig1.png"},
 		{Filename: "fig2.png", S3Key: "figures/20260310-aaaaaaaa/fig2.png"},
 	}
-	repo.dataFiles["20260310-aaaaaaaa"] = []repository.SlideDataFile{
+	repo.dataFiles["20260310-aaaaaaaa"] = []repository.RecordDataFile{
 		{Filename: "data.csv", S3Key: "data/20260310-aaaaaaaa/data.csv"},
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides")
+	resp, _ := http.Get(ts.URL + "/api/records")
 	body := readBody(t, resp)
 	items := body["items"].([]any)
 	item := items[0].(map[string]any)
@@ -833,214 +833,214 @@ func TestListSlides_FigureAndDataFileCount(t *testing.T) {
 	}
 }
 
-func TestListSlides_CountLookupErrorReturns500(t *testing.T) {
+func TestListRecords_CountLookupErrorReturns500(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	repo.listFiguresErr = fmt.Errorf("figures broken")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides")
+	resp, _ := http.Get(ts.URL + "/api/records")
 	if resp.StatusCode != 500 {
 		t.Fatalf("expected 500, got %d", resp.StatusCode)
 	}
 }
 
-// --- Get slide tests ---
+// --- Get record tests ---
 
-func TestGetSlide_Valid(t *testing.T) {
+func TestGetRecord_Valid(t *testing.T) {
 	repo := newMockRepo()
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	notes := "Some notes"
 	s.Notes = &notes
-	repo.slides = []repository.Slide{s}
+	repo.records = []repository.Record{s}
 	altText := "A figure"
-	repo.figures["20260310-aaaaaaaa"] = []repository.SlideFigure{
+	repo.figures["20260310-aaaaaaaa"] = []repository.RecordFigure{
 		{Filename: "fig.png", S3Key: "figures/20260310-aaaaaaaa/fig.png", AltText: &altText},
 	}
 	desc := "Data file"
-	repo.dataFiles["20260310-aaaaaaaa"] = []repository.SlideDataFile{
+	repo.dataFiles["20260310-aaaaaaaa"] = []repository.RecordDataFile{
 		{Filename: "data.csv", S3Key: "data/20260310-aaaaaaaa/data.csv", Size: 1024, Hash: "abc123", Description: &desc},
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides/20260310-aaaaaaaa")
+	resp, _ := http.Get(ts.URL + "/api/records/20260310-aaaaaaaa")
 	body := readBody(t, resp)
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	slide := body["slide"].(map[string]any)
-	if slide["id"] != "20260310-aaaaaaaa" {
-		t.Fatalf("unexpected id: %v", slide["id"])
+	record := body["record"].(map[string]any)
+	if record["id"] != "20260310-aaaaaaaa" {
+		t.Fatalf("unexpected id: %v", record["id"])
 	}
-	if slide["notes"] != "Some notes" {
-		t.Fatalf("unexpected notes: %v", slide["notes"])
+	if record["notes"] != "Some notes" {
+		t.Fatalf("unexpected notes: %v", record["notes"])
 	}
-	figs := slide["figures"].([]any)
+	figs := record["figures"].([]any)
 	if len(figs) != 1 {
 		t.Fatalf("expected 1 figure, got %d", len(figs))
 	}
-	dfs := slide["data_files"].([]any)
+	dfs := record["data_files"].([]any)
 	if len(dfs) != 1 {
 		t.Fatalf("expected 1 data file, got %d", len(dfs))
 	}
 }
 
-func TestGetSlide_InvalidID(t *testing.T) {
+func TestGetRecord_InvalidID(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides/bad-id")
+	resp, _ := http.Get(ts.URL + "/api/records/bad-id")
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
 
-func TestGetSlide_NotFound(t *testing.T) {
+func TestGetRecord_NotFound(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides/20260310-aaaaaaaa")
+	resp, _ := http.Get(ts.URL + "/api/records/20260310-aaaaaaaa")
 	if resp.StatusCode != 404 {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 }
 
-func TestGetSlide_FiguresError(t *testing.T) {
+func TestGetRecord_FiguresError(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	repo.listFiguresErr = fmt.Errorf("figures broken")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides/20260310-aaaaaaaa")
+	resp, _ := http.Get(ts.URL + "/api/records/20260310-aaaaaaaa")
 	if resp.StatusCode != 500 {
 		t.Fatalf("expected 500, got %d", resp.StatusCode)
 	}
 }
 
-func TestGetSlide_DataFilesError(t *testing.T) {
+func TestGetRecord_DataFilesError(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	repo.listDataFilesErr = fmt.Errorf("data files broken")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	resp, _ := http.Get(ts.URL + "/api/slides/20260310-aaaaaaaa")
+	resp, _ := http.Get(ts.URL + "/api/records/20260310-aaaaaaaa")
 	if resp.StatusCode != 500 {
 		t.Fatalf("expected 500, got %d", resp.StatusCode)
 	}
 }
 
-// --- Patch slide tests ---
+// --- Patch record tests ---
 
-func TestPatchSlide_UpdateProjectID(t *testing.T) {
+func TestPatchRecord_UpdateProjectID(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"project_id": "new-project"}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	result := readBody(t, resp)
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
 	}
-	slide := result["slide"].(map[string]any)
-	if slide["project_id"] != "new-project" {
-		t.Fatalf("expected project_id=new-project, got %v", slide["project_id"])
+	record := result["record"].(map[string]any)
+	if record["project_id"] != "new-project" {
+		t.Fatalf("expected project_id=new-project, got %v", record["project_id"])
 	}
 	if result["sync_version"] == nil {
 		t.Fatal("expected sync_version")
 	}
 }
 
-func TestPatchSlide_ClearNotes(t *testing.T) {
+func TestPatchRecord_ClearNotes(t *testing.T) {
 	repo := newMockRepo()
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	notes := "Old notes"
 	s.Notes = &notes
-	repo.slides = []repository.Slide{s}
+	repo.records = []repository.Record{s}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"notes": null}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	result := readBody(t, resp)
-	slide := result["slide"].(map[string]any)
-	if slide["notes"] != nil {
-		t.Fatalf("expected nil notes, got %v", slide["notes"])
+	record := result["record"].(map[string]any)
+	if record["notes"] != nil {
+		t.Fatalf("expected nil notes, got %v", record["notes"])
 	}
 }
 
-func TestPatchSlide_EmptyNotesNormalized(t *testing.T) {
+func TestPatchRecord_EmptyNotesNormalized(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"notes": ""}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	result := readBody(t, resp)
-	slide := result["slide"].(map[string]any)
-	if slide["notes"] != nil {
-		t.Fatalf("expected nil notes for empty string, got %v", slide["notes"])
+	record := result["record"].(map[string]any)
+	if record["notes"] != nil {
+		t.Fatalf("expected nil notes for empty string, got %v", record["notes"])
 	}
 }
 
-func TestPatchSlide_WhitespaceNotesPreserved(t *testing.T) {
+func TestPatchRecord_WhitespaceNotesPreserved(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"notes": "  "}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	result := readBody(t, resp)
-	slide := result["slide"].(map[string]any)
-	if slide["notes"] != "  " {
-		t.Fatalf("expected whitespace-only notes to be preserved, got %v", slide["notes"])
+	record := result["record"].(map[string]any)
+	if record["notes"] != "  " {
+		t.Fatalf("expected whitespace-only notes to be preserved, got %v", record["notes"])
 	}
 }
 
-func TestPatchSlide_InvalidID(t *testing.T) {
+func TestPatchRecord_InvalidID(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/bad", strings.NewReader(`{}`))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/bad", strings.NewReader(`{}`))
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
 
-func TestPatchSlide_InvalidBody(t *testing.T) {
+func TestPatchRecord_InvalidBody(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader("not json"))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader("not json"))
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
 
-func TestPatchSlide_RejectsEmptyBody(t *testing.T) {
+func TestPatchRecord_RejectsEmptyBody(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(`{}`))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -1048,11 +1048,11 @@ func TestPatchSlide_RejectsEmptyBody(t *testing.T) {
 	}
 }
 
-func TestPatchSlide_RejectsUnknownFields(t *testing.T) {
+func TestPatchRecord_RejectsUnknownFields(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(`{"unknown":"value"}`))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(`{"unknown":"value"}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -1060,13 +1060,13 @@ func TestPatchSlide_RejectsUnknownFields(t *testing.T) {
 	}
 }
 
-func TestPatchSlide_RejectsEmptyProjectID(t *testing.T) {
+func TestPatchRecord_RejectsEmptyProjectID(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(`{"project_id":""}`))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(`{"project_id":""}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -1074,9 +1074,9 @@ func TestPatchSlide_RejectsEmptyProjectID(t *testing.T) {
 	}
 }
 
-func TestPatchSlide_RejectsProjectIDWithWhitespace(t *testing.T) {
+func TestPatchRecord_RejectsProjectIDWithWhitespace(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
@@ -1085,7 +1085,7 @@ func TestPatchSlide_RejectsProjectIDWithWhitespace(t *testing.T) {
 		`{"project_id":" org/proj"}`,
 		`{"project_id":"   "}`,
 	} {
-		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+		req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -1098,11 +1098,11 @@ func TestPatchSlide_RejectsProjectIDWithWhitespace(t *testing.T) {
 	}
 }
 
-func TestPatchSlide_InvalidGitHash(t *testing.T) {
+func TestPatchRecord_InvalidGitHash(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(`{"git_hash":"short"}`))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(`{"git_hash":"short"}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -1110,11 +1110,11 @@ func TestPatchSlide_InvalidGitHash(t *testing.T) {
 	}
 }
 
-func TestPatchSlide_NotFound(t *testing.T) {
+func TestPatchRecord_NotFound(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(`{"notes":"updated"}`))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(`{"notes":"updated"}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 404 {
@@ -1122,16 +1122,16 @@ func TestPatchSlide_NotFound(t *testing.T) {
 	}
 }
 
-func TestPatchSlide_DeletedSlideReturns404(t *testing.T) {
+func TestPatchRecord_DeletedRecordReturns404(t *testing.T) {
 	repo := newMockRepo()
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	now := time.Now().UTC()
 	s.DeletedAt = &now
-	repo.slides = []repository.Slide{s}
+	repo.records = []repository.Record{s}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(`{"notes":"updated"}`))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(`{"notes":"updated"}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 404 {
@@ -1139,67 +1139,67 @@ func TestPatchSlide_DeletedSlideReturns404(t *testing.T) {
 	}
 }
 
-func TestPatchSlide_NilBody(t *testing.T) {
+func TestPatchRecord_NilBody(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", nil)
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
 
-func TestPatchSlide_GitFields(t *testing.T) {
+func TestPatchRecord_GitFields(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"git_remote_url": "https://github.com/test/repo", "git_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	result := readBody(t, resp)
-	slide := result["slide"].(map[string]any)
-	if slide["git_remote_url"] != "https://github.com/test/repo" {
-		t.Fatalf("unexpected git_remote_url: %v", slide["git_remote_url"])
+	record := result["record"].(map[string]any)
+	if record["git_remote_url"] != "https://github.com/test/repo" {
+		t.Fatalf("unexpected git_remote_url: %v", record["git_remote_url"])
 	}
-	if slide["git_hash"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
-		t.Fatalf("unexpected git_hash: %v", slide["git_hash"])
+	if record["git_hash"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
+		t.Fatalf("unexpected git_hash: %v", record["git_hash"])
 	}
 }
 
-func TestPatchSlide_ClearGitFields(t *testing.T) {
+func TestPatchRecord_ClearGitFields(t *testing.T) {
 	repo := newMockRepo()
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	url := "https://github.com/test/repo"
 	hash := "abc"
 	s.GitRemoteURL = &url
 	s.GitHash = &hash
-	repo.slides = []repository.Slide{s}
+	repo.records = []repository.Record{s}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"git_remote_url": null, "git_hash": null}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	result := readBody(t, resp)
-	slide := result["slide"].(map[string]any)
-	if slide["git_remote_url"] != nil {
-		t.Fatalf("expected nil git_remote_url, got %v", slide["git_remote_url"])
+	record := result["record"].(map[string]any)
+	if record["git_remote_url"] != nil {
+		t.Fatalf("expected nil git_remote_url, got %v", record["git_remote_url"])
 	}
 }
 
-func TestPatchSlide_SyncVersionErrorReturns500(t *testing.T) {
+func TestPatchRecord_SyncVersionErrorReturns500(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	repo.getSyncVersionErr = fmt.Errorf("sync version unavailable")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(`{"notes":"updated"}`))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(`{"notes":"updated"}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 500 {
@@ -1207,15 +1207,15 @@ func TestPatchSlide_SyncVersionErrorReturns500(t *testing.T) {
 	}
 }
 
-// --- Delete slide tests ---
+// --- Delete record tests ---
 
-func TestDeleteSlide_Success(t *testing.T) {
+func TestDeleteRecord_Success(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/20260310-aaaaaaaa", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/20260310-aaaaaaaa", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	result := readBody(t, resp)
 	if resp.StatusCode != 200 {
@@ -1229,56 +1229,56 @@ func TestDeleteSlide_Success(t *testing.T) {
 	}
 }
 
-func TestDeleteSlide_InvalidID(t *testing.T) {
+func TestDeleteRecord_InvalidID(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/bad", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/bad", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
 
-func TestDeleteSlide_NotFound(t *testing.T) {
+func TestDeleteRecord_NotFound(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/20260310-aaaaaaaa", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/20260310-aaaaaaaa", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 404 {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 }
 
-func TestDeleteSlide_AlreadyDeletedReturns404(t *testing.T) {
+func TestDeleteRecord_AlreadyDeletedReturns404(t *testing.T) {
 	repo := newMockRepo()
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	now := time.Now().UTC()
 	s.DeletedAt = &now
-	repo.slides = []repository.Slide{s}
+	repo.records = []repository.Record{s}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/20260310-aaaaaaaa", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/20260310-aaaaaaaa", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 404 {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 }
 
-// --- Restore slide tests ---
+// --- Restore record tests ---
 
-func TestRestoreSlide_Success(t *testing.T) {
+func TestRestoreRecord_Success(t *testing.T) {
 	repo := newMockRepo()
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	now := time.Now().UTC()
 	s.DeletedAt = &now
-	repo.slides = []repository.Slide{s}
+	repo.records = []repository.Record{s}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/slides/20260310-aaaaaaaa/restore", nil)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/records/20260310-aaaaaaaa/restore", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	result := readBody(t, resp)
 	if resp.StatusCode != 200 {
@@ -1289,116 +1289,116 @@ func TestRestoreSlide_Success(t *testing.T) {
 	}
 }
 
-func TestRestoreSlide_InvalidID(t *testing.T) {
+func TestRestoreRecord_InvalidID(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/slides/bad/restore", nil)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/records/bad/restore", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
 
-func TestRestoreSlide_NotFound(t *testing.T) {
+func TestRestoreRecord_NotFound(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/slides/20260310-aaaaaaaa/restore", nil)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/records/20260310-aaaaaaaa/restore", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 404 {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 }
 
-func TestRestoreSlide_NotDeletedReturns404(t *testing.T) {
+func TestRestoreRecord_NotDeletedReturns404(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/slides/20260310-aaaaaaaa/restore", nil)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/records/20260310-aaaaaaaa/restore", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 404 {
 		t.Fatalf("expected 404, got %d", resp.StatusCode)
 	}
 }
 
-func TestDeleteSlide_SyncVersionErrorReturns500(t *testing.T) {
+func TestDeleteRecord_SyncVersionErrorReturns500(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	repo.getSyncVersionErr = fmt.Errorf("sync version unavailable")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/20260310-aaaaaaaa", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/20260310-aaaaaaaa", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 500 {
 		t.Fatalf("expected 500, got %d", resp.StatusCode)
 	}
 }
 
-func TestDeleteSlide_SoftDeleteErrorReturns500(t *testing.T) {
+func TestDeleteRecord_SoftDeleteErrorReturns500(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	repo.softDeleteErr = fmt.Errorf("delete unavailable")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/20260310-aaaaaaaa", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/20260310-aaaaaaaa", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 500 {
 		t.Fatalf("expected 500, got %d", resp.StatusCode)
 	}
 }
 
-func TestRestoreSlide_SyncVersionErrorReturns500(t *testing.T) {
+func TestRestoreRecord_SyncVersionErrorReturns500(t *testing.T) {
 	repo := newMockRepo()
-	slide := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	record := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	now := time.Now().UTC()
-	slide.DeletedAt = &now
-	repo.slides = []repository.Slide{slide}
+	record.DeletedAt = &now
+	repo.records = []repository.Record{record}
 	repo.getSyncVersionErr = fmt.Errorf("sync version unavailable")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/slides/20260310-aaaaaaaa/restore", nil)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/records/20260310-aaaaaaaa/restore", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 500 {
 		t.Fatalf("expected 500, got %d", resp.StatusCode)
 	}
 }
 
-func TestRestoreSlide_RestoreErrorReturns500(t *testing.T) {
+func TestRestoreRecord_RestoreErrorReturns500(t *testing.T) {
 	repo := newMockRepo()
-	slide := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	record := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	now := time.Now().UTC()
-	slide.DeletedAt = &now
-	repo.slides = []repository.Slide{slide}
+	record.DeletedAt = &now
+	repo.records = []repository.Record{record}
 	repo.restoreErr = fmt.Errorf("restore unavailable")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/slides/20260310-aaaaaaaa/restore", nil)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/records/20260310-aaaaaaaa/restore", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 500 {
 		t.Fatalf("expected 500, got %d", resp.StatusCode)
 	}
 }
 
-// --- Reorder slide tests ---
+// --- Reorder record tests ---
 
-func TestReorderSlide_Last(t *testing.T) {
+func TestReorderRecord_Last(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a0"),
-		testSlide("20260310-bbbbbbbb", "2026-03-10", "a1"),
+	repo.records = []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a0"),
+		testRecord("20260310-bbbbbbbb", "2026-03-10", "a1"),
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"position": {"kind": "last"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	result := readBody(t, resp)
@@ -1413,17 +1413,17 @@ func TestReorderSlide_Last(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_First(t *testing.T) {
+func TestReorderRecord_First(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a0"),
-		testSlide("20260310-bbbbbbbb", "2026-03-10", "a1"),
+	repo.records = []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a0"),
+		testRecord("20260310-bbbbbbbb", "2026-03-10", "a1"),
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"position": {"kind": "first"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-bbbbbbbb/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-bbbbbbbb/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 200 {
@@ -1431,19 +1431,19 @@ func TestReorderSlide_First(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_Before(t *testing.T) {
+func TestReorderRecord_Before(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a0"),
-		testSlide("20260310-bbbbbbbb", "2026-03-10", "a1"),
-		testSlide("20260310-cccccccc", "2026-03-10", "a2"),
+	repo.records = []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a0"),
+		testRecord("20260310-bbbbbbbb", "2026-03-10", "a1"),
+		testRecord("20260310-cccccccc", "2026-03-10", "a2"),
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	refID := "20260310-bbbbbbbb"
 	body := fmt.Sprintf(`{"position": {"kind": "before", "reference_id": "%s"}}`, refID)
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-cccccccc/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-cccccccc/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 200 {
@@ -1451,19 +1451,19 @@ func TestReorderSlide_Before(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_After(t *testing.T) {
+func TestReorderRecord_After(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a0"),
-		testSlide("20260310-bbbbbbbb", "2026-03-10", "a1"),
-		testSlide("20260310-cccccccc", "2026-03-10", "a2"),
+	repo.records = []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a0"),
+		testRecord("20260310-bbbbbbbb", "2026-03-10", "a1"),
+		testRecord("20260310-cccccccc", "2026-03-10", "a2"),
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	refID := "20260310-aaaaaaaa"
 	body := fmt.Sprintf(`{"position": {"kind": "after", "reference_id": "%s"}}`, refID)
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-cccccccc/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-cccccccc/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 200 {
@@ -1471,14 +1471,14 @@ func TestReorderSlide_After(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_InvalidKind(t *testing.T) {
+func TestReorderRecord_InvalidKind(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"position": {"kind": "invalid"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -1486,14 +1486,14 @@ func TestReorderSlide_InvalidKind(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_BeforeMissingReferenceID(t *testing.T) {
+func TestReorderRecord_BeforeMissingReferenceID(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"position": {"kind": "before"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -1501,14 +1501,14 @@ func TestReorderSlide_BeforeMissingReferenceID(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_SelfReference(t *testing.T) {
+func TestReorderRecord_SelfReference(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"position": {"kind": "before", "reference_id": "20260310-aaaaaaaa"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -1516,37 +1516,37 @@ func TestReorderSlide_SelfReference(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_InvalidID(t *testing.T) {
+func TestReorderRecord_InvalidID(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
 	body := `{"position": {"kind": "last"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/bad/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/bad/order", strings.NewReader(body))
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
 
-func TestReorderSlide_InvalidBody(t *testing.T) {
+func TestReorderRecord_InvalidBody(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader("not json"))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader("not json"))
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
 		t.Fatalf("expected 400, got %d", resp.StatusCode)
 	}
 }
 
-func TestReorderSlide_InvalidDateFormat(t *testing.T) {
+func TestReorderRecord_InvalidDateFormat(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"date":"03-10-2026","position":{"kind":"last"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -1554,14 +1554,14 @@ func TestReorderSlide_InvalidDateFormat(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_InvalidReferenceIDFormat(t *testing.T) {
+func TestReorderRecord_InvalidReferenceIDFormat(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"position":{"kind":"before","reference_id":"bad-id"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -1569,12 +1569,12 @@ func TestReorderSlide_InvalidReferenceIDFormat(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_NotFound(t *testing.T) {
+func TestReorderRecord_NotFound(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
 	body := `{"position": {"kind": "last"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 404 {
@@ -1582,17 +1582,17 @@ func TestReorderSlide_NotFound(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_DeletedSlide(t *testing.T) {
+func TestReorderRecord_DeletedRecord(t *testing.T) {
 	repo := newMockRepo()
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	now := time.Now().UTC()
 	s.DeletedAt = &now
-	repo.slides = []repository.Slide{s}
+	repo.records = []repository.Record{s}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"position": {"kind": "last"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 404 {
@@ -1600,18 +1600,18 @@ func TestReorderSlide_DeletedSlide(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_SyncVersionErrorReturns500(t *testing.T) {
+func TestReorderRecord_SyncVersionErrorReturns500(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a0"),
-		testSlide("20260310-bbbbbbbb", "2026-03-10", "a1"),
+	repo.records = []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a0"),
+		testRecord("20260310-bbbbbbbb", "2026-03-10", "a1"),
 	}
 	repo.getSyncVersionErr = fmt.Errorf("sync version unavailable")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"position":{"kind":"last"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 500 {
@@ -1619,17 +1619,17 @@ func TestReorderSlide_SyncVersionErrorReturns500(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_ChangeDate(t *testing.T) {
+func TestReorderRecord_ChangeDate(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a0"),
-		testSlide("20260311-bbbbbbbb", "2026-03-11", "a0"),
+	repo.records = []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a0"),
+		testRecord("20260311-bbbbbbbb", "2026-03-11", "a0"),
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"date": "2026-03-11", "position": {"kind": "last"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	result := readBody(t, resp)
@@ -1641,16 +1641,16 @@ func TestReorderSlide_ChangeDate(t *testing.T) {
 	}
 }
 
-func TestReorderSlide_ReferenceNotFound(t *testing.T) {
+func TestReorderRecord_ReferenceNotFound(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a0"),
+	repo.records = []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a0"),
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"position": {"kind": "before", "reference_id": "20260310-zzzzzzzz"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -1717,12 +1717,12 @@ func TestSyncChanges_InvalidSince(t *testing.T) {
 	}
 }
 
-func TestSyncChanges_ReturnsChangedSlides(t *testing.T) {
+func TestSyncChanges_ReturnsChangedRecords(t *testing.T) {
 	repo := newMockRepo()
 	now := time.Now().UTC()
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	s.UpdatedAt = now
-	repo.slides = []repository.Slide{s}
+	repo.records = []repository.Record{s}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
@@ -1741,13 +1741,13 @@ func TestSyncChanges_ReturnsChangedSlides(t *testing.T) {
 	}
 }
 
-func TestSyncChanges_IncludesDeletedSlides(t *testing.T) {
+func TestSyncChanges_IncludesDeletedRecords(t *testing.T) {
 	repo := newMockRepo()
 	now := time.Now().UTC()
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	s.UpdatedAt = now
 	s.DeletedAt = &now
-	repo.slides = []repository.Slide{s}
+	repo.records = []repository.Record{s}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
@@ -1763,9 +1763,9 @@ func TestSyncChanges_IncludesDeletedSlides(t *testing.T) {
 func TestSyncChanges_CountLookupErrorReturns500(t *testing.T) {
 	repo := newMockRepo()
 	now := time.Now().UTC()
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	s.UpdatedAt = now
-	repo.slides = []repository.Slide{s}
+	repo.records = []repository.Record{s}
 	repo.listFiguresErr = fmt.Errorf("figures broken")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
@@ -1779,7 +1779,7 @@ func TestSyncChanges_CountLookupErrorReturns500(t *testing.T) {
 
 // --- File endpoint tests ---
 
-func TestGetFile_InvalidSlideID(t *testing.T) {
+func TestGetFile_InvalidRecordID(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
@@ -1833,7 +1833,7 @@ func TestGetFile_FigureLookupErrorReturns500(t *testing.T) {
 
 func TestGetFile_FigureFound(t *testing.T) {
 	repo := newMockRepo()
-	repo.figures["20260310-aaaaaaaa"] = []repository.SlideFigure{
+	repo.figures["20260310-aaaaaaaa"] = []repository.RecordFigure{
 		{Filename: "fig.png", S3Key: "figures/20260310-aaaaaaaa/fig.png"},
 	}
 	ts := setupTestServer(t, repo)
@@ -1854,7 +1854,7 @@ func TestGetFile_FigureFound(t *testing.T) {
 
 func TestGetFile_DataFileFound(t *testing.T) {
 	repo := newMockRepo()
-	repo.dataFiles["20260310-aaaaaaaa"] = []repository.SlideDataFile{
+	repo.dataFiles["20260310-aaaaaaaa"] = []repository.RecordDataFile{
 		{Filename: "data.csv", S3Key: "data/20260310-aaaaaaaa/data.csv"},
 	}
 	ts := setupTestServer(t, repo)
@@ -1874,7 +1874,7 @@ func TestGetFile_AllowsSafeFilenameAndEscapesReturnedURL(t *testing.T) {
 	dataDir := t.TempDir()
 	filename := "chart..v2 #1?.png"
 	repo := newMockRepo()
-	repo.figures["20260310-aaaaaaaa"] = []repository.SlideFigure{
+	repo.figures["20260310-aaaaaaaa"] = []repository.RecordFigure{
 		{Filename: filename, S3Key: "figures/20260310-aaaaaaaa/" + filename},
 	}
 
@@ -1956,7 +1956,7 @@ func TestServeFile_ValidFile(t *testing.T) {
 	}
 }
 
-func TestServeFile_InvalidSlideID(t *testing.T) {
+func TestServeFile_InvalidRecordID(t *testing.T) {
 	ts := setupTestServer(t, newMockRepo())
 	defer ts.Close()
 
@@ -1998,7 +1998,7 @@ func TestServeFile_MissingFile(t *testing.T) {
 
 // --- Validation helper tests ---
 
-func TestIsValidSlideID(t *testing.T) {
+func TestIsValidRecordID(t *testing.T) {
 	tests := []struct {
 		id    string
 		valid bool
@@ -2014,9 +2014,9 @@ func TestIsValidSlideID(t *testing.T) {
 		{"20260310-aaaaaaaaX", false}, // too long
 	}
 	for _, tc := range tests {
-		got := isValidSlideID(tc.id)
+		got := isValidRecordID(tc.id)
 		if got != tc.valid {
-			t.Errorf("isValidSlideID(%q) = %v, want %v", tc.id, got, tc.valid)
+			t.Errorf("isValidRecordID(%q) = %v, want %v", tc.id, got, tc.valid)
 		}
 	}
 }
@@ -2109,22 +2109,22 @@ func TestFormatTimePtr_NonNil(t *testing.T) {
 
 // --- Sort/comparison tests ---
 
-func TestSortSlidesForAPI(t *testing.T) {
-	slides := []repository.Slide{
-		testSlide("20260308-aaaaaaaa", "2026-03-08", "a0"),
-		testSlide("20260310-bbbbbbbb", "2026-03-10", "a1"),
-		testSlide("20260310-cccccccc", "2026-03-10", "a0"),
+func TestSortRecordsForAPI(t *testing.T) {
+	records := []repository.Record{
+		testRecord("20260308-aaaaaaaa", "2026-03-08", "a0"),
+		testRecord("20260310-bbbbbbbb", "2026-03-10", "a1"),
+		testRecord("20260310-cccccccc", "2026-03-10", "a0"),
 	}
-	sortSlidesForAPI(slides)
+	sortRecordsForAPI(records)
 	// Expected: 2026-03-10 a0, 2026-03-10 a1, 2026-03-08 a0
-	if slides[0].ID != "20260310-cccccccc" {
-		t.Fatalf("expected first slide 20260310-cccccccc, got %s", slides[0].ID)
+	if records[0].ID != "20260310-cccccccc" {
+		t.Fatalf("expected first record 20260310-cccccccc, got %s", records[0].ID)
 	}
-	if slides[1].ID != "20260310-bbbbbbbb" {
-		t.Fatalf("expected second slide 20260310-bbbbbbbb, got %s", slides[1].ID)
+	if records[1].ID != "20260310-bbbbbbbb" {
+		t.Fatalf("expected second record 20260310-bbbbbbbb, got %s", records[1].ID)
 	}
-	if slides[2].ID != "20260308-aaaaaaaa" {
-		t.Fatalf("expected third slide 20260308-aaaaaaaa, got %s", slides[2].ID)
+	if records[2].ID != "20260308-aaaaaaaa" {
+		t.Fatalf("expected third record 20260308-aaaaaaaa, got %s", records[2].ID)
 	}
 }
 
@@ -2132,31 +2132,31 @@ func TestIsAfterCursor(t *testing.T) {
 	cursor := &cursorPayload{Date: "2026-03-10", DayOrder: "a1", ID: "20260310-bbbbbbbb"}
 
 	// Earlier date = after in DESC order
-	s1 := testSlide("20260308-aaaaaaaa", "2026-03-08", "a0")
+	s1 := testRecord("20260308-aaaaaaaa", "2026-03-08", "a0")
 	if !isAfterCursor(s1, cursor) {
 		t.Fatal("earlier date should be after cursor in DESC order")
 	}
 
 	// Same date, higher day_order
-	s2 := testSlide("20260310-cccccccc", "2026-03-10", "a2")
+	s2 := testRecord("20260310-cccccccc", "2026-03-10", "a2")
 	if !isAfterCursor(s2, cursor) {
 		t.Fatal("same date + higher day_order should be after cursor")
 	}
 
 	// Same date, same day_order, higher ID
-	s3 := testSlide("20260310-cccccccc", "2026-03-10", "a1")
+	s3 := testRecord("20260310-cccccccc", "2026-03-10", "a1")
 	if !isAfterCursor(s3, cursor) {
 		t.Fatal("same date + same day_order + higher ID should be after cursor")
 	}
 
 	// Same as cursor — should NOT be after
-	s4 := testSlide("20260310-bbbbbbbb", "2026-03-10", "a1")
+	s4 := testRecord("20260310-bbbbbbbb", "2026-03-10", "a1")
 	if isAfterCursor(s4, cursor) {
 		t.Fatal("same as cursor should not be after cursor")
 	}
 
 	// Later date (before cursor in DESC order)
-	s5 := testSlide("20260312-aaaaaaaa", "2026-03-12", "a0")
+	s5 := testRecord("20260312-aaaaaaaa", "2026-03-12", "a0")
 	if isAfterCursor(s5, cursor) {
 		t.Fatal("later date should not be after cursor in DESC order")
 	}
@@ -2206,8 +2206,8 @@ func TestComputeFractionalIndex_InvalidKind(t *testing.T) {
 }
 
 func TestComputeFractionalIndex_BeforeFirst(t *testing.T) {
-	siblings := []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a1"),
+	siblings := []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a1"),
 	}
 	result, err := computeFractionalIndex(siblings, "before", ptr("20260310-aaaaaaaa"))
 	if err != nil {
@@ -2219,8 +2219,8 @@ func TestComputeFractionalIndex_BeforeFirst(t *testing.T) {
 }
 
 func TestComputeFractionalIndex_AfterLast(t *testing.T) {
-	siblings := []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a1"),
+	siblings := []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a1"),
 	}
 	result, err := computeFractionalIndex(siblings, "after", ptr("20260310-aaaaaaaa"))
 	if err != nil {
@@ -2232,8 +2232,8 @@ func TestComputeFractionalIndex_AfterLast(t *testing.T) {
 }
 
 func TestComputeFractionalIndex_BeforeNotFound(t *testing.T) {
-	siblings := []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a1"),
+	siblings := []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a1"),
 	}
 	_, err := computeFractionalIndex(siblings, "before", ptr("20260310-zzzzzzzz"))
 	if err == nil {
@@ -2242,8 +2242,8 @@ func TestComputeFractionalIndex_BeforeNotFound(t *testing.T) {
 }
 
 func TestComputeFractionalIndex_AfterNotFound(t *testing.T) {
-	siblings := []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a1"),
+	siblings := []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a1"),
 	}
 	_, err := computeFractionalIndex(siblings, "after", ptr("20260310-zzzzzzzz"))
 	if err == nil {
@@ -2280,56 +2280,56 @@ func TestStart_AndShutdown(t *testing.T) {
 	}
 }
 
-// --- compareSlidesForAPI full branch coverage ---
+// --- compareRecordsForAPI full branch coverage ---
 
-func TestCompareSlidesForAPI_AllBranches(t *testing.T) {
-	a := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
-	b := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+func TestCompareRecordsForAPI_AllBranches(t *testing.T) {
+	a := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
+	b := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 
-	// Equal slides
-	if compareSlidesForAPI(a, b) != 0 {
-		t.Fatal("expected 0 for equal slides")
+	// Equal records
+	if compareRecordsForAPI(a, b) != 0 {
+		t.Fatal("expected 0 for equal records")
 	}
 
 	// Date equal, day_order equal, ID a > b
-	a2 := testSlide("20260310-bbbbbbbb", "2026-03-10", "a0")
-	b2 := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
-	if compareSlidesForAPI(a2, b2) != 1 {
+	a2 := testRecord("20260310-bbbbbbbb", "2026-03-10", "a0")
+	b2 := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
+	if compareRecordsForAPI(a2, b2) != 1 {
 		t.Fatal("expected 1 when a.ID > b.ID")
 	}
 
 	// Date equal, day_order a > b
-	a3 := testSlide("20260310-aaaaaaaa", "2026-03-10", "a1")
-	b3 := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
-	if compareSlidesForAPI(a3, b3) != 1 {
+	a3 := testRecord("20260310-aaaaaaaa", "2026-03-10", "a1")
+	b3 := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
+	if compareRecordsForAPI(a3, b3) != 1 {
 		t.Fatal("expected 1 when a.DayOrder > b.DayOrder")
 	}
 
 	// Date a < b (DESC means a comes first, so should return -1)
-	a4 := testSlide("20260308-aaaaaaaa", "2026-03-08", "a0")
-	b4 := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
-	if compareSlidesForAPI(a4, b4) != 1 {
+	a4 := testRecord("20260308-aaaaaaaa", "2026-03-08", "a0")
+	b4 := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
+	if compareRecordsForAPI(a4, b4) != 1 {
 		t.Fatal("expected 1 when a.Date < b.Date in DESC order")
 	}
 }
 
-// --- handleDeleteSlide error after soft delete (re-fetch fails) ---
+// --- handleDeleteRecord error after soft delete (re-fetch fails) ---
 
 type softDeleteOnlyRepo struct {
 	*mockRepo
 	failGetAfterDelete bool
 }
 
-func (r *softDeleteOnlyRepo) GetSlideByID(ctx context.Context, id string) (repository.Slide, error) {
+func (r *softDeleteOnlyRepo) GetRecordByID(ctx context.Context, id string) (repository.Record, error) {
 	if r.failGetAfterDelete {
-		return repository.Slide{}, fmt.Errorf("re-fetch failed")
+		return repository.Record{}, fmt.Errorf("re-fetch failed")
 	}
-	return r.mockRepo.GetSlideByID(ctx, id)
+	return r.mockRepo.GetRecordByID(ctx, id)
 }
 
-func TestDeleteSlide_RefetchError(t *testing.T) {
+func TestDeleteRecord_RefetchError(t *testing.T) {
 	base := newMockRepo()
-	base.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	base.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	repo := &softDeleteOnlyRepo{mockRepo: base, failGetAfterDelete: false}
 
 	mux := http.NewServeMux()
@@ -2341,33 +2341,33 @@ func TestDeleteSlide_RefetchError(t *testing.T) {
 	// First do a normal delete to cover the happy path (already tested)
 	// Now test re-fetch error after soft delete
 	repo.failGetAfterDelete = true
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/20260310-aaaaaaaa", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/20260310-aaaaaaaa", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 500 {
 		t.Fatalf("expected 500 for re-fetch error, got %d", resp.StatusCode)
 	}
 }
 
-// --- handleRestoreSlide error after restore (re-fetch fails) ---
+// --- handleRestoreRecord error after restore (re-fetch fails) ---
 
 type restoreOnlyRepo struct {
 	*mockRepo
 	failGetAfterRestore bool
 }
 
-func (r *restoreOnlyRepo) GetSlideByID(ctx context.Context, id string) (repository.Slide, error) {
+func (r *restoreOnlyRepo) GetRecordByID(ctx context.Context, id string) (repository.Record, error) {
 	if r.failGetAfterRestore {
-		return repository.Slide{}, fmt.Errorf("re-fetch failed")
+		return repository.Record{}, fmt.Errorf("re-fetch failed")
 	}
-	return r.mockRepo.GetSlideByID(ctx, id)
+	return r.mockRepo.GetRecordByID(ctx, id)
 }
 
-func TestRestoreSlide_RefetchError(t *testing.T) {
+func TestRestoreRecord_RefetchError(t *testing.T) {
 	base := newMockRepo()
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	now := time.Now().UTC()
 	s.DeletedAt = &now
-	base.slides = []repository.Slide{s}
+	base.records = []repository.Record{s}
 	repo := &restoreOnlyRepo{mockRepo: base, failGetAfterRestore: true}
 
 	mux := http.NewServeMux()
@@ -2376,24 +2376,24 @@ func TestRestoreSlide_RefetchError(t *testing.T) {
 	ts := httptest.NewServer(corsMiddleware(mux))
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/slides/20260310-aaaaaaaa/restore", nil)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/records/20260310-aaaaaaaa/restore", nil)
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 500 {
 		t.Fatalf("expected 500 for re-fetch error, got %d", resp.StatusCode)
 	}
 }
 
-// --- handlePatchSlide error during update ---
+// --- handlePatchRecord error during update ---
 
-func TestPatchSlide_UpdateError(t *testing.T) {
+func TestPatchRecord_UpdateError(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
-	repo.updateSlideErr = fmt.Errorf("update failed")
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.updateRecordErr = fmt.Errorf("update failed")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"project_id": "new"}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 500 {
@@ -2405,7 +2405,7 @@ func TestPatchSlide_UpdateError(t *testing.T) {
 
 func TestSyncChanges_RepoError(t *testing.T) {
 	repo := newMockRepo()
-	repo.listSlidesErr = fmt.Errorf("db broken")
+	repo.listRecordsErr = fmt.Errorf("db broken")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
@@ -2416,19 +2416,19 @@ func TestSyncChanges_RepoError(t *testing.T) {
 	}
 }
 
-// --- handleReorderSlide with ListSlides error ---
+// --- handleReorderRecord with ListRecords error ---
 
-func TestReorderSlide_ListSlidesError(t *testing.T) {
+func TestReorderRecord_ListRecordsError(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	// Inject error after the initial GetSlideByID succeeds
-	repo.listSlidesErr = fmt.Errorf("list broken")
+	// Inject error after the initial GetRecordByID succeeds
+	repo.listRecordsErr = fmt.Errorf("list broken")
 
 	body := `{"position": {"kind": "last"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 500 {
@@ -2436,21 +2436,21 @@ func TestReorderSlide_ListSlidesError(t *testing.T) {
 	}
 }
 
-// --- handleReorderSlide with update error ---
+// --- handleReorderRecord with update error ---
 
-func TestReorderSlide_UpdateError(t *testing.T) {
+func TestReorderRecord_UpdateError(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
-		testSlide("20260310-aaaaaaaa", "2026-03-10", "a0"),
+	repo.records = []repository.Record{
+		testRecord("20260310-aaaaaaaa", "2026-03-10", "a0"),
 	}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	// Inject update error
-	repo.updateSlideErr = fmt.Errorf("update broken")
+	repo.updateRecordErr = fmt.Errorf("update broken")
 
 	body := `{"position": {"kind": "last"}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 500 {
@@ -2458,16 +2458,16 @@ func TestReorderSlide_UpdateError(t *testing.T) {
 	}
 }
 
-// --- handleReorderSlide with "after" reference_id with empty string ---
+// --- handleReorderRecord with "after" reference_id with empty string ---
 
-func TestReorderSlide_AfterEmptyReferenceID(t *testing.T) {
+func TestReorderRecord_AfterEmptyReferenceID(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"position": {"kind": "after", "reference_id": ""}}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa/order", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa/order", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -2557,20 +2557,20 @@ func TestGenerateKeyBetween_EqualInputs(t *testing.T) {
 	}
 }
 
-// --- handlePatchSlide: invalid field types return 400 ---
+// --- handlePatchRecord: invalid field types return 400 ---
 
-func TestPatchSlide_NonStringProjectID(t *testing.T) {
+func TestPatchRecord_NonStringProjectID(t *testing.T) {
 	repo := newMockRepo()
 	proj := "original"
-	s := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
+	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	s.ProjectID = proj
-	repo.slides = []repository.Slide{s}
+	repo.records = []repository.Record{s}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	// project_id is a number, not a string.
 	body := `{"project_id": 42}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -2578,14 +2578,14 @@ func TestPatchSlide_NonStringProjectID(t *testing.T) {
 	}
 }
 
-func TestPatchSlide_NonStringNotes(t *testing.T) {
+func TestPatchRecord_NonStringNotes(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"notes": 123}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -2593,14 +2593,14 @@ func TestPatchSlide_NonStringNotes(t *testing.T) {
 	}
 }
 
-func TestPatchSlide_NonStringGitFields(t *testing.T) {
+func TestPatchRecord_NonStringGitFields(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")}
+	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
 	body := `{"git_remote_url": 42, "git_hash": true}`
-	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/slides/20260310-aaaaaaaa", strings.NewReader(body))
+	req, _ := http.NewRequest(http.MethodPatch, ts.URL+"/api/records/20260310-aaaaaaaa", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	resp, _ := http.DefaultClient.Do(req)
 	if resp.StatusCode != 400 {
@@ -2610,7 +2610,7 @@ func TestPatchSlide_NonStringGitFields(t *testing.T) {
 
 func TestGetFile_EmptyHost(t *testing.T) {
 	repo := newMockRepo()
-	repo.figures["20260310-aaaaaaaa"] = []repository.SlideFigure{
+	repo.figures["20260310-aaaaaaaa"] = []repository.RecordFigure{
 		{Filename: "fig.png", S3Key: "figures/20260310-aaaaaaaa/fig.png"},
 	}
 	mux := http.NewServeMux()
@@ -2674,7 +2674,7 @@ func TestHandleStats(t *testing.T) {
 	deletedAt := now.Add(-1 * time.Hour)
 	repo := newMockRepo()
 	proj := "test-project"
-	repo.slides = []repository.Slide{
+	repo.records = []repository.Record{
 		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: strPtrTest("<p>active1</p>"), ProjectID: proj, UpdatedAt: now, CreatedAt: now},
 		{ID: "20260310-a1b2c3d5", Date: "2026-03-10", DayOrder: "a1", HTMLContent: strPtrTest("<p>active2</p>"), UpdatedAt: now, CreatedAt: now},
 		{ID: "20260310-a1b2c3d6", Date: "2026-03-10", DayOrder: "a2", HTMLContent: strPtrTest("<p>trashed</p>"), UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
@@ -2699,14 +2699,14 @@ func TestHandleStats(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	if body["total_slides"] != 2 {
-		t.Errorf("expected total_slides=2, got %d", body["total_slides"])
+	if body["total_records"] != 2 {
+		t.Errorf("expected total_records=2, got %d", body["total_records"])
 	}
 	if body["total_projects"] != 1 {
 		t.Errorf("expected total_projects=1, got %d", body["total_projects"])
 	}
-	if body["trashed_slides"] != 1 {
-		t.Errorf("expected trashed_slides=1, got %d", body["trashed_slides"])
+	if body["trashed_records"] != 1 {
+		t.Errorf("expected trashed_records=1, got %d", body["trashed_records"])
 	}
 }
 
@@ -2724,20 +2724,20 @@ func TestHandleStats_Empty(t *testing.T) {
 	var body map[string]int
 	_ = json.NewDecoder(res.Body).Decode(&body)
 
-	if body["total_slides"] != 0 {
-		t.Errorf("expected total_slides=0, got %d", body["total_slides"])
+	if body["total_records"] != 0 {
+		t.Errorf("expected total_records=0, got %d", body["total_records"])
 	}
 	if body["total_projects"] != 0 {
 		t.Errorf("expected total_projects=0, got %d", body["total_projects"])
 	}
-	if body["trashed_slides"] != 0 {
-		t.Errorf("expected trashed_slides=0, got %d", body["trashed_slides"])
+	if body["trashed_records"] != 0 {
+		t.Errorf("expected trashed_records=0, got %d", body["trashed_records"])
 	}
 }
 
-func TestHandleStats_CountSlidesError(t *testing.T) {
+func TestHandleStats_CountRecordsError(t *testing.T) {
 	repo := newMockRepo()
-	repo.countSlidesErr = fmt.Errorf("db error")
+	repo.countRecordsErr = fmt.Errorf("db error")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
@@ -2775,7 +2775,7 @@ func TestHandlePurgeTrash(t *testing.T) {
 	now := time.Now().UTC()
 	deletedAt := now.Add(-1 * time.Hour)
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
+	repo.records = []repository.Record{
 		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: strPtrTest("<p>active</p>"), UpdatedAt: now, CreatedAt: now},
 		{ID: "20260310-a1b2c3d5", Date: "2026-03-10", DayOrder: "a1", HTMLContent: strPtrTest("<p>trashed1</p>"), UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
 		{ID: "20260310-a1b2c3d6", Date: "2026-03-10", DayOrder: "a2", HTMLContent: strPtrTest("<p>trashed2</p>"), UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
@@ -2784,7 +2784,7 @@ func TestHandlePurgeTrash(t *testing.T) {
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
+	req, err := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/trash", nil)
 	if err != nil {
 		t.Fatalf("create request: %v", err)
 	}
@@ -2808,25 +2808,25 @@ func TestHandlePurgeTrash(t *testing.T) {
 		t.Errorf("expected purged_count=2, got %d", purgedCount)
 	}
 
-	// Verify active slide was not deleted
-	if len(repo.slides) != 1 {
-		t.Errorf("expected 1 remaining slide, got %d", len(repo.slides))
+	// Verify active record was not deleted
+	if len(repo.records) != 1 {
+		t.Errorf("expected 1 remaining record, got %d", len(repo.records))
 	}
-	if repo.slides[0].ID != "20260310-a1b2c3d4" {
-		t.Errorf("expected active slide to remain, got %s", repo.slides[0].ID)
+	if repo.records[0].ID != "20260310-a1b2c3d4" {
+		t.Errorf("expected active record to remain, got %s", repo.records[0].ID)
 	}
 }
 
 func TestHandlePurgeTrash_Empty(t *testing.T) {
 	repo := newMockRepo()
-	repo.slides = []repository.Slide{
+	repo.records = []repository.Record{
 		{ID: "20260310-a1b2c3d4", Date: "2026-03-10", DayOrder: "a0", HTMLContent: strPtrTest("<p>active</p>"), UpdatedAt: time.Now().UTC(), CreatedAt: time.Now().UTC()},
 	}
 
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/trash", nil)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -2846,15 +2846,15 @@ func TestHandlePurgeTrash_RemovesFilesystemDirs(t *testing.T) {
 	now := time.Now().UTC()
 	deletedAt := now.Add(-1 * time.Hour)
 	repo := newMockRepo()
-	slideID := "20260310-a1b2c3d4"
-	repo.slides = []repository.Slide{
-		{ID: slideID, Date: "2026-03-10", DayOrder: "a0", HTMLContent: strPtrTest("<p>trashed</p>"), UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
+	recordID := "20260310-a1b2c3d4"
+	repo.records = []repository.Record{
+		{ID: recordID, Date: "2026-03-10", DayOrder: "a0", HTMLContent: strPtrTest("<p>trashed</p>"), UpdatedAt: now, CreatedAt: now, DeletedAt: &deletedAt},
 	}
 
 	dataDir := t.TempDir()
 	// Create figure and data directories
-	figDir := filepath.Join(dataDir, "figures", slideID)
-	dataFileDir := filepath.Join(dataDir, "data", slideID)
+	figDir := filepath.Join(dataDir, "figures", recordID)
+	dataFileDir := filepath.Join(dataDir, "data", recordID)
 	if err := os.MkdirAll(figDir, 0o755); err != nil {
 		t.Fatalf("create fig dir: %v", err)
 	}
@@ -2869,7 +2869,7 @@ func TestHandlePurgeTrash_RemovesFilesystemDirs(t *testing.T) {
 	ts := setupTestServerWithDataDir(t, repo, dataDir)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/trash", nil)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -2895,7 +2895,7 @@ func TestHandlePurgeTrash_PurgeError(t *testing.T) {
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/trash", nil)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -2913,7 +2913,7 @@ func TestHandlePurgeTrash_GetSyncVersionError(t *testing.T) {
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
-	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/slides/trash", nil)
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/api/records/trash", nil)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
@@ -2925,37 +2925,37 @@ func TestHandlePurgeTrash_GetSyncVersionError(t *testing.T) {
 	}
 }
 
-// --- compareSlidesByDayOrder full branch coverage ---
+// --- compareRecordsByDayOrder full branch coverage ---
 
-func TestCompareSlidesByDayOrder_AllBranches(t *testing.T) {
+func TestCompareRecordsByDayOrder_AllBranches(t *testing.T) {
 	// DayOrder equal, ID less-than branch
-	a := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
-	b := testSlide("20260310-bbbbbbbb", "2026-03-10", "a0")
-	if got := compareSlidesByDayOrder(a, b); got != -1 {
+	a := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
+	b := testRecord("20260310-bbbbbbbb", "2026-03-10", "a0")
+	if got := compareRecordsByDayOrder(a, b); got != -1 {
 		t.Fatalf("expected -1 (a.ID < b.ID), got %d", got)
 	}
 
 	// DayOrder equal, ID greater-than branch
-	if got := compareSlidesByDayOrder(b, a); got != 1 {
+	if got := compareRecordsByDayOrder(b, a); got != 1 {
 		t.Fatalf("expected 1 (a.ID > b.ID), got %d", got)
 	}
 
 	// DayOrder less-than branch
-	c := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
-	d := testSlide("20260310-aaaaaaaa", "2026-03-10", "a1")
-	if got := compareSlidesByDayOrder(c, d); got != -1 {
+	c := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
+	d := testRecord("20260310-aaaaaaaa", "2026-03-10", "a1")
+	if got := compareRecordsByDayOrder(c, d); got != -1 {
 		t.Fatalf("expected -1 (a.DayOrder < b.DayOrder), got %d", got)
 	}
 
 	// DayOrder greater-than branch
-	if got := compareSlidesByDayOrder(d, c); got != 1 {
+	if got := compareRecordsByDayOrder(d, c); got != 1 {
 		t.Fatalf("expected 1 (a.DayOrder > b.DayOrder), got %d", got)
 	}
 
 	// All equal — zero return
-	e := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
-	f := testSlide("20260310-aaaaaaaa", "2026-03-10", "a0")
-	if got := compareSlidesByDayOrder(e, f); got != 0 {
+	e := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
+	f := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
+	if got := compareRecordsByDayOrder(e, f); got != 0 {
 		t.Fatalf("expected 0 (equal), got %d", got)
 	}
 }
@@ -2963,7 +2963,7 @@ func TestCompareSlidesByDayOrder_AllBranches(t *testing.T) {
 // --- decodeJSON: nil body branch ---
 
 func TestDecodeJSON_NilBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPatch, "/api/slides/20260310-aaaaaaaa", nil)
+	req := httptest.NewRequest(http.MethodPatch, "/api/records/20260310-aaaaaaaa", nil)
 	// httptest.NewRequest with nil body sets Body to http.NoBody, not nil.
 	// We must set it explicitly to nil.
 	req.Body = nil
@@ -3000,27 +3000,27 @@ func TestIsValidGitHash_AllBranches(t *testing.T) {
 	}
 }
 
-// --- isValidSlideID: missing hex suffix char coverage ---
+// --- isValidRecordID: missing hex suffix char coverage ---
 
-func TestIsValidSlideID_InvalidHexSuffix(t *testing.T) {
+func TestIsValidRecordID_InvalidHexSuffix(t *testing.T) {
 	// 17 chars, dash at position 8, but suffix contains uppercase/non-hex
-	if isValidSlideID("20260310-AAAAAAAA") {
+	if isValidRecordID("20260310-AAAAAAAA") {
 		t.Fatal("expected false for uppercase hex suffix")
 	}
-	if isValidSlideID("20260310-ggggggg0") {
+	if isValidRecordID("20260310-ggggggg0") {
 		t.Fatal("expected false for non-hex suffix char 'g'")
 	}
 }
 
-// --- handleStats: CountTrashedSlides error path ---
+// --- handleStats: CountTrashedRecords error path ---
 
-// countTrashedErrRepo wraps mockRepo and fails only CountTrashedSlides.
+// countTrashedErrRepo wraps mockRepo and fails only CountTrashedRecords.
 type countTrashedErrRepo struct {
 	*mockRepo
 	trashedErr error
 }
 
-func (r *countTrashedErrRepo) CountTrashedSlides(_ context.Context) (int, error) {
+func (r *countTrashedErrRepo) CountTrashedRecords(_ context.Context) (int, error) {
 	return 0, r.trashedErr
 }
 
@@ -3045,17 +3045,17 @@ func TestHandleStats_CountTrashedError(t *testing.T) {
 	}
 }
 
-// --- slideFileExists: data branch, data error, and default branch ---
+// --- recordFileExists: data branch, data error, and default branch ---
 
-func TestSlideFileExists_DataBranch(t *testing.T) {
+func TestRecordFileExists_DataBranch(t *testing.T) {
 	repo := newMockRepo()
-	repo.dataFiles["20260310-aaaaaaaa"] = []repository.SlideDataFile{
+	repo.dataFiles["20260310-aaaaaaaa"] = []repository.RecordDataFile{
 		{Filename: "result.csv", S3Key: "data/20260310-aaaaaaaa/result.csv"},
 	}
 	srv := &Server{repo: repo}
 
 	// File present
-	ok, err := srv.slideFileExists(context.Background(), "20260310-aaaaaaaa", "data", "result.csv")
+	ok, err := srv.recordFileExists(context.Background(), "20260310-aaaaaaaa", "data", "result.csv")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3064,7 +3064,7 @@ func TestSlideFileExists_DataBranch(t *testing.T) {
 	}
 
 	// File absent
-	ok, err = srv.slideFileExists(context.Background(), "20260310-aaaaaaaa", "data", "missing.csv")
+	ok, err = srv.recordFileExists(context.Background(), "20260310-aaaaaaaa", "data", "missing.csv")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -3073,22 +3073,22 @@ func TestSlideFileExists_DataBranch(t *testing.T) {
 	}
 }
 
-func TestSlideFileExists_DataError(t *testing.T) {
+func TestRecordFileExists_DataError(t *testing.T) {
 	repo := newMockRepo()
 	repo.listDataFilesErr = fmt.Errorf("data files broken")
 	srv := &Server{repo: repo}
 
-	_, err := srv.slideFileExists(context.Background(), "20260310-aaaaaaaa", "data", "any.csv")
+	_, err := srv.recordFileExists(context.Background(), "20260310-aaaaaaaa", "data", "any.csv")
 	if err == nil {
-		t.Fatal("expected error from ListSlideDataFilesBySlideID")
+		t.Fatal("expected error from ListRecordDataFilesByRecordID")
 	}
 }
 
-func TestSlideFileExists_DefaultBranch(t *testing.T) {
+func TestRecordFileExists_DefaultBranch(t *testing.T) {
 	repo := newMockRepo()
 	srv := &Server{repo: repo}
 
-	_, err := srv.slideFileExists(context.Background(), "20260310-aaaaaaaa", "unknown", "file.bin")
+	_, err := srv.recordFileExists(context.Background(), "20260310-aaaaaaaa", "unknown", "file.bin")
 	if err == nil {
 		t.Fatal("expected error for unknown file type")
 	}
@@ -3132,12 +3132,12 @@ func TestServeFile_PathTraversalGuard(t *testing.T) {
 	// crafted path that bypasses URL decoding to hit the HasPrefix guard.
 	//
 	// Instead: build a path that, after filepath.Join + Abs, lands outside dataDir.
-	// filepath.Join(dataDir, "figures", slideID, filename) where filename is "."
+	// filepath.Join(dataDir, "figures", recordID, filename) where filename is "."
 	// is rejected by isValidFilename. The guard is only reachable if Abs resolves
 	// outside the dir — which happens via symlinks.
 	//
 	// Build a URL using the symlink-named file type.
-	// Route is /local-files/{slideId}/{fileType}/{filename}.
+	// Route is /local-files/{recordId}/{fileType}/{filename}.
 	// fileType must be "figures" or "data" — so we cannot use the symlink as fileType.
 	// The path traversal guard is primarily defense-in-depth and is hard to trigger
 	// via normal HTTP without a symlink escape. We exercise it by verifying the

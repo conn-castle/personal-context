@@ -57,7 +57,7 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 	hasWarnings := false
 
 	// Check orphaned directories
-	figDirs, dataDirs, err := stack.FS.ListSlideIDsOnDisk()
+	figDirs, dataDirs, err := stack.FS.ListRecordIDsOnDisk()
 	if err != nil {
 		return fmt.Errorf("list disk directories: %w", err)
 	}
@@ -88,13 +88,13 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 	}
 	hasWarnings = hasWarnings || warned
 
-	// Check missing files for all tracked slides, including items currently in trash.
-	slides, err := stack.Repo.ListSlides(ctx, repository.ListSlidesFilter{IncludeDeleted: true})
+	// Check missing files for all tracked records, including items currently in trash.
+	records, err := stack.Repo.ListRecords(ctx, repository.ListRecordsFilter{IncludeDeleted: true})
 	if err != nil {
-		return fmt.Errorf("list slides: %w", err)
+		return fmt.Errorf("list records: %w", err)
 	}
 
-	missingFigs, err := checkMissingFigures(ctx, stack.Repo, stack.FS, slides)
+	missingFigs, err := checkMissingFigures(ctx, stack.Repo, stack.FS, records)
 	if err != nil {
 		if err := reportDoctorFailure(stdout, "write missing figures failure", "Missing figures", err); err != nil {
 			return err
@@ -107,7 +107,7 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer) error {
 	}
 	hasWarnings = hasWarnings || warned
 
-	missingDataFiles, err := checkMissingDataFiles(ctx, stack.Repo, stack.FS, slides)
+	missingDataFiles, err := checkMissingDataFiles(ctx, stack.Repo, stack.FS, records)
 	if err != nil {
 		if err := reportDoctorFailure(stdout, "write missing data files failure", "Missing data files", err); err != nil {
 			return err
@@ -225,74 +225,74 @@ func writeDoctorln(w io.Writer, context string, line string) error {
 	return nil
 }
 
-// findOrphans returns slide IDs from the given list that do not exist in the repository.
-// Args: ctx is the context; repo is the repository; slideIDs is the list of IDs found on disk.
-// Returns: a slice of orphaned slide IDs or an error when the repository lookup fails unexpectedly.
-func findOrphans(ctx context.Context, repo repository.Repository, slideIDs []string) ([]string, error) {
+// findOrphans returns record IDs from the given list that do not exist in the repository.
+// Args: ctx is the context; repo is the repository; recordIDs is the list of IDs found on disk.
+// Returns: a slice of orphaned record IDs or an error when the repository lookup fails unexpectedly.
+func findOrphans(ctx context.Context, repo repository.Repository, recordIDs []string) ([]string, error) {
 	orphans := make([]string, 0)
-	for _, id := range slideIDs {
-		_, err := repo.GetSlideByID(ctx, id)
+	for _, id := range recordIDs {
+		_, err := repo.GetRecordByID(ctx, id)
 		if errors.Is(err, repository.ErrNotFound) {
 			orphans = append(orphans, id)
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("look up slide %s: %w", id, err)
+			return nil, fmt.Errorf("look up record %s: %w", id, err)
 		}
 	}
 	return orphans, nil
 }
 
-// checkMissingFigures checks all tracked slides for figure files that are
+// checkMissingFigures checks all tracked records for figure files that are
 // recorded in the database but missing from disk.
-// Args: ctx is the context; repo is the repository; fs is the filesystem client; slides is the list of slides.
-// Returns: missing figure paths (as slideID/filename), or an error when inspection fails.
-func checkMissingFigures(ctx context.Context, repo repository.Repository, fs *filesystem.Client, slides []repository.Slide) ([]string, error) {
+// Args: ctx is the context; repo is the repository; fs is the filesystem client; records is the list of records.
+// Returns: missing figure paths (as recordID/filename), or an error when inspection fails.
+func checkMissingFigures(ctx context.Context, repo repository.Repository, fs *filesystem.Client, records []repository.Record) ([]string, error) {
 	missingFigures := make([]string, 0)
-	for _, slide := range slides {
-		figures, err := repo.ListSlideFiguresBySlideID(ctx, slide.ID)
+	for _, record := range records {
+		figures, err := repo.ListRecordFiguresByRecordID(ctx, record.ID)
 		if err != nil {
-			return nil, fmt.Errorf("list figures for %s: %w", slide.ID, err)
+			return nil, fmt.Errorf("list figures for %s: %w", record.ID, err)
 		}
 		for _, fig := range figures {
-			path, err := fs.ResolveFigurePath(slide.ID, fig.Filename)
+			path, err := fs.ResolveFigurePath(record.ID, fig.Filename)
 			if err != nil {
-				return nil, fmt.Errorf("resolve figure path for %s/%s: %w", slide.ID, fig.Filename, err)
+				return nil, fmt.Errorf("resolve figure path for %s/%s: %w", record.ID, fig.Filename, err)
 			}
 			if _, err := os.Stat(path); err != nil {
 				if os.IsNotExist(err) {
-					missingFigures = append(missingFigures, slide.ID+"/"+fig.Filename)
+					missingFigures = append(missingFigures, record.ID+"/"+fig.Filename)
 					continue
 				}
-				return nil, fmt.Errorf("stat figure path for %s/%s: %w", slide.ID, fig.Filename, err)
+				return nil, fmt.Errorf("stat figure path for %s/%s: %w", record.ID, fig.Filename, err)
 			}
 		}
 	}
 	return missingFigures, nil
 }
 
-// checkMissingDataFiles checks all tracked slides for data files that are
+// checkMissingDataFiles checks all tracked records for data files that are
 // recorded in the database but missing from disk.
-// Args: ctx is the context; repo is the repository; fs is the filesystem client; slides is the list of slides.
-// Returns: missing data file paths (as slideID/filename), or an error when inspection fails.
-func checkMissingDataFiles(ctx context.Context, repo repository.Repository, fs *filesystem.Client, slides []repository.Slide) ([]string, error) {
+// Args: ctx is the context; repo is the repository; fs is the filesystem client; records is the list of records.
+// Returns: missing data file paths (as recordID/filename), or an error when inspection fails.
+func checkMissingDataFiles(ctx context.Context, repo repository.Repository, fs *filesystem.Client, records []repository.Record) ([]string, error) {
 	missingDataFiles := make([]string, 0)
-	for _, slide := range slides {
-		dataFiles, err := repo.ListSlideDataFilesBySlideID(ctx, slide.ID)
+	for _, record := range records {
+		dataFiles, err := repo.ListRecordDataFilesByRecordID(ctx, record.ID)
 		if err != nil {
-			return nil, fmt.Errorf("list data files for %s: %w", slide.ID, err)
+			return nil, fmt.Errorf("list data files for %s: %w", record.ID, err)
 		}
 		for _, df := range dataFiles {
-			path, err := fs.ResolveDataFilePath(slide.ID, df.Filename)
+			path, err := fs.ResolveDataFilePath(record.ID, df.Filename)
 			if err != nil {
-				return nil, fmt.Errorf("resolve data file path for %s/%s: %w", slide.ID, df.Filename, err)
+				return nil, fmt.Errorf("resolve data file path for %s/%s: %w", record.ID, df.Filename, err)
 			}
 			if _, err := os.Stat(path); err != nil {
 				if os.IsNotExist(err) {
-					missingDataFiles = append(missingDataFiles, slide.ID+"/"+df.Filename)
+					missingDataFiles = append(missingDataFiles, record.ID+"/"+df.Filename)
 					continue
 				}
-				return nil, fmt.Errorf("stat data file path for %s/%s: %w", slide.ID, df.Filename, err)
+				return nil, fmt.Errorf("stat data file path for %s/%s: %w", record.ID, df.Filename, err)
 			}
 		}
 	}

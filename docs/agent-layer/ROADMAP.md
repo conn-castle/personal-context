@@ -60,7 +60,7 @@ Incomplete:
 - Added nightly export workflow example (`docs/nightly-export-workflow.example.yml`) and rewrote root `README.md` with architecture, setup, command reference, web overview, and contributor workflow.
 
 ## Phase 2 ✅ — Core Data Layer (Local)
-- Implemented foundation libraries with test-first coverage: slide ID generation, fractional indexing, timezone utilities, config read/write + mode detection, and notes normalization.
+- Implemented foundation libraries with test-first coverage: record ID generation, fractional indexing, timezone utilities, config read/write + mode detection, and notes normalization.
 - Added SQLite local data layer end-to-end: connection factory (`foreign_keys=ON`, WAL), executable migrations for all 5 tables with sync/timestamp triggers, backend-agnostic repository contract, SQLite repository implementation, and integration tests.
 - Implemented local filesystem client for figures/data with path validation, copy/delete behavior, and error-case coverage.
 - Restored `go mod tidy -diff` in CI and added per-package coverage enforcement (`>=95%`) in CI and CLI workflow commands.
@@ -73,8 +73,8 @@ Incomplete:
 
 ## Phase 4 ✅ — Local CLI Features (Search, Trash, Projects)
 - Implemented 5 new CLI commands: `pc search`, `pc trash`, `pc gc`, `pc project set/clear/list`, `pc doctor` — all registered in root.go.
-- Extended `ListSlidesFilter` with `OnlyDeleted` and `Query` fields; added `ListDistinctProjectIDs` to Repository interface; extended Config with `ActiveProject`.
-- Added filesystem methods: `BasePath`, `ListSlideIDsOnDisk`, `DeleteSlideDir` for gc and doctor operations.
+- Extended `ListRecordsFilter` with `OnlyDeleted` and `Query` fields; added `ListDistinctProjectIDs` to Repository interface; extended Config with `ActiveProject`.
+- Added filesystem methods: `BasePath`, `ListRecordIDsOnDisk`, `DeleteRecordDir` for gc and doctor operations.
 - Active project integration: `pc add` uses active project when no `--project` flag or metadata.json project_id.
 - E2e test suite expanded to 103 tests (from 57): search (14), trash (5), gc (9), project (12), doctor (5), workflow (1), plus existing tests.
 - Full local-only workflow e2e test (`TestFullLocalWorkflow`) exercises all commands end-to-end.
@@ -89,9 +89,9 @@ Incomplete:
 - Dependencies added: `aws-sdk-go-v2` + credentials + service/s3 + smithy-go, `testcontainers-go/modules/minio`.
 
 ## Phase 6 ✅ — Sync Engine + Cloud CLI
-- Implemented bidirectional sync engine (`internal/sync/`) with push-then-pull conflict resolution (last-writer-wins, edit-wins-on-tie), child row matching by `(slide_id, filename)`, and file-based sync lock (`.pc/sync.lock`).
+- Implemented bidirectional sync engine (`internal/sync/`) with push-then-pull conflict resolution (last-writer-wins, edit-wins-on-tie), child row matching by `(record_id, filename)`, and file-based sync lock (`.pc/sync.lock`).
 - Implemented sync session management (`internal/syncengine/`) with `last_sync_at` cursor captured at sync start, file lock for concurrent sync prevention, and cursor persistence.
-- Implemented `pc sync`, `pc fetch` (slide ID / `--project` / `--recent` modes with `--output`), `pc setup` cloud path (interactive + non-interactive Neon/S3/AWS credential wizard), `pc setup --remove-cloud`.
+- Implemented `pc sync`, `pc fetch` (record ID / `--project` / `--recent` modes with `--output`), `pc setup` cloud path (interactive + non-interactive Neon/S3/AWS credential wizard), `pc setup --remove-cloud`.
 - Implemented `pc doctor` cloud connectivity checks (WARN if unreachable, OK if reachable, skipped if local-only), `pc gc` cloud-aware (hard-deletes from cloud first to prevent sync re-creation, warns if cloud unreachable).
 - Auto-sync (`runAutoSyncFn`) integrated into all 6 mutation commands: add, edit, delete, restore, move, gc. Failures are non-fatal (stderr warnings).
 - 160+ sync/conflict unit tests, integration tests (testcontainers Postgres+MinIO), and e2e coverage for cloud-command validation plus local-only/no-op entrypoints. Per-package coverage >=95%.
@@ -106,15 +106,15 @@ Incomplete:
 - Received final v0.dev reference project as zip file, extracted into the repository.
 
 ## Phase 9 ✅ — Web UI Integration (API, Logic, and v0.dev UI Adoption)
-- Production web UI with all API routes (slides CRUD, sync, projects, files, info, stats, purge trash), `useSyncManager` 4-layer polling, Playwright e2e tests, and >95% coverage (99.16% statements, 95.28% branches).
+- Production web UI with all API routes (records CRUD, sync, projects, files, info, stats, purge trash), `useSyncManager` 4-layer polling, Playwright e2e tests, and >95% coverage (99.16% statements, 95.28% branches).
 - `pc serve` Go HTTP server implementing all REST API endpoints backed by local SQLite + filesystem. Next.js API routes detect `LOCAL_BACKEND_URL` and proxy to Go via `local-proxy.ts`. `make dev-local` orchestrates both servers.
 - Contract parity tests (`contract-parity.test.ts`) verify all 13 shared endpoint response shapes match between Go and Node implementations.
-- SettingsOverlay with sync status, data management (purge trash with AlertDialog confirmation), about info. `useLocalStorage` hook persists UI state (view mode, project filter, panel visibility, last selected slide).
+- SettingsOverlay with sync status, data management (purge trash with AlertDialog confirmation), about info. `useLocalStorage` hook persists UI state (view mode, project filter, panel visibility, last selected record).
 - v0.dev reference used solely for visual/UI parity; all backend, logic, and data layer implemented from scratch.
 
 ## Phase 10 ✅ — Authentication & Multi-User
 - Auth.js v5 with Credentials provider and JWT sessions (90-day maxAge). Login and registration pages with shadcn/ui.
-- Per-user data isolation: `users` and `api_keys` tables (Postgres only), `slides.user_id` FK, per-user `sync_version`, S3 `users/{user_id}/` key prefix.
+- Per-user data isolation: `users` and `api_keys` tables (Postgres only), `records.user_id` FK, per-user `sync_version`, S3 `users/{user_id}/` key prefix.
 - All API routes protected via `requireUser()`: Bearer token (API key) or Auth.js session. Local mode (`pc serve`) bypasses auth.
 - CLI API key system: `pc setup --init-cloud-schema` bootstraps a fresh Postgres database, `pc setup --api-key` stores the user API key, and `resolveUserIDFromAPIKey` validates against `api_keys` table. `openCloudStack` auto-resolves userID from config.
 - API key CRUD: `POST /api/api-keys` (create), `GET /api/api-keys` (list), `DELETE /api/api-keys/[id]` (revoke). Registration gating via `REGISTRATION_ENABLED` env var.
@@ -132,14 +132,14 @@ Incomplete:
 - [x] Add GitHub Release and Homebrew tap automation for the `pc` CLI
 - [ ] Create nightly export GitHub Action (example in docs/, real in data repo)
 - [ ] Write full system e2e tests (CLI + cloud + web UI together):
-    - CLI creates slide with figures -> `pc sync` -> web UI Playwright test verifies slide appears with figures
-    - Web UI edits slide notes -> CLI runs `pc sync` -> CLI `pc show` verifies updated notes
-    - CLI deletes slide -> sync -> web UI verifies slide gone from main view, appears in trash
-    - Web UI restores slide from trash -> CLI syncs -> CLI verifies slide is active
-    - Conflict: CLI edits slide offline, web UI edits same slide, CLI syncs -> later timestamp wins on both sides
+    - CLI creates record with figures -> `pc sync` -> web UI Playwright test verifies record appears with figures
+    - Web UI edits record notes -> CLI runs `pc sync` -> CLI `pc show` verifies updated notes
+    - CLI deletes record -> sync -> web UI verifies record gone from main view, appears in trash
+    - Web UI restores record from trash -> CLI syncs -> CLI verifies record is active
+    - Conflict: CLI edits record offline, web UI edits same record, CLI syncs -> later timestamp wins on both sides
 - [ ] Test multi-machine sync simulation: two local databases syncing through Neon with conflict scenarios
 - [ ] Test local-only mode e2e: full workflow without cloud configuration
-- [ ] Verify all 5 data conversion paths with production-like data volume (500+ slides)
+- [ ] Verify all 5 data conversion paths with production-like data volume (500+ records)
 - [ ] Write comprehensive README (setup guide, CLI usage, web UI, architecture)
 - [ ] Final review and update of all memory files
 

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { fetchSlideFileUrl } from "@/lib/file-url";
+import { fetchRecordFileUrl } from "@/lib/file-url";
 
-describe("fetchSlideFileUrl", () => {
+describe("fetchRecordFileUrl", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
@@ -23,7 +23,7 @@ describe("fetchSlideFileUrl", () => {
     }) as typeof globalThis.fetch;
 
     await expect(
-      fetchSlideFileUrl("20260309-aabbccdd", "figures", "figure.png")
+      fetchRecordFileUrl("20260309-aabbccdd", "figures", "figure.png")
     ).resolves.toBe("https://signed.example.com/figure.png");
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -39,7 +39,7 @@ describe("fetchSlideFileUrl", () => {
     }) as typeof globalThis.fetch;
 
     await expect(
-      fetchSlideFileUrl("20260309-aabbccdd", "data", "results.csv")
+      fetchRecordFileUrl("20260309-aabbccdd", "data", "results.csv")
     ).rejects.toThrow("Failed to resolve data file: 404");
   });
 
@@ -50,7 +50,7 @@ describe("fetchSlideFileUrl", () => {
     }) as typeof globalThis.fetch;
 
     await expect(
-      fetchSlideFileUrl("20260309-aabbccdd", "figures", "figure.png")
+      fetchRecordFileUrl("20260309-aabbccdd", "figures", "figure.png")
     ).rejects.toThrow("Invalid figures file URL response");
   });
 });

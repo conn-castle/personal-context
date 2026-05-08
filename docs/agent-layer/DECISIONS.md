@@ -30,7 +30,7 @@ A rolling log of important, non-obvious decisions that materially affect future 
 - Decision 2026-03-05 b3c4d5: Figma's fractional indexing for day_order
     Decision: Use Figma's fractional indexing algorithm (Go port) for `day_order` strings.
     Reason: Industry standard for collaborative reordering. Lexicographic sort, only moved item updated.
-    Tradeoffs: String length grows with repeated insertions between same positions; acceptable for 1-2K slides/year.
+    Tradeoffs: String length grows with repeated insertions between same positions; acceptable for 1-2K records/year.
 
 - Decision 2026-03-05 c5d6e7: s3_key stores canonical relative path regardless of mode
     Decision: `s3_key` always stores relative path (e.g., `figures/20250304-a3f2b7e1/loss-curve.png`) whether or not S3 is configured.
@@ -40,10 +40,10 @@ A rolling log of important, non-obvious decisions that materially affect future 
 - Decision 2026-03-05 f1a2b3: last_sync_at captured at sync start
     Decision: Record `last_sync_at` at the beginning of sync (before push), not at the end.
     Reason: Changes made to cloud during sync window would be missed otherwise.
-    Tradeoffs: May re-process some slides on next sync; UPSERT makes this safe.
+    Tradeoffs: May re-process some records on next sync; UPSERT makes this safe.
 
-- Decision 2026-03-05 e1f2a3: Sandboxed iframes for slide HTML rendering
-    Decision: Render slide HTML in sandboxed iframes with `transform: scale()` for 16:9 containers.
+- Decision 2026-03-05 e1f2a3: Sandboxed iframes for record HTML rendering
+    Decision: Render record HTML in sandboxed iframes with `transform: scale()` for 16:9 containers.
     Reason: Arbitrary HTML in main document risks XSS and style leakage, even single-user (agents generate HTML).
     Tradeoffs: Performance cost of iframes; mitigated by virtualization.
 
@@ -55,10 +55,10 @@ A rolling log of important, non-obvious decisions that materially affect future 
 - Decision 2026-03-05 d1e2f3: pc gc resurrection documented, tombstones deferred
     Decision: Document that pc gc should be followed by pc sync on all machines. Tombstone mechanism deferred.
     Reason: Machine A hard-deletes, Machine B could re-push. Tombstones add complexity for an edge case.
-    Tradeoffs: Deleted slides can reappear; documented mitigation sufficient for 1-2 machines.
+    Tradeoffs: Deleted records can reappear; documented mitigation sufficient for 1-2 machines.
 
 - Decision 2026-03-05 f5a6b7: Timestamp tie — edit wins over delete
-    Decision: When updated_at equals deleted_at to microsecond, edit wins and slide is active.
+    Decision: When updated_at equals deleted_at to microsecond, edit wins and record is active.
     Reason: Preserving data is safer than losing it. Deterministic tiebreaker.
     Tradeoffs: Simultaneous delete may not take effect; user can re-delete.
 
@@ -68,7 +68,7 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: Adding new structured metadata requires a schema change; acceptable for a 5-table system.
 
 - Decision 2026-03-05 i5j6k7: Git fields — CLI via metadata.json only, web UI via PATCH
-    Decision: CLI (`pc add`, `pc edit`): `git_remote_url` and `git_hash` come exclusively from `metadata.json` in the input folder. No `--git-remote-url` or `--git-hash` CLI flags. Web UI: edits git fields via `PATCH /api/slides/[id]` — a different interface, not contradictory.
+    Decision: CLI (`pc add`, `pc edit`): `git_remote_url` and `git_hash` come exclusively from `metadata.json` in the input folder. No `--git-remote-url` or `--git-hash` CLI flags. Web UI: edits git fields via `PATCH /api/records/[id]` — a different interface, not contradictory.
     Reason: CLI uses folder-based input (single source of truth per operation). Web UI uses field-level mutation (different interface contract).
     Tradeoffs: Manual CLI users must create `metadata.json` to set git fields; acceptable since these fields are primarily for agent use.
 
@@ -77,9 +77,9 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Reason: Prevents bugs like restore not bumping `updated_at`. Application code cannot forget to set timestamps. Simpler code.
     Tradeoffs: Different trigger syntax per dialect (Postgres BEFORE UPDATE, SQLite AFTER UPDATE). SQLite gets millisecond precision vs microsecond in Postgres; sufficient for single-user.
 
-- Decision 2026-03-05 k9l0m1: Slide ID uses 8 hex chars (not 4)
-    Decision: Slide ID format is `{YYYYMMDD}-{8-random-hex}` (e.g., `20250304-a3f2b7e1`). Changed from 4 hex chars before any data was persisted.
-    Reason: 4 hex chars (65,536 per day) has ~50% collision probability over 10 years at 5 slides/day (birthday paradox). 8 hex chars (4.3 billion per day) makes collisions effectively impossible. ID is the primary sync/import key — collision is catastrophic.
+- Decision 2026-03-05 k9l0m1: Record ID uses 8 hex chars (not 4)
+    Decision: Record ID format is `{YYYYMMDD}-{8-random-hex}` (e.g., `20250304-a3f2b7e1`). Changed from 4 hex chars before any data was persisted.
+    Reason: 4 hex chars (65,536 per day) has ~50% collision probability over 10 years at 5 records/day (birthday paradox). 8 hex chars (4.3 billion per day) makes collisions effectively impossible. ID is the primary sync/import key — collision is catastrophic.
     Tradeoffs: IDs are 4 chars longer; still human-readable and filesystem-safe.
 
 - Decision 2026-03-05 l1m2n3: AWS credentials in ~/.aws/credentials [personal-context] profile
@@ -89,7 +89,7 @@ A rolling log of important, non-obvious decisions that materially affect future 
 
 - Decision 2026-03-05 m3n4o5: Two-tier data integrity guarantee
     Decision: Full lossless guarantee for Local ↔ Cloud sync (all fields, all figures, all data files). Narrowed guarantee for git export paths: all database fields and figures lossless, data file *references* preserved but binary content requires S3.
-    Reason: Data files stay in S3 only (not in git export). Git export is for slide content backup. Full recovery = git clone + S3.
+    Reason: Data files stay in S3 only (not in git export). Git export is for record content backup. Full recovery = git clone + S3.
     Tradeoffs: `pc restore-db` from git alone cannot recover data file binaries; documented and acceptable.
 
 - Decision 2026-03-05 o7p8q9: S3 _version updated write-after with retry
@@ -104,11 +104,11 @@ A rolling log of important, non-obvious decisions that materially affect future 
 
 - Decision 2026-03-05 t7u8v9: Sync cursors use >= with millisecond precision
     Decision: All sync and polling cursors use `>=` (not strict `>`). Effective timestamp precision is millisecond everywhere — Postgres microsecond timestamps truncated to ms when syncing to SQLite.
-    Reason: Strict `>` can miss boundary updates when `last_sync_at` equals a slide's `updated_at`. Precision mismatch between Postgres (microsecond) and SQLite (millisecond) causes comparison drift. `>=` with idempotent UPSERT is safe — at most one redundant re-process per sync.
-    Tradeoffs: Marginal re-processing cost (one slide per sync cycle); negligible for single-user.
+    Reason: Strict `>` can miss boundary updates when `last_sync_at` equals a record's `updated_at`. Precision mismatch between Postgres (microsecond) and SQLite (millisecond) causes comparison drift. `>=` with idempotent UPSERT is safe — at most one redundant re-process per sync.
+    Tradeoffs: Marginal re-processing cost (one record per sync cycle); negligible for single-user.
 
 - Decision 2026-03-05 u9v0w1: Figure references in HTML use relative paths
-    Decision: `html_content` references figures as `figures/{filename}` (relative, no slide_id). Each rendering context resolves: web UI rewrites to presigned URLs; git export matches naturally (`./figures/{filename}` relative to slide folder). `pc add`/`pc edit` validate that every `figures/` src has a matching file.
+    Decision: `html_content` references figures as `figures/{filename}` (relative, no record_id). Each rendering context resolves: web UI rewrites to presigned URLs; git export matches naturally (`./figures/{filename}` relative to record folder). `pc add`/`pc edit` validate that every `figures/` src has a matching file.
     Reason: Standard HTML with relative paths. No custom protocol for agents to learn. Natural fit for git export structure.
     Tradeoffs: Requires per-context resolution logic; trivial (URL rewriting in iframe, validation in CLI).
 
@@ -153,12 +153,12 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: Two new config fields that most users won't need; `omitempty` keeps them invisible in default configs.
 
 - Decision 2026-03-09 p7q8r9: Cloud-rooted exports use local seeded templates
-    Decision: `pc export --from-cloud` and `pc verify --from-cloud` read slides/figures from Postgres + S3, but template files from the local seeded template set.
+    Decision: `pc export --from-cloud` and `pc verify --from-cloud` read records/figures from Postgres + S3, but template files from the local seeded template set.
     Reason: Templates are not part of the current cloud sync contract, yet cloud-rooted exports and round-trip verification still need deterministic `templates/*.html` output for the git snapshot format.
     Tradeoffs: Cloud-rooted export assumes the local setup has the canonical builtin templates. If templates become user-editable later, template sync/export semantics must be revisited.
 
 - Decision 2026-03-09 r1s2t3: Metadata-only cloud sync for git-restored data files
-    Decision: When a local slide has a data-file row but no local binary, `pc sync` still creates or updates the cloud metadata row if the S3 key is unchanged (or the row is new). Changing the S3 key without a local binary still fails.
+    Decision: When a local record has a data-file row but no local binary, `pc sync` still creates or updates the cloud metadata row if the S3 key is unchanged (or the row is new). Changing the S3 key without a local binary still fails.
     Reason: `pc restore-db` and `pc import` intentionally preserve data-file references without binaries. The Tier 2 restore paths need a later sync to recreate database state in a fresh cloud without inventing fake file content.
     Tradeoffs: Cloud metadata can temporarily reference an object that is absent from the bucket until the binary is restored from the original S3 source or re-uploaded from disk. Sync remains strict for S3 key changes because there is no safe object to point at.
 
@@ -179,7 +179,7 @@ A rolling log of important, non-obvious decisions that materially affect future 
 
 - Decision 2026-05-07 v9w0x1: sync_version is per-user with tenant-scoped S3 version objects
     Decision: In cloud mode, `sync_version` is keyed by `user_id` and S3 version objects live under `users/{user_id}/_version`; SQLite remains a local singleton. Shared template changes create or bump every existing user's `sync_version` row.
-    Reason: Multi-user cloud mode needs each user's polling cursor to advance only for that user's slide mutations while preserving the simple single-version polling model within each tenant. Templates are shared, so every existing user's cursor must advance when templates change, including users who have not yet made slide mutations.
+    Reason: Multi-user cloud mode needs each user's polling cursor to advance only for that user's record mutations while preserving the simple single-version polling model within each tenant. Templates are shared, so every existing user's cursor must advance when templates change, including users who have not yet made record mutations.
     Tradeoffs: Fresh cloud bootstrap must create users/auth tables before API keys can be generated, and all cloud callers must carry user scope into Postgres and S3. Template changes touch all users; a separate shared-resource cursor would scale better for frequent template edits but would require widening the client polling contract.
 
 - Decision 2026-03-09 x9y0z1: react-resizable-panels v4 sizes must use string percentages
@@ -198,14 +198,14 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: Visual tests will fail in Linux CI until Linux baselines are generated. `maxDiffPixelRatio: 0.02` tolerates minor rendering differences.
 
 - Decision 2026-03-09 w1x2y3: v0.dev UI adopted as canonical frontend, adapted for real types
-    Decision: Replaced hand-built UI components with v0.dev reference design components. Adapted `Slide` type to `SlideSummary`/`SlideDetail` split. All hook orchestration lives in `SpreadsheetViewer`, not `page.tsx`. `resizable.tsx` wraps react-resizable-panels v4 API with v2-style `direction` prop for shadcn compatibility.
-    Reason: User required visual parity with v0.dev reference. v0.dev used a single `Slide` type with mock data; our real backend uses `SlideSummary` (list) and `SlideDetail` (selected). The v4 API renames `PanelGroup`→`Group`, `PanelResizeHandle`→`Separator`, `direction`→`orientation`.
-    Tradeoffs: v0.dev ScaledSlideFrame lost figure URL resolution (moved to iframe rendering context). NotesEditor doesn't key on slideId (editing state may persist across slide changes — tracked in ISSUES.md).
+    Decision: Replaced hand-built UI components with v0.dev reference design components. Adapted `Record` type to `RecordSummary`/`RecordDetail` split. All hook orchestration lives in `SpreadsheetViewer`, not `page.tsx`. `resizable.tsx` wraps react-resizable-panels v4 API with v2-style `direction` prop for shadcn compatibility.
+    Reason: User required visual parity with v0.dev reference. v0.dev used a single `Record` type with mock data; our real backend uses `RecordSummary` (list) and `RecordDetail` (selected). The v4 API renames `PanelGroup`→`Group`, `PanelResizeHandle`→`Separator`, `direction`→`orientation`.
+    Tradeoffs: v0.dev ScaledRecordFrame lost figure URL resolution (moved to iframe rendering context). NotesEditor doesn't key on recordId (editing state may persist across record changes — tracked in ISSUES.md).
 
-- Decision 2026-03-10 x3y4z5a: html_content included in SlideSummary for thumbnail rendering
-    Decision: Keep nullable `html_content` on `SlideSummary` for `GET /api/slides` and `GET /api/sync/changes`; thumbnails render HTML in `ScaledSlideFrame` only when non-null and use a notes/data fallback when null.
-    Reason: v0.dev reference renders thumbnails from actual HTML, while Castle Vault records may legitimately omit `slide.html`. With 20 slides per page, the additional payload remains manageable.
-    Tradeoffs: Larger API responses. If slide HTML grows very large (100KB+), consider a separate thumbnail content endpoint or server-side thumbnail generation.
+- Decision 2026-03-10 x3y4z5a: html_content included in RecordSummary for thumbnail rendering
+    Decision: Keep nullable `html_content` on `RecordSummary` for `GET /api/records` and `GET /api/sync/changes`; thumbnails render HTML in `ScaledRecordFrame` only when non-null and use a notes/data fallback when null.
+    Reason: v0.dev reference renders thumbnails from actual HTML, while Castle Vault records may legitimately omit `record.html`. With 20 records per page, the additional payload remains manageable.
+    Tradeoffs: Larger API responses. If record HTML grows very large (100KB+), consider a separate thumbnail content endpoint or server-side thumbnail generation.
 
 - Decision 2026-03-10 y5z6a7a: react-markdown + remark-gfm + mermaid for notes rendering
     Decision: Replaced custom inline MarkdownRenderer with `react-markdown` + `remark-gfm` + `mermaid` library. Mermaid code blocks are detected and rendered as SVG diagrams client-side.
@@ -223,11 +223,11 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: Credentials provider requires password hashing and storage (security surface). Auth tables are Postgres-only (no SQLite equivalent needed — local mode has no users). S3 keys gain a `users/{user_id}/` prefix, requiring migration logic if data exists pre-auth.
 
 - Decision 2026-05-07 b4c5d6: Records require registry provenance and optional HTML
-    Decision: Records may omit `slide.html` (`html_content = NULL`), but every record must carry explicit registered `project_id` and `source_device_id`; `active_project` config is ignored by write paths.
+    Decision: Records may omit `record.html` (`html_content = NULL`), but every record must carry explicit registered `project_id` and `source_device_id`; `active_project` config is ignored by write paths.
     Reason: Notes/data-first vault records need to round-trip without fabricated HTML while retaining auditable provenance across SQLite, Postgres, sync, and git export/import.
     Tradeoffs: Existing folders and scripts must register/pass project and device values explicitly; this removes convenient hidden assignment but prevents silent misclassification.
 
 - Decision 2026-05-07 c6d7e8: Source-available noncommercial release license
-    Decision: License Personal Context under PolyForm Noncommercial 1.0.0 (`PolyForm-Noncommercial-1.0.0`) and describe the Homebrew formula as `Personal structured vault for searchable knowledge, data, files, and slides`.
+    Decision: License Personal Context under PolyForm Noncommercial 1.0.0 (`PolyForm-Noncommercial-1.0.0`) and describe the Homebrew formula as `Personal structured vault for searchable knowledge, data, files, and records`.
     Reason: The repo is public for Homebrew releases, but the owner wants to retain commercial rights and prevent third-party commercial use without separate permission.
     Tradeoffs: This is source-available, not open source by OSI criteria; some package ecosystems and commercial users may reject or require legal review before use.

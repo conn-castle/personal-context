@@ -99,14 +99,14 @@ describe("S3 utilities", () => {
 
     it("generates a presigned URL with default expiry and user prefix", async () => {
       mockGetSignedUrl.mockResolvedValue("https://signed.example.com/key");
-      const result = await getPresignedUrl("figures/slide-1/image.png", userId);
+      const result = await getPresignedUrl("figures/record-1/image.png", userId);
       expect(result.url).toBe("https://signed.example.com/key");
       expect(result.expires_at).toBeDefined();
       const expiresAt = new Date(result.expires_at).getTime();
       expect(expiresAt).toBeGreaterThan(Date.now());
       expect(mockGetSignedUrl).toHaveBeenCalledWith(
         expect.anything(),
-        expect.objectContaining({ Key: "users/test-user-id/figures/slide-1/image.png" }),
+        expect.objectContaining({ Key: "users/test-user-id/figures/record-1/image.png" }),
         expect.anything()
       );
     });

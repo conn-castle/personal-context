@@ -440,7 +440,7 @@ func withMutationProvenance(t *testing.T, homeDir string, userHome string, args 
 	return withProvenance
 }
 
-func ensureEditMetadata(t *testing.T, homeDir string, userHome string, slideID string, inputDir string) {
+func ensureEditMetadata(t *testing.T, homeDir string, userHome string, recordID string, inputDir string) {
 	t.Helper()
 	metadataPath := filepath.Join(inputDir, "metadata.json")
 	if _, err := os.Stat(metadataPath); err == nil {
@@ -448,10 +448,10 @@ func ensureEditMetadata(t *testing.T, homeDir string, userHome string, slideID s
 	} else if err != nil && !os.IsNotExist(err) {
 		t.Fatalf("stat edit metadata: %v", err)
 	}
-	slide := getSlideJSON(t, homeDir, userHome, slideID)
+	record := getRecordJSON(t, homeDir, userHome, recordID)
 	raw, err := json.MarshalIndent(map[string]string{
-		"project_id":       slide.ProjectID,
-		"source_device_id": slide.SourceDeviceID,
+		"project_id":       record.ProjectID,
+		"source_device_id": record.SourceDeviceID,
 	}, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal edit metadata: %v", err)
@@ -509,11 +509,11 @@ func runPCFailure(t *testing.T, homeDir string, userHome string, args ...string)
 	return result.Stderr
 }
 
-// backdateSlideCloud sets a slide's updated_at in Postgres to 5 seconds earlier
+// backdateRecordCloud sets a record's updated_at in Postgres to 5 seconds earlier
 // than its current value. This makes conflict-resolution tests deterministic by
-// ensuring that a later edit against the same slide has an unambiguously later
+// ensuring that a later edit against the same record has an unambiguously later
 // timestamp, without relying on time.Sleep.
-func backdateSlideCloud(t *testing.T, neonURL string, slideID string) {
+func backdateRecordCloud(t *testing.T, neonURL string, recordID string) {
 	t.Helper()
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, neonURL)
@@ -522,9 +522,9 @@ func backdateSlideCloud(t *testing.T, neonURL string, slideID string) {
 	}
 	defer pool.Close()
 	if _, err := pool.Exec(ctx,
-		"UPDATE slides SET updated_at = updated_at - interval '5 seconds' WHERE id = $1",
-		slideID); err != nil {
-		t.Fatalf("backdate cloud updated_at for %s: %v", slideID, err)
+		"UPDATE records SET updated_at = updated_at - interval '5 seconds' WHERE id = $1",
+		recordID); err != nil {
+		t.Fatalf("backdate cloud updated_at for %s: %v", recordID, err)
 	}
 }
 
@@ -559,8 +559,8 @@ func createInputFolder(t *testing.T, htmlContent string, notes string, figures m
 	if htmlContent == "" {
 		htmlContent = "<html><body>Test</body></html>"
 	}
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte(htmlContent), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte(htmlContent), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	if notes != "" {
 		if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte(notes), 0o644); err != nil {
@@ -602,13 +602,13 @@ type showJSON struct {
 	SourceDeviceID string `json:"source_device_id"`
 }
 
-// getSlideJSON runs `pc show --format json` and parses the output.
-func getSlideJSON(t *testing.T, homeDir string, userHome string, slideID string) showJSON {
+// getRecordJSON runs `pc show --format json` and parses the output.
+func getRecordJSON(t *testing.T, homeDir string, userHome string, recordID string) showJSON {
 	t.Helper()
-	stdout := runPCSuccess(t, homeDir, userHome, "show", "--format", "json", slideID)
+	stdout := runPCSuccess(t, homeDir, userHome, "show", "--format", "json", recordID)
 	var s showJSON
 	if err := json.Unmarshal([]byte(stdout), &s); err != nil {
-		t.Fatalf("parse show json for %s: %v\nraw: %s", slideID, err, stdout)
+		t.Fatalf("parse show json for %s: %v\nraw: %s", recordID, err, stdout)
 	}
 	return s
 }

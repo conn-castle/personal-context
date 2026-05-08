@@ -88,12 +88,12 @@ func TestAddUsesExplicitMetadataProjectAndDevice(t *testing.T) {
 		MetadataJSON: `{"project_id":"alpha","source_device_id":"laptop"}`,
 	})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	db := openTestDB(t, homeDir)
 	var projectID string
 	var deviceID string
-	if err := db.QueryRow("SELECT project_id, source_device_id FROM slides WHERE id = ?", slideID).Scan(&projectID, &deviceID); err != nil {
+	if err := db.QueryRow("SELECT project_id, source_device_id FROM records WHERE id = ?", recordID).Scan(&projectID, &deviceID); err != nil {
 		t.Fatalf("query provenance: %v", err)
 	}
 	if projectID != "alpha" || deviceID != "laptop" {
@@ -135,17 +135,17 @@ func TestStaleActiveProjectConfigIsIgnored(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	db := openTestDB(t, homeDir)
-	if _, err := db.Exec(`UPDATE slides SET project_id = project_id WHERE 1 = 0`); err != nil {
+	if _, err := db.Exec(`UPDATE records SET project_id = project_id WHERE 1 = 0`); err != nil {
 		t.Fatalf("database sanity check: %v", err)
 	}
 	writeStaleActiveProjectConfig(t, homeDir)
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	var projectID string
-	if err := db.QueryRow("SELECT project_id FROM slides WHERE id = ?", slideID).Scan(&projectID); err != nil {
+	if err := db.QueryRow("SELECT project_id FROM records WHERE id = ?", recordID).Scan(&projectID); err != nil {
 		t.Fatalf("query project_id: %v", err)
 	}
 	if projectID != "test/default-project" {

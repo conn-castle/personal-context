@@ -19,19 +19,19 @@ func writeFakeChromeScript(t *testing.T, content string) string {
 	return scriptPath
 }
 
-func TestBuildSlideHTML_FullDocument(t *testing.T) {
+func TestBuildRecordHTML_FullDocument(t *testing.T) {
 	// A full HTML document should be returned as-is.
 	full := `<!DOCTYPE html><html><head></head><body><h1>Hello</h1></body></html>`
-	got := buildSlideHTML(full)
+	got := buildRecordHTML(full)
 	if got != full {
 		t.Errorf("expected full document to pass through unchanged, got %d bytes", len(got))
 	}
 }
 
-func TestBuildSlideHTML_Fragment(t *testing.T) {
+func TestBuildRecordHTML_Fragment(t *testing.T) {
 	// A fragment should be wrapped in a 1920x1080 document.
 	frag := `<h1>Hello</h1>`
-	got := buildSlideHTML(frag)
+	got := buildRecordHTML(frag)
 	if got == frag {
 		t.Error("expected fragment to be wrapped, got unchanged")
 	}
@@ -48,7 +48,7 @@ func TestBuildSlideHTML_Fragment(t *testing.T) {
 	}
 }
 
-func TestBuildSlideHTML_HTMLTagVariants(t *testing.T) {
+func TestBuildRecordHTML_HTMLTagVariants(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -63,7 +63,7 @@ func TestBuildSlideHTML_HTMLTagVariants(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildSlideHTML(tt.input)
+			got := buildRecordHTML(tt.input)
 			wrapped := got != tt.input
 			if wrapped != tt.wrap {
 				t.Errorf("wrapped=%v, want %v", wrapped, tt.wrap)
@@ -148,7 +148,7 @@ func TestScreenshotCommand_NotFound(t *testing.T) {
 	cmd.SetArgs([]string{"nonexistent-id"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for nonexistent slide")
+		t.Fatal("expected error for nonexistent record")
 	}
 	// Should mention "not found" — but might fail at Chrome detection first.
 	// Either error is acceptable in a unit test.
@@ -187,21 +187,21 @@ func TestScreenshotHappyPath(t *testing.T) {
 
 	homeDir := setupEnv(t)
 
-	// Create a slide via the add command.
-	slideDir := t.TempDir()
-	htmlPath := filepath.Join(slideDir, "slide.html")
+	// Create a record via the add command.
+	recordDir := t.TempDir()
+	htmlPath := filepath.Join(recordDir, "record.html")
 	if err := os.WriteFile(htmlPath, []byte(`<!DOCTYPE html><html><body><h1>Test</h1></body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeDefaultProvenanceMetadata(t, slideDir)
+	writeDefaultProvenanceMetadata(t, recordDir)
 
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", slideDir})
+	addCmd.SetArgs([]string{"add", recordDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
 	// Take a screenshot with explicit output.
 	outDir := t.TempDir()
@@ -209,7 +209,7 @@ func TestScreenshotHappyPath(t *testing.T) {
 
 	var ssOut bytes.Buffer
 	ssCmd := NewRootCommand(RootCommandOptions{Stdout: &ssOut, Stderr: &bytes.Buffer{}})
-	ssCmd.SetArgs([]string{"screenshot", slideID, "--output", outFile})
+	ssCmd.SetArgs([]string{"screenshot", recordID, "--output", outFile})
 	if err := ssCmd.Execute(); err != nil {
 		t.Fatalf("screenshot: %v (homeDir=%s)", err, homeDir)
 	}
@@ -274,31 +274,31 @@ printf 'fake png' > "$out"
 
 	setupEnv(t)
 
-	slideDir := t.TempDir()
-	figuresDir := filepath.Join(slideDir, "figures")
+	recordDir := t.TempDir()
+	figuresDir := filepath.Join(recordDir, "figures")
 	if err := os.MkdirAll(figuresDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(figuresDir, "chart.png"), []byte("chart"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(slideDir, "slide.html"), []byte(`<!DOCTYPE html><html><body><img src="figures/chart.png" alt="chart"></body></html>`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(recordDir, "record.html"), []byte(`<!DOCTYPE html><html><body><img src="figures/chart.png" alt="chart"></body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeDefaultProvenanceMetadata(t, slideDir)
+	writeDefaultProvenanceMetadata(t, recordDir)
 
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", slideDir})
+	addCmd.SetArgs([]string{"add", recordDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
 	outputPath := filepath.Join(t.TempDir(), "relative-figure.png")
 	var screenshotOut bytes.Buffer
 	screenshotCmd := NewRootCommand(RootCommandOptions{Stdout: &screenshotOut, Stderr: &bytes.Buffer{}})
-	screenshotCmd.SetArgs([]string{"screenshot", slideID, "--output", outputPath})
+	screenshotCmd.SetArgs([]string{"screenshot", recordID, "--output", outputPath})
 	if err := screenshotCmd.Execute(); err != nil {
 		t.Fatalf("screenshot with relative figure path: %v", err)
 	}
@@ -317,21 +317,21 @@ func TestScreenshotDefaultOutput(t *testing.T) {
 
 	setupEnv(t)
 
-	// Create a slide.
-	slideDir := t.TempDir()
-	htmlPath := filepath.Join(slideDir, "slide.html")
+	// Create a record.
+	recordDir := t.TempDir()
+	htmlPath := filepath.Join(recordDir, "record.html")
 	if err := os.WriteFile(htmlPath, []byte(`<!DOCTYPE html><html><body><h1>Default Output</h1></body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeDefaultProvenanceMetadata(t, slideDir)
+	writeDefaultProvenanceMetadata(t, recordDir)
 
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", slideDir})
+	addCmd.SetArgs([]string{"add", recordDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
 	// Take a screenshot with no --output flag (defaults to <id>.png in cwd).
 	// Change to a temp dir so we don't pollute the working directory.
@@ -344,12 +344,12 @@ func TestScreenshotDefaultOutput(t *testing.T) {
 
 	var ssOut bytes.Buffer
 	ssCmd := NewRootCommand(RootCommandOptions{Stdout: &ssOut, Stderr: &bytes.Buffer{}})
-	ssCmd.SetArgs([]string{"screenshot", slideID})
+	ssCmd.SetArgs([]string{"screenshot", recordID})
 	if err := ssCmd.Execute(); err != nil {
 		t.Fatalf("screenshot (default output): %v", err)
 	}
 
-	defaultFile := filepath.Join(tmpCwd, slideID+".png")
+	defaultFile := filepath.Join(tmpCwd, recordID+".png")
 	if _, err := os.Stat(defaultFile); err != nil {
 		t.Fatalf("default output file not created: %v", err)
 	}
@@ -396,26 +396,26 @@ func TestScreenshotChromeFailure(t *testing.T) {
 
 	setupEnv(t)
 
-	// Create a slide.
-	slideDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(slideDir, "slide.html"), []byte(`<html><body>Test</body></html>`), 0o644); err != nil {
+	// Create a record.
+	recordDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(recordDir, "record.html"), []byte(`<html><body>Test</body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeDefaultProvenanceMetadata(t, slideDir)
-	writeDefaultProvenanceMetadata(t, slideDir)
-	writeDefaultProvenanceMetadata(t, slideDir)
+	writeDefaultProvenanceMetadata(t, recordDir)
+	writeDefaultProvenanceMetadata(t, recordDir)
+	writeDefaultProvenanceMetadata(t, recordDir)
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", slideDir})
+	addCmd.SetArgs([]string{"add", recordDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
 	// Try to screenshot — should fail because fake Chrome can't render.
 	var ssOut bytes.Buffer
 	ssCmd := NewRootCommand(RootCommandOptions{Stdout: &ssOut, Stderr: &bytes.Buffer{}})
-	ssCmd.SetArgs([]string{"screenshot", slideID, "--output", filepath.Join(t.TempDir(), "fail.png")})
+	ssCmd.SetArgs([]string{"screenshot", recordID, "--output", filepath.Join(t.TempDir(), "fail.png")})
 	if err := ssCmd.Execute(); err == nil {
 		t.Fatal("expected error from fake Chrome binary")
 	}
@@ -441,16 +441,16 @@ func TestScreenshotOpenStackError(t *testing.T) {
 }
 
 func TestScreenshotDBCorrupted(t *testing.T) {
-	// Covers the non-ErrNotFound error path in GetSlideByID.
+	// Covers the non-ErrNotFound error path in GetRecordByID.
 	homeDir := setupEnv(t)
-	corruptTable(t, homeDir, "slides")
+	corruptTable(t, homeDir, "records")
 
 	var ssOut bytes.Buffer
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &ssOut, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"screenshot", "some-id"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when slides table is corrupted")
+		t.Fatal("expected error when records table is corrupted")
 	}
 }
 
@@ -574,23 +574,23 @@ func TestScreenshotTempDirError(t *testing.T) {
 
 	homeDir := setupEnv(t)
 
-	// Create a slide.
-	slideDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(slideDir, "slide.html"), []byte(`<html><body>Test</body></html>`), 0o644); err != nil {
+	// Create a record.
+	recordDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(recordDir, "record.html"), []byte(`<html><body>Test</body></html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeDefaultProvenanceMetadata(t, slideDir)
+	writeDefaultProvenanceMetadata(t, recordDir)
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", slideDir})
+	addCmd.SetArgs([]string{"add", recordDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
 	var ssOut bytes.Buffer
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &ssOut, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"screenshot", slideID, "--output", filepath.Join(t.TempDir(), "out.png")})
+	cmd.SetArgs([]string{"screenshot", recordID, "--output", filepath.Join(t.TempDir(), "out.png")})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error when TMPDIR is not writable")
@@ -777,15 +777,15 @@ func TestPrepareScreenshotWorkspace_WithAssets(t *testing.T) {
 	dataRoot := t.TempDir()
 
 	// Create figures/<id>/chart.png and data/<id>/file.csv
-	slideID := "test-slide-123"
-	figDir := filepath.Join(dataRoot, "figures", slideID)
+	recordID := "test-record-123"
+	figDir := filepath.Join(dataRoot, "figures", recordID)
 	if err := os.MkdirAll(figDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(figDir, "chart.png"), []byte("png"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	dataDir := filepath.Join(dataRoot, "data", slideID)
+	dataDir := filepath.Join(dataRoot, "data", recordID)
 	if err := os.MkdirAll(dataDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -793,7 +793,7 @@ func TestPrepareScreenshotWorkspace_WithAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	htmlPath, cleanup, err := prepareScreenshotWorkspace(slideID, "<html>test</html>", dataRoot)
+	htmlPath, cleanup, err := prepareScreenshotWorkspace(recordID, "<html>test</html>", dataRoot)
 	if err != nil {
 		t.Fatalf("prepareScreenshotWorkspace: %v", err)
 	}
@@ -816,9 +816,9 @@ func TestPrepareScreenshotWorkspace_StatError(t *testing.T) {
 	// Create a figures directory that we can't stat into by removing permissions
 	// on the parent (figures/<id> stat would require reading the figures dir).
 	dataRoot := t.TempDir()
-	slideID := "test-id"
+	recordID := "test-id"
 	figDir := filepath.Join(dataRoot, "figures")
-	if err := os.MkdirAll(filepath.Join(figDir, slideID), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(figDir, recordID), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// Make the figures dir unreadable so Stat on figures/<id> fails with permission error.
@@ -827,7 +827,7 @@ func TestPrepareScreenshotWorkspace_StatError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(figDir, 0o755) })
 
-	_, _, err := prepareScreenshotWorkspace(slideID, "<html>test</html>", dataRoot)
+	_, _, err := prepareScreenshotWorkspace(recordID, "<html>test</html>", dataRoot)
 	if err == nil {
 		t.Fatal("expected error when figures dir is unreadable")
 	}
@@ -840,8 +840,8 @@ func TestPrepareScreenshotWorkspace_LinkOrCopyError(t *testing.T) {
 	// Create a valid source dir but make the temp dir unwritable to cause
 	// both symlink and copy to fail.
 	dataRoot := t.TempDir()
-	slideID := "test-id"
-	figDir := filepath.Join(dataRoot, "figures", slideID)
+	recordID := "test-id"
+	figDir := filepath.Join(dataRoot, "figures", recordID)
 	if err := os.MkdirAll(figDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -879,17 +879,17 @@ func TestPrepareScreenshotWorkspace_LinkOrCopyError(t *testing.T) {
 func TestPrepareScreenshotWorkspace_AssetIsFile(t *testing.T) {
 	// If figures/<id> is a file (not a dir), it should be skipped.
 	dataRoot := t.TempDir()
-	slideID := "test-id"
+	recordID := "test-id"
 	figDir := filepath.Join(dataRoot, "figures")
 	if err := os.MkdirAll(figDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// Create figures/<id> as a file, not a directory.
-	if err := os.WriteFile(filepath.Join(figDir, slideID), []byte("not a dir"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(figDir, recordID), []byte("not a dir"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	htmlPath, cleanup, err := prepareScreenshotWorkspace(slideID, "<html>test</html>", dataRoot)
+	htmlPath, cleanup, err := prepareScreenshotWorkspace(recordID, "<html>test</html>", dataRoot)
 	if err != nil {
 		t.Fatalf("prepareScreenshotWorkspace: %v", err)
 	}

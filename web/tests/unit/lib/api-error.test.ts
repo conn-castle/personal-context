@@ -16,11 +16,11 @@ describe("API error helpers", () => {
   });
 
   it("notFound returns 404 with NOT_FOUND code", async () => {
-    const res = notFound("slide not found");
+    const res = notFound("record not found");
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.code).toBe("NOT_FOUND");
-    expect(body.error).toBe("slide not found");
+    expect(body.error).toBe("record not found");
   });
 
   it("badRequest returns 400 with BAD_REQUEST code", async () => {

@@ -11,7 +11,7 @@ func TestDoctorHealthySystem(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	// Add a slide with a figure so there is actual data to check
+	// Add a record with a figure so there is actual data to check
 	inputDir := createInputFolder(t, inputFolderOpts{
 		HTMLContent: `<html><img src="figures/plot.png"></html>`,
 		Figures:     map[string][]byte{"plot.png": []byte("fake-png-data")},
@@ -55,25 +55,25 @@ func TestDoctorOrphanedFigures(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	// Add a slide with a figure
+	// Add a record with a figure
 	inputDir := createInputFolder(t, inputFolderOpts{
 		HTMLContent: `<html><img src="figures/fig.png"></html>`,
 		Figures:     map[string][]byte{"fig.png": []byte("figure-data")},
 	})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
-	// Hard-delete the slide via direct SQL, leaving figure on disk
+	// Hard-delete the record via direct SQL, leaving figure on disk
 	db := openTestDB(t, homeDir)
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		t.Fatalf("enable foreign keys: %v", err)
 	}
-	if _, err := db.Exec("DELETE FROM slides WHERE id = ?", slideID); err != nil {
-		t.Fatalf("hard delete slide: %v", err)
+	if _, err := db.Exec("DELETE FROM records WHERE id = ?", recordID); err != nil {
+		t.Fatalf("hard delete record: %v", err)
 	}
 
 	// Verify figure dir still exists on disk
-	figDir := filepath.Join(homeDir, "personal-context", "figures", slideID)
+	figDir := filepath.Join(homeDir, "personal-context", "figures", recordID)
 	if _, err := os.Stat(figDir); err != nil {
 		t.Fatalf("expected figure dir to remain after SQL delete: %v", err)
 	}
@@ -85,8 +85,8 @@ func TestDoctorOrphanedFigures(t *testing.T) {
 	if !strings.Contains(result.Stdout, "Orphaned figures:   WARN") {
 		t.Fatalf("expected orphaned figures warning, got %q", result.Stdout)
 	}
-	if !strings.Contains(result.Stdout, slideID) {
-		t.Fatalf("expected slide ID %s in orphan warning, got %q", slideID, result.Stdout)
+	if !strings.Contains(result.Stdout, recordID) {
+		t.Fatalf("expected record ID %s in orphan warning, got %q", recordID, result.Stdout)
 	}
 }
 
@@ -94,16 +94,16 @@ func TestDoctorMissingFigureFiles(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	// Add a slide with a figure
+	// Add a record with a figure
 	inputDir := createInputFolder(t, inputFolderOpts{
 		HTMLContent: `<html><img src="figures/fig.png"></html>`,
 		Figures:     map[string][]byte{"fig.png": []byte("figure-data")},
 	})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	// Delete the figure file from disk but leave DB record
-	figurePath := filepath.Join(homeDir, "personal-context", "figures", slideID, "fig.png")
+	figurePath := filepath.Join(homeDir, "personal-context", "figures", recordID, "fig.png")
 	if err := os.Remove(figurePath); err != nil {
 		t.Fatalf("remove figure file: %v", err)
 	}
@@ -115,12 +115,12 @@ func TestDoctorMissingFigureFiles(t *testing.T) {
 	if !strings.Contains(result.Stdout, "Missing figures:    WARN") {
 		t.Fatalf("expected missing figures warning, got %q", result.Stdout)
 	}
-	if !strings.Contains(result.Stdout, slideID+"/fig.png") {
-		t.Fatalf("expected slide/figure path in warning, got %q", result.Stdout)
+	if !strings.Contains(result.Stdout, recordID+"/fig.png") {
+		t.Fatalf("expected record/figure path in warning, got %q", result.Stdout)
 	}
 }
 
-func TestDoctorMissingFigureFilesOnDeletedSlide(t *testing.T) {
+func TestDoctorMissingFigureFilesOnDeletedRecord(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
@@ -129,32 +129,32 @@ func TestDoctorMissingFigureFilesOnDeletedSlide(t *testing.T) {
 		Figures:     map[string][]byte{"fig.png": []byte("figure-data")},
 	})
 	stdout := runPCSuccess(t, homeDir, "add", inputDir)
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
-	runPCSuccess(t, homeDir, "delete", slideID)
+	runPCSuccess(t, homeDir, "delete", recordID)
 
-	figurePath := filepath.Join(homeDir, "personal-context", "figures", slideID, "fig.png")
+	figurePath := filepath.Join(homeDir, "personal-context", "figures", recordID, "fig.png")
 	if err := os.Remove(figurePath); err != nil {
 		t.Fatalf("remove figure file: %v", err)
 	}
 
 	result := runPC(t, homeDir, "doctor")
 	if result.ExitCode == 0 {
-		t.Fatalf("expected non-zero exit code for missing deleted-slide figure\nstdout: %s", result.Stdout)
+		t.Fatalf("expected non-zero exit code for missing deleted-record figure\nstdout: %s", result.Stdout)
 	}
 	if !strings.Contains(result.Stdout, "Missing figures:    WARN") {
 		t.Fatalf("expected missing figures warning, got %q", result.Stdout)
 	}
-	if !strings.Contains(result.Stdout, slideID+"/fig.png") {
-		t.Fatalf("expected slide/figure path in warning, got %q", result.Stdout)
+	if !strings.Contains(result.Stdout, recordID+"/fig.png") {
+		t.Fatalf("expected record/figure path in warning, got %q", result.Stdout)
 	}
 }
 
-func TestDoctorNoSlides(t *testing.T) {
+func TestDoctorNoRecords(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	// No slides added — should be all OK
+	// No records added — should be all OK
 	result := runPC(t, homeDir, "doctor")
 	if result.ExitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d\nstdout: %s\nstderr: %s",

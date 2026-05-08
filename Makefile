@@ -66,7 +66,7 @@ dev: ## Start web UI (auto-detects local vs cloud mode)
 	fi
 
 .PHONY: seed
-seed: cli-build ## Seed tutorial slides (idempotent)
+seed: cli-build ## Seed tutorial records (idempotent)
 	@$(CLI_DIR)/pc seed
 
 .PHONY: dev-local
@@ -210,8 +210,8 @@ web-e2e-smoke: ## Run Playwright smoke test only
 	@cd $(WEB_DIR) && pnpm test:e2e:smoke
 
 .PHONY: web-e2e-browser
-web-e2e-browser: ## Run Slide Browser Playwright e2e tests
-	@cd $(WEB_DIR) && pnpm test:e2e:slide-browser
+web-e2e-browser: ## Run Record Browser Playwright e2e tests
+	@cd $(WEB_DIR) && pnpm test:e2e:record-browser
 
 .PHONY: web-e2e-visual
 web-e2e-visual: ## Run visual regression tests (compare against baselines)

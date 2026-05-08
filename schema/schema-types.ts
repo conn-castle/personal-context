@@ -9,7 +9,7 @@
 //
 // TIMESTAMP MANAGEMENT: created_at and updated_at are DB-managed (defaults +
 // triggers). Sync/import bypasses the trigger by providing explicit values.
-// Slide ID format: {YYYYMMDD}-{8-random-hex} (e.g., 20250304-a3f2b7e1).
+// Record ID format: {YYYYMMDD}-{8-random-hex} (e.g., 20250304-a3f2b7e1).
 //
 // NO title. NO tags. Records may be notes/data-first with no HTML.
 // Project uses slash convention for hierarchy: "org/project".
@@ -38,15 +38,15 @@ interface ApiKey {
 }
 
 // -----------------------------------------------------------------------------
-// Database row types (shared schema — Postgres adds user_id on slides/sync_version)
+// Database row types (shared schema — Postgres adds user_id on records/sync_version)
 // -----------------------------------------------------------------------------
 
-interface Slide {
+interface Record {
   id: string;                // "20250304-a3f2b7e1"
   user_id?: string;          // Postgres only; absent in SQLite
   date: string;              // "2025-03-04" (local calendar date, no timezone)
   day_order: string;         // fractional index, lexicographic sort within date
-  html_content: string | null; // raw HTML; null when slide.html is absent
+  html_content: string | null; // raw HTML; null when record.html is absent
   notes: string | null;      // full markdown, null if no notes
   project_id: string;        // FK to projects.id
   source_device_id: string;  // FK to devices.id
@@ -74,18 +74,18 @@ interface Device {
 
 // Sort key: ORDER BY (date, day_order, id)
 
-interface SlideFigure {
+interface RecordFigure {
   id: number;                // auto-increment PK
-  slide_id: string;          // FK to slides.id, CASCADE delete
+  record_id: string;          // FK to records.id, CASCADE delete
   filename: string;          // "loss-curve.png"
   s3_key: string;            // "figures/20250304-a3f2b7e1/loss-curve.png"
   alt_text: string | null;
   created_at: string;        // ISO 8601 UTC
 }
 
-interface SlideDataFile {
+interface RecordDataFile {
   id: number;                // auto-increment PK
-  slide_id: string;          // FK to slides.id, CASCADE delete
+  record_id: string;          // FK to records.id, CASCADE delete
   filename: string;          // "training-log.csv"
   s3_key: string;            // "data/20250304-a3f2b7e1/training-log.csv"
   size: number;              // bytes
@@ -110,14 +110,14 @@ interface SyncVersion {
 }
 
 // -----------------------------------------------------------------------------
-// JSON export: metadata.json (per slide)
+// JSON export: metadata.json (per record)
 // -----------------------------------------------------------------------------
 //
 // Wire format convention: This interface represents the deserialized type.
 // In the JSON file, nullable fields are OMITTED when null (Go: `omitempty`,
 // TS: conditional serialization). Consumers must treat missing keys as null.
 
-interface SlideExport {
+interface RecordExport {
   format_version: 1;         // always 1; bump on breaking format changes for pc import compat
   id: string;
   date: string;
@@ -134,8 +134,8 @@ interface SlideExport {
   updated_at: string;        // ISO 8601 UTC
 }
 
-// Note: html_content → optional slide.html file, notes → notes.md file
-// deleted_at never exported (soft-deleted slides excluded)
+// Note: html_content → optional record.html file, notes → notes.md file
+// deleted_at never exported (soft-deleted records excluded)
 
 interface FigureExport {
   filename: string;
@@ -161,10 +161,10 @@ interface DataFileExport {
 // ├── templates/
 // │   ├── text-only.html
 // │   └── single-image.html
-// └── slides/
+// └── records/
 //     ├── 20250304-a3f2b7e1/
-//     │   ├── metadata.json      ← SlideExport
-//     │   ├── slide.html         ← html_content (omitted when null)
+//     │   ├── metadata.json      ← RecordExport
+//     │   ├── record.html         ← html_content (omitted when null)
 //     │   ├── notes.md           ← notes (only if has_notes)
 //     │   └── figures/           ← Git LFS
 //     │       └── loss-curve.png
@@ -178,19 +178,19 @@ interface DataFileExport {
 // │   ├── config.json
 // │   ├── pc.db
 // │   └── last_sync
-// ├── figures/{slide_id}/{filename}
-// └── data/{slide_id}/{filename}
+// ├── figures/{record_id}/{filename}
+// └── data/{record_id}/{filename}
 //
 // S3 bucket structure (user-scoped in cloud mode):
 //
 // s3://personal-context-prod/
 // └── users/{user_id}/
-//     ├── figures/{slide_id}/{filename}
-//     ├── data/{slide_id}/{filename}
+//     ├── figures/{record_id}/{filename}
+//     ├── data/{record_id}/{filename}
 //     └── _version
 
 // -----------------------------------------------------------------------------
-// Example: slides/20250304-a3f2b7e1/metadata.json
+// Example: records/20250304-a3f2b7e1/metadata.json
 // -----------------------------------------------------------------------------
 //
 // {

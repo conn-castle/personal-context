@@ -42,7 +42,7 @@ run_workflow_consistency_tests() {
     fail "workflow-consistency: release workflow does not reference Formula/personal-context.rb"
   fi
 
-  if grep -q 'Personal structured vault for searchable knowledge, data, files, and slides' "$formula_template" &&
+  if grep -q 'Personal structured vault for searchable knowledge, data, files, and records' "$formula_template" &&
     grep -q 'license "PolyForm-Noncommercial-1.0.0"' "$formula_template"; then
     pass "workflow-consistency: bootstrap formula uses approved description and license"
   else

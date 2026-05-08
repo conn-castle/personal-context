@@ -4,14 +4,14 @@ test("renders the home page with Personal Context heading @smoke", async ({
   page,
 }) => {
   // Mock all API routes so the page loads without a real backend
-  await page.route("**/api/slides", async (route: Route) => {
+  await page.route("**/api/records", async (route: Route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({ items: [], next_cursor: null }),
     });
   });
-  await page.route("**/api/slides?*", async (route: Route) => {
+  await page.route("**/api/records?*", async (route: Route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",

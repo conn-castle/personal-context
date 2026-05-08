@@ -20,7 +20,7 @@ func newSearchCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "search <query>",
-		Short: "Search slides by content, notes, or project",
+		Short: "Search records by content, notes, or project",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSearch(cmd.Context(), stdout, stderr, args[0], formatFlag, limitFlag, projectFlag, deletedFlag)
@@ -30,7 +30,7 @@ func newSearchCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	cmd.Flags().StringVar(&formatFlag, "format", "table", "Output format (table|ids|json)")
 	cmd.Flags().IntVar(&limitFlag, "limit", 0, "Maximum number of results (0 = no limit)")
 	cmd.Flags().StringVar(&projectFlag, "project", "", "Filter by project ID")
-	cmd.Flags().BoolVar(&deletedFlag, "deleted", false, "Include soft-deleted slides")
+	cmd.Flags().BoolVar(&deletedFlag, "deleted", false, "Include soft-deleted records")
 
 	return cmd
 }
@@ -71,7 +71,7 @@ func runSearch(ctx context.Context, stdout io.Writer, _ io.Writer, query string,
 	}
 	defer func() { _ = stack.Close() }()
 
-	filter := repository.ListSlidesFilter{
+	filter := repository.ListRecordsFilter{
 		Query:          &query,
 		Limit:          limit,
 		IncludeDeleted: deleted,
@@ -80,47 +80,47 @@ func runSearch(ctx context.Context, stdout io.Writer, _ io.Writer, query string,
 		filter.ProjectID = &project
 	}
 
-	slides, err := stack.Repo.ListSlides(ctx, filter)
+	records, err := stack.Repo.ListRecords(ctx, filter)
 	if err != nil {
-		return fmt.Errorf("search slides: %w", err)
+		return fmt.Errorf("search records: %w", err)
 	}
 
 	switch format {
 	case "table":
-		return searchTable(stdout, slides)
+		return searchTable(stdout, records)
 	case "ids":
-		return searchIDs(stdout, slides)
+		return searchIDs(stdout, records)
 	case "json":
-		return searchJSON(stdout, slides)
+		return searchJSON(stdout, records)
 	default:
 		return fmt.Errorf("unknown format %q: expected table, ids, or json", format)
 	}
 }
 
-func searchTable(w io.Writer, slides []repository.Slide) error {
-	if len(slides) == 0 {
-		_, _ = fmt.Fprintln(w, "No matching slides found.")
+func searchTable(w io.Writer, records []repository.Record) error {
+	if len(records) == 0 {
+		_, _ = fmt.Fprintln(w, "No matching records found.")
 		return nil
 	}
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "ID\tDate\tProject")
-	for _, s := range slides {
+	for _, s := range records {
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", s.ID, s.Date, s.ProjectID)
 	}
 	return tw.Flush()
 }
 
-func searchIDs(w io.Writer, slides []repository.Slide) error {
-	for _, s := range slides {
+func searchIDs(w io.Writer, records []repository.Record) error {
+	for _, s := range records {
 		_, _ = fmt.Fprintln(w, s.ID)
 	}
 	return nil
 }
 
-func searchJSON(w io.Writer, slides []repository.Slide) error {
-	results := make([]searchResultJSON, 0, len(slides))
-	for _, s := range slides {
+func searchJSON(w io.Writer, records []repository.Record) error {
+	results := make([]searchResultJSON, 0, len(records))
+	for _, s := range records {
 		r := searchResultJSON{
 			ID:        s.ID,
 			Date:      s.Date,

@@ -35,7 +35,7 @@ func TestSetupCreatesLocalEnvironment(t *testing.T) {
 	// Verify DB has expected tables
 	db := openTestDB(t, homeDir)
 
-	tables := []string{"slides", "slide_figures", "slide_data_files", "templates", "sync_version", "schema_migrations"}
+	tables := []string{"records", "record_figures", "record_data_files", "templates", "sync_version", "schema_migrations"}
 	for _, table := range tables {
 		var exists int
 		if err := db.QueryRow(

@@ -25,17 +25,17 @@ vi.mock("@/lib/local-proxy", () => ({
   proxyToLocal: mockProxyToLocal,
 }));
 
-import { GET } from "@/app/api/files/[slideId]/[...path]/route";
+import { GET } from "@/app/api/files/[recordId]/[...path]/route";
 
 type RouteContext = {
-  params: Promise<{ slideId: string; path: string[] }>;
+  params: Promise<{ recordId: string; path: string[] }>;
 };
 
-function makeContext(slideId: string, path: string[]): RouteContext {
-  return { params: Promise.resolve({ slideId, path }) };
+function makeContext(recordId: string, path: string[]): RouteContext {
+  return { params: Promise.resolve({ recordId, path }) };
 }
 
-describe("GET /api/files/[slideId]/[...path]", () => {
+describe("GET /api/files/[recordId]/[...path]", () => {
   beforeEach(() => {
     mockSql.mockReset();
     mockGetPresignedUrl.mockReset();
@@ -44,7 +44,7 @@ describe("GET /api/files/[slideId]/[...path]", () => {
     mockProxyToLocal.mockReset();
   });
 
-  const slideId = "20250304-a3f2b7e1";
+  const recordId = "20250304-a3f2b7e1";
 
   it("proxies to the local backend in local mode", async () => {
     const proxied = new Response("proxied", { status: 202 });
@@ -52,9 +52,9 @@ describe("GET /api/files/[slideId]/[...path]", () => {
     mockProxyToLocal.mockResolvedValueOnce(proxied);
 
     const req = new NextRequest(
-      `http://localhost/api/files/${slideId}/figures/chart.png`
+      `http://localhost/api/files/${recordId}/figures/chart.png`
     );
-    const res = await GET(req, makeContext(slideId, ["figures", "chart.png"]));
+    const res = await GET(req, makeContext(recordId, ["figures", "chart.png"]));
 
     expect(res).toBe(proxied);
     expect(mockProxyToLocal).toHaveBeenCalledWith(req);
@@ -63,7 +63,7 @@ describe("GET /api/files/[slideId]/[...path]", () => {
 
   it("returns presigned URL for a figure file", async () => {
     mockSql.mockResolvedValueOnce([
-      { s3_key: `figures/${slideId}/chart-v2.png` },
+      { s3_key: `figures/${recordId}/chart-v2.png` },
     ]);
     mockGetPresignedUrl.mockResolvedValueOnce({
       url: "https://s3.example.com/signed-url",
@@ -71,23 +71,23 @@ describe("GET /api/files/[slideId]/[...path]", () => {
     });
 
     const req = new NextRequest(
-      `http://localhost/api/files/${slideId}/figures/chart.png`
+      `http://localhost/api/files/${recordId}/figures/chart.png`
     );
-    const res = await GET(req, makeContext(slideId, ["figures", "chart.png"]));
+    const res = await GET(req, makeContext(recordId, ["figures", "chart.png"]));
 
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.url).toBe("https://s3.example.com/signed-url");
     expect(body.expires_at).toBe("2025-03-04T13:00:00.000Z");
     expect(mockGetPresignedUrl).toHaveBeenCalledWith(
-      `figures/${slideId}/chart-v2.png`,
+      `figures/${recordId}/chart-v2.png`,
       "test-user-id"
     );
   });
 
   it("returns presigned URL for a data file", async () => {
     mockSql.mockResolvedValueOnce([
-      { s3_key: `data/${slideId}/results-2025.csv` },
+      { s3_key: `data/${recordId}/results-2025.csv` },
     ]);
     mockGetPresignedUrl.mockResolvedValueOnce({
       url: "https://s3.example.com/data-url",
@@ -95,15 +95,15 @@ describe("GET /api/files/[slideId]/[...path]", () => {
     });
 
     const req = new NextRequest(
-      `http://localhost/api/files/${slideId}/data/results.csv`
+      `http://localhost/api/files/${recordId}/data/results.csv`
     );
-    const res = await GET(req, makeContext(slideId, ["data", "results.csv"]));
+    const res = await GET(req, makeContext(recordId, ["data", "results.csv"]));
 
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.url).toBe("https://s3.example.com/data-url");
     expect(mockGetPresignedUrl).toHaveBeenCalledWith(
-      `data/${slideId}/results-2025.csv`,
+      `data/${recordId}/results-2025.csv`,
       "test-user-id"
     );
   });
@@ -112,11 +112,11 @@ describe("GET /api/files/[slideId]/[...path]", () => {
     mockSql.mockResolvedValueOnce([]);
 
     const req = new NextRequest(
-      `http://localhost/api/files/${slideId}/figures/unknown.png`
+      `http://localhost/api/files/${recordId}/figures/unknown.png`
     );
     const res = await GET(
       req,
-      makeContext(slideId, ["figures", "unknown.png"])
+      makeContext(recordId, ["figures", "unknown.png"])
     );
 
     expect(res.status).toBe(404);
@@ -124,7 +124,7 @@ describe("GET /api/files/[slideId]/[...path]", () => {
     expect(body.code).toBe("NOT_FOUND");
   });
 
-  it("returns 400 for invalid slide ID", async () => {
+  it("returns 400 for invalid record ID", async () => {
     const req = new NextRequest(
       "http://localhost/api/files/bad-id/figures/chart.png"
     );
@@ -140,11 +140,11 @@ describe("GET /api/files/[slideId]/[...path]", () => {
 
   it("returns 400 for invalid path type", async () => {
     const req = new NextRequest(
-      `http://localhost/api/files/${slideId}/invalid/chart.png`
+      `http://localhost/api/files/${recordId}/invalid/chart.png`
     );
     const res = await GET(
       req,
-      makeContext(slideId, ["invalid", "chart.png"])
+      makeContext(recordId, ["invalid", "chart.png"])
     );
 
     expect(res.status).toBe(400);
@@ -154,11 +154,11 @@ describe("GET /api/files/[slideId]/[...path]", () => {
 
   it("returns 400 for path traversal attempt", async () => {
     const req = new NextRequest(
-      `http://localhost/api/files/${slideId}/figures/../../../etc/passwd`
+      `http://localhost/api/files/${recordId}/figures/../../../etc/passwd`
     );
     const res = await GET(
       req,
-      makeContext(slideId, ["figures", "../../../etc/passwd"])
+      makeContext(recordId, ["figures", "../../../etc/passwd"])
     );
 
     expect(res.status).toBe(400);
@@ -168,9 +168,9 @@ describe("GET /api/files/[slideId]/[...path]", () => {
 
   it("returns 400 for missing filename in path", async () => {
     const req = new NextRequest(
-      `http://localhost/api/files/${slideId}/figures`
+      `http://localhost/api/files/${recordId}/figures`
     );
-    const res = await GET(req, makeContext(slideId, ["figures"]));
+    const res = await GET(req, makeContext(recordId, ["figures"]));
 
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -179,11 +179,11 @@ describe("GET /api/files/[slideId]/[...path]", () => {
 
   it("returns 400 for extra path segments", async () => {
     const req = new NextRequest(
-      `http://localhost/api/files/${slideId}/figures/chart.png/extra`
+      `http://localhost/api/files/${recordId}/figures/chart.png/extra`
     );
     const res = await GET(
       req,
-      makeContext(slideId, ["figures", "chart.png", "extra"])
+      makeContext(recordId, ["figures", "chart.png", "extra"])
     );
 
     expect(res.status).toBe(400);
@@ -195,11 +195,11 @@ describe("GET /api/files/[slideId]/[...path]", () => {
     mockSql.mockRejectedValueOnce(new Error("connection refused"));
 
     const req = new NextRequest(
-      `http://localhost/api/files/${slideId}/figures/chart.png`
+      `http://localhost/api/files/${recordId}/figures/chart.png`
     );
     const res = await GET(
       req,
-      makeContext(slideId, ["figures", "chart.png"])
+      makeContext(recordId, ["figures", "chart.png"])
     );
 
     expect(res.status).toBe(500);
@@ -209,18 +209,18 @@ describe("GET /api/files/[slideId]/[...path]", () => {
 
   it("returns 500 on S3 presigning error", async () => {
     mockSql.mockResolvedValueOnce([
-      { s3_key: `figures/${slideId}/chart-v2.png` },
+      { s3_key: `figures/${recordId}/chart-v2.png` },
     ]);
     mockGetPresignedUrl.mockRejectedValueOnce(
       new Error("S3 access denied")
     );
 
     const req = new NextRequest(
-      `http://localhost/api/files/${slideId}/figures/chart.png`
+      `http://localhost/api/files/${recordId}/figures/chart.png`
     );
     const res = await GET(
       req,
-      makeContext(slideId, ["figures", "chart.png"])
+      makeContext(recordId, ["figures", "chart.png"])
     );
 
     expect(res.status).toBe(500);

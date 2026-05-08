@@ -1,8 +1,8 @@
 // API response types — derived from CONTEXT.md payload shapes.
 // DB row types are defined in schema/schema-types.ts (canonical, not imported here).
 
-/** Summary representation of a slide for list endpoints. */
-export type SlideSummary = {
+/** Summary representation of a record for list endpoints. */
+export type RecordSummary = {
   id: string;
   date: string;
   day_order: string;
@@ -17,7 +17,7 @@ export type SlideSummary = {
 };
 
 /** A figure or data file attachment. */
-export type SlideFile = {
+export type RecordFile = {
   filename: string;
   s3_key: string;
   size?: number;
@@ -26,8 +26,8 @@ export type SlideFile = {
   description?: string | null;
 };
 
-/** Full slide detail including child rows. */
-export type SlideDetail = {
+/** Full record detail including child rows. */
+export type RecordDetail = {
   id: string;
   date: string;
   day_order: string;
@@ -41,19 +41,19 @@ export type SlideDetail = {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
-  figures: SlideFile[];
-  data_files: SlideFile[];
+  figures: RecordFile[];
+  data_files: RecordFile[];
 };
 
-/** Request body for PATCH /api/slides/[id]. */
-export type SlideUpdateInput = {
+/** Request body for PATCH /api/records/[id]. */
+export type RecordUpdateInput = {
   project_id?: string;
   notes?: string | null;
   git_remote_url?: string | null;
   git_hash?: string | null;
 };
 
-/** Request body for PATCH /api/slides/[id]/order. */
+/** Request body for PATCH /api/records/[id]/order. */
 export type ReorderInput = {
   date?: string;
   position:
@@ -61,8 +61,8 @@ export type ReorderInput = {
     | { kind: "before" | "after"; reference_id: string };
 };
 
-/** Query params for GET /api/slides. */
-export type SlideListParams = {
+/** Query params for GET /api/records. */
+export type RecordListParams = {
   limit?: number;
   cursor?: string;
   project?: string;
@@ -84,7 +84,7 @@ export type SyncVersionResponse = {
 
 /** GET /api/sync/changes response. */
 export type SyncChangesResponse = {
-  items: SlideSummary[];
+  items: RecordSummary[];
   server_now: string;
 };
 
@@ -99,7 +99,7 @@ export type ProjectsResponse = {
   projects: string[];
 };
 
-/** Response for DELETE /api/slides/[id]. */
+/** Response for DELETE /api/records/[id]. */
 export type DeleteResponse = {
   id: string;
   deleted_at: string;
@@ -107,7 +107,7 @@ export type DeleteResponse = {
   sync_version: number;
 };
 
-/** Response for POST /api/slides/[id]/restore. */
+/** Response for POST /api/records/[id]/restore. */
 export type RestoreResponse = {
   id: string;
   deleted_at: null;
@@ -115,7 +115,7 @@ export type RestoreResponse = {
   sync_version: number;
 };
 
-/** Response for PATCH /api/slides/[id]/order. */
+/** Response for PATCH /api/records/[id]/order. */
 export type ReorderResponse = {
   id: string;
   date: string;
@@ -124,14 +124,14 @@ export type ReorderResponse = {
   sync_version: number;
 };
 
-/** A group of slide summaries sharing the same date. */
-export type SlideGroup = {
+/** A group of record summaries sharing the same date. */
+export type RecordGroup = {
   date: string;
-  slides: SlideSummary[];
+  records: RecordSummary[];
 };
 
-/** A virtual element representing a date boundary between slide groups. */
-export type VirtualDateSlide = {
+/** A virtual element representing a date boundary between record groups. */
+export type VirtualDateRecord = {
   type: "date-marker";
   date: string;
 };
@@ -144,12 +144,12 @@ export type AppInfoResponse = {
 
 /** GET /api/stats response. */
 export type StatsResponse = {
-  total_slides: number;
+  total_records: number;
   total_projects: number;
-  trashed_slides: number;
+  trashed_records: number;
 };
 
-/** DELETE /api/slides/trash response. */
+/** DELETE /api/records/trash response. */
 export type PurgeTrashResponse = {
   purged_count: number;
   sync_version: number;

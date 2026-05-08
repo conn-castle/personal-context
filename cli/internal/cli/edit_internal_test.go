@@ -43,11 +43,11 @@ func TestStageReplacementFileSuccess(t *testing.T) {
 
 func TestRunEditRejectsArchivedProjectBeforeMutation(t *testing.T) {
 	setupEnv(t)
-	id := addSlideWithContent(t, "<html><body>before</body></html>", "", "", nil, nil)
+	id := addRecordWithContent(t, "<html><body>before</body></html>", "", "", nil, nil)
 
 	editDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html><body>after</body></html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(editDir, "record.html"), []byte("<html><body>after</body></html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(editDir, "metadata.json"), []byte(`{"project_id":"archived-edit-project","source_device_id":"test-device"}`), 0o644); err != nil {
 		t.Fatalf("write metadata.json: %v", err)
@@ -83,22 +83,22 @@ func TestEditSupportRepositoryErrorBranches(t *testing.T) {
 
 	listDataErr := fmt.Errorf("list data failed")
 	if _, err := loadExistingEditAssets(ctx, &mockRepo{
-		listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
-			return []repository.SlideFigure{{ID: 1, Filename: "fig.png"}}, nil
+		listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+			return []repository.RecordFigure{{ID: 1, Filename: "fig.png"}}, nil
 		},
-		listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
+		listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
 			return nil, listDataErr
 		},
-	}, "slide-a"); err == nil || !strings.Contains(err.Error(), "list old data files") {
+	}, "record-a"); err == nil || !strings.Contains(err.Error(), "list old data files") {
 		t.Fatalf("loadExistingEditAssets() error = %v, want data file list context", err)
 	}
 
 	updateFigureErr := fmt.Errorf("update figure failed")
 	if _, err := upsertEditFigureRecords(ctx, &mockRepo{
-		updateFigureFn: func(context.Context, repository.UpdateSlideFigureInput) (repository.SlideFigure, error) {
-			return repository.SlideFigure{}, updateFigureErr
+		updateFigureFn: func(context.Context, repository.UpdateRecordFigureInput) (repository.RecordFigure, error) {
+			return repository.RecordFigure{}, updateFigureErr
 		},
-	}, []repository.CreateSlideFigureInput{{Filename: "fig.png"}}, map[string]repository.SlideFigure{
+	}, []repository.CreateRecordFigureInput{{Filename: "fig.png"}}, map[string]repository.RecordFigure{
 		"fig.png": {ID: 1, Filename: "fig.png"},
 	}, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "update figure record") {
 		t.Fatalf("upsertEditFigureRecords(update) error = %v", err)
@@ -106,19 +106,19 @@ func TestEditSupportRepositoryErrorBranches(t *testing.T) {
 
 	createFigureErr := fmt.Errorf("create figure failed")
 	if _, err := upsertEditFigureRecords(ctx, &mockRepo{
-		createFigureFn: func(context.Context, repository.CreateSlideFigureInput) (repository.SlideFigure, error) {
-			return repository.SlideFigure{}, createFigureErr
+		createFigureFn: func(context.Context, repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
+			return repository.RecordFigure{}, createFigureErr
 		},
-	}, []repository.CreateSlideFigureInput{{Filename: "new.png"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "create figure record") {
+	}, []repository.CreateRecordFigureInput{{Filename: "new.png"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "create figure record") {
 		t.Fatalf("upsertEditFigureRecords(create) error = %v", err)
 	}
 
 	updateDataErr := fmt.Errorf("update data failed")
 	if _, err := upsertEditDataFileRecords(ctx, &mockRepo{
-		updateDataFileFn: func(context.Context, repository.UpdateSlideDataFileInput) (repository.SlideDataFile, error) {
-			return repository.SlideDataFile{}, updateDataErr
+		updateDataFileFn: func(context.Context, repository.UpdateRecordDataFileInput) (repository.RecordDataFile, error) {
+			return repository.RecordDataFile{}, updateDataErr
 		},
-	}, []repository.CreateSlideDataFileInput{{Filename: "data.csv"}}, map[string]repository.SlideDataFile{
+	}, []repository.CreateRecordDataFileInput{{Filename: "data.csv"}}, map[string]repository.RecordDataFile{
 		"data.csv": {ID: 1, Filename: "data.csv"},
 	}, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "update data file record") {
 		t.Fatalf("upsertEditDataFileRecords(update) error = %v", err)
@@ -126,10 +126,10 @@ func TestEditSupportRepositoryErrorBranches(t *testing.T) {
 
 	createDataErr := fmt.Errorf("create data failed")
 	if _, err := upsertEditDataFileRecords(ctx, &mockRepo{
-		createDataFileFn: func(context.Context, repository.CreateSlideDataFileInput) (repository.SlideDataFile, error) {
-			return repository.SlideDataFile{}, createDataErr
+		createDataFileFn: func(context.Context, repository.CreateRecordDataFileInput) (repository.RecordDataFile, error) {
+			return repository.RecordDataFile{}, createDataErr
 		},
-	}, []repository.CreateSlideDataFileInput{{Filename: "data.csv"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "create data file record") {
+	}, []repository.CreateRecordDataFileInput{{Filename: "data.csv"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "create data file record") {
 		t.Fatalf("upsertEditDataFileRecords(create) error = %v", err)
 	}
 
@@ -138,7 +138,7 @@ func TestEditSupportRepositoryErrorBranches(t *testing.T) {
 		deleteFigureFn: func(context.Context, int64) error {
 			return deleteFigureErr
 		},
-	}, []repository.SlideFigure{{ID: 1, Filename: "old.png"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "delete old figure record") {
+	}, []repository.RecordFigure{{ID: 1, Filename: "old.png"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "delete old figure record") {
 		t.Fatalf("deleteRemovedEditFigures() error = %v", err)
 	}
 
@@ -147,7 +147,7 @@ func TestEditSupportRepositoryErrorBranches(t *testing.T) {
 		deleteDataFileFn: func(context.Context, int64) error {
 			return deleteDataErr
 		},
-	}, []repository.SlideDataFile{{ID: 1, Filename: "old.csv"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "delete old data file record") {
+	}, []repository.RecordDataFile{{ID: 1, Filename: "old.csv"}}, nil, &editMutationState{}); err == nil || !strings.Contains(err.Error(), "delete old data file record") {
 		t.Fatalf("deleteRemovedEditDataFiles() error = %v", err)
 	}
 }
@@ -178,17 +178,17 @@ func TestStageReplacementFileDestinationMkdirError(t *testing.T) {
 	}
 }
 
-func TestRunEditRollsBackSlideOnStageFailure(t *testing.T) {
+func TestRunEditRollsBackRecordOnStageFailure(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		"<html><body>before</body></html>", "", "",
 		nil,
 		map[string][]byte{"x.csv": []byte("before,data\n1,2\n")},
 	)
 
 	editDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html><body>after</body></html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(editDir, "record.html"), []byte("<html><body>after</body></html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, editDir)
 	dataDir := filepath.Join(editDir, "data")
@@ -217,7 +217,7 @@ func TestRunEditRollsBackSlideOnStageFailure(t *testing.T) {
 
 	db := openEditInternalDB(t, homeDir)
 	var htmlContent string
-	if err := db.QueryRow("SELECT html_content FROM slides WHERE id = ?", id).Scan(&htmlContent); err != nil {
+	if err := db.QueryRow("SELECT html_content FROM records WHERE id = ?", id).Scan(&htmlContent); err != nil {
 		t.Fatalf("query html_content: %v", err)
 	}
 	if htmlContent != "<html><body>before</body></html>" {
@@ -227,7 +227,7 @@ func TestRunEditRollsBackSlideOnStageFailure(t *testing.T) {
 
 func TestRunEditFailsWhenCommitRenameTargetIsDirectory(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	finalFigurePath := filepath.Join(homeDir, "personal-context", "figures", id, "bad.png")
 	if err := os.MkdirAll(finalFigurePath, 0o755); err != nil {
@@ -235,8 +235,8 @@ func TestRunEditFailsWhenCommitRenameTargetIsDirectory(t *testing.T) {
 	}
 
 	editDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><img src="figures/bad.png"></html>`), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(editDir, "record.html"), []byte(`<html><img src="figures/bad.png"></html>`), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, editDir)
 	figuresDir := filepath.Join(editDir, "figures")
@@ -257,7 +257,7 @@ func TestRunEditFailsWhenCommitRenameTargetIsDirectory(t *testing.T) {
 
 	db := openEditInternalDB(t, homeDir)
 	var figureRows int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slide_figures WHERE slide_id = ?", id).Scan(&figureRows); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM record_figures WHERE record_id = ?", id).Scan(&figureRows); err != nil {
 		t.Fatalf("count figure rows: %v", err)
 	}
 	if figureRows != 0 {
@@ -267,7 +267,7 @@ func TestRunEditFailsWhenCommitRenameTargetIsDirectory(t *testing.T) {
 
 func TestRunEditRollsBackDataFileRowOnCommitFailure(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		"<html><body>before</body></html>",
 		"", "",
 		nil,
@@ -284,13 +284,13 @@ func TestRunEditRollsBackDataFileRowOnCommitFailure(t *testing.T) {
 
 	db := openEditInternalDB(t, homeDir)
 	var beforeHash string
-	if err := db.QueryRow("SELECT hash FROM slide_data_files WHERE slide_id = ? AND filename = ?", id, "x.csv").Scan(&beforeHash); err != nil {
+	if err := db.QueryRow("SELECT hash FROM record_data_files WHERE record_id = ? AND filename = ?", id, "x.csv").Scan(&beforeHash); err != nil {
 		t.Fatalf("query old hash: %v", err)
 	}
 
 	editDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html><body>after</body></html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(editDir, "record.html"), []byte("<html><body>after</body></html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, editDir)
 	dataDir := filepath.Join(editDir, "data")
@@ -310,7 +310,7 @@ func TestRunEditRollsBackDataFileRowOnCommitFailure(t *testing.T) {
 	}
 
 	var afterHash string
-	if err := db.QueryRow("SELECT hash FROM slide_data_files WHERE slide_id = ? AND filename = ?", id, "x.csv").Scan(&afterHash); err != nil {
+	if err := db.QueryRow("SELECT hash FROM record_data_files WHERE record_id = ? AND filename = ?", id, "x.csv").Scan(&afterHash); err != nil {
 		t.Fatalf("query hash after failed edit: %v", err)
 	}
 	if afterHash != beforeHash {
@@ -320,7 +320,7 @@ func TestRunEditRollsBackDataFileRowOnCommitFailure(t *testing.T) {
 
 func TestRunEditRestoresEarlierCommittedFilesWhenLaterCommitFails(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/a.png"></html>`,
 		"", "",
 		map[string][]byte{"a.png": []byte("old-a")},
@@ -333,8 +333,8 @@ func TestRunEditRestoresEarlierCommittedFilesWhenLaterCommitFails(t *testing.T) 
 	}
 
 	editDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><img src="figures/a.png"><img src="figures/b.png"></html>`), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(editDir, "record.html"), []byte(`<html><img src="figures/a.png"><img src="figures/b.png"></html>`), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, editDir)
 	figuresDir := filepath.Join(editDir, "figures")
@@ -367,7 +367,7 @@ func TestRunEditRestoresEarlierCommittedFilesWhenLaterCommitFails(t *testing.T) 
 
 	db := openEditInternalDB(t, homeDir)
 	var bCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slide_figures WHERE slide_id = ? AND filename = ?", id, "b.png").Scan(&bCount); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM record_figures WHERE record_id = ? AND filename = ?", id, "b.png").Scan(&bCount); err != nil {
 		t.Fatalf("count b.png rows: %v", err)
 	}
 	if bCount != 0 {
@@ -377,7 +377,7 @@ func TestRunEditRestoresEarlierCommittedFilesWhenLaterCommitFails(t *testing.T) 
 
 func TestRunEditRestoresFilesAndRowsWhenDeletePhaseFails(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/keep.png"><img src="figures/remove.png"></html>`,
 		"", "",
 		map[string][]byte{
@@ -390,7 +390,7 @@ func TestRunEditRestoresFilesAndRowsWhenDeletePhaseFails(t *testing.T) {
 	db := openEditInternalDB(t, homeDir)
 	if _, err := db.Exec(`
 CREATE TRIGGER block_remove_figure_delete
-BEFORE DELETE ON slide_figures
+BEFORE DELETE ON record_figures
 WHEN OLD.filename = 'remove.png'
 BEGIN
   SELECT RAISE(FAIL, 'blocked figure delete');
@@ -400,8 +400,8 @@ END;
 	}
 
 	editDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><img src="figures/keep.png"></html>`), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(editDir, "record.html"), []byte(`<html><img src="figures/keep.png"></html>`), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, editDir)
 	figuresDir := filepath.Join(editDir, "figures")
@@ -439,7 +439,7 @@ END;
 	}
 
 	var figureRows int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slide_figures WHERE slide_id = ?", id).Scan(&figureRows); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM record_figures WHERE record_id = ?", id).Scan(&figureRows); err != nil {
 		t.Fatalf("count figure rows: %v", err)
 	}
 	if figureRows != 2 {
@@ -449,7 +449,7 @@ END;
 
 func TestRunEditRestoresDataRowsWhenDeletePhaseFailsAfterPartialDeletes(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><body>data delete failure</body></html>`,
 		"", "",
 		nil,
@@ -461,7 +461,7 @@ func TestRunEditRestoresDataRowsWhenDeletePhaseFailsAfterPartialDeletes(t *testi
 	)
 
 	db := openEditInternalDB(t, homeDir)
-	rows, err := db.Query("SELECT filename FROM slide_data_files WHERE slide_id = ? AND filename <> ? ORDER BY id", id, "keep.csv")
+	rows, err := db.Query("SELECT filename FROM record_data_files WHERE record_id = ? AND filename <> ? ORDER BY id", id, "keep.csv")
 	if err != nil {
 		t.Fatalf("query removable filenames: %v", err)
 	}
@@ -488,7 +488,7 @@ func TestRunEditRestoresDataRowsWhenDeletePhaseFailsAfterPartialDeletes(t *testi
 	escapedFailFilename := strings.ReplaceAll(failFilename, "'", "''")
 	triggerSQL := fmt.Sprintf(`
 CREATE TRIGGER block_selected_data_delete
-BEFORE DELETE ON slide_data_files
+BEFORE DELETE ON record_data_files
 WHEN OLD.filename = '%s'
 BEGIN
   SELECT RAISE(FAIL, 'blocked data delete');
@@ -499,8 +499,8 @@ END;
 	}
 
 	editDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><body>updated</body></html>`), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(editDir, "record.html"), []byte(`<html><body>updated</body></html>`), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, editDir)
 	dataDir := filepath.Join(editDir, "data")
@@ -529,7 +529,7 @@ END;
 	}
 
 	var dataRows int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slide_data_files WHERE slide_id = ?", id).Scan(&dataRows); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM record_data_files WHERE record_id = ?", id).Scan(&dataRows); err != nil {
 		t.Fatalf("count data rows: %v", err)
 	}
 	if dataRows != 3 {
@@ -539,7 +539,7 @@ END;
 
 func TestRunEditReconcilesCreateUpdateAndDeletePaths(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/keep.png"><img src="figures/remove.png"></html>`,
 		"", "",
 		map[string][]byte{
@@ -553,8 +553,8 @@ func TestRunEditReconcilesCreateUpdateAndDeletePaths(t *testing.T) {
 	)
 
 	editDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><img src="figures/keep.png"><img src="figures/new.png"></html>`), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(editDir, "record.html"), []byte(`<html><img src="figures/keep.png"><img src="figures/new.png"></html>`), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, editDir)
 
@@ -586,7 +586,7 @@ func TestRunEditReconcilesCreateUpdateAndDeletePaths(t *testing.T) {
 
 	db := openEditInternalDB(t, homeDir)
 	var figureCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slide_figures WHERE slide_id = ?", id).Scan(&figureCount); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM record_figures WHERE record_id = ?", id).Scan(&figureCount); err != nil {
 		t.Fatalf("count figures: %v", err)
 	}
 	if figureCount != 2 {
@@ -594,7 +594,7 @@ func TestRunEditReconcilesCreateUpdateAndDeletePaths(t *testing.T) {
 	}
 
 	var dataCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slide_data_files WHERE slide_id = ?", id).Scan(&dataCount); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM record_data_files WHERE record_id = ?", id).Scan(&dataCount); err != nil {
 		t.Fatalf("count data files: %v", err)
 	}
 	if dataCount != 2 {
