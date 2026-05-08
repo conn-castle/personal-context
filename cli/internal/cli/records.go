@@ -121,8 +121,15 @@ func runList(ctx context.Context, stdout io.Writer, stderr io.Writer, opts recor
 	sortRecordsForDiscovery(slides)
 	slides = applyRecordCursor(slides, cursor)
 
-	items := make([]recordListItem, 0, len(slides))
+	itemCap := opts.Limit + 1
+	if opts.All || len(slides) < itemCap {
+		itemCap = len(slides)
+	}
+	items := make([]recordListItem, 0, itemCap)
 	for _, slide := range slides {
+		if !opts.All && len(items) > opts.Limit {
+			break
+		}
 		item, err := buildRecordListItem(ctx, stack.Repo, slide)
 		if err != nil {
 			return err
@@ -319,33 +326,58 @@ func runFilesList(ctx context.Context, stdout io.Writer, _ io.Writer, opts files
 	}
 	defer func() { _ = stack.Close() }()
 
-	slides, err := stack.Repo.ListSlides(ctx, filter)
-	if err != nil {
-		return fmt.Errorf("list records: %w", err)
-	}
-	sortRecordsForDiscovery(slides)
 	recordID := strings.TrimSpace(opts.RecordID)
+	var slides []repository.Slide
+	if recordID != "" {
+		slide, err := stack.Repo.GetSlideByID(ctx, recordID)
+		if err != nil {
+			return fmt.Errorf("record %q not found", recordID)
+		}
+		if !recordMatchesFilter(slide, filter) {
+			return fmt.Errorf("record %q does not match the requested filters", recordID)
+		}
+		slides = []repository.Slide{slide}
+	} else {
+		slides, err = stack.Repo.ListSlides(ctx, filter)
+		if err != nil {
+			return fmt.Errorf("list records: %w", err)
+		}
+		sortRecordsForDiscovery(slides)
+	}
+
 	items := make([]fileInventoryItem, 0)
 	for _, slide := range slides {
-		if recordID != "" && slide.ID != recordID {
-			continue
-		}
 		slideItems, err := buildFileInventoryItems(ctx, stack, slide)
 		if err != nil {
 			return err
 		}
 		items = append(items, slideItems...)
 	}
-	if recordID != "" && len(items) == 0 {
-		if _, err := stack.Repo.GetSlideByID(ctx, recordID); err != nil {
-			return fmt.Errorf("record %q not found", recordID)
-		}
-	}
 
 	if opts.Format == "json" {
 		return writeIndentedJSON(stdout, items)
 	}
 	return writeFilesListTable(stdout, items)
+}
+
+func recordMatchesFilter(slide repository.Slide, filter repository.ListSlidesFilter) bool {
+	if filter.ProjectID != nil && slide.ProjectID != *filter.ProjectID {
+		return false
+	}
+	if filter.DateFrom != nil && slide.Date < *filter.DateFrom {
+		return false
+	}
+	if filter.DateTo != nil && slide.Date > *filter.DateTo {
+		return false
+	}
+	deleted := slide.DeletedAt != nil
+	if filter.OnlyDeleted && !deleted {
+		return false
+	}
+	if !filter.IncludeDeleted && deleted {
+		return false
+	}
+	return true
 }
 
 func addRecordFilterFlags(cmd *cobra.Command, opts *recordFilterOptions) {

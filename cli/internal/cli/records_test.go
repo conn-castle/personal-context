@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/filesystem"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
@@ -699,4 +700,56 @@ type errorWriter struct{}
 
 func (errorWriter) Write([]byte) (int, error) {
 	return 0, errors.New("write failed")
+}
+
+func TestRecordMatchesFilterCoversAllBranches(t *testing.T) {
+	now := time.Now().UTC()
+	active := repository.Slide{ID: "a1", Date: "2026-02-15", ProjectID: "alpha/project", UpdatedAt: now}
+	deleted := active
+	when := now
+	deleted.DeletedAt = &when
+
+	project := "alpha/project"
+	other := "beta/project"
+	from := "2026-02-01"
+	earlierFrom := "2026-03-01"
+	to := "2026-02-28"
+	earlierTo := "2026-02-01"
+
+	cases := []struct {
+		name   string
+		slide  repository.Slide
+		filter repository.ListSlidesFilter
+		want   bool
+	}{
+		{name: "matches with no filter", slide: active, filter: repository.ListSlidesFilter{}, want: true},
+		{name: "project mismatch", slide: active, filter: repository.ListSlidesFilter{ProjectID: &other}, want: false},
+		{name: "project match", slide: active, filter: repository.ListSlidesFilter{ProjectID: &project}, want: true},
+		{name: "from window match", slide: active, filter: repository.ListSlidesFilter{DateFrom: &from}, want: true},
+		{name: "from window before", slide: active, filter: repository.ListSlidesFilter{DateFrom: &earlierFrom}, want: false},
+		{name: "to window match", slide: active, filter: repository.ListSlidesFilter{DateTo: &to}, want: true},
+		{name: "to window after", slide: active, filter: repository.ListSlidesFilter{DateTo: &earlierTo}, want: false},
+		{name: "only-deleted excludes active", slide: active, filter: repository.ListSlidesFilter{IncludeDeleted: true, OnlyDeleted: true}, want: false},
+		{name: "only-deleted matches deleted", slide: deleted, filter: repository.ListSlidesFilter{IncludeDeleted: true, OnlyDeleted: true}, want: true},
+		{name: "default excludes deleted", slide: deleted, filter: repository.ListSlidesFilter{}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := recordMatchesFilter(tc.slide, tc.filter); got != tc.want {
+				t.Fatalf("recordMatchesFilter(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFilesListCommandRecordFilterMismatch(t *testing.T) {
+	setupEnv(t)
+	recordID := addSlideWithContent(t, "<html>x</html>", "", `{"project_id":"alpha/project"}`, nil, nil)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"files", "list", "--record", recordID, "--project", "beta/project"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "does not match the requested filters") {
+		t.Fatalf("expected filter mismatch error, got %v", err)
+	}
 }
