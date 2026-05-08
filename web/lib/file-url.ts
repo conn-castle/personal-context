@@ -1,23 +1,23 @@
 import type { FileUrlResponse } from "@/lib/types";
 
-export type SlideFileKind = "figures" | "data";
+export type RecordFileKind = "figures" | "data";
 
 /**
- * Resolves a slide attachment to a presigned URL via the web file API.
+ * Resolves a record attachment to a presigned URL via the web file API.
  *
- * @param slideId - The slide identifier.
+ * @param recordId - The record identifier.
  * @param kind - The attachment collection (`figures` or `data`).
  * @param filename - The attachment filename.
  * @returns The resolved presigned URL.
  * @throws If the API response is not successful or does not contain a URL.
  */
-export async function fetchSlideFileUrl(
-  slideId: string,
-  kind: SlideFileKind,
+export async function fetchRecordFileUrl(
+  recordId: string,
+  kind: RecordFileKind,
   filename: string
 ): Promise<string> {
   const res = await fetch(
-    `/api/files/${encodeURIComponent(slideId)}/${kind}/${encodeURIComponent(filename)}`
+    `/api/files/${encodeURIComponent(recordId)}/${kind}/${encodeURIComponent(filename)}`
   );
 
   if (!res.ok) {

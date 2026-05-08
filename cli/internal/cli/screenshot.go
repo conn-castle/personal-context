@@ -24,8 +24,8 @@ func newScreenshotCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "screenshot <id>",
-		Short: "Capture a PNG screenshot of a slide",
-		Long:  "Renders the slide HTML at 1920x1080 using headless Chrome and saves it as a PNG.",
+		Short: "Capture a PNG screenshot of a record",
+		Long:  "Renders the record HTML at 1920x1080 using headless Chrome and saves it as a PNG.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runScreenshot(cmd.Context(), stdout, stderr, args[0], outputFlag)
@@ -101,9 +101,9 @@ func searchCandidates(candidates []string) (string, error) {
 	)
 }
 
-// buildSlideHTML wraps slide HTML content in a full 1920x1080 document suitable
+// buildRecordHTML wraps record HTML content in a full 1920x1080 document suitable
 // for headless Chrome screenshot capture.
-func buildSlideHTML(htmlContent string) string {
+func buildRecordHTML(htmlContent string) string {
 	// If the content is a full document (has <html> or <!DOCTYPE>), return it
 	// as-is — full documents carry their own styling and viewport rules.
 	lower := strings.ToLower(htmlContent)
@@ -125,7 +125,7 @@ html, body { width: 1920px; height: 1080px; overflow: hidden; background: white;
 </html>`, htmlContent)
 }
 
-func prepareScreenshotWorkspace(slideID string, htmlContent string, dataRoot string) (string, func(), error) {
+func prepareScreenshotWorkspace(recordID string, htmlContent string, dataRoot string) (string, func(), error) {
 	tempDir, err := os.MkdirTemp("", "pc-screenshot-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("create temp dir: %w", err)
@@ -135,14 +135,14 @@ func prepareScreenshotWorkspace(slideID string, htmlContent string, dataRoot str
 		_ = os.RemoveAll(tempDir)
 	}
 
-	htmlPath := filepath.Join(tempDir, "slide.html")
+	htmlPath := filepath.Join(tempDir, "record.html")
 	if err := os.WriteFile(htmlPath, []byte(htmlContent), 0o600); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("write temp file: %w", err)
 	}
 
 	for _, assetDir := range []string{"figures", "data"} {
-		sourceDir := filepath.Join(dataRoot, assetDir, slideID)
+		sourceDir := filepath.Join(dataRoot, assetDir, recordID)
 		info, err := os.Stat(sourceDir)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -269,13 +269,13 @@ func runScreenshot(ctx context.Context, stdout io.Writer, _ io.Writer, id string
 	}
 	defer func() { _ = stack.Close() }()
 
-	// Get the slide.
-	slide, err := stack.Repo.GetSlideByID(ctx, id)
+	// Get the record.
+	record, err := stack.Repo.GetRecordByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return fmt.Errorf("slide %q not found", id)
+			return fmt.Errorf("record %q not found", id)
 		}
-		return fmt.Errorf("get slide: %w", err)
+		return fmt.Errorf("get record: %w", err)
 	}
 
 	// Determine output path.
@@ -283,10 +283,10 @@ func runScreenshot(ctx context.Context, stdout io.Writer, _ io.Writer, id string
 		output = id + ".png"
 	}
 
-	if slide.HTMLContent == nil {
-		return fmt.Errorf("slide %s has no slide.html content", id)
+	if record.HTMLContent == nil {
+		return fmt.Errorf("record %s has no record.html content", id)
 	}
-	html := buildSlideHTML(*slide.HTMLContent)
+	html := buildRecordHTML(*record.HTMLContent)
 	htmlPath, cleanup, err := prepareScreenshotWorkspace(id, html, basePath(homeDir))
 	if err != nil {
 		return err

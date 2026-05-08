@@ -22,7 +22,7 @@ type Snapshot struct {
 	Templates []Template
 	Projects  []RegistryEntry
 	Devices   []RegistryEntry
-	Slides    []Slide
+	Records    []Record
 }
 
 // Template is an exported HTML template file.
@@ -31,8 +31,8 @@ type Template struct {
 	HTMLContent string
 }
 
-// Slide is an exported slide directory with metadata, content, and figures.
-type Slide struct {
+// Record is an exported record directory with metadata, content, and figures.
+type Record struct {
 	ID             string
 	Date           string
 	DayOrder       string
@@ -140,7 +140,7 @@ func Write(root string, snapshot Snapshot) error {
 		return fmt.Errorf("create export root: %w", err)
 	}
 	templatesDir := filepath.Join(root, "templates")
-	slidesDir := filepath.Join(root, "slides")
+	recordsDir := filepath.Join(root, "records")
 	projectsPath := filepath.Join(root, "projects.json")
 	devicesPath := filepath.Join(root, "devices.json")
 	if err := os.Remove(projectsPath); err != nil && !os.IsNotExist(err) {
@@ -152,14 +152,14 @@ func Write(root string, snapshot Snapshot) error {
 	if err := os.RemoveAll(templatesDir); err != nil {
 		return fmt.Errorf("reset templates dir: %w", err)
 	}
-	if err := os.RemoveAll(slidesDir); err != nil {
-		return fmt.Errorf("reset slides dir: %w", err)
+	if err := os.RemoveAll(recordsDir); err != nil {
+		return fmt.Errorf("reset records dir: %w", err)
 	}
 	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
 		return fmt.Errorf("create templates dir: %w", err)
 	}
-	if err := os.MkdirAll(slidesDir, 0o755); err != nil {
-		return fmt.Errorf("create slides dir: %w", err)
+	if err := os.MkdirAll(recordsDir, 0o755); err != nil {
+		return fmt.Errorf("create records dir: %w", err)
 	}
 	templates := append([]Template(nil), snapshot.Templates...)
 	sort.Slice(templates, func(i, j int) bool {
@@ -175,43 +175,43 @@ func Write(root string, snapshot Snapshot) error {
 		}
 	}
 
-	slides := append([]Slide(nil), snapshot.Slides...)
-	sort.Slice(slides, func(i, j int) bool {
-		if slides[i].Date != slides[j].Date {
-			return slides[i].Date < slides[j].Date
+	records := append([]Record(nil), snapshot.Records...)
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].Date != records[j].Date {
+			return records[i].Date < records[j].Date
 		}
-		if slides[i].DayOrder != slides[j].DayOrder {
-			return slides[i].DayOrder < slides[j].DayOrder
+		if records[i].DayOrder != records[j].DayOrder {
+			return records[i].DayOrder < records[j].DayOrder
 		}
-		return slides[i].ID < slides[j].ID
+		return records[i].ID < records[j].ID
 	})
-	for _, slide := range slides {
-		if err := validatePathSegment("slide id", slide.ID); err != nil {
+	for _, record := range records {
+		if err := validatePathSegment("record id", record.ID); err != nil {
 			return err
 		}
-		slideDir := filepath.Join(slidesDir, slide.ID)
-		if err := os.MkdirAll(slideDir, 0o755); err != nil {
-			return fmt.Errorf("create slide dir %s: %w", slide.ID, err)
+		recordDir := filepath.Join(recordsDir, record.ID)
+		if err := os.MkdirAll(recordDir, 0o755); err != nil {
+			return fmt.Errorf("create record dir %s: %w", record.ID, err)
 		}
-		if slide.HTMLContent != nil {
-			if err := writeFile(filepath.Join(slideDir, "slide.html"), []byte(*slide.HTMLContent)); err != nil {
-				return fmt.Errorf("write slide.html for %s: %w", slide.ID, err)
+		if record.HTMLContent != nil {
+			if err := writeFile(filepath.Join(recordDir, "record.html"), []byte(*record.HTMLContent)); err != nil {
+				return fmt.Errorf("write record.html for %s: %w", record.ID, err)
 			}
 		}
-		if slide.Notes != nil {
-			if err := writeFile(filepath.Join(slideDir, "notes.md"), []byte(*slide.Notes)); err != nil {
-				return fmt.Errorf("write notes.md for %s: %w", slide.ID, err)
+		if record.Notes != nil {
+			if err := writeFile(filepath.Join(recordDir, "notes.md"), []byte(*record.Notes)); err != nil {
+				return fmt.Errorf("write notes.md for %s: %w", record.ID, err)
 			}
 		}
 
-		figures := append([]Figure(nil), slide.Figures...)
+		figures := append([]Figure(nil), record.Figures...)
 		sort.Slice(figures, func(i, j int) bool {
 			return figures[i].Filename < figures[j].Filename
 		})
-		figureDir := filepath.Join(slideDir, "figures")
+		figureDir := filepath.Join(recordDir, "figures")
 		if len(figures) > 0 {
 			if err := os.MkdirAll(figureDir, 0o755); err != nil {
-				return fmt.Errorf("create figures dir for %s: %w", slide.ID, err)
+				return fmt.Errorf("create figures dir for %s: %w", record.ID, err)
 			}
 		}
 		metadataFigures := make([]figureFile, 0, len(figures))
@@ -220,7 +220,7 @@ func Write(root string, snapshot Snapshot) error {
 				return err
 			}
 			if err := writeFile(filepath.Join(figureDir, figure.Filename), figure.Content); err != nil {
-				return fmt.Errorf("write figure %s/%s: %w", slide.ID, figure.Filename, err)
+				return fmt.Errorf("write figure %s/%s: %w", record.ID, figure.Filename, err)
 			}
 			metadataFigures = append(metadataFigures, figureFile{
 				Filename: figure.Filename,
@@ -229,7 +229,7 @@ func Write(root string, snapshot Snapshot) error {
 			})
 		}
 
-		dataFiles := append([]DataFile(nil), slide.DataFiles...)
+		dataFiles := append([]DataFile(nil), record.DataFiles...)
 		sort.Slice(dataFiles, func(i, j int) bool {
 			return dataFiles[i].Filename < dataFiles[j].Filename
 		})
@@ -243,26 +243,26 @@ func Write(root string, snapshot Snapshot) error {
 
 		metadataBytes, err := json.MarshalIndent(metadataFile{
 			FormatVersion:  FormatVersion,
-			ID:             slide.ID,
-			Date:           slide.Date,
-			DayOrder:       slide.DayOrder,
-			ProjectID:      slide.ProjectID,
-			SourceDeviceID: slide.SourceDeviceID,
-			SourceRef:      slide.SourceRef,
-			GitRemoteURL:   slide.GitRemoteURL,
-			GitHash:        slide.GitHash,
-			HasNotes:       slide.Notes != nil,
+			ID:             record.ID,
+			Date:           record.Date,
+			DayOrder:       record.DayOrder,
+			ProjectID:      record.ProjectID,
+			SourceDeviceID: record.SourceDeviceID,
+			SourceRef:      record.SourceRef,
+			GitRemoteURL:   record.GitRemoteURL,
+			GitHash:        record.GitHash,
+			HasNotes:       record.Notes != nil,
 			Figures:        metadataFigures,
 			DataFiles:      metadataDataFiles,
-			CreatedAt:      slide.CreatedAt.UTC().Format(time.RFC3339Nano),
-			UpdatedAt:      slide.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			CreatedAt:      record.CreatedAt.UTC().Format(time.RFC3339Nano),
+			UpdatedAt:      record.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		}, "", "  ")
 		if err != nil {
-			return fmt.Errorf("marshal metadata for %s: %w", slide.ID, err)
+			return fmt.Errorf("marshal metadata for %s: %w", record.ID, err)
 		}
 		metadataBytes = append(metadataBytes, '\n')
-		if err := writeFile(filepath.Join(slideDir, "metadata.json"), metadataBytes); err != nil {
-			return fmt.Errorf("write metadata.json for %s: %w", slide.ID, err)
+		if err := writeFile(filepath.Join(recordDir, "metadata.json"), metadataBytes); err != nil {
+			return fmt.Errorf("write metadata.json for %s: %w", record.ID, err)
 		}
 	}
 
@@ -285,7 +285,7 @@ func Read(root string) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	slides, err := readSlides(filepath.Join(root, "slides"))
+	records, err := readRecords(filepath.Join(root, "records"))
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -297,7 +297,7 @@ func Read(root string) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("read devices.json: %w", err)
 	}
-	return Snapshot{Templates: templates, Projects: projects, Devices: devices, Slides: slides}, nil
+	return Snapshot{Templates: templates, Projects: projects, Devices: devices, Records: records}, nil
 }
 
 // Manifest returns a deterministic listing of the snapshot tree for byte-for-byte comparisons.
@@ -447,100 +447,100 @@ func readTemplates(dir string) ([]Template, error) {
 	return templates, nil
 }
 
-func readSlides(dir string) ([]Slide, error) {
+func readRecords(dir string) ([]Record, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("read slides dir: %w", err)
+		return nil, fmt.Errorf("read records dir: %w", err)
 	}
-	slides := make([]Slide, 0, len(entries))
+	records := make([]Record, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
-			return nil, fmt.Errorf("unexpected file in slides export: %s", entry.Name())
+			return nil, fmt.Errorf("unexpected file in records export: %s", entry.Name())
 		}
-		slide, err := readSlide(filepath.Join(dir, entry.Name()), entry.Name())
+		record, err := readRecord(filepath.Join(dir, entry.Name()), entry.Name())
 		if err != nil {
 			return nil, err
 		}
-		slides = append(slides, slide)
+		records = append(records, record)
 	}
-	sort.Slice(slides, func(i, j int) bool {
-		if slides[i].Date != slides[j].Date {
-			return slides[i].Date < slides[j].Date
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].Date != records[j].Date {
+			return records[i].Date < records[j].Date
 		}
-		if slides[i].DayOrder != slides[j].DayOrder {
-			return slides[i].DayOrder < slides[j].DayOrder
+		if records[i].DayOrder != records[j].DayOrder {
+			return records[i].DayOrder < records[j].DayOrder
 		}
-		return slides[i].ID < slides[j].ID
+		return records[i].ID < records[j].ID
 	})
-	return slides, nil
+	return records, nil
 }
 
-func readSlide(dir string, slideID string) (Slide, error) {
-	if err := validatePathSegment("slide id", slideID); err != nil {
-		return Slide{}, err
+func readRecord(dir string, recordID string) (Record, error) {
+	if err := validatePathSegment("record id", recordID); err != nil {
+		return Record{}, err
 	}
 	metadataBytes, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
 	if err != nil {
-		return Slide{}, fmt.Errorf("read metadata for %s: %w", slideID, err)
+		return Record{}, fmt.Errorf("read metadata for %s: %w", recordID, err)
 	}
 	var metadata metadataFile
 	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-		return Slide{}, fmt.Errorf("parse metadata for %s: %w", slideID, err)
+		return Record{}, fmt.Errorf("parse metadata for %s: %w", recordID, err)
 	}
 	if metadata.FormatVersion != FormatVersion {
-		return Slide{}, fmt.Errorf("unsupported format_version %d for %s", metadata.FormatVersion, slideID)
+		return Record{}, fmt.Errorf("unsupported format_version %d for %s", metadata.FormatVersion, recordID)
 	}
-	if metadata.ID != slideID {
-		return Slide{}, fmt.Errorf("metadata id %s does not match slide dir %s", metadata.ID, slideID)
+	if metadata.ID != recordID {
+		return Record{}, fmt.Errorf("metadata id %s does not match record dir %s", metadata.ID, recordID)
 	}
 	if strings.TrimSpace(metadata.ProjectID) == "" {
-		return Slide{}, fmt.Errorf("project_id is required for %s", slideID)
+		return Record{}, fmt.Errorf("project_id is required for %s", recordID)
 	}
 	if strings.TrimSpace(metadata.SourceDeviceID) == "" {
-		return Slide{}, fmt.Errorf("source_device_id is required for %s", slideID)
+		return Record{}, fmt.Errorf("source_device_id is required for %s", recordID)
 	}
 	createdAt, err := time.Parse(time.RFC3339Nano, metadata.CreatedAt)
 	if err != nil {
-		return Slide{}, fmt.Errorf("parse created_at for %s: %w", slideID, err)
+		return Record{}, fmt.Errorf("parse created_at for %s: %w", recordID, err)
 	}
 	updatedAt, err := time.Parse(time.RFC3339Nano, metadata.UpdatedAt)
 	if err != nil {
-		return Slide{}, fmt.Errorf("parse updated_at for %s: %w", slideID, err)
+		return Record{}, fmt.Errorf("parse updated_at for %s: %w", recordID, err)
 	}
 	var htmlContent *string
-	htmlBytes, err := os.ReadFile(filepath.Join(dir, "slide.html"))
+	htmlBytes, err := os.ReadFile(filepath.Join(dir, "record.html"))
 	if err == nil {
 		value := string(htmlBytes)
 		htmlContent = &value
 	} else if !os.IsNotExist(err) {
-		return Slide{}, fmt.Errorf("read slide.html for %s: %w", slideID, err)
+		return Record{}, fmt.Errorf("read record.html for %s: %w", recordID, err)
 	}
 	var notes *string
 	if metadata.HasNotes {
 		notesBytes, err := os.ReadFile(filepath.Join(dir, "notes.md"))
 		if err != nil {
-			return Slide{}, fmt.Errorf("read notes.md for %s: %w", slideID, err)
+			return Record{}, fmt.Errorf("read notes.md for %s: %w", recordID, err)
 		}
 		value := string(notesBytes)
 		notes = &value
 	} else if _, err := os.Stat(filepath.Join(dir, "notes.md")); err == nil {
-		return Slide{}, fmt.Errorf("notes.md present for %s despite has_notes=false", slideID)
+		return Record{}, fmt.Errorf("notes.md present for %s despite has_notes=false", recordID)
 	}
 
-	figures, err := readFigures(dir, slideID, metadata.Figures)
+	figures, err := readFigures(dir, recordID, metadata.Figures)
 	if err != nil {
-		return Slide{}, err
+		return Record{}, err
 	}
 	dataFiles := make([]DataFile, 0, len(metadata.DataFiles))
 	for _, file := range metadata.DataFiles {
 		if err := validatePathSegment("data file filename", file.Filename); err != nil {
-			return Slide{}, err
+			return Record{}, err
 		}
 		dataFiles = append(dataFiles, DataFile(file))
 	}
 
-	return Slide{
-		ID:             slideID,
+	return Record{
+		ID:             recordID,
 		Date:           metadata.Date,
 		DayOrder:       metadata.DayOrder,
 		ProjectID:      metadata.ProjectID,
@@ -557,7 +557,7 @@ func readSlide(dir string, slideID string) (Slide, error) {
 	}, nil
 }
 
-func readFigures(dir string, slideID string, metadata []figureFile) ([]Figure, error) {
+func readFigures(dir string, recordID string, metadata []figureFile) ([]Figure, error) {
 	figures := make([]Figure, 0, len(metadata))
 	figureDir := filepath.Join(dir, "figures")
 	expected := make(map[string]struct{}, len(metadata))
@@ -568,10 +568,10 @@ func readFigures(dir string, slideID string, metadata []figureFile) ([]Figure, e
 		expected[figure.Filename] = struct{}{}
 		content, err := os.ReadFile(filepath.Join(figureDir, figure.Filename))
 		if err != nil {
-			return nil, fmt.Errorf("read figure %s/%s: %w", slideID, figure.Filename, err)
+			return nil, fmt.Errorf("read figure %s/%s: %w", recordID, figure.Filename, err)
 		}
 		if isLFSPointer(content) {
-			return nil, fmt.Errorf("figure %s/%s is a Git LFS pointer, not real content", slideID, figure.Filename)
+			return nil, fmt.Errorf("figure %s/%s is a Git LFS pointer, not real content", recordID, figure.Filename)
 		}
 		figures = append(figures, Figure{
 			Filename: figure.Filename,
@@ -584,24 +584,24 @@ func readFigures(dir string, slideID string, metadata []figureFile) ([]Figure, e
 		if _, err := os.Stat(figureDir); err == nil {
 			entries, err := os.ReadDir(figureDir)
 			if err != nil {
-				return nil, fmt.Errorf("read figures dir for %s: %w", slideID, err)
+				return nil, fmt.Errorf("read figures dir for %s: %w", recordID, err)
 			}
 			if len(entries) > 0 {
-				return nil, fmt.Errorf("figures dir for %s contains files not referenced by metadata", slideID)
+				return nil, fmt.Errorf("figures dir for %s contains files not referenced by metadata", recordID)
 			}
 		}
 		return figures, nil
 	}
 	entries, err := os.ReadDir(figureDir)
 	if err != nil {
-		return nil, fmt.Errorf("read figures dir for %s: %w", slideID, err)
+		return nil, fmt.Errorf("read figures dir for %s: %w", recordID, err)
 	}
 	for _, entry := range entries {
 		if entry.IsDir() {
-			return nil, fmt.Errorf("unexpected nested dir in figures for %s: %s", slideID, entry.Name())
+			return nil, fmt.Errorf("unexpected nested dir in figures for %s: %s", recordID, entry.Name())
 		}
 		if _, ok := expected[entry.Name()]; !ok {
-			return nil, fmt.Errorf("figure file %s/%s not referenced by metadata", slideID, entry.Name())
+			return nil, fmt.Errorf("figure file %s/%s not referenced by metadata", recordID, entry.Name())
 		}
 	}
 	return figures, nil

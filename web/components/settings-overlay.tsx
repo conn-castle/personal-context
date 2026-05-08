@@ -91,7 +91,7 @@ export function SettingsOverlay({
     setIsPurging(true);
     setPurgeError(null);
     try {
-      const res = await fetch("/api/slides/trash", { method: "DELETE" });
+      const res = await fetch("/api/records/trash", { method: "DELETE" });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
         throw new Error(
@@ -195,9 +195,9 @@ export function SettingsOverlay({
               {stats ? (
                 <>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm">Total slides</span>
+                    <span className="text-sm">Total records</span>
                     <span className="text-sm text-muted-foreground font-mono">
-                      {stats.total_slides}
+                      {stats.total_records}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
@@ -207,9 +207,9 @@ export function SettingsOverlay({
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm">Slides in trash</span>
+                    <span className="text-sm">Records in trash</span>
                     <span className="text-sm text-muted-foreground font-mono">
-                      {stats.trashed_slides}
+                      {stats.trashed_records}
                     </span>
                   </div>
                 </>
@@ -229,7 +229,7 @@ export function SettingsOverlay({
                     size="sm"
                     className="w-full"
                     disabled={
-                      isPurging || !stats || stats.trashed_slides === 0
+                      isPurging || !stats || stats.trashed_records === 0
                     }
                   >
                     {isPurging ? (
@@ -239,16 +239,16 @@ export function SettingsOverlay({
                     )}
                     {isPurging
                       ? "Purging..."
-                      : `Purge Trash${stats && stats.trashed_slides > 0 ? ` (${stats.trashed_slides})` : ""}`}
+                      : `Purge Trash${stats && stats.trashed_records > 0 ? ` (${stats.trashed_records})` : ""}`}
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Permanently delete all trashed slides?</AlertDialogTitle>
+                    <AlertDialogTitle>Permanently delete all trashed records?</AlertDialogTitle>
                     <AlertDialogDescription>
                       This will permanently delete{" "}
-                      {stats?.trashed_slides ?? 0} trashed slide
-                      {stats?.trashed_slides === 1 ? "" : "s"} and all
+                      {stats?.trashed_records ?? 0} trashed record
+                      {stats?.trashed_records === 1 ? "" : "s"} and all
                       associated figures and data files. This action cannot be
                       undone.
                     </AlertDialogDescription>

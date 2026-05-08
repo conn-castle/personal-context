@@ -16,19 +16,19 @@ const (
 	OutcomeRemote Outcome = "remote"
 )
 
-// ResolveSlideWinner compares local and remote slide states using the Phase 6 rules.
-func ResolveSlideWinner(local *repository.Slide, remote *repository.Slide) (Outcome, error) {
+// ResolveRecordWinner compares local and remote record states using the Phase 6 rules.
+func ResolveRecordWinner(local *repository.Record, remote *repository.Record) (Outcome, error) {
 	switch {
 	case local == nil && remote == nil:
-		return "", fmt.Errorf("at least one slide is required")
+		return "", fmt.Errorf("at least one record is required")
 	case local == nil:
 		return OutcomeRemote, nil
 	case remote == nil:
 		return OutcomeLocal, nil
 	}
 
-	localAction := latestSlideAction(*local)
-	remoteAction := latestSlideAction(*remote)
+	localAction := latestRecordAction(*local)
+	remoteAction := latestRecordAction(*remote)
 
 	switch {
 	case localAction.when.After(remoteAction.when):
@@ -41,38 +41,38 @@ func ResolveSlideWinner(local *repository.Slide, remote *repository.Slide) (Outc
 			return OutcomeLocal, nil
 		}
 		return OutcomeRemote, nil
-	case slideIsMoreActive(*local, *remote):
+	case recordIsMoreActive(*local, *remote):
 		// Both classified as edits (tie rule), but one still has DeletedAt set.
-		// Prefer the truly active slide.
+		// Prefer the truly active record.
 		return OutcomeLocal, nil
-	case slideIsMoreActive(*remote, *local):
+	case recordIsMoreActive(*remote, *local):
 		return OutcomeRemote, nil
 	default:
 		return OutcomeEqual, nil
 	}
 }
 
-// FilterSlidesUpdatedSince applies the inclusive millisecond-precision sync cursor filter.
-func FilterSlidesUpdatedSince(slides []repository.Slide, since time.Time) []repository.Slide {
+// FilterRecordsUpdatedSince applies the inclusive millisecond-precision sync cursor filter.
+func FilterRecordsUpdatedSince(records []repository.Record, since time.Time) []repository.Record {
 	if since.IsZero() {
-		filtered := make([]repository.Slide, len(slides))
-		copy(filtered, slides)
+		filtered := make([]repository.Record, len(records))
+		copy(filtered, records)
 		return filtered
 	}
 
 	threshold := truncateToMillisecond(since)
-	filtered := make([]repository.Slide, 0, len(slides))
-	for _, slide := range slides {
-		if !truncateToMillisecond(slide.UpdatedAt).Before(threshold) {
-			filtered = append(filtered, slide)
+	filtered := make([]repository.Record, 0, len(records))
+	for _, record := range records {
+		if !truncateToMillisecond(record.UpdatedAt).Before(threshold) {
+			filtered = append(filtered, record)
 		}
 	}
 	return filtered
 }
 
 // FigureMapByFilename indexes child rows by filename for sync matching.
-func FigureMapByFilename(figures []repository.SlideFigure) (map[string]repository.SlideFigure, error) {
-	indexed := make(map[string]repository.SlideFigure, len(figures))
+func FigureMapByFilename(figures []repository.RecordFigure) (map[string]repository.RecordFigure, error) {
+	indexed := make(map[string]repository.RecordFigure, len(figures))
 	for _, figure := range figures {
 		if _, exists := indexed[figure.Filename]; exists {
 			return nil, fmt.Errorf("duplicate figure filename %q", figure.Filename)
@@ -83,8 +83,8 @@ func FigureMapByFilename(figures []repository.SlideFigure) (map[string]repositor
 }
 
 // DataFileMapByFilename indexes data-file rows by filename for sync matching.
-func DataFileMapByFilename(files []repository.SlideDataFile) (map[string]repository.SlideDataFile, error) {
-	indexed := make(map[string]repository.SlideDataFile, len(files))
+func DataFileMapByFilename(files []repository.RecordDataFile) (map[string]repository.RecordDataFile, error) {
+	indexed := make(map[string]repository.RecordDataFile, len(files))
 	for _, file := range files {
 		if _, exists := indexed[file.Filename]; exists {
 			return nil, fmt.Errorf("duplicate data file filename %q", file.Filename)
@@ -94,29 +94,29 @@ func DataFileMapByFilename(files []repository.SlideDataFile) (map[string]reposit
 	return indexed, nil
 }
 
-type slideAction struct {
+type recordAction struct {
 	when    time.Time
 	deleted bool
 }
 
-func latestSlideAction(slide repository.Slide) slideAction {
-	updatedAt := truncateToMillisecond(slide.UpdatedAt)
-	if slide.DeletedAt == nil {
-		return slideAction{when: updatedAt, deleted: false}
+func latestRecordAction(record repository.Record) recordAction {
+	updatedAt := truncateToMillisecond(record.UpdatedAt)
+	if record.DeletedAt == nil {
+		return recordAction{when: updatedAt, deleted: false}
 	}
 
-	deletedAt := truncateToMillisecond(slide.DeletedAt.UTC())
+	deletedAt := truncateToMillisecond(record.DeletedAt.UTC())
 	if deletedAt.After(updatedAt) {
-		return slideAction{when: deletedAt, deleted: true}
+		return recordAction{when: deletedAt, deleted: true}
 	}
 
 	// Timestamp ties are resolved in favor of edits, not deletes.
-	return slideAction{when: updatedAt, deleted: false}
+	return recordAction{when: updatedAt, deleted: false}
 }
 
-// slideIsMoreActive returns true when left is active and right has a DeletedAt set.
-// This handles the case where latestSlideAction classifies both as "edits" (tie rule)
-// but their raw slide states differ.
-func slideIsMoreActive(left repository.Slide, right repository.Slide) bool {
+// recordIsMoreActive returns true when left is active and right has a DeletedAt set.
+// This handles the case where latestRecordAction classifies both as "edits" (tie rule)
+// but their raw record states differ.
+func recordIsMoreActive(left repository.Record, right repository.Record) bool {
 	return left.DeletedAt == nil && right.DeletedAt != nil
 }

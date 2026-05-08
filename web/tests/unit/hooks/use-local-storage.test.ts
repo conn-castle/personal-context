@@ -181,7 +181,7 @@ describe("useLocalStorage", () => {
 
   it("handles null values", async () => {
     const { result } = renderHook(() =>
-      useLocalStorage<string | null>("slideId", null)
+      useLocalStorage<string | null>("recordId", null)
     );
 
     await waitFor(() => {
@@ -189,9 +189,9 @@ describe("useLocalStorage", () => {
     });
 
     act(() => {
-      result.current[1]("slide-123");
+      result.current[1]("record-123");
     });
-    expect(result.current[0]).toBe("slide-123");
+    expect(result.current[0]).toBe("record-123");
 
     act(() => {
       result.current[1](null);

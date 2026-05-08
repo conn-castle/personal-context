@@ -42,18 +42,18 @@ Before starting implementation, resolve:
 
 The Go `Repository` interface was designed for CLI use and has two gaps that must be resolved before implementing HTTP handlers:
 
-*Gap 1: `UpdateSlideInput` is full-replacement, not patch-shaped.*
-- `UpdateSlideInput` requires all fields (ID, Date, DayOrder, HTMLContent, project/device provenance). The web `PATCH /api/slides/:id` accepts partial updates (only `project_id`, `notes`, `git_remote_url`, `git_hash`).
-- **Decision**: Do NOT change the Repository interface or `UpdateSlideInput` struct. Instead, implement a read-then-merge adapter in the `serve` package: the handler fetches the existing slide via `GetSlideByID`, merges the PATCH body fields onto it, and calls `UpdateSlide` with the complete input. This keeps the Repository contract stable and matches how the web API routes work (they also read-then-write against Postgres).
+*Gap 1: `UpdateRecordInput` is full-replacement, not patch-shaped.*
+- `UpdateRecordInput` requires all fields (ID, Date, DayOrder, HTMLContent, project/device provenance). The web `PATCH /api/records/:id` accepts partial updates (only `project_id`, `notes`, `git_remote_url`, `git_hash`).
+- **Decision**: Do NOT change the Repository interface or `UpdateRecordInput` struct. Instead, implement a read-then-merge adapter in the `serve` package: the handler fetches the existing record via `GetRecordByID`, merges the PATCH body fields onto it, and calls `UpdateRecord` with the complete input. This keeps the Repository contract stable and matches how the web API routes work (they also read-then-write against Postgres).
 - Document this pattern in the serve package.
 
-*Gap 2: `ListSlidesFilter` lacks `UpdatedAfter`.*
-- The `GET /api/sync/changes?since=<ISO>` endpoint needs to filter slides by `updated_at >= since AND updated_at <= server_now`.
-- **Decision**: Add `UpdatedAfter *time.Time` and `UpdatedBefore *time.Time` fields to `ListSlidesFilter` in `cli/internal/repository/types.go`.
-- Update both SQLite and Postgres repository implementations to apply the new filter fields in their `ListSlides` queries.
+*Gap 2: `ListRecordsFilter` lacks `UpdatedAfter`.*
+- The `GET /api/sync/changes?since=<ISO>` endpoint needs to filter records by `updated_at >= since AND updated_at <= server_now`.
+- **Decision**: Add `UpdatedAfter *time.Time` and `UpdatedBefore *time.Time` fields to `ListRecordsFilter` in `cli/internal/repository/types.go`.
+- Update both SQLite and Postgres repository implementations to apply the new filter fields in their `ListRecords` queries.
 - Add contract test cases for the new filter fields.
 
-**Exit**: `ListSlidesFilter` supports `UpdatedAfter` and `UpdatedBefore`. Both repository implementations pass contract tests. The serve package has a documented read-then-merge adapter pattern for PATCH.
+**Exit**: `ListRecordsFilter` supports `UpdatedAfter` and `UpdatedBefore`. Both repository implementations pass contract tests. The serve package has a documented read-then-merge adapter pattern for PATCH.
 
 **A3. Create `pc serve` command scaffold**
 - New package: `cli/internal/serve/`
@@ -80,38 +80,38 @@ Implement each endpoint in `cli/internal/serve/`. Each handler calls the existin
 - Calls `repo.ListProjects(ctx, false)` so the project list is registry-backed and excludes archived rows.
 - Response: `{"projects": ["a", "b"]}`.
 
-**B2. `GET /api/slides`**
+**B2. `GET /api/records`**
 - Parse query params: `limit`, `cursor`, `project`, `deleted`, `updated_after`.
-- Calls `repo.ListSlides()` with appropriate `ListSlidesFilter`.
+- Calls `repo.ListRecords()` with appropriate `ListRecordsFilter`.
 - Implement cursor-based pagination (same cursor format as web API — encode `(date, day_order, id)` tuple).
-- Response: `{"items": [...SlideSummary], "next_cursor": "..." | null}`.
-- **Note**: Must include nullable `html_content`, `project_id`, `source_device_id`, `source_ref`, `figure_count`, and `data_file_count` in each SlideSummary. `figure_count` and `data_file_count` require additional queries or a list+count helper.
+- Response: `{"items": [...RecordSummary], "next_cursor": "..." | null}`.
+- **Note**: Must include nullable `html_content`, `project_id`, `source_device_id`, `source_ref`, `figure_count`, and `data_file_count` in each RecordSummary. `figure_count` and `data_file_count` require additional queries or a list+count helper.
 
-**B3. `GET /api/slides/:id`**
-- Calls `repo.GetSlideByID()`, `repo.ListSlideFiguresBySlideID()`, `repo.ListSlideDataFilesBySlideID()`.
-- Response: `{"slide": SlideDetail}` with figures and data_files arrays.
+**B3. `GET /api/records/:id`**
+- Calls `repo.GetRecordByID()`, `repo.ListRecordFiguresByRecordID()`, `repo.ListRecordDataFilesByRecordID()`.
+- Response: `{"record": RecordDetail}` with figures and data_files arrays.
 
-**B4. `PATCH /api/slides/:id`**
+**B4. `PATCH /api/records/:id`**
 - Parse JSON body: `project_id`, `notes`, `git_remote_url`, `git_hash` (all optional).
-- Uses the read-then-merge adapter (A2): fetch existing slide, merge PATCH fields, call `repo.UpdateSlide()` with the complete input.
-- Re-fetch full slide detail for response.
+- Uses the read-then-merge adapter (A2): fetch existing record, merge PATCH fields, call `repo.UpdateRecord()` with the complete input.
+- Re-fetch full record detail for response.
 - Include `sync_version` from `repo.GetSyncVersion()`.
-- Response: `{"slide": SlideDetail, "sync_version": N}`.
+- Response: `{"record": RecordDetail, "sync_version": N}`.
 
-**B5. `PATCH /api/slides/:id/order`**
+**B5. `PATCH /api/records/:id/order`**
 - Parse JSON body: `date`, `position` (first/last/before/after with reference_id).
 - Compute new fractional index using existing `fracdex` library.
-- Uses the read-then-merge adapter: fetch existing slide, update date + day_order, call `repo.UpdateSlide()`.
+- Uses the read-then-merge adapter: fetch existing record, update date + day_order, call `repo.UpdateRecord()`.
 - Response: `{"id", "date", "day_order", "updated_at", "sync_version"}`.
 
-**B6. `DELETE /api/slides/:id`**
-- Calls `repo.SoftDeleteSlide()`.
-- Re-fetch slide for response timestamps.
+**B6. `DELETE /api/records/:id`**
+- Calls `repo.SoftDeleteRecord()`.
+- Re-fetch record for response timestamps.
 - Response: `{"id", "deleted_at", "updated_at", "sync_version"}`.
 
-**B7. `POST /api/slides/:id/restore`**
-- Calls `repo.RestoreSlide()`.
-- Re-fetch slide for response.
+**B7. `POST /api/records/:id/restore`**
+- Calls `repo.RestoreRecord()`.
+- Re-fetch record for response.
 - Response: `{"id", "deleted_at": null, "updated_at", "sync_version"}`.
 
 **B8. `GET /api/sync/version`**
@@ -120,16 +120,16 @@ Implement each endpoint in `cli/internal/serve/`. Each handler calls the existin
 
 **B9. `GET /api/sync/changes?since=<ISO>`**
 - **Snapshot window pattern** (matches web route behavior): Capture `server_now = time.Now().UTC()` *before* querying the database. Use `server_now` as the upper bound for the `updated_at` range (`updated_at >= since AND updated_at <= server_now`). Return `server_now` in the response.
-- This prevents the race where a slide is modified between capturing the timestamp and querying, which would cause the change to be missed by the next sync (since the client uses `server_now` as its next `since` value).
-- Calls `repo.ListSlides()` with `UpdatedAfter` and `UpdatedBefore` filters (from A2) plus `IncludeDeleted: true`.
-- Response: `{"items": [...SlideSummary], "server_now": "ISO"}`.
+- This prevents the race where a record is modified between capturing the timestamp and querying, which would cause the change to be missed by the next sync (since the client uses `server_now` as its next `since` value).
+- Calls `repo.ListRecords()` with `UpdatedAfter` and `UpdatedBefore` filters (from A2) plus `IncludeDeleted: true`.
+- Response: `{"items": [...RecordSummary], "server_now": "ISO"}`.
 
-**B10. `GET /api/files/:slide_id/figures/:filename` and `GET /api/files/:slide_id/data/:filename`**
+**B10. `GET /api/files/:record_id/figures/:filename` and `GET /api/files/:record_id/data/:filename`**
 - **Contract**: Returns JSON `{"url": "<direct_file_url>", "expires_at": "<far_future_ISO>"}` — identical response shape to the cloud route's `FileUrlResponse`.
-- The `url` value points to a separate direct-file-serving endpoint on the Go server: `http://localhost:<port>/local-files/<slide_id>/figures/<filename>` (or `/data/`).
+- The `url` value points to a separate direct-file-serving endpoint on the Go server: `http://localhost:<port>/local-files/<record_id>/figures/<filename>` (or `/data/`).
 - `expires_at` is a fixed far-future timestamp (e.g., `2099-01-01T00:00:00Z`) since local files don't expire.
-- The Go server also registers a `/local-files/` handler that resolves the local file path (`<data_dir>/figures/<slide_id>/<filename>` or `<data_dir>/data/<slide_id>/<filename>`), validates against directory traversal (`..` in path components), and serves the file with `http.ServeFile`.
-- Validate that the file record exists in the DB (slide_figures / slide_data_files table) before generating the URL — return 404 if not found.
+- The Go server also registers a `/local-files/` handler that resolves the local file path (`<data_dir>/figures/<record_id>/<filename>` or `<data_dir>/data/<record_id>/<filename>`), validates against directory traversal (`..` in path components), and serves the file with `http.ServeFile`.
+- Validate that the file record exists in the DB (record_figures / record_data_files table) before generating the URL — return 404 if not found.
 - **Rationale**: Keeping the JSON `{url, expires_at}` shape means the frontend `FileUrlResponse` type, presigned URL caching, and `<img src={url}>` rendering all work unchanged in local mode. No conditional branching in the frontend.
 
 ### Phase C: Web-side proxy integration
@@ -146,7 +146,7 @@ Implement each endpoint in `cli/internal/serve/`. Each handler calls the existin
   }
   ```
 - The rest of the handler (Neon/S3 logic) is unchanged.
-- Files to update: `slides/route.ts`, `slides/[id]/route.ts`, `slides/[id]/order/route.ts`, `slides/[id]/restore/route.ts`, `sync/version/route.ts`, `sync/changes/route.ts`, `files/[slideId]/[...path]/route.ts`, `projects/route.ts`.
+- Files to update: `records/route.ts`, `records/[id]/route.ts`, `records/[id]/order/route.ts`, `records/[id]/restore/route.ts`, `sync/version/route.ts`, `sync/changes/route.ts`, `files/[recordId]/[...path]/route.ts`, `projects/route.ts`.
 
 **C3. `make dev` integration**
 - **Decision**: Single canonical command `make dev` that auto-detects the mode:
@@ -169,7 +169,7 @@ Implement each endpoint in `cli/internal/serve/`. Each handler calls the existin
 *Timestamp normalization rules* (applied by both test runners):
 - Fixture `expected_response` uses placeholder `"<<TIMESTAMP>>"` for any timestamp field whose exact value depends on DB clock/trigger timing.
 - Test runners validate `"<<TIMESTAMP>>"` fields using a structural matcher: value must be a valid ISO 8601 string in UTC (ends with `Z` or `+00:00`), non-empty.
-- For **ordering assertions** (e.g., "updated_at of slide A > updated_at of slide B"), fixtures include an optional `"timestamp_ordering"` array: `[["$.items[0].updated_at", ">", "$.items[1].updated_at"]]`. Test runners parse these as JSONPath comparisons on the actual response.
+- For **ordering assertions** (e.g., "updated_at of record A > updated_at of record B"), fixtures include an optional `"timestamp_ordering"` array: `[["$.items[0].updated_at", ">", "$.items[1].updated_at"]]`. Test runners parse these as JSONPath comparisons on the actual response.
 - For **precision normalization**: both test runners truncate all timestamp values to millisecond precision before comparison (SQLite stores ms, Postgres stores µs). This means `2026-03-10T10:00:00.123456Z` and `2026-03-10T10:00:00.123Z` are treated as equal.
 - `null` timestamp fields (e.g., `deleted_at: null`) are compared exactly — no normalization.
 
@@ -213,7 +213,7 @@ Implement each endpoint in `cli/internal/serve/`. Each handler calls the existin
 ## Implementation Order
 
 1. **A1** — Converge S3 version format (Go + web fallback)
-2. **A2** — Repository interface extensions (`UpdatedAfter`/`UpdatedBefore` in `ListSlidesFilter`, read-then-merge adapter pattern)
+2. **A2** — Repository interface extensions (`UpdatedAfter`/`UpdatedBefore` in `ListRecordsFilter`, read-then-merge adapter pattern)
 3. **A3, A4** — Go server scaffold + routing
 4. **B1–B10** — All API endpoints (can be done incrementally, testing each)
 5. **C1–C2** — Web proxy integration
@@ -226,13 +226,13 @@ Implement each endpoint in `cli/internal/serve/`. Each handler calls the existin
 - **Cursor pagination parity**: The web API uses an opaque cursor encoding. The Go server must produce identical cursor format so the frontend pagination works seamlessly.
 - **Timestamp precision**: SQLite stores millisecond precision, Postgres stores microsecond. Contract tests truncate to millisecond for comparison, and use `<<TIMESTAMP>>` placeholders for DB-generated values.
 - **Response field ordering**: JSON field order doesn't matter semantically, but contract test assertions should use deep-equal on parsed objects, not string comparison.
-- **Read-then-merge atomicity**: The Go PATCH handler reads the slide, merges fields, and writes back. Without transactions, a concurrent mutation between read and write could lose data. Acceptable for single-user local mode; document the limitation.
+- **Read-then-merge atomicity**: The Go PATCH handler reads the record, merges fields, and writes back. Without transactions, a concurrent mutation between read and write could lose data. Acceptable for single-user local mode; document the limitation.
 
 ## Revision History
 
 - **v2 (2026-03-10)**: Addressed 6 review findings:
   1. A1 now includes web-side `_version` fallback in `getS3Version()`.
-  2. Added A2 (repository extensions): `UpdatedAfter`/`UpdatedBefore` in `ListSlidesFilter`, read-then-merge adapter for PATCH.
+  2. Added A2 (repository extensions): `UpdatedAfter`/`UpdatedBefore` in `ListRecordsFilter`, read-then-merge adapter for PATCH.
   3. B10 locked to JSON `{url, expires_at}` contract with Go serving files at `/local-files/` endpoint.
   4. B9 specifies snapshot-window pattern (`server_now` captured before query, used as upper bound).
   5. C4 replaced with C3: `make dev` auto-detects mode, with explicit `make dev-local`/`make dev-cloud` overrides.

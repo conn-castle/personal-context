@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS devices (
 
 CREATE INDEX IF NOT EXISTS idx_devices_archived ON devices (archived_at) WHERE archived_at IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS slides (
+CREATE TABLE IF NOT EXISTS records (
     id TEXT PRIMARY KEY
         CHECK (
             id GLOB '[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'
@@ -37,37 +37,37 @@ CREATE TABLE IF NOT EXISTS slides (
     deleted_at TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_slides_date ON slides (date, day_order, id);
-CREATE INDEX IF NOT EXISTS idx_slides_project ON slides (project_id);
-CREATE INDEX IF NOT EXISTS idx_slides_source_device ON slides (source_device_id);
-CREATE INDEX IF NOT EXISTS idx_slides_updated ON slides (updated_at);
-CREATE INDEX IF NOT EXISTS idx_slides_deleted ON slides (deleted_at) WHERE deleted_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_records_date ON records (date, day_order, id);
+CREATE INDEX IF NOT EXISTS idx_records_project ON records (project_id);
+CREATE INDEX IF NOT EXISTS idx_records_source_device ON records (source_device_id);
+CREATE INDEX IF NOT EXISTS idx_records_updated ON records (updated_at);
+CREATE INDEX IF NOT EXISTS idx_records_deleted ON records (deleted_at) WHERE deleted_at IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS slide_figures (
+CREATE TABLE IF NOT EXISTS record_figures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    slide_id TEXT NOT NULL REFERENCES slides(id) ON DELETE CASCADE,
+    record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,
     filename TEXT NOT NULL CHECK (length(filename) > 0 AND instr(filename, '/') = 0),
     s3_key TEXT NOT NULL CHECK (substr(s3_key, 1, 8) = 'figures/'),
     alt_text TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    UNIQUE (slide_id, filename)
+    UNIQUE (record_id, filename)
 );
 
-CREATE INDEX IF NOT EXISTS idx_figures_slide ON slide_figures (slide_id);
+CREATE INDEX IF NOT EXISTS idx_figures_record ON record_figures (record_id);
 
-CREATE TABLE IF NOT EXISTS slide_data_files (
+CREATE TABLE IF NOT EXISTS record_data_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    slide_id TEXT NOT NULL REFERENCES slides(id) ON DELETE CASCADE,
+    record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,
     filename TEXT NOT NULL CHECK (length(filename) > 0 AND instr(filename, '/') = 0),
     s3_key TEXT NOT NULL CHECK (substr(s3_key, 1, 5) = 'data/'),
     size INTEGER NOT NULL CHECK (size >= 0),
     hash TEXT NOT NULL CHECK (length(hash) = 64 AND hash NOT GLOB '*[^0-9a-f]*'),
     description TEXT,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    UNIQUE (slide_id, filename)
+    UNIQUE (record_id, filename)
 );
 
-CREATE INDEX IF NOT EXISTS idx_data_files_slide ON slide_data_files (slide_id);
+CREATE INDEX IF NOT EXISTS idx_data_files_record ON record_data_files (record_id);
 
 CREATE TABLE IF NOT EXISTS templates (
     name TEXT PRIMARY KEY,
@@ -87,8 +87,8 @@ INSERT INTO sync_version (id, version)
 SELECT 1, 0
 WHERE NOT EXISTS (SELECT 1 FROM sync_version WHERE id = 1);
 
-CREATE TRIGGER IF NOT EXISTS slides_sync_bump_after_insert
-AFTER INSERT ON slides
+CREATE TRIGGER IF NOT EXISTS records_sync_bump_after_insert
+AFTER INSERT ON records
 BEGIN
     UPDATE sync_version
     SET version = version + 1,
@@ -96,8 +96,8 @@ BEGIN
     WHERE id = 1;
 END;
 
-CREATE TRIGGER IF NOT EXISTS slides_sync_bump_after_update
-AFTER UPDATE ON slides
+CREATE TRIGGER IF NOT EXISTS records_sync_bump_after_update
+AFTER UPDATE ON records
 FOR EACH ROW
 WHEN
     OLD.id != NEW.id OR
@@ -118,8 +118,8 @@ BEGIN
     WHERE id = 1;
 END;
 
-CREATE TRIGGER IF NOT EXISTS slides_sync_bump_after_delete
-AFTER DELETE ON slides
+CREATE TRIGGER IF NOT EXISTS records_sync_bump_after_delete
+AFTER DELETE ON records
 BEGIN
     UPDATE sync_version
     SET version = version + 1,
@@ -128,7 +128,7 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS figures_sync_bump_after_insert
-AFTER INSERT ON slide_figures
+AFTER INSERT ON record_figures
 BEGIN
     UPDATE sync_version
     SET version = version + 1,
@@ -137,10 +137,10 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS figures_sync_bump_after_update
-AFTER UPDATE ON slide_figures
+AFTER UPDATE ON record_figures
 FOR EACH ROW
 WHEN
-    OLD.slide_id != NEW.slide_id OR
+    OLD.record_id != NEW.record_id OR
     OLD.filename != NEW.filename OR
     OLD.s3_key != NEW.s3_key OR
     COALESCE(OLD.alt_text, '') != COALESCE(NEW.alt_text, '')
@@ -152,7 +152,7 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS figures_sync_bump_after_delete
-AFTER DELETE ON slide_figures
+AFTER DELETE ON record_figures
 BEGIN
     UPDATE sync_version
     SET version = version + 1,
@@ -161,7 +161,7 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS data_files_sync_bump_after_insert
-AFTER INSERT ON slide_data_files
+AFTER INSERT ON record_data_files
 BEGIN
     UPDATE sync_version
     SET version = version + 1,
@@ -170,10 +170,10 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS data_files_sync_bump_after_update
-AFTER UPDATE ON slide_data_files
+AFTER UPDATE ON record_data_files
 FOR EACH ROW
 WHEN
-    OLD.slide_id != NEW.slide_id OR
+    OLD.record_id != NEW.record_id OR
     OLD.filename != NEW.filename OR
     OLD.s3_key != NEW.s3_key OR
     OLD.size != NEW.size OR
@@ -187,7 +187,7 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS data_files_sync_bump_after_delete
-AFTER DELETE ON slide_data_files
+AFTER DELETE ON record_data_files
 BEGIN
     UPDATE sync_version
     SET version = version + 1,
@@ -293,12 +293,12 @@ BEGIN
     WHERE id = 1;
 END;
 
-CREATE TRIGGER IF NOT EXISTS slides_auto_update_updated_at
-AFTER UPDATE ON slides
+CREATE TRIGGER IF NOT EXISTS records_auto_update_updated_at
+AFTER UPDATE ON records
 FOR EACH ROW
 WHEN NEW.updated_at = OLD.updated_at
 BEGIN
-    UPDATE slides
+    UPDATE records
     SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     WHERE id = OLD.id;
 END;

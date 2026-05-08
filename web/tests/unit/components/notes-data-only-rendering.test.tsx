@@ -2,21 +2,21 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { SlideDetail, SlideSummary } from "@/lib/types";
+import type { RecordDetail, RecordSummary } from "@/lib/types";
 
-const scaledSlideFrameMock = vi.fn();
+const scaledRecordFrameMock = vi.fn();
 
-vi.mock("@/components/scaled-slide-frame", () => ({
-  ScaledSlideFrame: (props: { htmlContent: string }) => {
-    scaledSlideFrameMock(props);
-    return <div data-testid="scaled-slide-frame" />;
+vi.mock("@/components/scaled-record-frame", () => ({
+  ScaledRecordFrame: (props: { htmlContent: string }) => {
+    scaledRecordFrameMock(props);
+    return <div data-testid="scaled-record-frame" />;
   },
 }));
 
-import { SlideThumbnail } from "@/components/slide-thumbnail";
-import { SlideViewer } from "@/components/slide-viewer";
+import { RecordThumbnail } from "@/components/record-thumbnail";
+import { RecordViewer } from "@/components/record-viewer";
 
-const summary: SlideSummary = {
+const summary: RecordSummary = {
   id: "20260507-aabbccdd",
   date: "2026-05-07",
   day_order: "a0",
@@ -30,7 +30,7 @@ const summary: SlideSummary = {
   data_file_count: 2,
 };
 
-const detail: SlideDetail = {
+const detail: RecordDetail = {
   ...summary,
   notes: "Daily notes and observations",
   git_remote_url: null,
@@ -57,31 +57,31 @@ const detail: SlideDetail = {
 describe("notes/data-only rendering", () => {
   afterEach(() => {
     cleanup();
-    scaledSlideFrameMock.mockClear();
+    scaledRecordFrameMock.mockClear();
   });
 
   it("renders a deliberate main viewer state without passing null HTML to the iframe", () => {
-    render(<SlideViewer slide={detail} />);
+    render(<RecordViewer record={detail} />);
 
     expect(screen.getByText("Notes/data-only record")).toBeTruthy();
     expect(screen.getByText("Daily notes and observations")).toBeTruthy();
     expect(screen.getByText("1 figure")).toBeTruthy();
     expect(screen.getByText("2 data files")).toBeTruthy();
-    expect(screen.queryByTestId("scaled-slide-frame")).toBeNull();
-    expect(scaledSlideFrameMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("scaled-record-frame")).toBeNull();
+    expect(scaledRecordFrameMock).not.toHaveBeenCalled();
   });
 
   it("renders a thumbnail fallback without passing null HTML to the iframe", () => {
     render(
-      <SlideThumbnail
-        slide={summary}
+      <RecordThumbnail
+        record={summary}
         isSelected={false}
         onClick={vi.fn()}
       />
     );
 
     expect(screen.getByText("Notes/data")).toBeTruthy();
-    expect(screen.queryByTestId("scaled-slide-frame")).toBeNull();
-    expect(scaledSlideFrameMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("scaled-record-frame")).toBeNull();
+    expect(scaledRecordFrameMock).not.toHaveBeenCalled();
   });
 });

@@ -3,16 +3,16 @@
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { FileText, Image as ImageIcon, FileDown } from 'lucide-react'
-import type { SlideDetail } from '@/lib/types'
+import type { RecordDetail } from '@/lib/types'
 
 interface CollapsedDetailsStripProps {
-  slide: SlideDetail | null
+  record: RecordDetail | null
   onOpenTab: (tab: string) => void
 }
 
-export function CollapsedDetailsStrip({ slide, onOpenTab }: CollapsedDetailsStripProps) {
-  const figuresCount = slide?.figures.length ?? 0
-  const filesCount = slide?.data_files.length ?? 0
+export function CollapsedDetailsStrip({ record, onOpenTab }: CollapsedDetailsStripProps) {
+  const figuresCount = record?.figures.length ?? 0
+  const filesCount = record?.data_files.length ?? 0
 
   return (
     <div className="h-full w-12 bg-card border-l border-border flex flex-col items-center py-3 gap-1">

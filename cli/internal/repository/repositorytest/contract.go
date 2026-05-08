@@ -18,11 +18,11 @@ type RepositoryFactory func(t *testing.T) repository.Repository
 func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 	t.Helper()
 
-	t.Run("slides CRUD and sort order", func(t *testing.T) {
+	t.Run("records CRUD and sort order", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		slideA := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		recordA := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250304-a3f2b7e1",
 			Date:        "2025-03-04",
 			DayOrder:    "b",
@@ -35,8 +35,8 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: projectID}); err != nil && !errors.Is(err, repository.ErrConflict) {
 			t.Fatalf("CreateProject(update target) error = %v", err)
 		}
-		updated, err := repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-			ID:             slideA.ID,
+		updated, err := repo.UpdateRecord(ctx, repository.UpdateRecordInput{
+			ID:             recordA.ID,
 			Date:           "2025-03-04",
 			DayOrder:       "c",
 			HTMLContent:    strPtr("<h1>A2</h1>"),
@@ -45,10 +45,10 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			SourceDeviceID: sourceDeviceID,
 		})
 		if err != nil {
-			t.Fatalf("UpdateSlide() error = %v", err)
+			t.Fatalf("UpdateRecord() error = %v", err)
 		}
 		if updated.DayOrder != "c" || updated.HTMLContent == nil || *updated.HTMLContent != "<h1>A2</h1>" {
-			t.Fatalf("unexpected updated slide DayOrder/HTMLContent: %+v", updated)
+			t.Fatalf("unexpected updated record DayOrder/HTMLContent: %+v", updated)
 		}
 		if updated.Notes == nil || *updated.Notes != "updated notes" {
 			t.Fatalf("expected Notes=%q after update, got %v", "updated notes", updated.Notes)
@@ -59,34 +59,34 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if updated.UpdatedAt.IsZero() {
 			t.Fatal("expected non-zero UpdatedAt after update")
 		}
-		if updated.CreatedAt != slideA.CreatedAt {
-			t.Fatalf("expected CreatedAt preserved after update: got %v, want %v", updated.CreatedAt, slideA.CreatedAt)
+		if updated.CreatedAt != recordA.CreatedAt {
+			t.Fatalf("expected CreatedAt preserved after update: got %v, want %v", updated.CreatedAt, recordA.CreatedAt)
 		}
 
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250304-b7e1c9d3",
 			Date:        "2025-03-04",
 			DayOrder:    "a",
 			HTMLContent: strPtr("<h1>B</h1>"),
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250303-c0ffee01",
 			Date:        "2025-03-03",
 			DayOrder:    "z",
 			HTMLContent: strPtr("<h1>C</h1>"),
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250304-a3f2b700",
 			Date:        "2025-03-04",
 			DayOrder:    "c",
 			HTMLContent: strPtr("<h1>D</h1>"),
 		})
 
-		slides, err := repo.ListSlides(ctx, repository.ListSlidesFilter{})
+		records, err := repo.ListRecords(ctx, repository.ListRecordsFilter{})
 		if err != nil {
-			t.Fatalf("ListSlides() error = %v", err)
+			t.Fatalf("ListRecords() error = %v", err)
 		}
-		ids := slideIDs(slides)
+		ids := recordIDs(records)
 		expected := []string{
 			"20250303-c0ffee01",
 			"20250304-b7e1c9d3",
@@ -96,69 +96,69 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		assertExactOrder(t, ids, expected)
 	})
 
-	t.Run("slides soft delete and restore", func(t *testing.T) {
+	t.Run("records soft delete and restore", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		slide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		record := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250305-deadbeef",
 			Date:        "2025-03-05",
 			DayOrder:    "n",
 			HTMLContent: strPtr("<h1>Trash me</h1>"),
 		})
 
-		if err := repo.SoftDeleteSlide(ctx, slide.ID); err != nil {
-			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		if err := repo.SoftDeleteRecord(ctx, record.ID); err != nil {
+			t.Fatalf("SoftDeleteRecord() error = %v", err)
 		}
-		active, err := repo.ListSlides(ctx, repository.ListSlidesFilter{})
+		active, err := repo.ListRecords(ctx, repository.ListRecordsFilter{})
 		if err != nil {
-			t.Fatalf("ListSlides(active) error = %v", err)
+			t.Fatalf("ListRecords(active) error = %v", err)
 		}
 		if len(active) != 0 {
 			t.Fatalf("expected active list to be empty, got %d rows", len(active))
 		}
 
-		deleted, err := repo.ListSlides(ctx, repository.ListSlidesFilter{IncludeDeleted: true})
+		deleted, err := repo.ListRecords(ctx, repository.ListRecordsFilter{IncludeDeleted: true})
 		if err != nil {
-			t.Fatalf("ListSlides(includeDeleted) error = %v", err)
+			t.Fatalf("ListRecords(includeDeleted) error = %v", err)
 		}
 		if len(deleted) != 1 || deleted[0].DeletedAt == nil {
-			t.Fatalf("expected one deleted slide with deleted_at, got %+v", deleted)
+			t.Fatalf("expected one deleted record with deleted_at, got %+v", deleted)
 		}
 
-		if err := repo.RestoreSlide(ctx, slide.ID); err != nil {
-			t.Fatalf("RestoreSlide() error = %v", err)
+		if err := repo.RestoreRecord(ctx, record.ID); err != nil {
+			t.Fatalf("RestoreRecord() error = %v", err)
 		}
-		restored, err := repo.ListSlides(ctx, repository.ListSlidesFilter{})
+		restored, err := repo.ListRecords(ctx, repository.ListRecordsFilter{})
 		if err != nil {
-			t.Fatalf("ListSlides(after restore) error = %v", err)
+			t.Fatalf("ListRecords(after restore) error = %v", err)
 		}
 		if len(restored) != 1 || restored[0].DeletedAt != nil {
-			t.Fatalf("expected restored active slide, got %+v", restored)
+			t.Fatalf("expected restored active record, got %+v", restored)
 		}
 	})
 
-	t.Run("slide figures and data files unique constraints", func(t *testing.T) {
+	t.Run("record figures and data files unique constraints", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		slide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		record := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250306-1111aaaa",
 			Date:        "2025-03-06",
 			DayOrder:    "n",
 			HTMLContent: strPtr("<h1>Assets</h1>"),
 		})
 
-		figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-			SlideID:  slide.ID,
+		figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID:  record.ID,
 			Filename: "plot.png",
 			S3Key:    "figures/20250306-1111aaaa/plot.png",
 		})
 		if err != nil {
-			t.Fatalf("CreateSlideFigure() error = %v", err)
+			t.Fatalf("CreateRecordFigure() error = %v", err)
 		}
-		_, err = repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-			SlideID:  slide.ID,
+		_, err = repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID:  record.ID,
 			Filename: "plot.png",
 			S3Key:    "figures/20250306-1111aaaa/plot.png",
 		})
@@ -166,18 +166,18 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			t.Fatalf("expected ErrConflict for duplicate figure filename, got %v", err)
 		}
 
-		dataFile, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-			SlideID:  slide.ID,
+		dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+			RecordID:  record.ID,
 			Filename: "metrics.csv",
 			S3Key:    "data/20250306-1111aaaa/metrics.csv",
 			Size:     12,
 			Hash:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		})
 		if err != nil {
-			t.Fatalf("CreateSlideDataFile() error = %v", err)
+			t.Fatalf("CreateRecordDataFile() error = %v", err)
 		}
-		_, err = repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-			SlideID:  slide.ID,
+		_, err = repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+			RecordID:  record.ID,
 			Filename: "metrics.csv",
 			S3Key:    "data/20250306-1111aaaa/metrics.csv",
 			Size:     12,
@@ -187,11 +187,11 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			t.Fatalf("expected ErrConflict for duplicate data filename, got %v", err)
 		}
 
-		if err := repo.DeleteSlideFigure(ctx, figure.ID); err != nil {
-			t.Fatalf("DeleteSlideFigure() error = %v", err)
+		if err := repo.DeleteRecordFigure(ctx, figure.ID); err != nil {
+			t.Fatalf("DeleteRecordFigure() error = %v", err)
 		}
-		if err := repo.DeleteSlideDataFile(ctx, dataFile.ID); err != nil {
-			t.Fatalf("DeleteSlideDataFile() error = %v", err)
+		if err := repo.DeleteRecordDataFile(ctx, dataFile.ID); err != nil {
+			t.Fatalf("DeleteRecordDataFile() error = %v", err)
 		}
 	})
 
@@ -199,39 +199,39 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		slide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		record := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250306-2222bbbb",
 			Date:        "2025-03-06",
 			DayOrder:    "n",
 			HTMLContent: strPtr("<h1>Asset updates</h1>"),
 		})
 
-		figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-			SlideID:  slide.ID,
+		figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID:  record.ID,
 			Filename: "before.png",
 			S3Key:    "figures/20250306-2222bbbb/before.png",
 			AltText:  strPtr("before"),
 		})
 		if err != nil {
-			t.Fatalf("CreateSlideFigure() error = %v", err)
+			t.Fatalf("CreateRecordFigure() error = %v", err)
 		}
 
-		figures, err := repo.ListSlideFiguresBySlideID(ctx, slide.ID)
+		figures, err := repo.ListRecordFiguresByRecordID(ctx, record.ID)
 		if err != nil {
-			t.Fatalf("ListSlideFiguresBySlideID() error = %v", err)
+			t.Fatalf("ListRecordFiguresByRecordID() error = %v", err)
 		}
 		if len(figures) != 1 || figures[0].ID != figure.ID {
 			t.Fatalf("unexpected figures list: %+v", figures)
 		}
 
-		updatedFigure, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{
+		updatedFigure, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{
 			ID:       figure.ID,
 			Filename: "after.png",
 			S3Key:    "figures/20250306-2222bbbb/after.png",
 			AltText:  strPtr("after"),
 		})
 		if err != nil {
-			t.Fatalf("UpdateSlideFigure() error = %v", err)
+			t.Fatalf("UpdateRecordFigure() error = %v", err)
 		}
 		if updatedFigure.Filename != "after.png" || updatedFigure.S3Key != "figures/20250306-2222bbbb/after.png" {
 			t.Fatalf("unexpected updated figure Filename/S3Key: %+v", updatedFigure)
@@ -241,19 +241,19 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 
 		// Verify nil AltText preserves existing value (patch semantics).
-		patchedFigure, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{
+		patchedFigure, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{
 			ID:      figure.ID,
 			AltText: nil,
 		})
 		if err != nil {
-			t.Fatalf("UpdateSlideFigure(nil AltText) error = %v", err)
+			t.Fatalf("UpdateRecordFigure(nil AltText) error = %v", err)
 		}
 		if patchedFigure.AltText == nil || *patchedFigure.AltText != "after" {
 			t.Fatalf("expected AltText preserved as %q when nil, got %v", "after", patchedFigure.AltText)
 		}
 
-		dataFile, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-			SlideID:     slide.ID,
+		dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+			RecordID:     record.ID,
 			Filename:    "before.csv",
 			S3Key:       "data/20250306-2222bbbb/before.csv",
 			Size:        7,
@@ -261,18 +261,18 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			Description: strPtr("before"),
 		})
 		if err != nil {
-			t.Fatalf("CreateSlideDataFile() error = %v", err)
+			t.Fatalf("CreateRecordDataFile() error = %v", err)
 		}
 
-		files, err := repo.ListSlideDataFilesBySlideID(ctx, slide.ID)
+		files, err := repo.ListRecordDataFilesByRecordID(ctx, record.ID)
 		if err != nil {
-			t.Fatalf("ListSlideDataFilesBySlideID() error = %v", err)
+			t.Fatalf("ListRecordDataFilesByRecordID() error = %v", err)
 		}
 		if len(files) != 1 || files[0].ID != dataFile.ID {
 			t.Fatalf("unexpected data-file list: %+v", files)
 		}
 
-		updatedDataFile, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+		updatedDataFile, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{
 			ID:          dataFile.ID,
 			Filename:    "after.csv",
 			S3Key:       "data/20250306-2222bbbb/after.csv",
@@ -281,7 +281,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			Description: strPtr("after"),
 		})
 		if err != nil {
-			t.Fatalf("UpdateSlideDataFile() error = %v", err)
+			t.Fatalf("UpdateRecordDataFile() error = %v", err)
 		}
 		if updatedDataFile.Filename != "after.csv" ||
 			updatedDataFile.S3Key != "data/20250306-2222bbbb/after.csv" ||
@@ -294,12 +294,12 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 
 		// Verify nil Description preserves existing value (patch semantics).
-		patchedDataFile, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+		patchedDataFile, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{
 			ID:          dataFile.ID,
 			Description: nil,
 		})
 		if err != nil {
-			t.Fatalf("UpdateSlideDataFile(nil Description) error = %v", err)
+			t.Fatalf("UpdateRecordDataFile(nil Description) error = %v", err)
 		}
 		if patchedDataFile.Description == nil || *patchedDataFile.Description != "after" {
 			t.Fatalf("expected Description preserved as %q when nil, got %v", "after", patchedDataFile.Description)
@@ -310,21 +310,21 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250301-aa11aa11",
 			Date:        "2025-03-01",
 			DayOrder:    "a",
 			HTMLContent: strPtr("<h1>1</h1>"),
 			ProjectID:   "org/p1",
 		})
-		second := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		second := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250302-bb22bb22",
 			Date:        "2025-03-02",
 			DayOrder:    "a",
 			HTMLContent: strPtr("<h1>2</h1>"),
 			ProjectID:   "org/p2",
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250303-cc33cc33",
 			Date:        "2025-03-03",
 			DayOrder:    "a",
@@ -332,14 +332,14 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			ProjectID:   "org/p2",
 		})
 
-		if err := repo.SoftDeleteSlide(ctx, second.ID); err != nil {
-			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		if err := repo.SoftDeleteRecord(ctx, second.ID); err != nil {
+			t.Fatalf("SoftDeleteRecord() error = %v", err)
 		}
 
 		projectID := "org/p2"
 		dateFrom := "2025-03-01"
 		dateTo := "2025-03-03"
-		filtered, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+		filtered, err := repo.ListRecords(ctx, repository.ListRecordsFilter{
 			IncludeDeleted: false,
 			ProjectID:      &projectID,
 			DateFrom:       &dateFrom,
@@ -347,25 +347,25 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			Limit:          1,
 		})
 		if err != nil {
-			t.Fatalf("ListSlides(filter) error = %v", err)
+			t.Fatalf("ListRecords(filter) error = %v", err)
 		}
 		if len(filtered) != 1 || filtered[0].ID != "20250303-cc33cc33" {
 			t.Fatalf("unexpected filtered result: %+v", filtered)
 		}
 
-		if _, err := repo.GetSlideByID(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
-			t.Fatalf("expected ErrInvalidArgument for empty slide id, got %v", err)
+		if _, err := repo.GetRecordByID(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for empty record id, got %v", err)
 		}
-		if err := repo.DeleteSlide(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+		if err := repo.DeleteRecord(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for empty delete id, got %v", err)
 		}
-		if err := repo.RestoreSlide(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+		if err := repo.RestoreRecord(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for empty restore id, got %v", err)
 		}
-		if _, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
+		if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for invalid figure input, got %v", err)
 		}
-		if _, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
+		if _, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for invalid data-file input, got %v", err)
 		}
 		if _, err := repo.CreateTemplate(ctx, repository.CreateTemplateInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
@@ -380,30 +380,30 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if err := repo.DeleteTemplate(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for empty template delete, got %v", err)
 		}
-		if _, err := repo.GetSlideFigureByID(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
+		if _, err := repo.GetRecordFigureByID(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for invalid figure id, got %v", err)
 		}
-		if _, err := repo.GetSlideDataFileByID(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
+		if _, err := repo.GetRecordDataFileByID(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for invalid data-file id, got %v", err)
 		}
-		if _, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{ID: 0}); !errors.Is(err, repository.ErrInvalidArgument) {
+		if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{ID: 0}); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for invalid figure update id, got %v", err)
 		}
-		if _, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{ID: 0}); !errors.Is(err, repository.ErrInvalidArgument) {
+		if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{ID: 0}); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for invalid data-file update id, got %v", err)
 		}
-		if err := repo.DeleteSlideFigure(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
+		if err := repo.DeleteRecordFigure(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for invalid figure delete id, got %v", err)
 		}
-		if err := repo.DeleteSlideDataFile(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
+		if err := repo.DeleteRecordDataFile(ctx, 0); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for invalid data-file delete id, got %v", err)
 		}
-		if err := repo.SoftDeleteSlide(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+		if err := repo.SoftDeleteRecord(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for empty soft-delete id, got %v", err)
 		}
 
-		if err := repo.DeleteSlide(ctx, "20259999-missing00"); !errors.Is(err, repository.ErrNotFound) {
-			t.Fatalf("expected ErrNotFound for missing slide delete, got %v", err)
+		if err := repo.DeleteRecord(ctx, "20259999-missing00"); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound for missing record delete, got %v", err)
 		}
 	})
 
@@ -415,21 +415,21 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		middleUpdatedAt := time.Date(2025, 3, 4, 11, 0, 0, 0, time.UTC)
 		lastUpdatedAt := time.Date(2025, 3, 4, 12, 0, 0, 0, time.UTC)
 
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250304-a1b2c3d4",
 			Date:        "2025-03-04",
 			DayOrder:    "a",
 			HTMLContent: strPtr("<h1>First</h1>"),
 			UpdatedAt:   &firstUpdatedAt,
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250304-b2c3d4e5",
 			Date:        "2025-03-04",
 			DayOrder:    "b",
 			HTMLContent: strPtr("<h1>Middle</h1>"),
 			UpdatedAt:   &middleUpdatedAt,
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250304-c3d4e5f6",
 			Date:        "2025-03-04",
 			DayOrder:    "c",
@@ -437,36 +437,36 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			UpdatedAt:   &lastUpdatedAt,
 		})
 
-		afterResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+		afterResults, err := repo.ListRecords(ctx, repository.ListRecordsFilter{
 			UpdatedAfter: &middleUpdatedAt,
 		})
 		if err != nil {
-			t.Fatalf("ListSlides(UpdatedAfter) error = %v", err)
+			t.Fatalf("ListRecords(UpdatedAfter) error = %v", err)
 		}
-		assertExactOrder(t, slideIDs(afterResults), []string{
+		assertExactOrder(t, recordIDs(afterResults), []string{
 			"20250304-b2c3d4e5",
 			"20250304-c3d4e5f6",
 		})
 
-		beforeResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+		beforeResults, err := repo.ListRecords(ctx, repository.ListRecordsFilter{
 			UpdatedBefore: &middleUpdatedAt,
 		})
 		if err != nil {
-			t.Fatalf("ListSlides(UpdatedBefore) error = %v", err)
+			t.Fatalf("ListRecords(UpdatedBefore) error = %v", err)
 		}
-		assertExactOrder(t, slideIDs(beforeResults), []string{
+		assertExactOrder(t, recordIDs(beforeResults), []string{
 			"20250304-a1b2c3d4",
 			"20250304-b2c3d4e5",
 		})
 
-		windowResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+		windowResults, err := repo.ListRecords(ctx, repository.ListRecordsFilter{
 			UpdatedAfter:  &middleUpdatedAt,
 			UpdatedBefore: &middleUpdatedAt,
 		})
 		if err != nil {
-			t.Fatalf("ListSlides(UpdatedAfter+UpdatedBefore) error = %v", err)
+			t.Fatalf("ListRecords(UpdatedAfter+UpdatedBefore) error = %v", err)
 		}
-		assertExactOrder(t, slideIDs(windowResults), []string{
+		assertExactOrder(t, recordIDs(windowResults), []string{
 			"20250304-b2c3d4e5",
 		})
 	})
@@ -515,8 +515,8 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		_, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-			SlideID:  "20250309-missing0",
+		_, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID:  "20250309-missing0",
 			Filename: "orphan.png",
 			S3Key:    "figures/20250309-missing0/orphan.png",
 		})
@@ -524,43 +524,43 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			t.Fatalf("expected ErrForeignKeyViolation for orphan figure, got %v", err)
 		}
 
-		slide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		record := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250309-ca5cad01",
 			Date:        "2025-03-09",
 			DayOrder:    "n",
 			HTMLContent: strPtr("<h1>Cascade</h1>"),
 		})
-		figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-			SlideID:  slide.ID,
+		figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID:  record.ID,
 			Filename: "f.png",
 			S3Key:    "figures/20250309-ca5cad01/f.png",
 		})
 		if err != nil {
-			t.Fatalf("CreateSlideFigure() error = %v", err)
+			t.Fatalf("CreateRecordFigure() error = %v", err)
 		}
-		dataFile, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-			SlideID:  slide.ID,
+		dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+			RecordID:  record.ID,
 			Filename: "d.csv",
 			S3Key:    "data/20250309-ca5cad01/d.csv",
 			Size:     4,
 			Hash:     "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
 		})
 		if err != nil {
-			t.Fatalf("CreateSlideDataFile() error = %v", err)
+			t.Fatalf("CreateRecordDataFile() error = %v", err)
 		}
 
-		if err := repo.DeleteSlide(ctx, slide.ID); err != nil {
-			t.Fatalf("DeleteSlide() error = %v", err)
+		if err := repo.DeleteRecord(ctx, record.ID); err != nil {
+			t.Fatalf("DeleteRecord() error = %v", err)
 		}
-		_, err = repo.GetSlideByID(ctx, slide.ID)
+		_, err = repo.GetRecordByID(ctx, record.ID)
 		if !errors.Is(err, repository.ErrNotFound) {
-			t.Fatalf("expected ErrNotFound for deleted slide, got %v", err)
+			t.Fatalf("expected ErrNotFound for deleted record, got %v", err)
 		}
-		_, err = repo.GetSlideFigureByID(ctx, figure.ID)
+		_, err = repo.GetRecordFigureByID(ctx, figure.ID)
 		if !errors.Is(err, repository.ErrNotFound) {
 			t.Fatalf("expected ErrNotFound for cascaded figure, got %v", err)
 		}
-		_, err = repo.GetSlideDataFileByID(ctx, dataFile.ID)
+		_, err = repo.GetRecordDataFileByID(ctx, dataFile.ID)
 		if !errors.Is(err, repository.ErrNotFound) {
 			t.Fatalf("expected ErrNotFound for cascaded data file, got %v", err)
 		}
@@ -596,38 +596,38 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250401-aa010101",
 			Date:        "2025-04-01",
 			DayOrder:    "a",
 			HTMLContent: strPtr("<h1>Active 1</h1>"),
 		})
-		deletedSlide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		deletedRecord := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250401-bb020202",
 			Date:        "2025-04-01",
 			DayOrder:    "b",
 			HTMLContent: strPtr("<h1>Will be deleted</h1>"),
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250401-cc030303",
 			Date:        "2025-04-01",
 			DayOrder:    "c",
 			HTMLContent: strPtr("<h1>Active 2</h1>"),
 		})
 
-		if err := repo.SoftDeleteSlide(ctx, deletedSlide.ID); err != nil {
-			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		if err := repo.SoftDeleteRecord(ctx, deletedRecord.ID); err != nil {
+			t.Fatalf("SoftDeleteRecord() error = %v", err)
 		}
 
-		onlyDeleted, err := repo.ListSlides(ctx, repository.ListSlidesFilter{OnlyDeleted: true})
+		onlyDeleted, err := repo.ListRecords(ctx, repository.ListRecordsFilter{OnlyDeleted: true})
 		if err != nil {
-			t.Fatalf("ListSlides(OnlyDeleted) error = %v", err)
+			t.Fatalf("ListRecords(OnlyDeleted) error = %v", err)
 		}
 		if len(onlyDeleted) != 1 {
-			t.Fatalf("expected 1 deleted slide, got %d", len(onlyDeleted))
+			t.Fatalf("expected 1 deleted record, got %d", len(onlyDeleted))
 		}
-		if onlyDeleted[0].ID != deletedSlide.ID {
-			t.Fatalf("expected deleted slide %s, got %s", deletedSlide.ID, onlyDeleted[0].ID)
+		if onlyDeleted[0].ID != deletedRecord.ID {
+			t.Fatalf("expected deleted record %s, got %s", deletedRecord.ID, onlyDeleted[0].ID)
 		}
 		if onlyDeleted[0].DeletedAt == nil {
 			t.Fatal("expected deleted_at to be set on OnlyDeleted result")
@@ -638,27 +638,27 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250402-a0a0a0a1",
 			Date:        "2025-04-02",
 			DayOrder:    "a",
 			HTMLContent: strPtr("<p>Advances in machine learning</p>"),
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250402-b0b0b0b2",
 			Date:        "2025-04-02",
 			DayOrder:    "b",
 			HTMLContent: strPtr("<p>Unrelated content</p>"),
 			Notes:       strPtr("learning about rust"),
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250402-c0c0c0c3",
 			Date:        "2025-04-02",
 			DayOrder:    "c",
 			HTMLContent: strPtr("<p>Some other topic</p>"),
 			ProjectID:   "org/learning-project",
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250402-d0d0d0d4",
 			Date:        "2025-04-02",
 			DayOrder:    "d",
@@ -666,11 +666,11 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		})
 
 		query := "learning"
-		results, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &query})
+		results, err := repo.ListRecords(ctx, repository.ListRecordsFilter{Query: &query})
 		if err != nil {
-			t.Fatalf("ListSlides(Query=learning) error = %v", err)
+			t.Fatalf("ListRecords(Query=learning) error = %v", err)
 		}
-		ids := slideIDs(results)
+		ids := recordIDs(results)
 		expected := []string{
 			"20250402-a0a0a0a1",
 			"20250402-b0b0b0b2",
@@ -680,32 +680,32 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 
 		// Case-insensitive search returns the same results.
 		upperQuery := "LEARNING"
-		upperResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &upperQuery})
+		upperResults, err := repo.ListRecords(ctx, repository.ListRecordsFilter{Query: &upperQuery})
 		if err != nil {
-			t.Fatalf("ListSlides(Query=LEARNING) error = %v", err)
+			t.Fatalf("ListRecords(Query=LEARNING) error = %v", err)
 		}
-		assertExactOrder(t, slideIDs(upperResults), expected)
+		assertExactOrder(t, recordIDs(upperResults), expected)
 	})
 
 	t.Run("Query with project filter", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250403-a1a1a1a1",
 			Date:        "2025-04-03",
 			DayOrder:    "a",
 			HTMLContent: strPtr("<p>golang concurrency patterns</p>"),
 			ProjectID:   "org/backend",
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250403-b2b2b2b2",
 			Date:        "2025-04-03",
 			DayOrder:    "b",
 			HTMLContent: strPtr("<p>golang generics tutorial</p>"),
 			ProjectID:   "org/frontend",
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250403-c3c3c3c3",
 			Date:        "2025-04-03",
 			DayOrder:    "c",
@@ -715,15 +715,15 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 
 		query := "golang"
 		projectID := "org/backend"
-		results, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+		results, err := repo.ListRecords(ctx, repository.ListRecordsFilter{
 			Query:     &query,
 			ProjectID: &projectID,
 		})
 		if err != nil {
-			t.Fatalf("ListSlides(Query+ProjectID) error = %v", err)
+			t.Fatalf("ListRecords(Query+ProjectID) error = %v", err)
 		}
 		if len(results) != 1 || results[0].ID != "20250403-a1a1a1a1" {
-			t.Fatalf("expected only backend golang slide, got %v", slideIDs(results))
+			t.Fatalf("expected only backend golang record, got %v", recordIDs(results))
 		}
 	})
 
@@ -731,34 +731,34 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		slide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		record := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250404-de1e1e01",
 			Date:        "2025-04-04",
 			DayOrder:    "a",
 			HTMLContent: strPtr("<p>searchable content</p>"),
 		})
-		if err := repo.SoftDeleteSlide(ctx, slide.ID); err != nil {
-			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		if err := repo.SoftDeleteRecord(ctx, record.ID); err != nil {
+			t.Fatalf("SoftDeleteRecord() error = %v", err)
 		}
 
 		query := "searchable"
 
-		// Default search excludes deleted slides.
-		defaultResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &query})
+		// Default search excludes deleted records.
+		defaultResults, err := repo.ListRecords(ctx, repository.ListRecordsFilter{Query: &query})
 		if err != nil {
-			t.Fatalf("ListSlides(Query, default) error = %v", err)
+			t.Fatalf("ListRecords(Query, default) error = %v", err)
 		}
 		if len(defaultResults) != 0 {
-			t.Fatalf("expected no results for deleted slide in default search, got %d", len(defaultResults))
+			t.Fatalf("expected no results for deleted record in default search, got %d", len(defaultResults))
 		}
 
-		// IncludeDeleted=true includes the deleted slide.
-		includeResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &query, IncludeDeleted: true})
+		// IncludeDeleted=true includes the deleted record.
+		includeResults, err := repo.ListRecords(ctx, repository.ListRecordsFilter{Query: &query, IncludeDeleted: true})
 		if err != nil {
-			t.Fatalf("ListSlides(Query, IncludeDeleted) error = %v", err)
+			t.Fatalf("ListRecords(Query, IncludeDeleted) error = %v", err)
 		}
-		if len(includeResults) != 1 || includeResults[0].ID != slide.ID {
-			t.Fatalf("expected deleted slide with IncludeDeleted, got %v", slideIDs(includeResults))
+		if len(includeResults) != 1 || includeResults[0].ID != record.ID {
+			t.Fatalf("expected deleted record with IncludeDeleted, got %v", recordIDs(includeResults))
 		}
 	})
 
@@ -766,38 +766,38 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250405-e5c01aa1",
 			Date:        "2025-04-05",
 			DayOrder:    "a",
 			HTMLContent: strPtr("<p>100% complete</p>"),
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250405-e5c02bb2",
 			Date:        "2025-04-05",
 			DayOrder:    "b",
 			HTMLContent: strPtr("<p>1000 items</p>"),
 		})
 
-		// "100%" should only match the slide with the literal percent sign,
+		// "100%" should only match the record with the literal percent sign,
 		// not "1000" (which would match if % were treated as a wildcard).
 		query := "100%"
-		results, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &query})
+		results, err := repo.ListRecords(ctx, repository.ListRecordsFilter{Query: &query})
 		if err != nil {
-			t.Fatalf("ListSlides(Query=100%%) error = %v", err)
+			t.Fatalf("ListRecords(Query=100%%) error = %v", err)
 		}
 		if len(results) != 1 || results[0].ID != "20250405-e5c01aa1" {
-			t.Fatalf("expected only the slide with literal '100%%', got %v", slideIDs(results))
+			t.Fatalf("expected only the record with literal '100%%', got %v", recordIDs(results))
 		}
 
 		// Also test underscore escaping: "_" should not match arbitrary single chars.
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250405-e5c03cc3",
 			Date:        "2025-04-05",
 			DayOrder:    "c",
 			HTMLContent: strPtr("<p>item_count is 5</p>"),
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250405-e5c04dd4",
 			Date:        "2025-04-05",
 			DayOrder:    "d",
@@ -805,12 +805,12 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		})
 
 		underscoreQuery := "item_count"
-		underscoreResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &underscoreQuery})
+		underscoreResults, err := repo.ListRecords(ctx, repository.ListRecordsFilter{Query: &underscoreQuery})
 		if err != nil {
-			t.Fatalf("ListSlides(Query=item_count) error = %v", err)
+			t.Fatalf("ListRecords(Query=item_count) error = %v", err)
 		}
 		if len(underscoreResults) != 1 || underscoreResults[0].ID != "20250405-e5c03cc3" {
-			t.Fatalf("expected only the slide with literal 'item_count', got %v", slideIDs(underscoreResults))
+			t.Fatalf("expected only the record with literal 'item_count', got %v", recordIDs(underscoreResults))
 		}
 	})
 
@@ -818,28 +818,28 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250405-e5c05ee5",
 			Date:        "2025-04-05",
 			DayOrder:    "e",
 			HTMLContent: strPtr(`<p>path is C:\Users\docs</p>`),
 		})
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250405-e5c06ff6",
 			Date:        "2025-04-05",
 			DayOrder:    "f",
 			HTMLContent: strPtr("<p>path is C:Usersdocs</p>"),
 		})
 
-		// A query containing backslashes should only match the slide with
+		// A query containing backslashes should only match the record with
 		// literal backslashes, not the one without them.
 		bsQuery := `C:\Users`
-		bsResults, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &bsQuery})
+		bsResults, err := repo.ListRecords(ctx, repository.ListRecordsFilter{Query: &bsQuery})
 		if err != nil {
-			t.Fatalf("ListSlides(Query with backslash) error = %v", err)
+			t.Fatalf("ListRecords(Query with backslash) error = %v", err)
 		}
 		if len(bsResults) != 1 || bsResults[0].ID != "20250405-e5c05ee5" {
-			t.Fatalf("expected only the slide with literal backslashes, got %v", slideIDs(bsResults))
+			t.Fatalf("expected only the record with literal backslashes, got %v", recordIDs(bsResults))
 		}
 	})
 
@@ -848,7 +848,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		ctx := context.Background()
 
 		query := "   "
-		_, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Query: &query})
+		_, err := repo.ListRecords(ctx, repository.ListRecordsFilter{Query: &query})
 		if !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for whitespace-only query, got %v", err)
 		}
@@ -858,116 +858,116 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		_, err := repo.ListSlides(ctx, repository.ListSlidesFilter{Limit: -1})
+		_, err := repo.ListRecords(ctx, repository.ListRecordsFilter{Limit: -1})
 		if !errors.Is(err, repository.ErrInvalidArgument) {
 			t.Fatalf("expected ErrInvalidArgument for negative limit, got %v", err)
 		}
 	})
 
-	t.Run("CountActiveSlides and CountTrashedSlides", func(t *testing.T) {
+	t.Run("CountActiveRecords and CountTrashedRecords", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
 
 		// Empty DB: both counts are zero.
-		active, err := repo.CountActiveSlides(ctx)
+		active, err := repo.CountActiveRecords(ctx)
 		if err != nil {
-			t.Fatalf("CountActiveSlides(empty) error = %v", err)
+			t.Fatalf("CountActiveRecords(empty) error = %v", err)
 		}
 		if active != 0 {
-			t.Fatalf("expected 0 active slides, got %d", active)
+			t.Fatalf("expected 0 active records, got %d", active)
 		}
-		trashed, err := repo.CountTrashedSlides(ctx)
+		trashed, err := repo.CountTrashedRecords(ctx)
 		if err != nil {
-			t.Fatalf("CountTrashedSlides(empty) error = %v", err)
+			t.Fatalf("CountTrashedRecords(empty) error = %v", err)
 		}
 		if trashed != 0 {
-			t.Fatalf("expected 0 trashed slides, got %d", trashed)
+			t.Fatalf("expected 0 trashed records, got %d", trashed)
 		}
 
-		// Create two slides, trash one.
-		mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		// Create two records, trash one.
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID: "20250410-c0a1b2c3", Date: "2025-04-10", DayOrder: "a", HTMLContent: strPtr("<h1>A</h1>"),
 		})
-		toTrash := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		toTrash := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID: "20250410-c0d4e5f6", Date: "2025-04-10", DayOrder: "b", HTMLContent: strPtr("<h1>B</h1>"),
 		})
-		if err := repo.SoftDeleteSlide(ctx, toTrash.ID); err != nil {
-			t.Fatalf("SoftDeleteSlide() error = %v", err)
+		if err := repo.SoftDeleteRecord(ctx, toTrash.ID); err != nil {
+			t.Fatalf("SoftDeleteRecord() error = %v", err)
 		}
 
-		active, err = repo.CountActiveSlides(ctx)
+		active, err = repo.CountActiveRecords(ctx)
 		if err != nil {
-			t.Fatalf("CountActiveSlides error = %v", err)
+			t.Fatalf("CountActiveRecords error = %v", err)
 		}
 		if active != 1 {
-			t.Fatalf("expected 1 active slide, got %d", active)
+			t.Fatalf("expected 1 active record, got %d", active)
 		}
-		trashed, err = repo.CountTrashedSlides(ctx)
+		trashed, err = repo.CountTrashedRecords(ctx)
 		if err != nil {
-			t.Fatalf("CountTrashedSlides error = %v", err)
+			t.Fatalf("CountTrashedRecords error = %v", err)
 		}
 		if trashed != 1 {
-			t.Fatalf("expected 1 trashed slide, got %d", trashed)
+			t.Fatalf("expected 1 trashed record, got %d", trashed)
 		}
 	})
 
-	t.Run("PurgeDeletedSlides", func(t *testing.T) {
+	t.Run("PurgeDeletedRecords", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
 
 		// Purge on empty DB returns empty slice.
-		ids, err := repo.PurgeDeletedSlides(ctx)
+		ids, err := repo.PurgeDeletedRecords(ctx)
 		if err != nil {
-			t.Fatalf("PurgeDeletedSlides(empty) error = %v", err)
+			t.Fatalf("PurgeDeletedRecords(empty) error = %v", err)
 		}
 		if len(ids) != 0 {
 			t.Fatalf("expected 0 purged IDs, got %d", len(ids))
 		}
 
-		// Create 3 slides, trash 2, purge.
-		activeSlide := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		// Create 3 records, trash 2, purge.
+		activeRecord := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID: "20250411-a0a1a1a1", Date: "2025-04-11", DayOrder: "a", HTMLContent: strPtr("<h1>Active</h1>"),
 		})
-		trash1 := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		trash1 := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID: "20250411-b0b2b2b2", Date: "2025-04-11", DayOrder: "b", HTMLContent: strPtr("<h1>Trash1</h1>"),
 		})
-		trash2 := mustCreateSlide(t, ctx, repo, repository.CreateSlideInput{
+		trash2 := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID: "20250411-c0c3c3c3", Date: "2025-04-11", DayOrder: "c", HTMLContent: strPtr("<h1>Trash2</h1>"),
 		})
 
-		if err := repo.SoftDeleteSlide(ctx, trash1.ID); err != nil {
-			t.Fatalf("SoftDeleteSlide(1) error = %v", err)
+		if err := repo.SoftDeleteRecord(ctx, trash1.ID); err != nil {
+			t.Fatalf("SoftDeleteRecord(1) error = %v", err)
 		}
-		if err := repo.SoftDeleteSlide(ctx, trash2.ID); err != nil {
-			t.Fatalf("SoftDeleteSlide(2) error = %v", err)
+		if err := repo.SoftDeleteRecord(ctx, trash2.ID); err != nil {
+			t.Fatalf("SoftDeleteRecord(2) error = %v", err)
 		}
 
-		ids, err = repo.PurgeDeletedSlides(ctx)
+		ids, err = repo.PurgeDeletedRecords(ctx)
 		if err != nil {
-			t.Fatalf("PurgeDeletedSlides error = %v", err)
+			t.Fatalf("PurgeDeletedRecords error = %v", err)
 		}
 		if len(ids) != 2 {
 			t.Fatalf("expected 2 purged IDs, got %d: %v", len(ids), ids)
 		}
 
-		// Active slide should still exist.
-		_, err = repo.GetSlideByID(ctx, activeSlide.ID)
+		// Active record should still exist.
+		_, err = repo.GetRecordByID(ctx, activeRecord.ID)
 		if err != nil {
-			t.Fatalf("active slide should still exist: %v", err)
+			t.Fatalf("active record should still exist: %v", err)
 		}
 
-		// Trashed slides should be hard-deleted.
+		// Trashed records should be hard-deleted.
 		for _, trashID := range []string{trash1.ID, trash2.ID} {
-			_, err = repo.GetSlideByID(ctx, trashID)
+			_, err = repo.GetRecordByID(ctx, trashID)
 			if !errors.Is(err, repository.ErrNotFound) {
-				t.Fatalf("expected ErrNotFound for purged slide %s, got %v", trashID, err)
+				t.Fatalf("expected ErrNotFound for purged record %s, got %v", trashID, err)
 			}
 		}
 
 		// Count should reflect the purge.
-		trashed, err := repo.CountTrashedSlides(ctx)
+		trashed, err := repo.CountTrashedRecords(ctx)
 		if err != nil {
-			t.Fatalf("CountTrashedSlides after purge error = %v", err)
+			t.Fatalf("CountTrashedRecords after purge error = %v", err)
 		}
 		if trashed != 0 {
 			t.Fatalf("expected 0 trashed after purge, got %d", trashed)
@@ -1065,7 +1065,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 
 }
 
-func mustCreateSlide(t *testing.T, ctx context.Context, repo repository.Repository, input repository.CreateSlideInput) repository.Slide {
+func mustCreateRecord(t *testing.T, ctx context.Context, repo repository.Repository, input repository.CreateRecordInput) repository.Record {
 	t.Helper()
 
 	if input.ProjectID == "" {
@@ -1089,23 +1089,23 @@ func mustCreateSlide(t *testing.T, ctx context.Context, repo repository.Reposito
 		t.Fatalf("ensure device registry row failed: %v", err)
 	}
 
-	slide, err := repo.CreateSlide(ctx, input)
+	record, err := repo.CreateRecord(ctx, input)
 	if err != nil {
-		t.Fatalf("CreateSlide failed: %v", err)
+		t.Fatalf("CreateRecord failed: %v", err)
 	}
-	if slide.CreatedAt.IsZero() {
-		t.Fatal("expected non-zero CreatedAt after CreateSlide")
+	if record.CreatedAt.IsZero() {
+		t.Fatal("expected non-zero CreatedAt after CreateRecord")
 	}
-	if slide.UpdatedAt.IsZero() {
-		t.Fatal("expected non-zero UpdatedAt after CreateSlide")
+	if record.UpdatedAt.IsZero() {
+		t.Fatal("expected non-zero UpdatedAt after CreateRecord")
 	}
-	return slide
+	return record
 }
 
-func slideIDs(slides []repository.Slide) []string {
-	ids := make([]string, 0, len(slides))
-	for _, slide := range slides {
-		ids = append(ids, slide.ID)
+func recordIDs(records []repository.Record) []string {
+	ids := make([]string, 0, len(records))
+	for _, record := range records {
+		ids = append(ids, record.ID)
 	}
 	return ids
 }

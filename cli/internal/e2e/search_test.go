@@ -14,11 +14,11 @@ func TestSearchMatchesHTMLContent(t *testing.T) {
 		HTMLContent: "<html><body>neural network training</body></html>",
 	})
 	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-01-15")
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	searchOut := runPCSuccess(t, homeDir, "search", "neural")
-	if !strings.Contains(searchOut, slideID) {
-		t.Fatalf("expected search output to contain slide ID %q, got:\n%s", slideID, searchOut)
+	if !strings.Contains(searchOut, recordID) {
+		t.Fatalf("expected search output to contain record ID %q, got:\n%s", recordID, searchOut)
 	}
 }
 
@@ -30,11 +30,11 @@ func TestSearchMatchesNotes(t *testing.T) {
 		Notes: "experiment alpha",
 	})
 	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-01-16")
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	searchOut := runPCSuccess(t, homeDir, "search", "alpha")
-	if !strings.Contains(searchOut, slideID) {
-		t.Fatalf("expected search output to contain slide ID %q, got:\n%s", slideID, searchOut)
+	if !strings.Contains(searchOut, recordID) {
+		t.Fatalf("expected search output to contain record ID %q, got:\n%s", recordID, searchOut)
 	}
 }
 
@@ -46,11 +46,11 @@ func TestSearchMatchesProjectID(t *testing.T) {
 		MetadataJSON: `{"project_id": "happy-ai/sleep"}`,
 	})
 	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-01-17")
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	searchOut := runPCSuccess(t, homeDir, "search", "sleep")
-	if !strings.Contains(searchOut, slideID) {
-		t.Fatalf("expected search output to contain slide ID %q, got:\n%s", slideID, searchOut)
+	if !strings.Contains(searchOut, recordID) {
+		t.Fatalf("expected search output to contain record ID %q, got:\n%s", recordID, searchOut)
 	}
 }
 
@@ -62,11 +62,11 @@ func TestSearchCaseInsensitive(t *testing.T) {
 		HTMLContent: "<html><body>MachineLearning</body></html>",
 	})
 	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-01-18")
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	searchOut := runPCSuccess(t, homeDir, "search", "machinelearning")
-	if !strings.Contains(searchOut, slideID) {
-		t.Fatalf("expected case-insensitive match for slide ID %q, got:\n%s", slideID, searchOut)
+	if !strings.Contains(searchOut, recordID) {
+		t.Fatalf("expected case-insensitive match for record ID %q, got:\n%s", recordID, searchOut)
 	}
 }
 
@@ -90,10 +90,10 @@ func TestSearchProjectFilter(t *testing.T) {
 
 	searchOut := runPCSuccess(t, homeDir, "search", "--format", "ids", "--project", "proj-alpha", "shared keyword")
 	if !strings.Contains(searchOut, id1) {
-		t.Fatalf("expected search to include slide %q from proj-alpha, got:\n%s", id1, searchOut)
+		t.Fatalf("expected search to include record %q from proj-alpha, got:\n%s", id1, searchOut)
 	}
 	if strings.Contains(searchOut, id2) {
-		t.Fatalf("expected search to exclude slide %q from proj-beta, got:\n%s", id2, searchOut)
+		t.Fatalf("expected search to exclude record %q from proj-beta, got:\n%s", id2, searchOut)
 	}
 }
 
@@ -102,16 +102,16 @@ func TestSearchDeletedFlagIncludesSoftDeleted(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	folder := createInputFolder(t, inputFolderOpts{
-		HTMLContent: "<html><body>recoverable slide data</body></html>",
+		HTMLContent: "<html><body>recoverable record data</body></html>",
 	})
 	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-03-04")
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
-	runPCSuccess(t, homeDir, "delete", slideID)
+	runPCSuccess(t, homeDir, "delete", recordID)
 
-	searchOut := runPCSuccess(t, homeDir, "search", "--format", "ids", "--deleted", "recoverable slide data")
-	if !strings.Contains(searchOut, slideID) {
-		t.Fatalf("expected --deleted flag to include soft-deleted slide %q, got:\n%s", slideID, searchOut)
+	searchOut := runPCSuccess(t, homeDir, "search", "--format", "ids", "--deleted", "recoverable record data")
+	if !strings.Contains(searchOut, recordID) {
+		t.Fatalf("expected --deleted flag to include soft-deleted record %q, got:\n%s", recordID, searchOut)
 	}
 }
 
@@ -124,7 +124,7 @@ func TestSearchFormatJSON(t *testing.T) {
 		MetadataJSON: `{"project_id": "json-proj"}`,
 	})
 	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-02-03")
-	slideID := strings.TrimSpace(stdout)
+	recordID := strings.TrimSpace(stdout)
 
 	searchOut := runPCSuccess(t, homeDir, "search", "--format", "json", "json output")
 
@@ -138,8 +138,8 @@ func TestSearchFormatJSON(t *testing.T) {
 	}
 
 	r := results[0]
-	if r["id"] != slideID {
-		t.Fatalf("expected id=%s, got %v", slideID, r["id"])
+	if r["id"] != recordID {
+		t.Fatalf("expected id=%s, got %v", recordID, r["id"])
 	}
 	if r["date"] != "2025-02-03" {
 		t.Fatalf("expected date=2025-02-03, got %v", r["date"])

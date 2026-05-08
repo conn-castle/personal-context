@@ -30,7 +30,7 @@ Do not duplicate information that belongs in other memory files:
 
 ## Project Overview
 
-Personal Context (`pc`) is a personal engineering notebook system that stores work as individual HTML slides — images, text, tables, code, and data — organized chronologically and by project. Designed for 10+ year lifespan, accumulating 1,000-2,000 slides per year.
+Personal Context (`pc`) is a personal engineering notebook system that stores work as individual HTML records — images, text, tables, code, and data — organized chronologically and by project. Designed for 10+ year lifespan, accumulating 1,000-2,000 records per year.
 
 Replaces yearly Google Slides decks with a database-backed, agent-friendly, multi-device, browsable system.
 
@@ -44,12 +44,12 @@ personal-context/          # code repo
 └── docs/                  # README, example GitHub Action workflow
 ```
 
-Separate **data repo**: nightly git export of slide data (metadata.json, slide.html, notes.md, figures via Git LFS). GitHub Action for nightly export lives there.
+Separate **data repo**: nightly git export of record data (metadata.json, record.html, notes.md, figures via Git LFS). GitHub Action for nightly export lives there.
 - Scheduled nightly at `0 4 * * *` UTC.
 - Workflow downloads the `pc` binary from code-repo releases, then runs `pc export --from-cloud --path . --github-remote origin`.
 - The code repository stores an example workflow under `docs/` for users to copy into their data repo.
 
-CLI releases are published from stable `vX.Y.Z` tags. The release workflow builds macOS/Linux `pc` artifacts, publishes a GitHub Release, and opens a PR against `conn-castle/homebrew-tap` for `Formula/personal-context.rb`. The Homebrew formula name is `personal-context`; the installed binary remains `pc`; the formula description is `Personal structured vault for searchable knowledge, data, files, and slides`.
+CLI releases are published from stable `vX.Y.Z` tags. The release workflow builds macOS/Linux `pc` artifacts, publishes a GitHub Release, and opens a PR against `conn-castle/homebrew-tap` for `Formula/personal-context.rb`. The Homebrew formula name is `personal-context`; the installed binary remains `pc`; the formula description is `Personal structured vault for searchable knowledge, data, files, and records`.
 
 The project license is PolyForm Noncommercial 1.0.0 (`PolyForm-Noncommercial-1.0.0`). Commercial use requires separate permission from the licensor.
 
@@ -64,7 +64,7 @@ GitHub + S3                     <-- portable backup (git clone + S3 = full resto
 ```
 
 Any state can be reconstructed from any other (subject to two-tier guarantee):
-- Postgres <-- git export via `pc restore-db` then `pc sync` (Tier 2: data file rows are recreated even when git export omitted the binaries; object content still requires S3/original files, and soft-deleted slides stay excluded)
+- Postgres <-- git export via `pc restore-db` then `pc sync` (Tier 2: data file rows are recreated even when git export omitted the binaries; object content still requires S3/original files, and soft-deleted records stay excluded)
 - Local SQLite <-- Postgres via `pc sync` (Tier 1: fully lossless)
 - Git export <-- Postgres via `pc export` (Tier 2: data file binaries stay in S3; soft-deleted excluded)
 - Postgres <-- local SQLite via `pc sync` push phase (Tier 1: fully lossless)
@@ -82,20 +82,20 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 | `api_keys` | `id` TEXT (UUID) | CLI auth keys: user_id FK, key_hash (SHA-256), label, last_used_at, revoked_at. Postgres only. |
 | `projects` | `id` TEXT (`user_id`, `id` in Postgres) | Project registry with archived state. |
 | `devices` | `id` TEXT (`user_id`, `id` in Postgres) | Source-device registry with archived state. |
-| `slides` | `id` TEXT (`YYYYMMDD-8hex`) | Optional HTML content, notes, project_id, source_device_id, source_ref, git fields, date, day_order, user_id (Postgres), soft delete |
-| `slide_figures` | `id` auto-increment | Image refs: filename, s3_key, alt_text. FK -> slides CASCADE |
-| `slide_data_files` | `id` auto-increment | Data file refs: filename, s3_key, size, SHA-256 hash, description. FK -> slides CASCADE |
-| `templates` | `name` TEXT | HTML templates for slide creation. Hardcoded, seeded by `pc setup` |
+| `records` | `id` TEXT (`YYYYMMDD-8hex`) | Optional HTML content, notes, project_id, source_device_id, source_ref, git fields, date, day_order, user_id (Postgres), soft delete |
+| `record_figures` | `id` auto-increment | Image refs: filename, s3_key, alt_text. FK -> records CASCADE |
+| `record_data_files` | `id` auto-increment | Data file refs: filename, s3_key, size, SHA-256 hash, description. FK -> records CASCADE |
+| `templates` | `name` TEXT | HTML templates for record creation. Hardcoded, seeded by `pc setup` |
 | `sync_version` | `user_id` TEXT (Postgres) / `id` (SQLite) | Per-user version counter (Postgres), singleton (SQLite). Auto-incremented by triggers |
 
 ### Key Fields and Invariants
-- **Slide ID**: `{YYYYMMDD}-{8-random-hex}` from `crypto/rand` (e.g., `20250304-a3f2b7e1`). Date prefix matches the slide's `date` field (UTC-normalized).
+- **Record ID**: `{YYYYMMDD}-{8-random-hex}` from `crypto/rand` (e.g., `20250304-a3f2b7e1`). Date prefix matches the record's `date` field (UTC-normalized).
 - **Sort key**: `ORDER BY (date, day_order, id)` — always deterministic.
-- **day_order**: Fractional index string (Figma's algorithm, safe characters only). Lexicographic sort. Reordering updates only the moved slide.
+- **day_order**: Fractional index string (Figma's algorithm, safe characters only). Lexicographic sort. Reordering updates only the moved record.
 - **project_id**: Required slash-convention string (e.g., `"happy-ai/sleep-staging"`) that references a non-archived project registry row for new writes.
 - **source_device_id**: Required source-device registry ID for record provenance; new writes reject archived or missing devices.
 - **source_ref**: Optional opaque provenance string. Do not URI-validate it in the first pass.
-- **html_content**: Optional. `NULL` means `slide.html` was absent and the web UI renders a notes/data-only state instead of an iframe. Empty or whitespace-only `slide.html` remains a non-null string.
+- **html_content**: Optional. `NULL` means `record.html` was absent and the web UI renders a notes/data-only state instead of an iframe. Empty or whitespace-only `record.html` remains a non-null string.
 - **s3_key**: Canonical relative path (e.g., `figures/20250304-a3f2b7e1/loss-curve.png`). Same value for both S3 and local filesystem, regardless of mode.
 - **git_remote_url**: Optional. Git remote URL (e.g., `https://github.com/org/repo`). Set via `metadata.json` only — no CLI flags. Displayed as clickable link in web UI.
 - **git_hash**: Optional. Full 40-character SHA-1 commit hash. Set via `metadata.json` only. In web UI, linkable to `{git_remote_url}/commit/{git_hash}` when both present.
@@ -104,8 +104,8 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - **No title. No tags.** Organization is by project and date only.
 
 ### Figure References in HTML
-- `html_content` references figures as `figures/{filename}` (relative path, no slide_id — implicit from context).
-- Each rendering context resolves: web UI iframe rewrites to presigned URLs via `GET /api/files/{slide_id}/figures/{filename}`; git export matches naturally (`./figures/{filename}` relative to slide folder).
+- `html_content` references figures as `figures/{filename}` (relative path, no record_id — implicit from context).
+- Each rendering context resolves: web UI iframe rewrites to presigned URLs via `GET /api/files/{record_id}/figures/{filename}`; git export matches naturally (`./figures/{filename}` relative to record folder).
 - `pc add`/`pc edit` validate that every `figures/` src in HTML has a matching file in the input folder.
 - External URLs (`https://...`) pass through unchanged. Data files are attachments, not referenced in HTML.
 
@@ -118,7 +118,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - SQLite WAL mode enabled for concurrent reads.
 - Triggers reimplemented in SQLite syntax (per-row instead of per-statement).
 - `TIMESTAMPTZ` stored as ISO 8601 text with `Z` suffix in SQLite.
-- Child rows (`slide_figures`, `slide_data_files`) matched by `(slide_id, filename)` during sync, NOT by auto-increment `id`.
+- Child rows (`record_figures`, `record_data_files`) matched by `(record_id, filename)` during sync, NOT by auto-increment `id`.
 
 ## Timezone Rules
 
@@ -144,8 +144,8 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 ### Bidirectional Sync Protocol
 1. Acquire file lock (`.pc/sync.lock`) to prevent concurrent sync.
 2. Capture `last_sync_at` at sync **start** (not end).
-3. **Push**: local slides where `updated_at >= last_sync_at` -> UPSERT into Neon + upload figures to S3. (No `deleted_at` check needed — trigger auto-bumps `updated_at`.)
-4. **Pull**: Neon slides where `updated_at >= last_sync_at` -> UPSERT into local + download figures.
+3. **Push**: local records where `updated_at >= last_sync_at` -> UPSERT into Neon + upload figures to S3. (No `deleted_at` check needed — trigger auto-bumps `updated_at`.)
+4. **Pull**: Neon records where `updated_at >= last_sync_at` -> UPSERT into local + download figures.
 5. Update `last_sync_at` only after both phases complete fully.
 6. Release lock.
 
@@ -155,8 +155,8 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - Timestamp tie: edit wins over delete (deterministic tiebreaker).
 
 ### Child Row Sync (Critical Invariants)
-- `slide_figures` and `slide_data_files` auto-increment PKs diverge between Postgres and SQLite. **Sync must match child rows by `(slide_id, filename)`, NOT by `id`.**
-- Child rows are **only modified as part of a parent slide operation** (`pc add`, `pc edit`, sync). Never independently. The parent slide's `updated_at` is the authoritative change signal. The `sync_version` triggers on child tables may cause harmless false positives during sync. If independent child modification commands are ever added, a cross-table trigger to bump parent `updated_at` must be added.
+- `record_figures` and `record_data_files` auto-increment PKs diverge between Postgres and SQLite. **Sync must match child rows by `(record_id, filename)`, NOT by `id`.**
+- Child rows are **only modified as part of a parent record operation** (`pc add`, `pc edit`, sync). Never independently. The parent record's `updated_at` is the authoritative change signal. The `sync_version` triggers on child tables may cause harmless false positives during sync. If independent child modification commands are ever added, a cross-table trigger to bump parent `updated_at` must be added.
 
 ### Web UI Sync (Smart Layered Polling)
 Four layers, 30-second global cooldown. All version checks go through `GET /api/sync/version` (Next.js reads S3 `_version` server-side, NOT Postgres — keeps Neon asleep on free tier).
@@ -167,7 +167,7 @@ Four layers, 30-second global cooldown. All version checks go through `GET /api/
 
 S3 `_version` is bumped write-after (only after Postgres commit succeeds, retry up to 3 times). Never write-ahead — prevents race where a client polls, sees the bump, queries Postgres, and gets stale data.
 
-On version change: query Neon for slides with `updated_at >= last_known_timestamp`. If a version bump produces no incremental changes, perform full reconciliation (hard-deleted rows are invisible to incremental queries).
+On version change: query Neon for records with `updated_at >= last_known_timestamp`. If a version bump produces no incremental changes, perform full reconciliation (hard-deleted rows are invisible to incremental queries).
 
 ## Directory Structures
 
@@ -179,16 +179,16 @@ On version change: query Neon for slides with `updated_at >= last_known_timestam
 │   ├── pc.db                 # local SQLite
 │   ├── last_sync             # timestamp of last cloud sync
 │   └── sync.lock             # file lock for concurrent sync prevention
-├── figures/{slide_id}/{filename}
-└── data/{slide_id}/{filename}  # sparse, on demand
+├── figures/{record_id}/{filename}
+└── data/{record_id}/{filename}  # sparse, on demand
 ```
 
 ### S3
 ```
 s3://personal-context-prod/
 └── users/{user_id}/
-    ├── figures/{slide_id}/{filename}
-    ├── data/{slide_id}/{filename}
+    ├── figures/{record_id}/{filename}
+    ├── data/{record_id}/{filename}
     └── _version                # per-user sync heartbeat
 ```
 
@@ -198,20 +198,20 @@ personal-context-data/
 ├── projects.json
 ├── devices.json
 ├── templates/*.html
-└── slides/{slide_id}/
-    ├── metadata.json           # SlideExport (no HTML, no notes text)
-    ├── slide.html              # optional; absent means html_content is NULL
+└── records/{record_id}/
+    ├── metadata.json           # RecordExport (no HTML, no notes text)
+    ├── record.html              # optional; absent means html_content is NULL
     ├── notes.md                # only if has_notes
     └── figures/                # Git LFS
 ```
-Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slides excluded from export. Export must be deterministic (consistent JSON key order, sorted arrays) for clean git diffs.
+Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted records excluded from export. Export must be deterministic (consistent JSON key order, sorted arrays) for clean git diffs.
 
 ## Technology Stack
 
 | Component | Technology |
 |-----------|-----------|
 | CLI | Go: cobra, modernc.org/sqlite (pure Go), fracdex (fractional indexing), pgx (direct, not database/sql), aws-sdk-go-v2 (+credentials, +service/s3, +smithy-go), testcontainers-go (integration tests). Custom migration runner in `cli/internal/sqlite/` (no golang-migrate). |
-| Web UI | Next.js App Router, React, react-resizable-panels, shadcn/ui (New York), lucide-react, date-fns, react-markdown + remark-gfm + mermaid (notes rendering), sandboxed iframes for slide HTML rendering |
+| Web UI | Next.js App Router, React, react-resizable-panels, shadcn/ui (New York), lucide-react, date-fns, react-markdown + remark-gfm + mermaid (notes rendering), sandboxed iframes for record HTML rendering |
 | Web hosting | AWS Amplify (SSR via Lambda, us-east-1) |
 | DB (cloud) | Neon Postgres (provider-portable). @neondatabase/serverless HTTP driver for Lambda |
 | DB (local) | SQLite via modernc.org/sqlite (pure Go, no CGO) |
@@ -232,7 +232,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - **Local mode**: `isLocalMode()` returns true → proxy to Go server → no auth check.
 
 ### Per-User Data Isolation
-- `slides.user_id` FK → `users.id` (Postgres only). SQLite has no `user_id` column.
+- `records.user_id` FK → `users.id` (Postgres only). SQLite has no `user_id` column.
 - `sync_version` scoped per-user (PK = `user_id`).
 - S3 keys prefixed with `users/{user_id}/` at call site. `s3_key` column unchanged in DB.
 - All API routes and repository queries filter by `user_id`.
@@ -279,8 +279,8 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `pc setup` — first-time or reconfigure (idempotent, interactive/non-interactive, `--remove-cloud`)
 - `pc doctor` — health checks (DB readability, orphaned figure/data directories, missing local figure/data files; cloud connectivity WARN if configured but unreachable)
 
-### Slide CRUD
-- `pc add <path>` — create record from folder (`slide.html` optional; project/device provenance required through flags or metadata)
+### Record CRUD
+- `pc add <path>` — create record from folder (`record.html` optional; project/device provenance required through flags or metadata)
 - `pc edit <id> <path>` — full replacement of content, notes, figures, data files, git fields (`updated_at` auto-bumped by trigger)
 - `pc delete <id>` — soft-delete
 - `pc restore <id>` — un-delete
@@ -288,7 +288,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `pc show <id>` — display metadata (including git fields), notes, figures, data files (`--format text|json`)
 
 ### Trash
-- `pc trash` — list soft-deleted slides
+- `pc trash` — list soft-deleted records
 - `pc gc` — hard-delete trash > 30 days (cloud-first if configured: deletes from Neon before local to prevent sync re-creation, warns if cloud unreachable, removes local figure/data files, runs auto-sync)
 
 ### Search & Registries
@@ -303,10 +303,10 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `pc serve` — start Go HTTP server on `127.0.0.1:<port>` implementing the web API against local SQLite + filesystem. Used with `next dev` for local web UI development without cloud credentials.
 
 ### Screenshot
-- `pc screenshot <id>` — renders slide HTML at 1920x1080 using headless Chrome and saves as PNG. Requires Chrome/Chromium on PATH or `PC_CHROME_PATH` env var. `--output` / `-o` to set output path (default: `<id>.png` in current directory).
+- `pc screenshot <id>` — renders record HTML at 1920x1080 using headless Chrome and saves as PNG. Requires Chrome/Chromium on PATH or `PC_CHROME_PATH` env var. `--output` / `-o` to set output path (default: `<id>.png` in current directory).
 
 ### Dev Tools
-- `pc seed` — creates 6 tutorial slides under the `personal-context/tutorial` project. Idempotent — backfills any missing built-in tutorial slides and skips only when all 6 already exist. Run automatically by `make dev-local`.
+- `pc seed` — creates 6 tutorial records under the `personal-context/tutorial` project. Idempotent — backfills any missing built-in tutorial records and skips only when all 6 already exist. Run automatically by `make dev-local`.
 
 ### Sync & Data
 - `pc sync` — bidirectional cloud sync (errors if no cloud)
@@ -317,15 +317,15 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `pc verify` — full round-trip data integrity tests (`pc verify` for local, `pc verify --from-cloud` for cloud-rooted verification)
 
 ### `pc fetch` modes and flags
-- Slide mode:
-  - `pc fetch <slide_id>`
-  - Downloads all data files for one slide into `~/personal-context/data/{slide_id}/` by default.
+- Record mode:
+  - `pc fetch <record_id>`
+  - Downloads all data files for one record into `~/personal-context/data/{record_id}/` by default.
 - Project mode:
   - `pc fetch --project "org/project"`
-  - Downloads data files for all slides in a project.
+  - Downloads data files for all records in a project.
 - Recent-window mode:
   - `pc fetch --recent 3m`
-  - Downloads data files for slides inside a relative time window (`d`, `w`, `m`, `y` suffixes).
+  - Downloads data files for records inside a relative time window (`d`, `w`, `m`, `y` suffixes).
 - Output override:
   - `--output "./target-dir"`
   - Writes downloads under the provided directory instead of the default data path.
@@ -338,7 +338,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
   - Use `--project`, `--from YYYY-MM-DD`, and `--to YYYY-MM-DD` to export an active-record subset.
 - Nightly data-repo workflow usage:
   - `pc export --from-cloud --path . --github-remote origin`
-  - Reads slide rows from Neon and figure blobs from S3 using repository secrets; template exports still come from the seeded local template set because templates are not cloud-synced.
+  - Reads record rows from Neon and figure blobs from S3 using repository secrets; template exports still come from the seeded local template set because templates are not cloud-synced.
 
 ### `pc setup` flow details
 - Non-interactive mode:
@@ -361,10 +361,10 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 ## Web UI (MVP)
 
-- 16:9 slide viewer with sandboxed iframes, `transform: scale()`, white background
-- Virtual date slides injected at render time
+- 16:9 record viewer with sandboxed iframes, `transform: scale()`, white background
+- Virtual date records injected at render time
 - Filter by project
-- Auto-selects the most recent slide on initial load (never shows an empty "select a slide" state when slides exist)
+- Auto-selects the most recent record on initial load (never shows an empty "select a record" state when records exist)
 - Read-only chronological navigation (drag-and-drop reorder is still deferred)
 - View notes (full markdown via react-markdown + remark-gfm + mermaid), figures, and data files with sizes plus open/download actions
 - Edit notes from the detail panel
@@ -375,23 +375,23 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 3-panel resizable layout using `react-resizable-panels` (v4 API, wrapped with v2-style `direction` prop in `resizable.tsx`):
 - `spreadsheet-viewer.tsx` — shell/layout (top-level orchestrator, owns all hook calls and UI state)
-- `slide-navigation.tsx` — left panel (slide list grouped by date, strip/grid views)
-- `slide-viewer.tsx` — center panel (scaled iframe preview of selected slide)
-- `slide-details.tsx` — right panel (tabbed: notes editor, figures via AssetCard, data files via AssetCard)
-- `slide-metadata-bar.tsx` — metadata strip above viewer (date, project, git info, more menu)
+- `record-navigation.tsx` — left panel (record list grouped by date, strip/grid views)
+- `record-viewer.tsx` — center panel (scaled iframe preview of selected record)
+- `record-details.tsx` — right panel (tabbed: notes editor, figures via AssetCard, data files via AssetCard)
+- `record-metadata-bar.tsx` — metadata strip above viewer (date, project, git info, more menu)
 - `collapsed-details-strip.tsx` — icon strip when details panel is hidden
 - `project-picker.tsx` — project filter popover (uses cmdk for search/multi-select)
-- `slide-date-picker.tsx` — calendar date picker (react-day-picker v9)
-- `slide-thumbnail.tsx` — thumbnail card in navigation panel (uses `ScaledSlideFrame` for HTML preview, identical rendering to main viewer)
+- `record-date-picker.tsx` — calendar date picker (react-day-picker v9)
+- `record-thumbnail.tsx` — thumbnail card in navigation panel (uses `ScaledRecordFrame` for HTML preview, identical rendering to main viewer)
 - `asset-card.tsx` + `asset-preview-dialog.tsx` — file/figure cards with preview dialog
 - `settings-overlay.tsx` — settings dialog (placeholder, to be built out)
 - `theme-provider.tsx` — wraps next-themes ThemeProvider
 - `markdown-renderer.tsx` — full markdown rendering via react-markdown + remark-gfm + mermaid diagram support
-- `scaled-slide-frame.tsx` — 16:9 sandboxed iframe with `transform: scale()` (no figure URL resolution — renders htmlContent directly)
+- `scaled-record-frame.tsx` — 16:9 sandboxed iframe with `transform: scale()` (no figure URL resolution — renders htmlContent directly)
 
 ### Web UI Hooks
 
-- `useSlides` (`hooks/use-slides.ts`) — data fetching, CRUD mutations, cursor-based pagination, optimistic updates
+- `useRecords` (`hooks/use-records.ts`) — data fetching, CRUD mutations, cursor-based pagination, optimistic updates
 - `useSyncManager` (`hooks/use-sync-manager.ts`) — 4-layer smart polling (manual, interaction, visibility, idle)
 
 ### Web UI Libraries
@@ -401,7 +401,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - **react-resizable-panels** v4 — 3-panel layout. v4 API uses `Group`/`Panel`/`Separator` (not v2's `PanelGroup`/`Panel`/`PanelResizeHandle`). `resizable.tsx` provides v2-compatible `direction` prop wrapper. **Size props must use string percentages** (e.g., `"18%"`), not bare numbers (which are pixels in v4).
 - **next-themes** — dark mode support via `ThemeProvider` + `useTheme()`
 - **cmdk** — command palette for ProjectPicker search/multi-select
-- **react-day-picker** v9 — calendar in SlideDatePicker
+- **react-day-picker** v9 — calendar in RecordDatePicker
 - **react-markdown** + **remark-gfm** — full markdown rendering for notes (GFM tables, strikethrough, task lists, autolinks)
 - **mermaid** — renders `mermaid` code blocks as diagrams in the notes panel
 - **lucide-react** — icons
@@ -415,7 +415,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 
 ### Visual Regression Tests
 
-- `tests/e2e/ui-visual.e2e.spec.ts` — 8 tests covering: initial load, slide selection, panel toggles, tab switching, dark mode, settings overlay, empty state, grid view. Each test also asserts zero unexpected console errors.
+- `tests/e2e/ui-visual.e2e.spec.ts` — 8 tests covering: initial load, record selection, panel toggles, tab switching, dark mode, settings overlay, empty state, grid view. Each test also asserts zero unexpected console errors.
 - Baselines stored in `tests/e2e/__screenshots__/ui-visual.e2e.spec.ts/*.png` (11 PNGs, committed to git).
 - `snapshotPathTemplate` in `playwright.config.ts` removes platform from paths: `{testDir}/__screenshots__/{testFilePath}/{arg}{ext}`.
 - `maxDiffPixelRatio: 0.02` on all `toHaveScreenshot()` calls to tolerate Next.js dev badge.
@@ -427,26 +427,26 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted slid
 - `amplify.yml` in `web/` configures AWS Amplify build/deploy (SSR via Lambda, us-east-1).
 
 ### API Routes
-- `GET /api/slides` — list (paginated, filtered)
-- `GET /api/slides/[id]` — single slide with figures and data files
-- `PATCH /api/slides/[id]` — edit project_id, notes, git_remote_url, git_hash
-- `PATCH /api/slides/[id]/order` — reorder (fractional index)
-- `DELETE /api/slides/[id]` — soft delete
-- `POST /api/slides/[id]/restore` — restore
+- `GET /api/records` — list (paginated, filtered)
+- `GET /api/records/[id]` — single record with figures and data files
+- `PATCH /api/records/[id]` — edit project_id, notes, git_remote_url, git_hash
+- `PATCH /api/records/[id]/order` — reorder (fractional index)
+- `DELETE /api/records/[id]` — soft delete
+- `POST /api/records/[id]/restore` — restore
 - `GET /api/sync/version` — reads S3 `_version` (not Postgres)
-- `GET /api/sync/changes?since=<ISO>` — changed slides
-- `GET /api/files/[slide_id]/data/[filename]` — presigned download URL
-- `GET /api/files/[slide_id]/figures/[filename]` — presigned figure URL
+- `GET /api/sync/changes?since=<ISO>` — changed records
+- `GET /api/files/[record_id]/data/[filename]` — presigned download URL
+- `GET /api/files/[record_id]/figures/[filename]` — presigned figure URL
 - `GET /api/projects` — active registry project IDs
 - `GET /api/info` — application mode and version
-- `GET /api/stats` — total active slides, active registry projects, trashed slide count
-- `DELETE /api/slides/trash` — bulk purge all soft-deleted slides
+- `GET /api/stats` — total active records, active registry projects, trashed record count
+- `DELETE /api/records/trash` — bulk purge all soft-deleted records
 - `POST /api/register` — create user account (gated by `REGISTRATION_ENABLED`)
 - `GET/POST /api/auth/[...nextauth]` — Auth.js route handler
 - `GET /api/api-keys` — list API keys for authenticated user
 - `POST /api/api-keys` — create API key
 - `DELETE /api/api-keys/[id]` — revoke API key
-- No slide creation endpoint (CLI only)
+- No record creation endpoint (CLI only)
 - All data routes require authentication (Bearer token or session). Local mode bypasses auth.
 
 ### API payload shapes
@@ -457,7 +457,7 @@ type ErrorResponse = {
   code: string;
 };
 
-type SlideSummary = {
+type RecordSummary = {
   id: string;
   date: string; // YYYY-MM-DD
   day_order: string;
@@ -471,7 +471,7 @@ type SlideSummary = {
   data_file_count: number;
 };
 
-type SlideFile = {
+type RecordFile = {
   filename: string;
   s3_key: string;
   size?: number;
@@ -480,7 +480,7 @@ type SlideFile = {
   description?: string | null;
 };
 
-type SlideDetail = {
+type RecordDetail = {
   id: string;
   date: string;
   day_order: string;
@@ -494,12 +494,12 @@ type SlideDetail = {
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
-  figures: SlideFile[];
-  data_files: SlideFile[];
+  figures: RecordFile[];
+  data_files: RecordFile[];
 };
 ```
 
-- `GET /api/slides`
+- `GET /api/records`
   - Query params:
     - `limit` (number, default 20)
     - `cursor` (opaque string for forward pagination)
@@ -509,21 +509,21 @@ type SlideDetail = {
   - Response:
     ```ts
     {
-      items: SlideSummary[];
+      items: RecordSummary[];
       next_cursor: string | null;
     }
     ```
 
-- `GET /api/slides/[id]`
+- `GET /api/records/[id]`
   - Response:
     ```ts
     {
-      slide: SlideDetail;
+      record: RecordDetail;
     }
     ```
-  - `404` when slide is absent.
+  - `404` when record is absent.
 
-- `PATCH /api/slides/[id]`
+- `PATCH /api/records/[id]`
   - Request:
     ```ts
     {
@@ -536,12 +536,12 @@ type SlideDetail = {
   - Response:
     ```ts
     {
-      slide: SlideDetail;
+      record: RecordDetail;
       sync_version: number;
     }
     ```
 
-- `PATCH /api/slides/[id]/order`
+- `PATCH /api/records/[id]/order`
   - Request:
     ```ts
     {
@@ -562,7 +562,7 @@ type SlideDetail = {
     }
     ```
 
-- `DELETE /api/slides/[id]`
+- `DELETE /api/records/[id]`
   - Response:
     ```ts
     {
@@ -573,7 +573,7 @@ type SlideDetail = {
     }
     ```
 
-- `POST /api/slides/[id]/restore`
+- `POST /api/records/[id]/restore`
   - Response:
     ```ts
     {
@@ -598,14 +598,14 @@ type SlideDetail = {
   - Response:
     ```ts
     {
-      items: SlideSummary[];
+      items: RecordSummary[];
       server_now: string;
     }
     ```
-  - Includes soft-deleted slides so delete propagation stays lossless.
+  - Includes soft-deleted records so delete propagation stays lossless.
 
-- `GET /api/files/[slide_id]/data/[filename]`
-- `GET /api/files/[slide_id]/figures/[filename]`
+- `GET /api/files/[record_id]/data/[filename]`
+- `GET /api/files/[record_id]/figures/[filename]`
   - Response:
     ```ts
     {
@@ -613,7 +613,7 @@ type SlideDetail = {
       expires_at: string;
     }
     ```
-  - `404` for unknown file/slide pair.
+  - `404` for unknown file/record pair.
 
 - `GET /api/projects`
   - Response:
@@ -636,15 +636,15 @@ type SlideDetail = {
   - Response:
     ```ts
     {
-      total_slides: number;
+      total_records: number;
       total_projects: number;
-      trashed_slides: number;
+      trashed_records: number;
     }
     ```
   - `500` on database query failure.
 
-- `DELETE /api/slides/trash`
-  - Bulk hard-deletes all soft-deleted slides. Best-effort cleanup of associated figures/data files.
+- `DELETE /api/records/trash`
+  - Bulk hard-deletes all soft-deleted records. Best-effort cleanup of associated figures/data files.
   - Response:
     ```ts
     {
@@ -656,9 +656,9 @@ type SlideDetail = {
 
 ## Soft Deletes
 
-- Soft-deleted slides sync bidirectionally, excluded from git export.
+- Soft-deleted records sync bidirectionally, excluded from git export.
 - `ON DELETE CASCADE` handles child rows on hard delete.
-- `pc gc` deletes from cloud first (Neon), then local, to prevent sync re-creation. If cloud is unreachable, warns on stderr and proceeds with local-only deletion. If cloud `DeleteSlide` fails (non-ErrNotFound), skips that slide with a warning. Runs auto-sync afterward. Edge case: another machine that hasn't synced could re-push; run `pc sync` on all machines before/after gc. Tombstones deferred.
+- `pc gc` deletes from cloud first (Neon), then local, to prevent sync re-creation. If cloud is unreachable, warns on stderr and proceeds with local-only deletion. If cloud `DeleteRecord` fails (non-ErrNotFound), skips that record with a warning. Runs auto-sync afterward. Edge case: another machine that hasn't synced could re-push; run `pc sync` on all machines before/after gc. Tombstones deferred.
 
 ## Data Integrity: Two-Tier Guarantee
 
@@ -667,7 +667,7 @@ All database fields, all figures, all data files byte-for-byte identical.
 - Path A: Local + files -> sync -> Neon + S3 -> sync -> Local + files
 
 ### Tier 2 — Narrowed (Git Export Paths)
-All database fields of active (non-deleted) slides and figures lossless. Data file **references** preserved; binary content requires S3. Soft-deleted slides and `deleted_at` excluded from export. Full recovery = git clone + S3.
+All database fields of active (non-deleted) records and figures lossless. Data file **references** preserved; binary content requires S3. Soft-deleted records and `deleted_at` excluded from export. Full recovery = git clone + S3.
 - Path B: Neon + S3 -> export -> git -> restore-db -> Neon
 - Path C: Local + files -> export -> git -> restore-db -> Local
 - Path D: Neon -> sync -> Local -> export -> git
@@ -684,7 +684,7 @@ All database fields of active (non-deleted) slides and figures lossless. Data fi
 ### Test Layers
 
 **Unit tests** — Pure functions, business logic, data transformations. Fast, no I/O.
-- Go: `go test` with table-driven tests. Foundation libraries (fractional indexing, slide ID, timezone, config).
+- Go: `go test` with table-driven tests. Foundation libraries (fractional indexing, record ID, timezone, config).
 - Next.js: Vitest or Jest. Utility functions, data transformation, sync state logic.
 
 **Integration tests** — Real databases, real filesystem, real S3 (or mocked S3 for CI).
@@ -698,12 +698,12 @@ All database fields of active (non-deleted) slides and figures lossless. Data fi
 - Export/import e2e: all 5 conversion paths with real data, round-trip verification.
 
 **Web UI e2e tests** — Playwright against real Next.js app + test database.
-- Full user workflows: browse slides, filter by project, view details, edit, delete, restore, reorder.
-- Sync detection: CLI creates slide -> web UI detects via sync manager -> slide appears.
+- Full user workflows: browse records, filter by project, view details, edit, delete, restore, reorder.
+- Sync detection: CLI creates record -> web UI detects via sync manager -> record appears.
 - Error states: network failures, invalid data, empty states.
 
 **Full system e2e** — CLI + cloud + web UI together.
-- CLI creates slide -> syncs to Neon -> web UI sees it -> web UI edits -> CLI syncs and sees the edit.
+- CLI creates record -> syncs to Neon -> web UI sees it -> web UI edits -> CLI syncs and sees the edit.
 - Multi-machine simulation: two local databases syncing through cloud with conflicts.
 
 ### Coverage Enforcement
@@ -712,7 +712,7 @@ All database fields of active (non-deleted) slides and figures lossless. Data fi
 - CI fails if any package drops below 95%.
 
 ### Test Data
-- Fixtures for edge cases: minimal slide (no figures/notes/data/project), large slide (20+ figures, 100KB+ HTML), unicode content, special characters in filenames, slides across multiple dates and projects.
+- Fixtures for edge cases: minimal record (no figures/notes/data/project), large record (20+ figures, 100KB+ HTML), unicode content, special characters in filenames, records across multiple dates and projects.
 - Test database seeding utilities shared across test suites.
 
 ## Cost (Single User, 2 Years)

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-type cloudSlideExportJSON struct {
+type cloudRecordExportJSON struct {
 	FormatVersion  int                      `json:"format_version"`
 	ID             string                   `json:"id"`
 	Date           string                   `json:"date"`
@@ -23,19 +23,19 @@ type cloudSlideExportJSON struct {
 	GitRemoteURL   *string                  `json:"git_remote_url,omitempty"`
 	GitHash        *string                  `json:"git_hash,omitempty"`
 	HasNotes       bool                     `json:"has_notes"`
-	Figures        []cloudSlideFigureJSON   `json:"figures"`
-	DataFiles      []cloudSlideDataFileJSON `json:"data_files"`
+	Figures        []cloudRecordFigureJSON   `json:"figures"`
+	DataFiles      []cloudRecordDataFileJSON `json:"data_files"`
 	CreatedAt      string                   `json:"created_at"`
 	UpdatedAt      string                   `json:"updated_at"`
 }
 
-type cloudSlideFigureJSON struct {
+type cloudRecordFigureJSON struct {
 	Filename string  `json:"filename"`
 	S3Key    string  `json:"s3_key"`
 	AltText  *string `json:"alt_text"`
 }
 
-type cloudSlideDataFileJSON struct {
+type cloudRecordDataFileJSON struct {
 	Filename    string  `json:"filename"`
 	S3Key       string  `json:"s3_key"`
 	Size        int64   `json:"size"`
@@ -43,7 +43,7 @@ type cloudSlideDataFileJSON struct {
 	Description *string `json:"description"`
 }
 
-type cloudSlideDetailsJSON struct {
+type cloudRecordDetailsJSON struct {
 	ID             string                   `json:"id"`
 	Date           string                   `json:"date"`
 	DayOrder       string                   `json:"day_order"`
@@ -56,11 +56,11 @@ type cloudSlideDetailsJSON struct {
 	GitHash        *string                  `json:"git_hash"`
 	CreatedAt      string                   `json:"created_at"`
 	UpdatedAt      string                   `json:"updated_at"`
-	Figures        []cloudSlideFigureJSON   `json:"figures"`
-	DataFiles      []cloudSlideDataFileJSON `json:"data_files"`
+	Figures        []cloudRecordFigureJSON   `json:"figures"`
+	DataFiles      []cloudRecordDataFileJSON `json:"data_files"`
 }
 
-func TestExportFromCloudWritesGitTreeAndSkipsDeletedSlides(t *testing.T) {
+func TestExportFromCloudWritesGitTreeAndSkipsDeletedRecords(t *testing.T) {
 	cloud := newCloudTestEnv(t)
 
 	homeWriter, userWriter := setupCloudHome(t, cloud)
@@ -90,7 +90,7 @@ func TestExportFromCloudWritesGitTreeAndSkipsDeletedSlides(t *testing.T) {
 
 	assertCloudTemplateExports(t, exportDir)
 
-	metadata := readCloudSlideExportMetadata(t, exportDir, activeID)
+	metadata := readCloudRecordExportMetadata(t, exportDir, activeID)
 	if metadata.FormatVersion != 1 {
 		t.Fatalf("format_version = %d, want 1", metadata.FormatVersion)
 	}
@@ -107,18 +107,18 @@ func TestExportFromCloudWritesGitTreeAndSkipsDeletedSlides(t *testing.T) {
 		t.Fatalf("data_files = %d, want 1", len(metadata.DataFiles))
 	}
 
-	exportedFigure, err := os.ReadFile(filepath.Join(exportDir, "slides", activeID, "figures", "plot.png"))
+	exportedFigure, err := os.ReadFile(filepath.Join(exportDir, "records", activeID, "figures", "plot.png"))
 	if err != nil {
 		t.Fatalf("read exported cloud figure: %v", err)
 	}
 	if string(exportedFigure) != "cloud-plot-bytes" {
 		t.Fatalf("exported cloud figure = %q", string(exportedFigure))
 	}
-	if _, err := os.Stat(filepath.Join(exportDir, "slides", activeID, "data")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(exportDir, "records", activeID, "data")); !os.IsNotExist(err) {
 		t.Fatalf("cloud export should not write data binaries into git tree, stat err = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(exportDir, "slides", deletedID)); !os.IsNotExist(err) {
-		t.Fatalf("soft-deleted cloud slide %s should be excluded from export", deletedID)
+	if _, err := os.Stat(filepath.Join(exportDir, "records", deletedID)); !os.IsNotExist(err) {
+		t.Fatalf("soft-deleted cloud record %s should be excluded from export", deletedID)
 	}
 }
 
@@ -173,9 +173,9 @@ func TestImportFromCloudExportUsesUpdatedAtMergeRulesAndPreservesExternalURLs(t 
 		map[string][]byte{"local-only.csv": []byte("kind,value\nnewer-local,2\n")},
 	))
 
-	sameAfterEdit := getCloudSlideDetails(t, localHome, localUserHome, sameID)
-	olderAfterEdit := getCloudSlideDetails(t, localHome, localUserHome, olderID)
-	newerAfterEdit := getCloudSlideDetails(t, localHome, localUserHome, newerID)
+	sameAfterEdit := getCloudRecordDetails(t, localHome, localUserHome, sameID)
+	olderAfterEdit := getCloudRecordDetails(t, localHome, localUserHome, olderID)
+	newerAfterEdit := getCloudRecordDetails(t, localHome, localUserHome, newerID)
 
 	rewriteCloudExportUpdatedAt(t, exportDir, sameID, sameAfterEdit.UpdatedAt)
 	rewriteCloudExportUpdatedAt(t, exportDir, olderID, mustParseCloudTimestamp(t, olderAfterEdit.UpdatedAt).Add(-1*time.Minute).Format(time.RFC3339))
@@ -183,7 +183,7 @@ func TestImportFromCloudExportUsesUpdatedAtMergeRulesAndPreservesExternalURLs(t 
 
 	runPCSuccessNoStderr(t, localHome, localUserHome, "import", exportDir)
 
-	sameFinal := getCloudSlideDetails(t, localHome, localUserHome, sameID)
+	sameFinal := getCloudRecordDetails(t, localHome, localUserHome, sameID)
 	if sameFinal.HTMLContent != `<html><body><img src="figures/same-local.png">same local edit</body></html>` {
 		t.Fatalf("same-updated-at import should be skipped, html_content = %q", sameFinal.HTMLContent)
 	}
@@ -194,7 +194,7 @@ func TestImportFromCloudExportUsesUpdatedAtMergeRulesAndPreservesExternalURLs(t 
 		t.Fatalf("same-updated-at figures = %v, want [same-local.png]", got)
 	}
 
-	olderFinal := getCloudSlideDetails(t, localHome, localUserHome, olderID)
+	olderFinal := getCloudRecordDetails(t, localHome, localUserHome, olderID)
 	if olderFinal.HTMLContent != `<html><body><img src="figures/older-local.png">older local edit</body></html>` {
 		t.Fatalf("older import should be skipped, html_content = %q", olderFinal.HTMLContent)
 	}
@@ -205,7 +205,7 @@ func TestImportFromCloudExportUsesUpdatedAtMergeRulesAndPreservesExternalURLs(t 
 		t.Fatalf("older import figures = %v, want [older-local.png]", got)
 	}
 
-	newerFinal := getCloudSlideDetails(t, localHome, localUserHome, newerID)
+	newerFinal := getCloudRecordDetails(t, localHome, localUserHome, newerID)
 	if newerFinal.HTMLContent != `<html><body><img src="https://example.com/external-cloud.png"><img src="figures/cloud-newer.png">newer from cloud</body></html>` {
 		t.Fatalf("newer import html_content = %q", newerFinal.HTMLContent)
 	}
@@ -249,7 +249,7 @@ func TestRestoreDBFromCloudExportSyncsIntoFreshCloud(t *testing.T) {
 		map[string][]byte{"restore.csv": []byte("kind,value\nrestore,1\n")},
 	)))
 	deletedID := strings.TrimSpace(runPCSuccessNoStderr(t, sourceWriter, sourceUser, "add", createInputFolder(t,
-		"<html><body>deleted cloud restore slide</body></html>",
+		"<html><body>deleted cloud restore record</body></html>",
 		"",
 		nil,
 		nil,
@@ -268,7 +268,7 @@ func TestRestoreDBFromCloudExportSyncsIntoFreshCloud(t *testing.T) {
 	runPCSuccessNoStderr(t, targetWriter, targetUser, "sync")
 	runPCSuccessNoStderr(t, targetReader, targetReaderUser, "sync")
 
-	restored := getCloudSlideDetails(t, targetReader, targetReaderUser, activeID)
+	restored := getCloudRecordDetails(t, targetReader, targetReaderUser, activeID)
 	if restored.HTMLContent != `<html><body><img src="https://example.com/external-restore.png"><img src="figures/restore figure.png">cloud restore café 日本語</body></html>` {
 		t.Fatalf("restored cloud html_content = %q", restored.HTMLContent)
 	}
@@ -297,7 +297,7 @@ func TestRestoreDBFromCloudExportSyncsIntoFreshCloud(t *testing.T) {
 
 	stderr := runPCFailure(t, targetReader, targetReaderUser, "show", deletedID)
 	if !strings.Contains(stderr, "not found") {
-		t.Fatalf("deleted cloud slide should stay excluded after restore-db cloud path, got %q", stderr)
+		t.Fatalf("deleted cloud record should stay excluded after restore-db cloud path, got %q", stderr)
 	}
 }
 
@@ -321,17 +321,17 @@ func TestVerifyFromCloudRoundTrip(t *testing.T) {
 	}
 }
 
-func readCloudSlideExportMetadata(t *testing.T, exportDir string, slideID string) cloudSlideExportJSON {
+func readCloudRecordExportMetadata(t *testing.T, exportDir string, recordID string) cloudRecordExportJSON {
 	t.Helper()
 
-	raw, err := os.ReadFile(filepath.Join(exportDir, "slides", slideID, "metadata.json"))
+	raw, err := os.ReadFile(filepath.Join(exportDir, "records", recordID, "metadata.json"))
 	if err != nil {
-		t.Fatalf("read cloud export metadata for %s: %v", slideID, err)
+		t.Fatalf("read cloud export metadata for %s: %v", recordID, err)
 	}
 
-	var result cloudSlideExportJSON
+	var result cloudRecordExportJSON
 	if err := json.Unmarshal(raw, &result); err != nil {
-		t.Fatalf("parse cloud export metadata for %s: %v\nraw: %s", slideID, err, string(raw))
+		t.Fatalf("parse cloud export metadata for %s: %v\nraw: %s", recordID, err, string(raw))
 	}
 	return result
 }
@@ -368,29 +368,29 @@ func setupLocalOnlyHome(t *testing.T) (homeDir string, userHome string) {
 	return homeDir, userHome
 }
 
-func getCloudSlideDetails(t *testing.T, homeDir string, userHome string, slideID string) cloudSlideDetailsJSON {
+func getCloudRecordDetails(t *testing.T, homeDir string, userHome string, recordID string) cloudRecordDetailsJSON {
 	t.Helper()
 
-	stdout := runPCSuccessNoStderr(t, homeDir, userHome, "show", "--format", "json", slideID)
-	var result cloudSlideDetailsJSON
+	stdout := runPCSuccessNoStderr(t, homeDir, userHome, "show", "--format", "json", recordID)
+	var result cloudRecordDetailsJSON
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
-		t.Fatalf("parse show json for %s: %v\nraw: %s", slideID, err, stdout)
+		t.Fatalf("parse show json for %s: %v\nraw: %s", recordID, err, stdout)
 	}
 	return result
 }
 
-func rewriteCloudExportUpdatedAt(t *testing.T, exportDir string, slideID string, updatedAt string) {
+func rewriteCloudExportUpdatedAt(t *testing.T, exportDir string, recordID string, updatedAt string) {
 	t.Helper()
 
-	metadata := readCloudSlideExportMetadata(t, exportDir, slideID)
+	metadata := readCloudRecordExportMetadata(t, exportDir, recordID)
 	metadata.UpdatedAt = updatedAt
 
 	raw, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
-		t.Fatalf("marshal metadata for %s: %v", slideID, err)
+		t.Fatalf("marshal metadata for %s: %v", recordID, err)
 	}
-	if err := os.WriteFile(filepath.Join(exportDir, "slides", slideID, "metadata.json"), raw, 0o644); err != nil {
-		t.Fatalf("write metadata for %s: %v", slideID, err)
+	if err := os.WriteFile(filepath.Join(exportDir, "records", recordID, "metadata.json"), raw, 0o644); err != nil {
+		t.Fatalf("write metadata for %s: %v", recordID, err)
 	}
 }
 
@@ -406,7 +406,7 @@ func mustParseCloudTimestamp(t *testing.T, raw string) time.Time {
 	return time.Time{}
 }
 
-func fileNamesFromCloudFigures(figures []cloudSlideFigureJSON) []string {
+func fileNamesFromCloudFigures(figures []cloudRecordFigureJSON) []string {
 	names := make([]string, 0, len(figures))
 	for _, figure := range figures {
 		names = append(names, figure.Filename)
@@ -415,7 +415,7 @@ func fileNamesFromCloudFigures(figures []cloudSlideFigureJSON) []string {
 	return names
 }
 
-func fileNamesFromCloudDataFiles(dataFiles []cloudSlideDataFileJSON) []string {
+func fileNamesFromCloudDataFiles(dataFiles []cloudRecordDataFileJSON) []string {
 	names := make([]string, 0, len(dataFiles))
 	for _, dataFile := range dataFiles {
 		names = append(names, dataFile.Filename)

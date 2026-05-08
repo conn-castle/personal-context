@@ -13,7 +13,7 @@ import (
 func TestCloudOnboardingFirstSyncAndDoctor(t *testing.T) {
 	cloud := newCloudTestEnv(t)
 
-	// --- Phase 1: Set up a local-only home with one slide before cloud onboarding ---
+	// --- Phase 1: Set up a local-only home with one record before cloud onboarding ---
 	homeDir := t.TempDir()
 	fakeUserHome := t.TempDir()
 
@@ -24,11 +24,11 @@ func TestCloudOnboardingFirstSyncAndDoctor(t *testing.T) {
 			result.ExitCode, result.Stdout, result.Stderr)
 	}
 
-	// Add a slide before cloud setup so sync has something to push.
-	inputDir := createInputFolder(t, "<html>Pre-cloud slide</html>", "Pre-cloud notes", nil, nil)
+	// Add a record before cloud setup so sync has something to push.
+	inputDir := createInputFolder(t, "<html>Pre-cloud record</html>", "Pre-cloud notes", nil, nil)
 	preCloudID := strings.TrimSpace(runPCSuccess(t, homeDir, fakeUserHome, "add", inputDir))
 	if preCloudID == "" {
-		t.Fatal("expected slide ID from add")
+		t.Fatal("expected record ID from add")
 	}
 
 	// --- Phase 2: Configure cloud ---
@@ -74,16 +74,16 @@ func TestCloudOnboardingFirstSyncAndDoctor(t *testing.T) {
 		t.Fatalf("expected AWS credentials at %s: %v", awsCredsPath, err)
 	}
 
-	// --- Phase 3: Sync --- the pre-existing slide should be pushed to cloud.
+	// --- Phase 3: Sync --- the pre-existing record should be pushed to cloud.
 	syncOut := runPCSuccess(t, homeDir, fakeUserHome, "sync")
 	if !strings.Contains(syncOut, "Sync complete") {
 		t.Fatalf("expected 'Sync complete', got:\n%s", syncOut)
 	}
 
-	// Verify the slide exists in the cloud by checking Postgres.
-	slide := getSlideJSON(t, homeDir, fakeUserHome, preCloudID)
-	if slide.HTMLContent != "<html>Pre-cloud slide</html>" {
-		t.Fatalf("slide content mismatch after sync: %q", slide.HTMLContent)
+	// Verify the record exists in the cloud by checking Postgres.
+	record := getRecordJSON(t, homeDir, fakeUserHome, preCloudID)
+	if record.HTMLContent != "<html>Pre-cloud record</html>" {
+		t.Fatalf("record content mismatch after sync: %q", record.HTMLContent)
 	}
 
 	// --- Phase 4: Doctor --- should report OK with cloud checks.

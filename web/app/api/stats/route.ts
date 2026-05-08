@@ -9,7 +9,7 @@ import type { ErrorResponseBody } from "@/lib/api-error";
 /**
  * GET /api/stats
  *
- * Returns total slide count, active registry project count, and trashed slide count.
+ * Returns total record count, active registry project count, and trashed record count.
  */
 export async function GET(
   req: NextRequest
@@ -26,22 +26,22 @@ export async function GET(
     const sql = getDb();
 
     const [totalResult, projectResult, trashedResult] = await Promise.all([
-      sql`SELECT COUNT(*)::int AS count FROM slides WHERE user_id = ${user.id} AND deleted_at IS NULL`,
+      sql`SELECT COUNT(*)::int AS count FROM records WHERE user_id = ${user.id} AND deleted_at IS NULL`,
       sql`SELECT COUNT(*)::int AS count FROM projects WHERE user_id = ${user.id} AND archived_at IS NULL`,
-      sql`SELECT COUNT(*)::int AS count FROM slides WHERE user_id = ${user.id} AND deleted_at IS NOT NULL`,
+      sql`SELECT COUNT(*)::int AS count FROM records WHERE user_id = ${user.id} AND deleted_at IS NOT NULL`,
     ]);
 
-    const totalSlides =
+    const totalRecords =
       ((totalResult as Record<string, unknown>[])[0]?.count as number) ?? 0;
     const totalProjects =
       ((projectResult as Record<string, unknown>[])[0]?.count as number) ?? 0;
-    const trashedSlides =
+    const trashedRecords =
       ((trashedResult as Record<string, unknown>[])[0]?.count as number) ?? 0;
 
     return NextResponse.json({
-      total_slides: totalSlides,
+      total_records: totalRecords,
       total_projects: totalProjects,
-      trashed_slides: trashedSlides,
+      trashed_records: trashedRecords,
     });
   } catch (err) {
     console.error("GET /api/stats error:", err);

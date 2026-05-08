@@ -56,18 +56,18 @@ func TestDoctorOpenLocalStackFail(t *testing.T) {
 	}
 }
 
-func TestDoctorListSlidesFail(t *testing.T) {
+func TestDoctorListRecordsFail(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	// Drop the slides table to make ListSlides fail
-	corruptTable(t, homeDir, "slides")
+	// Drop the records table to make ListRecords fail
+	corruptTable(t, homeDir, "records")
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"doctor"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when ListSlides fails")
+		t.Fatal("expected error when ListRecords fails")
 	}
 }
 
@@ -192,18 +192,18 @@ func TestDoctorDatabaseReadFailWriteError(t *testing.T) {
 func TestDoctorOrphanedFiguresWarnWriteError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`, "", "",
 		map[string][]byte{"fig.png": []byte("data")}, nil,
 	)
 
-	// Hard-delete the slide, leaving orphan figure dir
+	// Hard-delete the record, leaving orphan figure dir
 	db := openErrorPathsDB(t, homeDir)
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		t.Fatalf("enable foreign keys: %v", err)
 	}
-	if _, err := db.Exec("DELETE FROM slides WHERE id = ?", id); err != nil {
-		t.Fatalf("hard delete slide: %v", err)
+	if _, err := db.Exec("DELETE FROM records WHERE id = ?", id); err != nil {
+		t.Fatalf("hard delete record: %v", err)
 	}
 
 	// Fail on 2nd write (Orphaned figures: WARN); 1st is "Database: OK"
@@ -217,7 +217,7 @@ func TestDoctorOrphanedFiguresWarnWriteError(t *testing.T) {
 func TestDoctorMissingFiguresWarnWriteError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`, "", "",
 		map[string][]byte{"fig.png": []byte("data")}, nil,
 	)
@@ -240,7 +240,7 @@ func TestDoctorMissingFiguresWarnWriteError(t *testing.T) {
 func TestDoctorMissingFiguresWarnPathWriteError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`, "", "",
 		map[string][]byte{"fig.png": []byte("data")}, nil,
 	)
@@ -251,7 +251,7 @@ func TestDoctorMissingFiguresWarnPathWriteError(t *testing.T) {
 		t.Fatalf("remove figure: %v", err)
 	}
 
-	// Fail on 5th write (the "  slideID/fig.png" path line after "Missing figures: WARN")
+	// Fail on 5th write (the "  recordID/fig.png" path line after "Missing figures: WARN")
 	stdout := &failAfterWriter{remaining: 4}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
 	if err == nil {
@@ -259,7 +259,7 @@ func TestDoctorMissingFiguresWarnPathWriteError(t *testing.T) {
 	}
 }
 
-func TestDoctorHealthyNoSlides(t *testing.T) {
+func TestDoctorHealthyNoRecords(t *testing.T) {
 	setupEnv(t)
 
 	stdout := &bytes.Buffer{}
@@ -290,10 +290,10 @@ func TestDoctorHealthyNoSlides(t *testing.T) {
 	}
 }
 
-func TestDoctorHealthyWithSlideAndFigure(t *testing.T) {
+func TestDoctorHealthyWithRecordAndFigure(t *testing.T) {
 	setupEnv(t)
 
-	addSlideWithContent(t,
+	addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`,
 		"", "",
 		map[string][]byte{"fig.png": []byte("data")},
@@ -313,10 +313,10 @@ func TestDoctorHealthyWithSlideAndFigure(t *testing.T) {
 	}
 }
 
-func TestDoctorHealthyWithSlideAndDataFile(t *testing.T) {
+func TestDoctorHealthyWithRecordAndDataFile(t *testing.T) {
 	setupEnv(t)
 
-	addSlideWithContent(t,
+	addRecordWithContent(t,
 		"<html>body</html>",
 		"", "",
 		nil,
@@ -339,20 +339,20 @@ func TestDoctorHealthyWithSlideAndDataFile(t *testing.T) {
 func TestDoctorOrphanedFigureDirectory(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`,
 		"", "",
 		map[string][]byte{"fig.png": []byte("data")},
 		nil,
 	)
 
-	// Hard-delete the slide via SQL, leaving figure directory on disk
+	// Hard-delete the record via SQL, leaving figure directory on disk
 	db := openErrorPathsDB(t, homeDir)
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		t.Fatalf("enable foreign keys: %v", err)
 	}
-	if _, err := db.Exec("DELETE FROM slides WHERE id = ?", id); err != nil {
-		t.Fatalf("hard delete slide: %v", err)
+	if _, err := db.Exec("DELETE FROM records WHERE id = ?", id); err != nil {
+		t.Fatalf("hard delete record: %v", err)
 	}
 
 	stdout := &bytes.Buffer{}
@@ -368,27 +368,27 @@ func TestDoctorOrphanedFigureDirectory(t *testing.T) {
 		t.Fatalf("expected orphaned figures WARN, got %q", out)
 	}
 	if !strings.Contains(out, id) {
-		t.Fatalf("expected slide ID %s in warning, got %q", id, out)
+		t.Fatalf("expected record ID %s in warning, got %q", id, out)
 	}
 }
 
 func TestDoctorOrphanedDataDirectory(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		"<html>body</html>",
 		"", "",
 		nil,
 		map[string][]byte{"data.csv": []byte("a,b\n1,2\n")},
 	)
 
-	// Hard-delete the slide via SQL, leaving data directory on disk
+	// Hard-delete the record via SQL, leaving data directory on disk
 	db := openErrorPathsDB(t, homeDir)
 	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
 		t.Fatalf("enable foreign keys: %v", err)
 	}
-	if _, err := db.Exec("DELETE FROM slides WHERE id = ?", id); err != nil {
-		t.Fatalf("hard delete slide: %v", err)
+	if _, err := db.Exec("DELETE FROM records WHERE id = ?", id); err != nil {
+		t.Fatalf("hard delete record: %v", err)
 	}
 
 	stdout := &bytes.Buffer{}
@@ -404,14 +404,14 @@ func TestDoctorOrphanedDataDirectory(t *testing.T) {
 		t.Fatalf("expected orphaned data WARN, got %q", out)
 	}
 	if !strings.Contains(out, id) {
-		t.Fatalf("expected slide ID %s in warning, got %q", id, out)
+		t.Fatalf("expected record ID %s in warning, got %q", id, out)
 	}
 }
 
 func TestDoctorMissingFigureFile(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`,
 		"", "",
 		map[string][]byte{"fig.png": []byte("data")},
@@ -444,7 +444,7 @@ func TestDoctorMissingFigureFile(t *testing.T) {
 func TestDoctorMissingDataFile(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		"<html>body</html>",
 		"", "",
 		nil,
@@ -474,10 +474,10 @@ func TestDoctorMissingDataFile(t *testing.T) {
 	}
 }
 
-func TestDoctorMissingFigureFileInDeletedSlide(t *testing.T) {
+func TestDoctorMissingFigureFileInDeletedRecord(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`,
 		"", "",
 		map[string][]byte{"fig.png": []byte("data")},
@@ -500,7 +500,7 @@ func TestDoctorMissingFigureFileInDeletedSlide(t *testing.T) {
 	cmd.SetArgs([]string{"doctor"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("expected error for missing figures on deleted slide")
+		t.Fatal("expected error for missing figures on deleted record")
 	}
 
 	out := stdout.String()
@@ -535,14 +535,14 @@ func TestDoctorDatabaseFail(t *testing.T) {
 func TestDoctorFigureMetadataReadFail(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	addSlideWithContent(t,
+	addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`,
 		"", "",
 		map[string][]byte{"fig.png": []byte("data")},
 		nil,
 	)
 
-	corruptTable(t, homeDir, "slide_figures")
+	corruptTable(t, homeDir, "record_figures")
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -563,8 +563,8 @@ type orphanRepoErrorStub struct {
 	err error
 }
 
-func (s orphanRepoErrorStub) GetSlideByID(context.Context, string) (repository.Slide, error) {
-	return repository.Slide{}, s.err
+func (s orphanRepoErrorStub) GetRecordByID(context.Context, string) (repository.Record, error) {
+	return repository.Record{}, s.err
 }
 
 // --- errWriter for writeDoctorf/writeDoctorln error branches ---
@@ -600,13 +600,13 @@ func TestWriteDoctorlnErrorWriter(t *testing.T) {
 func TestDoctorOrphanedFiguresCheckFailure(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	addSlideWithContent(t,
+	addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`, "", "",
 		map[string][]byte{"fig.png": []byte("data")}, nil,
 	)
 
-	// Drop slides table so GetSlideByID returns a non-ErrNotFound error
-	corruptTable(t, homeDir, "slides")
+	// Drop records table so GetRecordByID returns a non-ErrNotFound error
+	corruptTable(t, homeDir, "records")
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -625,15 +625,15 @@ func TestDoctorOrphanedFiguresCheckFailure(t *testing.T) {
 func TestDoctorOrphanedDataCheckFailure(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	// Add slide with data file only (no figures → no figure dirs on disk)
-	addSlideWithContent(t,
+	// Add record with data file only (no figures → no figure dirs on disk)
+	addRecordWithContent(t,
 		"<html>body</html>", "", "",
 		nil, map[string][]byte{"data.csv": []byte("a,b\n1,2\n")},
 	)
 
-	// Drop slides table so GetSlideByID returns a non-ErrNotFound error.
+	// Drop records table so GetRecordByID returns a non-ErrNotFound error.
 	// No figure dirs exist, so orphaned figures check passes with empty list.
-	corruptTable(t, homeDir, "slides")
+	corruptTable(t, homeDir, "records")
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -654,12 +654,12 @@ func TestDoctorOrphanedDataCheckFailure(t *testing.T) {
 func TestDoctorDataFileMetadataReadFail(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	addSlideWithContent(t,
+	addRecordWithContent(t,
 		"<html>body</html>", "", "",
 		nil, map[string][]byte{"data.csv": []byte("a,b\n1,2\n")},
 	)
 
-	corruptTable(t, homeDir, "slide_data_files")
+	corruptTable(t, homeDir, "record_data_files")
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -680,7 +680,7 @@ func TestDoctorDataFileMetadataReadFail(t *testing.T) {
 func TestDoctorMissingFigureStatError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/fig.png">body</html>`, "", "",
 		map[string][]byte{"fig.png": []byte("data")}, nil,
 	)
@@ -709,7 +709,7 @@ func TestDoctorMissingFigureStatError(t *testing.T) {
 func TestDoctorMissingDataFileStatError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		"<html>body</html>", "", "",
 		nil, map[string][]byte{"data.csv": []byte("a,b\n1,2\n")},
 	)
@@ -740,7 +740,7 @@ func TestDoctorMissingDataFileStatError(t *testing.T) {
 func TestDoctorFigureResolvePathError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t, "<html>body</html>", "", "", nil, nil)
+	id := addRecordWithContent(t, "<html>body</html>", "", "", nil, nil)
 
 	// Insert a figure record with an invalid filename directly via SQL
 	db := openErrorPathsDB(t, homeDir)
@@ -748,7 +748,7 @@ func TestDoctorFigureResolvePathError(t *testing.T) {
 		t.Fatalf("enable foreign keys: %v", err)
 	}
 	if _, err := db.Exec(
-		"INSERT INTO slide_figures (slide_id, filename, s3_key) VALUES (?, '..', ?)",
+		"INSERT INTO record_figures (record_id, filename, s3_key) VALUES (?, '..', ?)",
 		id, "figures/"+id+"/bad",
 	); err != nil {
 		t.Fatalf("insert bad figure record: %v", err)
@@ -771,7 +771,7 @@ func TestDoctorFigureResolvePathError(t *testing.T) {
 func TestDoctorDataFileResolvePathError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t, "<html>body</html>", "", "", nil, nil)
+	id := addRecordWithContent(t, "<html>body</html>", "", "", nil, nil)
 
 	// Insert a data file record with an invalid filename directly via SQL
 	db := openErrorPathsDB(t, homeDir)
@@ -779,7 +779,7 @@ func TestDoctorDataFileResolvePathError(t *testing.T) {
 		t.Fatalf("enable foreign keys: %v", err)
 	}
 	if _, err := db.Exec(
-		"INSERT INTO slide_data_files (slide_id, filename, s3_key, size, hash) VALUES (?, '..', ?, 0, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')",
+		"INSERT INTO record_data_files (record_id, filename, s3_key, size, hash) VALUES (?, '..', ?, 0, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855')",
 		id, "data/"+id+"/bad",
 	); err != nil {
 		t.Fatalf("insert bad data file record: %v", err)
@@ -802,10 +802,10 @@ func TestDoctorDataFileResolvePathError(t *testing.T) {
 func TestFindOrphansUnexpectedRepoError(t *testing.T) {
 	_, err := findOrphans(context.Background(), orphanRepoErrorStub{err: errors.New("boom")}, []string{"20250307-deadbeef"})
 	if err == nil {
-		t.Fatal("expected error when GetSlideByID fails unexpectedly")
+		t.Fatal("expected error when GetRecordByID fails unexpectedly")
 	}
 	if !strings.Contains(err.Error(), "20250307-deadbeef") {
-		t.Fatalf("expected slide id in error, got %v", err)
+		t.Fatalf("expected record id in error, got %v", err)
 	}
 }
 
@@ -927,12 +927,12 @@ func TestDoctorCloudWarnWriteError(t *testing.T) {
 	}
 }
 
-// --- Doctor: ListSlideIDsOnDisk error ---
+// --- Doctor: ListRecordIDsOnDisk error ---
 
-func TestDoctorListSlideIDsOnDiskError(t *testing.T) {
+func TestDoctorListRecordIDsOnDiskError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	// Replace figures directory with a file to make ListSlideIDsOnDisk fail
+	// Replace figures directory with a file to make ListRecordIDsOnDisk fail
 	figuresDir := filepath.Join(homeDir, "personal-context", "figures")
 	if err := os.RemoveAll(figuresDir); err != nil {
 		t.Fatal(err)

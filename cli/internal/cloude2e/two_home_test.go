@@ -32,16 +32,16 @@ func TestTwoHomeRoundTripWithAutoSyncConflictResolution(t *testing.T) {
 		homeBData      = "edited,by\nB,2\n"
 	)
 
-	// --- Phase 1: Create a slide with a figure and a data file on homeA ---
+	// --- Phase 1: Create a record with a figure and a data file on homeA ---
 	inputDir := createInputFolder(t,
 		originalHTML,
 		originalNotes,
 		map[string][]byte{"plot.png": []byte(originalFigure)},
 		map[string][]byte{"metrics.csv": []byte(originalData)},
 	)
-	slideID := strings.TrimSpace(runPCSuccessNoStderr(t, homeA, userHomeA, "add", inputDir))
-	if slideID == "" {
-		t.Fatal("expected slide ID from add")
+	recordID := strings.TrimSpace(runPCSuccessNoStderr(t, homeA, userHomeA, "add", inputDir))
+	if recordID == "" {
+		t.Fatal("expected record ID from add")
 	}
 
 	// HomeA add auto-syncs to cloud; homeB only needs an explicit sync to pull it.
@@ -50,16 +50,16 @@ func TestTwoHomeRoundTripWithAutoSyncConflictResolution(t *testing.T) {
 		t.Fatalf("expected sync success output, got:\n%s", syncOut)
 	}
 
-	slideB := getSlideJSON(t, homeB, userHomeB, slideID)
-	if slideB.HTMLContent != originalHTML {
-		t.Fatalf("homeB slide content = %q, want HomeA original", slideB.HTMLContent)
+	recordB := getRecordJSON(t, homeB, userHomeB, recordID)
+	if recordB.HTMLContent != originalHTML {
+		t.Fatalf("homeB record content = %q, want HomeA original", recordB.HTMLContent)
 	}
-	if slideB.Notes != originalNotes {
-		t.Fatalf("homeB notes = %q, want %q", slideB.Notes, originalNotes)
+	if recordB.Notes != originalNotes {
+		t.Fatalf("homeB notes = %q, want %q", recordB.Notes, originalNotes)
 	}
 
 	// Figure should be present locally on homeB after sync.
-	figurePath := filepath.Join(homeB, "personal-context", "figures", slideID, "plot.png")
+	figurePath := filepath.Join(homeB, "personal-context", "figures", recordID, "plot.png")
 	figureContent, err := os.ReadFile(figurePath)
 	if err != nil {
 		t.Fatalf("read figure on homeB: %v", err)
@@ -69,7 +69,7 @@ func TestTwoHomeRoundTripWithAutoSyncConflictResolution(t *testing.T) {
 	}
 
 	// Data file should remain cloud-only (not downloaded by sync).
-	dataPath := filepath.Join(homeB, "personal-context", "data", slideID, "metrics.csv")
+	dataPath := filepath.Join(homeB, "personal-context", "data", recordID, "metrics.csv")
 	if _, err := os.Stat(dataPath); !os.IsNotExist(err) {
 		t.Fatalf("expected data file to be cloud-only on homeB, stat err = %v", err)
 	}
@@ -79,20 +79,20 @@ func TestTwoHomeRoundTripWithAutoSyncConflictResolution(t *testing.T) {
 		map[string][]byte{"plot.png": []byte(homeAFigure)},
 		map[string][]byte{"metrics.csv": []byte(homeAData)},
 	)
-	editOutA := runPCSuccessNoStderr(t, homeA, userHomeA, "edit", slideID, editDirA)
-	if !strings.Contains(editOutA, "Slide "+slideID+" updated") {
+	editOutA := runPCSuccessNoStderr(t, homeA, userHomeA, "edit", recordID, editDirA)
+	if !strings.Contains(editOutA, "Record "+recordID+" updated") {
 		t.Fatalf("expected homeA edit success output, got:\n%s", editOutA)
 	}
 
-	// --- Phase 4: Edit the same stale slide on homeB. Its auto-sync should win. ---
+	// --- Phase 4: Edit the same stale record on homeB. Its auto-sync should win. ---
 	// Backdate homeA's cloud timestamp to ensure homeB's edit is deterministically later.
-	backdateSlideCloud(t, cloud.NeonURL, slideID)
+	backdateRecordCloud(t, cloud.NeonURL, recordID)
 	editDirB := createInputFolder(t, homeBHTML, homeBNotes,
 		map[string][]byte{"plot.png": []byte(homeBFigure)},
 		map[string][]byte{"metrics.csv": []byte(homeBData)},
 	)
-	editOutB := runPCSuccessNoStderr(t, homeB, userHomeB, "edit", slideID, editDirB)
-	if !strings.Contains(editOutB, "Slide "+slideID+" updated") {
+	editOutB := runPCSuccessNoStderr(t, homeB, userHomeB, "edit", recordID, editDirB)
+	if !strings.Contains(editOutB, "Record "+recordID+" updated") {
 		t.Fatalf("expected homeB edit success output, got:\n%s", editOutB)
 	}
 
@@ -103,28 +103,28 @@ func TestTwoHomeRoundTripWithAutoSyncConflictResolution(t *testing.T) {
 	}
 
 	// --- Phase 6: Verify both homes converge and assets reflect current sync semantics. ---
-	slideA := getSlideJSON(t, homeA, userHomeA, slideID)
-	slideBFinal := getSlideJSON(t, homeB, userHomeB, slideID)
+	recordA := getRecordJSON(t, homeA, userHomeA, recordID)
+	recordBFinal := getRecordJSON(t, homeB, userHomeB, recordID)
 
 	// The later edit (homeB) should win.
-	if slideA.HTMLContent != homeBHTML {
-		t.Fatalf("homeA final content = %q, want HomeB edit", slideA.HTMLContent)
+	if recordA.HTMLContent != homeBHTML {
+		t.Fatalf("homeA final content = %q, want HomeB edit", recordA.HTMLContent)
 	}
-	if slideA.Notes != homeBNotes {
-		t.Fatalf("homeA final notes = %q, want %q", slideA.Notes, homeBNotes)
+	if recordA.Notes != homeBNotes {
+		t.Fatalf("homeA final notes = %q, want %q", recordA.Notes, homeBNotes)
 	}
-	if slideBFinal.HTMLContent != homeBHTML {
-		t.Fatalf("homeB final content = %q, want HomeB edit", slideBFinal.HTMLContent)
+	if recordBFinal.HTMLContent != homeBHTML {
+		t.Fatalf("homeB final content = %q, want HomeB edit", recordBFinal.HTMLContent)
 	}
-	if slideBFinal.Notes != homeBNotes {
-		t.Fatalf("homeB final notes = %q, want %q", slideBFinal.Notes, homeBNotes)
+	if recordBFinal.Notes != homeBNotes {
+		t.Fatalf("homeB final notes = %q, want %q", recordBFinal.Notes, homeBNotes)
 	}
-	if slideA.ID != slideBFinal.ID {
-		t.Fatalf("slide IDs diverged: homeA=%s, homeB=%s", slideA.ID, slideBFinal.ID)
+	if recordA.ID != recordBFinal.ID {
+		t.Fatalf("record IDs diverged: homeA=%s, homeB=%s", recordA.ID, recordBFinal.ID)
 	}
 
-	figureAPath := filepath.Join(homeA, "personal-context", "figures", slideID, "plot.png")
-	figureBPath := filepath.Join(homeB, "personal-context", "figures", slideID, "plot.png")
+	figureAPath := filepath.Join(homeA, "personal-context", "figures", recordID, "plot.png")
+	figureBPath := filepath.Join(homeB, "personal-context", "figures", recordID, "plot.png")
 	figureAContent, err := os.ReadFile(figureAPath)
 	if err != nil {
 		t.Fatalf("read converged figure on homeA: %v", err)
@@ -141,7 +141,7 @@ func TestTwoHomeRoundTripWithAutoSyncConflictResolution(t *testing.T) {
 	}
 
 	// Winner home keeps its local data file; the other home keeps only cloud metadata after sync.
-	homeBDataPath := filepath.Join(homeB, "personal-context", "data", slideID, "metrics.csv")
+	homeBDataPath := filepath.Join(homeB, "personal-context", "data", recordID, "metrics.csv")
 	homeBDataContent, err := os.ReadFile(homeBDataPath)
 	if err != nil {
 		t.Fatalf("read data on winning homeB: %v", err)
@@ -149,7 +149,7 @@ func TestTwoHomeRoundTripWithAutoSyncConflictResolution(t *testing.T) {
 	if string(homeBDataContent) != homeBData {
 		t.Fatalf("homeB data = %q, want %q", string(homeBDataContent), homeBData)
 	}
-	homeADataPath := filepath.Join(homeA, "personal-context", "data", slideID, "metrics.csv")
+	homeADataPath := filepath.Join(homeA, "personal-context", "data", recordID, "metrics.csv")
 	if _, err := os.Stat(homeADataPath); !os.IsNotExist(err) {
 		t.Fatalf("expected homeA data file to be removed during sync reconciliation, stat err = %v", err)
 	}

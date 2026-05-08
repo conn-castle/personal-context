@@ -5,34 +5,34 @@ import (
 	"testing"
 )
 
-func TestTrashListsSoftDeletedSlides(t *testing.T) {
+func TestTrashListsSoftDeletedRecords(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	// Add 3 slides.
-	input1 := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Slide 1</html>"})
+	// Add 3 records.
+	input1 := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Record 1</html>"})
 	id1 := strings.TrimSpace(runPCSuccess(t, homeDir, "add", input1))
 
-	input2 := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Slide 2</html>"})
+	input2 := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Record 2</html>"})
 	id2 := strings.TrimSpace(runPCSuccess(t, homeDir, "add", input2))
 
-	input3 := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Slide 3</html>"})
+	input3 := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Record 3</html>"})
 	_ = strings.TrimSpace(runPCSuccess(t, homeDir, "add", input3))
 
 	// Soft-delete 2 of them.
 	runPCSuccess(t, homeDir, "delete", id1)
 	runPCSuccess(t, homeDir, "delete", id2)
 
-	// Trash should show exactly the 2 deleted slides.
+	// Trash should show exactly the 2 deleted records.
 	stdout := runPCSuccess(t, homeDir, "trash")
 	if !strings.Contains(stdout, id1) {
-		t.Fatalf("expected trash output to contain deleted slide %s, got:\n%s", id1, stdout)
+		t.Fatalf("expected trash output to contain deleted record %s, got:\n%s", id1, stdout)
 	}
 	if !strings.Contains(stdout, id2) {
-		t.Fatalf("expected trash output to contain deleted slide %s, got:\n%s", id2, stdout)
+		t.Fatalf("expected trash output to contain deleted record %s, got:\n%s", id2, stdout)
 	}
 
-	// Count non-header lines that contain a slide ID (header is "ID  Date  Deleted At").
+	// Count non-header lines that contain a record ID (header is "ID  Date  Deleted At").
 	lines := strings.Split(strings.TrimSpace(stdout), "\n")
 	dataLines := 0
 	for _, line := range lines {
@@ -64,9 +64,9 @@ func TestTrashShowsIDDateDeletedAt(t *testing.T) {
 		t.Fatalf("expected header with ID, Date, Deleted At, got:\n%s", stdout)
 	}
 
-	// Should contain the slide ID.
+	// Should contain the record ID.
 	if !strings.Contains(stdout, id) {
-		t.Fatalf("expected slide ID %s in output, got:\n%s", id, stdout)
+		t.Fatalf("expected record ID %s in output, got:\n%s", id, stdout)
 	}
 
 	// Should contain the date.
@@ -84,7 +84,7 @@ func TestTrashShowsIDDateDeletedAt(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("expected deleted_at timestamp on slide line, got:\n%s", stdout)
+		t.Fatalf("expected deleted_at timestamp on record line, got:\n%s", stdout)
 	}
 }
 
@@ -92,7 +92,7 @@ func TestTrashEmptyReturnsCleanMessage(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	// Add a slide but do NOT delete it.
+	// Add a record but do NOT delete it.
 	input := createInputFolder(t, inputFolderOpts{})
 	runPCSuccess(t, homeDir, "add", input)
 
@@ -102,7 +102,7 @@ func TestTrashEmptyReturnsCleanMessage(t *testing.T) {
 	}
 }
 
-func TestTrashNoSlidesAtAll(t *testing.T) {
+func TestTrashNoRecordsAtAll(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
@@ -112,7 +112,7 @@ func TestTrashNoSlidesAtAll(t *testing.T) {
 	}
 }
 
-func TestTrashExcludesRestoredSlides(t *testing.T) {
+func TestTrashExcludesRestoredRecords(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 

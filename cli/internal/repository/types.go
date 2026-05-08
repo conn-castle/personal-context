@@ -2,8 +2,8 @@ package repository
 
 import "time"
 
-// Slide is a row from the slides table.
-type Slide struct {
+// Record is a row from the records table.
+type Record struct {
 	ID             string
 	UserID         string // Postgres only; empty in SQLite (local mode)
 	Date           string
@@ -36,20 +36,20 @@ type Device struct {
 	ArchivedAt *time.Time
 }
 
-// SlideFigure is a row from the slide_figures table.
-type SlideFigure struct {
+// RecordFigure is a row from the record_figures table.
+type RecordFigure struct {
 	ID        int64
-	SlideID   string
+	RecordID   string
 	Filename  string
 	S3Key     string
 	AltText   *string
 	CreatedAt time.Time
 }
 
-// SlideDataFile is a row from the slide_data_files table.
-type SlideDataFile struct {
+// RecordDataFile is a row from the record_data_files table.
+type RecordDataFile struct {
 	ID          int64
-	SlideID     string
+	RecordID     string
 	Filename    string
 	S3Key       string
 	Size        int64
@@ -84,8 +84,8 @@ type CreateRegistryInput struct {
 	ArchivedAt *time.Time
 }
 
-// CreateSlideInput contains required and optional fields for inserts.
-type CreateSlideInput struct {
+// CreateRecordInput contains required and optional fields for inserts.
+type CreateRecordInput struct {
 	ID             string
 	Date           string
 	DayOrder       string
@@ -101,8 +101,8 @@ type CreateSlideInput struct {
 	DeletedAt      *time.Time
 }
 
-// UpdateSlideInput contains mutable slide fields.
-type UpdateSlideInput struct {
+// UpdateRecordInput contains mutable record fields.
+type UpdateRecordInput struct {
 	ID             string
 	Date           string
 	DayOrder       string
@@ -117,8 +117,8 @@ type UpdateSlideInput struct {
 	DeletedAt      *time.Time
 }
 
-// ListSlidesFilter controls slide-list query behavior.
-type ListSlidesFilter struct {
+// ListRecordsFilter controls record-list query behavior.
+type ListRecordsFilter struct {
 	IncludeDeleted bool
 	OnlyDeleted    bool
 	ProjectID      *string
@@ -130,25 +130,25 @@ type ListSlidesFilter struct {
 	UpdatedBefore  *time.Time
 }
 
-// CreateSlideFigureInput contains required and optional fields for figure inserts.
-type CreateSlideFigureInput struct {
-	SlideID  string
+// CreateRecordFigureInput contains required and optional fields for figure inserts.
+type CreateRecordFigureInput struct {
+	RecordID  string
 	Filename string
 	S3Key    string
 	AltText  *string
 }
 
-// UpdateSlideFigureInput contains mutable figure fields.
-type UpdateSlideFigureInput struct {
+// UpdateRecordFigureInput contains mutable figure fields.
+type UpdateRecordFigureInput struct {
 	ID       int64
 	Filename string
 	S3Key    string
 	AltText  *string
 }
 
-// CreateSlideDataFileInput contains required and optional fields for data-file inserts.
-type CreateSlideDataFileInput struct {
-	SlideID     string
+// CreateRecordDataFileInput contains required and optional fields for data-file inserts.
+type CreateRecordDataFileInput struct {
+	RecordID     string
 	Filename    string
 	S3Key       string
 	Size        int64
@@ -156,8 +156,8 @@ type CreateSlideDataFileInput struct {
 	Description *string
 }
 
-// UpdateSlideDataFileInput contains mutable data-file fields.
-type UpdateSlideDataFileInput struct {
+// UpdateRecordDataFileInput contains mutable data-file fields.
+type UpdateRecordDataFileInput struct {
 	ID          int64
 	Filename    string
 	S3Key       string

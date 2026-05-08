@@ -1,5 +1,5 @@
 class PersonalContext < Formula
-  desc "Personal structured vault for searchable knowledge, data, files, and slides"
+  desc "Personal structured vault for searchable knowledge, data, files, and records"
   homepage "https://github.com/conn-castle/personal-context"
   url "https://github.com/conn-castle/personal-context/releases/download/v0.0.0/personal-context-0.0.0.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"

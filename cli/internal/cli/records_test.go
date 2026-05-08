@@ -19,9 +19,9 @@ import (
 
 func TestListCommandFiltersAndPaginatesRecords(t *testing.T) {
 	setupEnv(t)
-	olderID := addSlideWithContent(t, "<html>older</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-01")
-	addSlideWithContent(t, "<html>other</html>", "", `{"project_id":"beta/project"}`, nil, nil, "--date", "2026-01-02")
-	newerID := addSlideWithContent(t, "<html>newer</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-03")
+	olderID := addRecordWithContent(t, "<html>older</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-01")
+	addRecordWithContent(t, "<html>other</html>", "", `{"project_id":"beta/project"}`, nil, nil, "--date", "2026-01-02")
+	newerID := addRecordWithContent(t, "<html>newer</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-03")
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -82,9 +82,9 @@ func TestListCommandRejectsInvalidOptions(t *testing.T) {
 
 func TestListCommandTableIDsDeletedAndEmptyOutput(t *testing.T) {
 	setupEnv(t)
-	firstID := addSlideWithContent(t, "<html>first</html>", "notes", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-01")
-	addSlideWithContent(t, "", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-02")
-	thirdID := addSlideWithContent(t, "<html>third</html>", "", `{"project_id":"alpha/project"}`, nil, map[string][]byte{"data.csv": []byte("data")}, "--date", "2026-01-03")
+	firstID := addRecordWithContent(t, "<html>first</html>", "notes", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-01")
+	addRecordWithContent(t, "", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-02")
+	thirdID := addRecordWithContent(t, "<html>third</html>", "", `{"project_id":"alpha/project"}`, nil, map[string][]byte{"data.csv": []byte("data")}, "--date", "2026-01-03")
 	noHTMLID := addRecordWithoutHTML(t, "alpha/project", "2026-01-04")
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", firstID})
@@ -163,7 +163,7 @@ func TestListCommandTableIDsDeletedAndEmptyOutput(t *testing.T) {
 
 func TestStatsCommandJSONCountsAndSizes(t *testing.T) {
 	setupEnv(t)
-	addSlideWithContent(
+	addRecordWithContent(
 		t,
 		`<html><img src="figures/plot.png"></html>`,
 		"notes",
@@ -173,7 +173,7 @@ func TestStatsCommandJSONCountsAndSizes(t *testing.T) {
 		"--date",
 		"2026-01-03",
 	)
-	deletedID := addSlideWithContent(t, "<html>deleted</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-04")
+	deletedID := addRecordWithContent(t, "<html>deleted</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-04")
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", deletedID})
 	if err := delCmd.Execute(); err != nil {
@@ -210,8 +210,8 @@ func TestStatsCommandJSONCountsAndSizes(t *testing.T) {
 
 func TestStatsCommandTextDeletedAndInvalidFormat(t *testing.T) {
 	setupEnv(t)
-	activeID := addSlideWithContent(t, "<html>active</html>", "", `{"project_id":"alpha/project"}`, nil, nil)
-	deletedID := addSlideWithContent(t, "<html>deleted</html>", "", `{"project_id":"alpha/project"}`, nil, nil)
+	activeID := addRecordWithContent(t, "<html>active</html>", "", `{"project_id":"alpha/project"}`, nil, nil)
+	deletedID := addRecordWithContent(t, "<html>deleted</html>", "", `{"project_id":"alpha/project"}`, nil, nil)
 	if activeID == deletedID {
 		t.Fatal("expected distinct test records")
 	}
@@ -263,7 +263,7 @@ func TestStatsCommandTextEmptyStore(t *testing.T) {
 
 func TestFilesListCommandReportsLocalInventory(t *testing.T) {
 	setupEnv(t)
-	recordID := addSlideWithContent(
+	recordID := addRecordWithContent(
 		t,
 		`<html><img src="figures/plot.png"></html>`,
 		"",
@@ -303,7 +303,7 @@ func TestFilesListCommandReportsLocalInventory(t *testing.T) {
 
 func TestFilesListCommandTableMissingEmptyAndInvalid(t *testing.T) {
 	homeDir := setupEnv(t)
-	recordID := addSlideWithContent(
+	recordID := addRecordWithContent(
 		t,
 		`<html><img src="figures/plot.png"></html>`,
 		"",
@@ -388,42 +388,42 @@ func TestRecordDiscoveryHelperErrorPaths(t *testing.T) {
 		t.Fatal("expected incomplete cursor to fail")
 	}
 
-	slides := []repository.Slide{
-		repositorySlide("2026-01-02", "m", "20260102-ccccdddd"),
-		repositorySlide("2026-01-03", "b", "20260103-aaaabbbb"),
-		repositorySlide("2026-01-03", "a", "20260103-eeeeffff"),
-		repositorySlide("2026-01-03", "a", "20260103-aaaabbbb"),
+	records := []repository.Record{
+		repositoryRecord("2026-01-02", "m", "20260102-ccccdddd"),
+		repositoryRecord("2026-01-03", "b", "20260103-aaaabbbb"),
+		repositoryRecord("2026-01-03", "a", "20260103-eeeeffff"),
+		repositoryRecord("2026-01-03", "a", "20260103-aaaabbbb"),
 	}
-	sortRecordsForDiscovery(slides)
-	gotOrder := []string{slides[0].ID, slides[1].ID, slides[2].ID, slides[3].ID}
+	sortRecordsForDiscovery(records)
+	gotOrder := []string{records[0].ID, records[1].ID, records[2].ID, records[3].ID}
 	wantOrder := []string{"20260103-aaaabbbb", "20260103-eeeeffff", "20260103-aaaabbbb", "20260102-ccccdddd"}
 	for i := range wantOrder {
 		if gotOrder[i] != wantOrder[i] {
 			t.Fatalf("sort order = %v, want %v", gotOrder, wantOrder)
 		}
 	}
-	sortRecordsForDiscovery([]repository.Slide{
-		repositorySlide("2026-01-01", "a", "20260101-aaaabbbb"),
-		repositorySlide("2026-01-02", "a", "20260102-aaaabbbb"),
+	sortRecordsForDiscovery([]repository.Record{
+		repositoryRecord("2026-01-01", "a", "20260101-aaaabbbb"),
+		repositoryRecord("2026-01-02", "a", "20260102-aaaabbbb"),
 	})
-	sortRecordsForDiscovery([]repository.Slide{
-		repositorySlide("2026-01-01", "z", "20260101-aaaabbbb"),
-		repositorySlide("2026-01-01", "a", "20260101-aaaabbbb"),
+	sortRecordsForDiscovery([]repository.Record{
+		repositoryRecord("2026-01-01", "z", "20260101-aaaabbbb"),
+		repositoryRecord("2026-01-01", "a", "20260101-aaaabbbb"),
 	})
-	sortRecordsForDiscovery([]repository.Slide{
-		repositorySlide("2026-01-01", "a", "20260101-eeeeffff"),
-		repositorySlide("2026-01-01", "a", "20260101-aaaabbbb"),
-		repositorySlide("2026-01-01", "a", "20260101-aaaabbbb"),
+	sortRecordsForDiscovery([]repository.Record{
+		repositoryRecord("2026-01-01", "a", "20260101-eeeeffff"),
+		repositoryRecord("2026-01-01", "a", "20260101-aaaabbbb"),
+		repositoryRecord("2026-01-01", "a", "20260101-aaaabbbb"),
 	})
 
 	cursor := &cliCursorPayload{Date: "2026-01-02", DayOrder: "m", ID: "20260102-ccccdddd"}
-	if !recordIsAfterCursor(repositorySlide("2026-01-01", "a", "20260101-aaaabbbb"), cursor) {
+	if !recordIsAfterCursor(repositoryRecord("2026-01-01", "a", "20260101-aaaabbbb"), cursor) {
 		t.Fatal("expected older date to be after cursor in newest-first order")
 	}
-	if !recordIsAfterCursor(repositorySlide("2026-01-02", "z", "20260102-aaaabbbb"), cursor) {
+	if !recordIsAfterCursor(repositoryRecord("2026-01-02", "z", "20260102-aaaabbbb"), cursor) {
 		t.Fatal("expected later day_order to be after cursor")
 	}
-	if !recordIsAfterCursor(repositorySlide("2026-01-02", "m", "20260102-eeeeffff"), cursor) {
+	if !recordIsAfterCursor(repositoryRecord("2026-01-02", "m", "20260102-eeeeffff"), cursor) {
 		t.Fatal("expected later id to be after cursor")
 	}
 
@@ -440,7 +440,7 @@ func TestRecordDiscoveryHelperErrorPaths(t *testing.T) {
 	if _, _, _, err := resolveLocalAttachment(func(string, string) (string, error) { return "", errors.New("resolve failed") }, "id", "file"); err == nil {
 		t.Fatal("expected resolveLocalAttachment to surface resolver failures")
 	}
-	if got := applyRecordCursor([]repository.Slide{repositorySlide("2026-01-03", "a", "20260103-aaaabbbb")}, cursor); got != nil {
+	if got := applyRecordCursor([]repository.Record{repositoryRecord("2026-01-03", "a", "20260103-aaaabbbb")}, cursor); got != nil {
 		t.Fatalf("expected cursor past end to return nil, got %+v", got)
 	}
 	if err := writeRecordListTable(errorWriter{}, []recordListItem{{ID: "id"}}, nil); err == nil {
@@ -450,25 +450,25 @@ func TestRecordDiscoveryHelperErrorPaths(t *testing.T) {
 
 func TestRecordDiscoveryRepositoryErrorPaths(t *testing.T) {
 	ctx := context.Background()
-	slide := repository.Slide{ID: "20260101-aaaabbbb", Date: "2026-01-01", DayOrder: "a0"}
+	record := repository.Record{ID: "20260101-aaaabbbb", Date: "2026-01-01", DayOrder: "a0"}
 	figureErr := errors.New("figure lookup failed")
 	dataErr := errors.New("data lookup failed")
 
 	if _, err := buildRecordListItem(ctx, &mockRepo{
-		listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+		listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 			return nil, figureErr
 		},
-	}, slide); err == nil || !strings.Contains(err.Error(), "figure lookup failed") {
+	}, record); err == nil || !strings.Contains(err.Error(), "figure lookup failed") {
 		t.Fatalf("buildRecordListItem figure error = %v", err)
 	}
 	if _, err := buildRecordListItem(ctx, &mockRepo{
-		listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+		listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 			return nil, nil
 		},
-		listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
+		listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
 			return nil, dataErr
 		},
-	}, slide); err == nil || !strings.Contains(err.Error(), "data lookup failed") {
+	}, record); err == nil || !strings.Contains(err.Error(), "data lookup failed") {
 		t.Fatalf("buildRecordListItem data error = %v", err)
 	}
 
@@ -477,59 +477,59 @@ func TestRecordDiscoveryRepositoryErrorPaths(t *testing.T) {
 		t.Fatalf("filesystem.NewClient: %v", err)
 	}
 	stack := &localStack{FS: fsClient, Repo: &mockRepo{
-		listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+		listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 			return nil, figureErr
 		},
 	}}
-	if _, err := buildRecordStats(ctx, t.TempDir(), stack, []repository.Slide{slide}); err == nil || !strings.Contains(err.Error(), "figure lookup failed") {
+	if _, err := buildRecordStats(ctx, t.TempDir(), stack, []repository.Record{record}); err == nil || !strings.Contains(err.Error(), "figure lookup failed") {
 		t.Fatalf("buildRecordStats figure error = %v", err)
 	}
 
 	stack.Repo = &mockRepo{
-		listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+		listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 			return nil, nil
 		},
-		listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
+		listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
 			return nil, dataErr
 		},
 	}
-	if _, err := buildFileInventoryItems(ctx, stack, slide); err == nil || !strings.Contains(err.Error(), "data lookup failed") {
+	if _, err := buildFileInventoryItems(ctx, stack, record); err == nil || !strings.Contains(err.Error(), "data lookup failed") {
 		t.Fatalf("buildFileInventoryItems data error = %v", err)
 	}
 
 	stack.Repo = &mockRepo{
-		listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+		listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 			return nil, figureErr
 		},
 	}
-	if _, err := buildFileInventoryItems(ctx, stack, slide); err == nil || !strings.Contains(err.Error(), "figure lookup failed") {
+	if _, err := buildFileInventoryItems(ctx, stack, record); err == nil || !strings.Contains(err.Error(), "figure lookup failed") {
 		t.Fatalf("buildFileInventoryItems figure error = %v", err)
 	}
 
 	stack.Repo = &mockRepo{
-		listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
-			return []repository.SlideFigure{{SlideID: slide.ID, Filename: "../bad", S3Key: "figures/bad"}}, nil
+		listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+			return []repository.RecordFigure{{RecordID: record.ID, Filename: "../bad", S3Key: "figures/bad"}}, nil
 		},
-		listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
+		listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
 			return nil, nil
 		},
 	}
-	if _, err := buildRecordStats(ctx, t.TempDir(), stack, []repository.Slide{slide}); err == nil {
+	if _, err := buildRecordStats(ctx, t.TempDir(), stack, []repository.Record{record}); err == nil {
 		t.Fatal("expected buildRecordStats to fail on invalid figure filename")
 	}
 
 	stack.Repo = &mockRepo{
-		listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+		listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 			return nil, nil
 		},
-		listDataFilesFn: func(context.Context, string) ([]repository.SlideDataFile, error) {
-			return []repository.SlideDataFile{{SlideID: slide.ID, Filename: "../bad", S3Key: "data/bad"}}, nil
+		listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
+			return []repository.RecordDataFile{{RecordID: record.ID, Filename: "../bad", S3Key: "data/bad"}}, nil
 		},
 	}
-	if _, err := buildRecordStats(ctx, t.TempDir(), stack, []repository.Slide{slide}); err == nil {
+	if _, err := buildRecordStats(ctx, t.TempDir(), stack, []repository.Record{record}); err == nil {
 		t.Fatal("expected buildRecordStats to fail on invalid data filename")
 	}
-	if _, err := buildFileInventoryItems(ctx, stack, slide); err == nil {
+	if _, err := buildFileInventoryItems(ctx, stack, record); err == nil {
 		t.Fatal("expected buildFileInventoryItems to fail on invalid data filename")
 	}
 }
@@ -578,11 +578,11 @@ func TestRecordDiscoveryRunRepositoryErrorPaths(t *testing.T) {
 	t.Cleanup(func() { newSQLiteRepoFn = origNewSQLiteRepoFn })
 	listErr := errors.New("list failed")
 	childErr := errors.New("children failed")
-	slide := repositorySlide("2026-01-01", "a0", "20260101-aaaabbbb")
+	record := repositoryRecord("2026-01-01", "a0", "20260101-aaaabbbb")
 
 	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
 		return &mockRepo{
-			listSlidesFn: func(context.Context, repository.ListSlidesFilter) ([]repository.Slide, error) {
+			listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
 				return nil, listErr
 			},
 		}, nil
@@ -600,7 +600,7 @@ func TestRecordDiscoveryRunRepositoryErrorPaths(t *testing.T) {
 	activeCalls := 0
 	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
 		return &mockRepo{
-			listSlidesFn: func(context.Context, repository.ListSlidesFilter) ([]repository.Slide, error) {
+			listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
 				activeCalls++
 				if activeCalls == 1 {
 					return nil, nil
@@ -615,10 +615,10 @@ func TestRecordDiscoveryRunRepositoryErrorPaths(t *testing.T) {
 
 	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
 		return &mockRepo{
-			listSlidesFn: func(context.Context, repository.ListSlidesFilter) ([]repository.Slide, error) {
-				return []repository.Slide{slide}, nil
+			listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+				return []repository.Record{record}, nil
 			},
-			listFiguresFn: func(context.Context, string) ([]repository.SlideFigure, error) {
+			listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 				return nil, childErr
 			},
 		}, nil
@@ -636,9 +636,9 @@ func TestRecordDiscoveryRunRepositoryErrorPaths(t *testing.T) {
 
 func TestExportCommandFiltersRecords(t *testing.T) {
 	setupEnv(t)
-	includedID := addSlideWithContent(t, "<html>included</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-02")
-	excludedByProject := addSlideWithContent(t, "<html>wrong project</html>", "", `{"project_id":"beta/project"}`, nil, nil, "--date", "2026-01-02")
-	excludedByDate := addSlideWithContent(t, "<html>wrong date</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-05")
+	includedID := addRecordWithContent(t, "<html>included</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-02")
+	excludedByProject := addRecordWithContent(t, "<html>wrong project</html>", "", `{"project_id":"beta/project"}`, nil, nil, "--date", "2026-01-02")
+	excludedByDate := addRecordWithContent(t, "<html>wrong date</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-05")
 
 	exportDir := t.TempDir()
 	stdout := &bytes.Buffer{}
@@ -652,12 +652,12 @@ func TestExportCommandFiltersRecords(t *testing.T) {
 	}
 
 	for _, id := range []string{includedID} {
-		if _, err := os.Stat(filepath.Join(exportDir, "slides", id)); err != nil {
+		if _, err := os.Stat(filepath.Join(exportDir, "records", id)); err != nil {
 			t.Fatalf("expected exported record %s: %v", id, err)
 		}
 	}
 	for _, id := range []string{excludedByProject, excludedByDate} {
-		if _, err := os.Stat(filepath.Join(exportDir, "slides", id)); !os.IsNotExist(err) {
+		if _, err := os.Stat(filepath.Join(exportDir, "records", id)); !os.IsNotExist(err) {
 			t.Fatalf("expected record %s to be filtered out, stat err = %v", id, err)
 		}
 	}
@@ -672,8 +672,8 @@ func encodeBase64ForTest(data []byte) string {
 	return strings.TrimRight(base64.StdEncoding.EncodeToString(data), "\n")
 }
 
-func repositorySlide(date string, dayOrder string, id string) repository.Slide {
-	return repository.Slide{Date: date, DayOrder: dayOrder, ID: id}
+func repositoryRecord(date string, dayOrder string, id string) repository.Record {
+	return repository.Record{Date: date, DayOrder: dayOrder, ID: id}
 }
 
 func addRecordWithoutHTML(t *testing.T, projectID string, date string) string {
@@ -704,7 +704,7 @@ func (errorWriter) Write([]byte) (int, error) {
 
 func TestRecordMatchesFilterCoversAllBranches(t *testing.T) {
 	now := time.Now().UTC()
-	active := repository.Slide{ID: "a1", Date: "2026-02-15", ProjectID: "alpha/project", UpdatedAt: now}
+	active := repository.Record{ID: "a1", Date: "2026-02-15", ProjectID: "alpha/project", UpdatedAt: now}
 	deleted := active
 	when := now
 	deleted.DeletedAt = &when
@@ -718,24 +718,24 @@ func TestRecordMatchesFilterCoversAllBranches(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		slide  repository.Slide
-		filter repository.ListSlidesFilter
+		record  repository.Record
+		filter repository.ListRecordsFilter
 		want   bool
 	}{
-		{name: "matches with no filter", slide: active, filter: repository.ListSlidesFilter{}, want: true},
-		{name: "project mismatch", slide: active, filter: repository.ListSlidesFilter{ProjectID: &other}, want: false},
-		{name: "project match", slide: active, filter: repository.ListSlidesFilter{ProjectID: &project}, want: true},
-		{name: "from window match", slide: active, filter: repository.ListSlidesFilter{DateFrom: &from}, want: true},
-		{name: "from window before", slide: active, filter: repository.ListSlidesFilter{DateFrom: &earlierFrom}, want: false},
-		{name: "to window match", slide: active, filter: repository.ListSlidesFilter{DateTo: &to}, want: true},
-		{name: "to window after", slide: active, filter: repository.ListSlidesFilter{DateTo: &earlierTo}, want: false},
-		{name: "only-deleted excludes active", slide: active, filter: repository.ListSlidesFilter{IncludeDeleted: true, OnlyDeleted: true}, want: false},
-		{name: "only-deleted matches deleted", slide: deleted, filter: repository.ListSlidesFilter{IncludeDeleted: true, OnlyDeleted: true}, want: true},
-		{name: "default excludes deleted", slide: deleted, filter: repository.ListSlidesFilter{}, want: false},
+		{name: "matches with no filter", record: active, filter: repository.ListRecordsFilter{}, want: true},
+		{name: "project mismatch", record: active, filter: repository.ListRecordsFilter{ProjectID: &other}, want: false},
+		{name: "project match", record: active, filter: repository.ListRecordsFilter{ProjectID: &project}, want: true},
+		{name: "from window match", record: active, filter: repository.ListRecordsFilter{DateFrom: &from}, want: true},
+		{name: "from window before", record: active, filter: repository.ListRecordsFilter{DateFrom: &earlierFrom}, want: false},
+		{name: "to window match", record: active, filter: repository.ListRecordsFilter{DateTo: &to}, want: true},
+		{name: "to window after", record: active, filter: repository.ListRecordsFilter{DateTo: &earlierTo}, want: false},
+		{name: "only-deleted excludes active", record: active, filter: repository.ListRecordsFilter{IncludeDeleted: true, OnlyDeleted: true}, want: false},
+		{name: "only-deleted matches deleted", record: deleted, filter: repository.ListRecordsFilter{IncludeDeleted: true, OnlyDeleted: true}, want: true},
+		{name: "default excludes deleted", record: deleted, filter: repository.ListRecordsFilter{}, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := recordMatchesFilter(tc.slide, tc.filter); got != tc.want {
+			if got := recordMatchesFilter(tc.record, tc.filter); got != tc.want {
 				t.Fatalf("recordMatchesFilter(%s) = %v, want %v", tc.name, got, tc.want)
 			}
 		})
@@ -744,7 +744,7 @@ func TestRecordMatchesFilterCoversAllBranches(t *testing.T) {
 
 func TestFilesListCommandRecordFilterMismatch(t *testing.T) {
 	setupEnv(t)
-	recordID := addSlideWithContent(t, "<html>x</html>", "", `{"project_id":"alpha/project"}`, nil, nil)
+	recordID := addRecordWithContent(t, "<html>x</html>", "", `{"project_id":"alpha/project"}`, nil, nil)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"files", "list", "--record", recordID, "--project", "beta/project"})

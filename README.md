@@ -1,6 +1,6 @@
 # Personal Context (`pc`)
 
-Personal Context is a local-first engineering notebook system that stores work as HTML slides, attached figures, and data files, organized by date and project.
+Personal Context is a local-first engineering notebook system that stores work as HTML records, attached figures, and data files, organized by date and project.
 
 ## Status
 
@@ -49,7 +49,7 @@ personal-context/
 
 ### Release Installation
 
-The release pipeline targets the Conn Castle Homebrew tap with formula name `personal-context` and binary name `pc`. The formula description is `Personal structured vault for searchable knowledge, data, files, and slides`.
+The release pipeline targets the Conn Castle Homebrew tap with formula name `personal-context` and binary name `pc`. The formula description is `Personal structured vault for searchable knowledge, data, files, and records`.
 
 Once the first Homebrew release is published:
 
@@ -90,8 +90,8 @@ pnpm test:coverage
 pnpm build
 pnpm exec playwright install
 pnpm test:e2e:smoke
-pnpm test:e2e:slide-browser
-pnpm test:e2e:cli-slide
+pnpm test:e2e:record-browser
+pnpm test:e2e:cli-record
 pnpm test:e2e:markdown
 pnpm test:e2e:visual
 pnpm test:e2e:cli-demo
@@ -149,40 +149,40 @@ above with `--api-key`.
 
 - `pc --help`, `pc --version`
 - `pc setup` — initialize local environment (directories, SQLite, templates)
-- `pc add <path>` — create record from folder (`slide.html` optional; `metadata.json` or flags must provide registered `project_id` and `source_device_id`)
-- `pc show <id>` — display slide metadata, notes, figures, data files (`--format text|json`)
+- `pc add <path>` — create record from folder (`record.html` optional; `metadata.json` or flags must provide registered `project_id` and `source_device_id`)
+- `pc show <id>` — display record metadata, notes, figures, data files (`--format text|json`)
 - `pc edit <id> <path>` — full replacement of content, notes, figures, data files
-- `pc delete <id>` — soft-delete a slide
-- `pc restore <id>` — un-delete a slide
+- `pc delete <id>` — soft-delete a record
+- `pc restore <id>` — un-delete a record
 - `pc move <id>` — change date and/or position (`--date`, `--first`, `--last`, `--after`, `--before`)
-- `pc search <query>` — search slides by content, notes, or project (`--format table|ids|json`, `--limit`, `--project`, `--deleted`)
+- `pc search <query>` — search records by content, notes, or project (`--format table|ids|json`, `--limit`, `--project`, `--deleted`)
 - `pc list` — list bounded record summaries newest-first (`--limit`, `--cursor`, `--from`, `--to`, `--project`, `--deleted`, `--has-html`, `--has-data`, `--all`, `--format table|ids|json`)
 - `pc stats` — show local record counts, attachment counts, date range, and explicit size components (`--from`, `--to`, `--project`, `--deleted`, `--format text|json`)
 - `pc files list` — inventory record attachments with local path/status (`--record`, `--from`, `--to`, `--project`, `--deleted`, `--format table|json`)
-- `pc trash` — list soft-deleted slides
+- `pc trash` — list soft-deleted records
 - `pc gc` — hard-delete trash older than 30 days (cascades child rows, removes files; cloud-aware: deletes from cloud first to prevent sync re-creation)
 - `pc project list|add|archive|restore` — manage the project registry
 - `pc device list|register|archive|restore` — manage the source-device registry
 - `pc doctor` — check system health (DB, orphans, missing files; cloud connectivity if configured)
 - `pc sync` — bidirectional sync between local SQLite and cloud Postgres/S3 (requires cloud configuration)
-- `pc fetch <slide_id>` — download data files from cloud S3 (`--project`, `--recent 3d/2w/1m/1y`, `--output`)
-- `pc export --path <dir>` — write deterministic git snapshot state (`projects.json`, `devices.json`, `templates/`, `slides/`); `--from-cloud` reads slide rows and assets from Postgres/S3; `--project`, `--from`, and `--to` scope exported active records
+- `pc fetch <record_id>` — download data files from cloud S3 (`--project`, `--recent 3d/2w/1m/1y`, `--output`)
+- `pc export --path <dir>` — write deterministic git snapshot state (`projects.json`, `devices.json`, `templates/`, `records/`); `--from-cloud` reads record rows and assets from Postgres/S3; `--project`, `--from`, and `--to` scope exported active records
 - `pc import <path>` — merge a git snapshot into local SQLite using `updated_at` rules (`same/older -> skip`, `newer -> replace`)
 - `pc restore-db <path>` — replace local SQLite state from a git snapshot and create an auto-backup snapshot first under `~/personal-context/.pc/backups/`
 - `pc verify` — run a local Tier 2 round-trip verification; `pc verify --from-cloud` verifies the cloud-rooted round-trip path
 - `pc serve` — start Go HTTP server on `127.0.0.1:9876` (default) implementing the web API against local SQLite + filesystem (`--port` to override)
-- `pc screenshot <id>` — capture a 1920x1080 PNG of a slide using headless Chrome (`--output` to set path; requires Chrome/Chromium or `PC_CHROME_PATH`)
-- `pc seed` — create 6 tutorial slides under `personal-context/tutorial` project (idempotent; auto-run by `make dev-local`)
+- `pc screenshot <id>` — capture a 1920x1080 PNG of a record using headless Chrome (`--output` to set path; requires Chrome/Chromium or `PC_CHROME_PATH`)
+- `pc seed` — create 6 tutorial records under `personal-context/tutorial` project (idempotent; auto-run by `make dev-local`)
 
 ## Web UI Overview
 
 The web UI provides:
 
 - App Router + TypeScript
-- Real slide/project/sync/file API routes backed by Neon + S3 helpers
-- Three-panel Slide Browser with date-grouped navigation, 16:9 sandboxed preview when HTML exists, notes/data-only fallback when HTML is absent, notes editing, attachment actions, slide delete controls, and trash counts/purge controls in Settings
+- Real record/project/sync/file API routes backed by Neon + S3 helpers
+- Three-panel Record Browser with date-grouped navigation, 16:9 sandboxed preview when HTML exists, notes/data-only fallback when HTML is absent, notes editing, attachment actions, record delete controls, and trash counts/purge controls in Settings
 - `useSyncManager` 4-layer polling and cursor-based pagination
-- Vitest coverage thresholds (95%) plus Playwright smoke and Slide Browser e2e coverage
+- Vitest coverage thresholds (95%) plus Playwright smoke and Record Browser e2e coverage
 - Schema-contract module referencing canonical `schema/` artifacts
 - Local dev mode: Next.js proxies to `pc serve` when `LOCAL_BACKEND_URL` is set (no cloud credentials needed)
 
@@ -191,7 +191,7 @@ The web UI provides:
 The web UI uses Auth.js (NextAuth v5) with email/password credentials. Two operational modes:
 
 - **Local mode** (`pc serve`): No authentication. Single-user, localhost only.
-- **Cloud mode** (Amplify/Neon): Auth.js credentials with JWT sessions (90-day expiry). Per-user data isolation (slides, S3 files, sync version).
+- **Cloud mode** (Amplify/Neon): Auth.js credentials with JWT sessions (90-day expiry). Per-user data isolation (records, S3 files, sync version).
 
 CLI authentication uses API keys generated from an authenticated web session. Store the key via `pc setup --api-key=<key>`.
 Create a key from an authenticated web session:
@@ -277,9 +277,9 @@ The three `-tags integration` commands require Docker because testcontainers-go 
 
 `go test -tags integration ./internal/cloude2e/ -v -timeout 420s` is the self-contained cloud CLI e2e suite: it drives the compiled `pc` binary through cloud onboarding, first sync plus doctor, two-home auto-sync conflict resolution, and `fetch --project --output` using testcontainers-backed Postgres and MinIO plus temp homes for isolated AWS credentials.
 
-`./scripts/verify_phase3_manual.sh` runs the full Phase 3 local flow (`setup/add/show/edit/move/delete/restore`), creates a standalone slide preview, and opens it in your default browser. Use `--no-open` for headless runs.
+`./scripts/verify_phase3_manual.sh` runs the full Phase 3 local flow (`setup/add/show/edit/move/delete/restore`), creates a standalone record preview, and opens it in your default browser. Use `--no-open` for headless runs.
 
-`./scripts/verify_local_demo.sh` runs a generalized local demo flow: it creates 10 numbered slides, deletes 5, restores 1, moves 1, verifies the final state through the real CLI, and opens a generated summary page with persisted previews for the first and last active slides. Use `--no-open` for headless runs.
+`./scripts/verify_local_demo.sh` runs a generalized local demo flow: it creates 10 numbered records, deletes 5, restores 1, moves 1, verifies the final state through the real CLI, and opens a generated summary page with persisted previews for the first and last active records. Use `--no-open` for headless runs.
 
 ### Web (`web/`)
 
@@ -292,10 +292,10 @@ pnpm test:coverage
 pnpm build
 pnpm exec playwright install
 pnpm test:e2e:smoke
-pnpm test:e2e:slide-browser
+pnpm test:e2e:record-browser
 pnpm test:e2e:markdown
 pnpm test:e2e:visual
-pnpm test:e2e:cli-slide
+pnpm test:e2e:cli-record
 pnpm test:e2e:cli-demo
 ```
 
@@ -303,9 +303,9 @@ Or via Makefile: `make web-all` runs lint + typecheck + coverage + build + e2e.
 
 Playwright starts Next.js with `LOCAL_BACKEND_URL=http://127.0.0.1:9876`, so browser e2e runs in local mode and bypasses cloud auth while tests mock API responses with `page.route()`.
 
-`pnpm test:e2e:slide-browser` exercises the mocked Slide Browser workflow (browse, filter, notes/data-only rendering, notes edit, delete/restore, sync badge, error states, pagination), so no real backend is required.
+`pnpm test:e2e:record-browser` exercises the mocked Record Browser workflow (browse, filter, notes/data-only rendering, notes edit, delete/restore, sync badge, error states, pagination), so no real backend is required.
 
-`pnpm test:e2e:cli-slide` requires Go on `PATH` because it executes `cli/scripts/verify_phase3_manual.sh --no-open`.
+`pnpm test:e2e:cli-record` requires Go on `PATH` because it executes `cli/scripts/verify_phase3_manual.sh --no-open`.
 
 `pnpm test:e2e:cli-demo` requires Go on `PATH` because it executes `cli/scripts/verify_local_demo.sh --no-open`.
 
@@ -322,7 +322,7 @@ GitHub Actions workflow: `.github/workflows/ci.yml`
 
 - Enforces schema contract and schema-equivalence checks.
 - Runs CLI `go mod tidy -diff`, build/test/lint, aggregate coverage gate (`>=95%`), per-package coverage gate (`>=95%` for each tested package), CLI e2e, and the Docker-backed Postgres/S3 integration suites.
-- Runs web lint/test/coverage/build, Playwright smoke e2e, Playwright Slide Browser e2e, and the standalone CLI-slide/local-demo Playwright flows.
+- Runs web lint/test/coverage/build, Playwright smoke e2e, Playwright Record Browser e2e, and the standalone CLI-record/local-demo Playwright flows.
 - Uses pinned `golangci-lint` version via `GOLANGCI_LINT_VERSION`.
 
 ## Nightly Export Example

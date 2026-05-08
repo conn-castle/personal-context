@@ -97,19 +97,19 @@ func TestPathResolution(t *testing.T) {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	figurePath, err := client.ResolveFigurePath("slide-1", "figure.png")
+	figurePath, err := client.ResolveFigurePath("record-1", "figure.png")
 	if err != nil {
 		t.Fatalf("ResolveFigurePath() error = %v", err)
 	}
-	if !strings.HasSuffix(filepath.ToSlash(figurePath), "/figures/slide-1/figure.png") {
+	if !strings.HasSuffix(filepath.ToSlash(figurePath), "/figures/record-1/figure.png") {
 		t.Fatalf("unexpected figure path: %s", figurePath)
 	}
 
-	dataPath, err := client.ResolveDataFilePath("slide-1", "data.csv")
+	dataPath, err := client.ResolveDataFilePath("record-1", "data.csv")
 	if err != nil {
 		t.Fatalf("ResolveDataFilePath() error = %v", err)
 	}
-	if !strings.HasSuffix(filepath.ToSlash(dataPath), "/data/slide-1/data.csv") {
+	if !strings.HasSuffix(filepath.ToSlash(dataPath), "/data/record-1/data.csv") {
 		t.Fatalf("unexpected data-file path: %s", dataPath)
 	}
 }
@@ -166,11 +166,11 @@ func TestResolvePathRejectsTraversalFilename(t *testing.T) {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	if _, err := client.ResolveFigurePath("slide-1", "../bad.png"); err == nil {
+	if _, err := client.ResolveFigurePath("record-1", "../bad.png"); err == nil {
 		t.Fatal("expected traversal filename to fail")
 	}
 	if _, err := client.ResolveFigurePath("../../etc", "passwd"); err == nil {
-		t.Fatal("expected traversal slide id to fail")
+		t.Fatal("expected traversal record id to fail")
 	}
 }
 
@@ -181,15 +181,15 @@ func TestResolvePathRejectsDotSegments(t *testing.T) {
 	}
 
 	if _, err := client.ResolveFigurePath(".", "file.png"); err == nil {
-		t.Fatal("expected dot slide id to fail")
+		t.Fatal("expected dot record id to fail")
 	}
 	if _, err := client.ResolveFigurePath("..", "file.png"); err == nil {
-		t.Fatal("expected dot-dot slide id to fail")
+		t.Fatal("expected dot-dot record id to fail")
 	}
-	if _, err := client.ResolveFigurePath("slide-1", "."); err == nil {
+	if _, err := client.ResolveFigurePath("record-1", "."); err == nil {
 		t.Fatal("expected dot filename to fail")
 	}
-	if _, err := client.ResolveFigurePath("slide-1", ".."); err == nil {
+	if _, err := client.ResolveFigurePath("record-1", ".."); err == nil {
 		t.Fatal("expected dot-dot filename to fail")
 	}
 }
@@ -233,10 +233,10 @@ func TestCopyRejectsDirectoryAndNilClient(t *testing.T) {
 	}
 
 	var nilClient *Client
-	if _, err := nilClient.ResolveFigurePath("slide-1", "file.png"); err == nil {
+	if _, err := nilClient.ResolveFigurePath("record-1", "file.png"); err == nil {
 		t.Fatal("expected nil client resolve to fail")
 	}
-	if err := nilClient.DeleteFigure("slide-1", "file.png"); err == nil {
+	if err := nilClient.DeleteFigure("record-1", "file.png"); err == nil {
 		t.Fatal("expected nil client delete to fail")
 	}
 }
@@ -248,9 +248,9 @@ func TestResolveRejectsMissingFields(t *testing.T) {
 	}
 
 	if _, err := client.ResolveFigurePath("", "file.png"); err == nil {
-		t.Fatal("expected empty slide id to fail")
+		t.Fatal("expected empty record id to fail")
 	}
-	if _, err := client.ResolveDataFilePath("slide-1", ""); err == nil {
+	if _, err := client.ResolveDataFilePath("record-1", ""); err == nil {
 		t.Fatal("expected empty filename to fail")
 	}
 }
@@ -261,15 +261,15 @@ func TestCopyRejectsEmptySourcePath(t *testing.T) {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	if _, err := client.CopyFigure("slide-1", ""); err == nil {
+	if _, err := client.CopyFigure("record-1", ""); err == nil {
 		t.Fatal("expected empty source path to fail")
 	}
-	if _, err := client.CopyDataFile("slide-1", ""); err == nil {
+	if _, err := client.CopyDataFile("record-1", ""); err == nil {
 		t.Fatal("expected empty source path to fail")
 	}
 }
 
-func TestCopyRejectsInvalidSlideID(t *testing.T) {
+func TestCopyRejectsInvalidRecordID(t *testing.T) {
 	client, err := NewClient(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
@@ -281,10 +281,10 @@ func TestCopyRejectsInvalidSlideID(t *testing.T) {
 	}
 
 	if _, err := client.CopyFigure("", source); err == nil {
-		t.Fatal("expected CopyFigure() to fail for empty slide id")
+		t.Fatal("expected CopyFigure() to fail for empty record id")
 	}
 	if _, err := client.CopyDataFile("", source); err == nil {
-		t.Fatal("expected CopyDataFile() to fail for empty slide id")
+		t.Fatal("expected CopyDataFile() to fail for empty record id")
 	}
 }
 
@@ -295,15 +295,15 @@ func TestDeleteRejectsInvalidInput(t *testing.T) {
 	}
 
 	if err := client.DeleteFigure("", "x.png"); err == nil {
-		t.Fatal("expected DeleteFigure() to fail for empty slide id")
+		t.Fatal("expected DeleteFigure() to fail for empty record id")
 	}
-	if err := client.DeleteFigure("slide-1", ""); err == nil {
+	if err := client.DeleteFigure("record-1", ""); err == nil {
 		t.Fatal("expected DeleteFigure() to fail for empty filename")
 	}
 	if err := client.DeleteDataFile("", "x.csv"); err == nil {
-		t.Fatal("expected DeleteDataFile() to fail for empty slide id")
+		t.Fatal("expected DeleteDataFile() to fail for empty record id")
 	}
-	if err := client.DeleteDataFile("slide-1", ""); err == nil {
+	if err := client.DeleteDataFile("record-1", ""); err == nil {
 		t.Fatal("expected DeleteDataFile() to fail for empty filename")
 	}
 }
@@ -370,7 +370,7 @@ func TestCopyFailsWhenDestinationParentCannotBeCreated(t *testing.T) {
 		t.Fatalf("WriteFile(source) error = %v", err)
 	}
 
-	if _, err := client.CopyDataFile("slide-1", source); err == nil {
+	if _, err := client.CopyDataFile("record-1", source); err == nil {
 		t.Fatal("expected copy to fail when destination parent is blocked")
 	}
 }
@@ -448,7 +448,7 @@ func TestCopyFailsWhenSourceFileCannotBeOpened(t *testing.T) {
 
 func TestDeleteDataFileRejectsInvalidInputOnNilClient(t *testing.T) {
 	var nilClient *Client
-	if err := nilClient.DeleteDataFile("slide-1", "f.csv"); err == nil {
+	if err := nilClient.DeleteDataFile("record-1", "f.csv"); err == nil {
 		t.Fatal("expected nil client delete data file to fail")
 	}
 }
@@ -465,7 +465,7 @@ func TestBasePathReturnsConfiguredPath(t *testing.T) {
 	}
 }
 
-func TestListSlideIDsOnDisk(t *testing.T) {
+func TestListRecordIDsOnDisk(t *testing.T) {
 	t.Run("no directories exist", func(t *testing.T) {
 		root := t.TempDir()
 		client, err := NewClient(root)
@@ -473,9 +473,9 @@ func TestListSlideIDsOnDisk(t *testing.T) {
 			t.Fatalf("NewClient() error = %v", err)
 		}
 
-		figures, data, err := client.ListSlideIDsOnDisk()
+		figures, data, err := client.ListRecordIDsOnDisk()
 		if err != nil {
-			t.Fatalf("ListSlideIDsOnDisk() error = %v", err)
+			t.Fatalf("ListRecordIDsOnDisk() error = %v", err)
 		}
 		if len(figures) != 0 {
 			t.Fatalf("expected empty figures, got %v", figures)
@@ -485,7 +485,7 @@ func TestListSlideIDsOnDisk(t *testing.T) {
 		}
 	})
 
-	t.Run("figures and data dirs with slide ID subdirs", func(t *testing.T) {
+	t.Run("figures and data dirs with record ID subdirs", func(t *testing.T) {
 		root := t.TempDir()
 		client, err := NewClient(root)
 		if err != nil {
@@ -493,19 +493,19 @@ func TestListSlideIDsOnDisk(t *testing.T) {
 		}
 
 		for _, dir := range []string{
-			filepath.Join(root, "figures", "slide-a"),
-			filepath.Join(root, "figures", "slide-b"),
-			filepath.Join(root, "data", "slide-a"),
-			filepath.Join(root, "data", "slide-c"),
+			filepath.Join(root, "figures", "record-a"),
+			filepath.Join(root, "figures", "record-b"),
+			filepath.Join(root, "data", "record-a"),
+			filepath.Join(root, "data", "record-c"),
 		} {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				t.Fatalf("MkdirAll(%s) error = %v", dir, err)
 			}
 		}
 
-		figures, data, err := client.ListSlideIDsOnDisk()
+		figures, data, err := client.ListRecordIDsOnDisk()
 		if err != nil {
-			t.Fatalf("ListSlideIDsOnDisk() error = %v", err)
+			t.Fatalf("ListRecordIDsOnDisk() error = %v", err)
 		}
 		if len(figures) != 2 {
 			t.Fatalf("expected 2 figure dirs, got %v", figures)
@@ -522,16 +522,16 @@ func TestListSlideIDsOnDisk(t *testing.T) {
 			t.Fatalf("NewClient() error = %v", err)
 		}
 
-		if err := os.MkdirAll(filepath.Join(root, "figures", "slide-x"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(root, "figures", "record-x"), 0o755); err != nil {
 			t.Fatalf("MkdirAll() error = %v", err)
 		}
 
-		figures, data, err := client.ListSlideIDsOnDisk()
+		figures, data, err := client.ListRecordIDsOnDisk()
 		if err != nil {
-			t.Fatalf("ListSlideIDsOnDisk() error = %v", err)
+			t.Fatalf("ListRecordIDsOnDisk() error = %v", err)
 		}
-		if len(figures) != 1 || figures[0] != "slide-x" {
-			t.Fatalf("expected [slide-x], got %v", figures)
+		if len(figures) != 1 || figures[0] != "record-x" {
+			t.Fatalf("expected [record-x], got %v", figures)
 		}
 		if len(data) != 0 {
 			t.Fatalf("expected empty data, got %v", data)
@@ -554,16 +554,16 @@ func TestListSlideIDsOnDisk(t *testing.T) {
 			t.Fatalf("WriteFile() error = %v", err)
 		}
 		// Also create a valid subdir
-		if err := os.MkdirAll(filepath.Join(figuresDir, "slide-valid"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(figuresDir, "record-valid"), 0o755); err != nil {
 			t.Fatalf("MkdirAll() error = %v", err)
 		}
 
-		figures, _, err := client.ListSlideIDsOnDisk()
+		figures, _, err := client.ListRecordIDsOnDisk()
 		if err != nil {
-			t.Fatalf("ListSlideIDsOnDisk() error = %v", err)
+			t.Fatalf("ListRecordIDsOnDisk() error = %v", err)
 		}
-		if len(figures) != 1 || figures[0] != "slide-valid" {
-			t.Fatalf("expected [slide-valid], got %v", figures)
+		if len(figures) != 1 || figures[0] != "record-valid" {
+			t.Fatalf("expected [record-valid], got %v", figures)
 		}
 	})
 
@@ -580,16 +580,16 @@ func TestListSlideIDsOnDisk(t *testing.T) {
 		}
 
 		dataDir := filepath.Join(root, "data")
-		if err := os.MkdirAll(filepath.Join(dataDir, "valid-slide"), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(dataDir, "valid-record"), 0o755); err != nil {
 			t.Fatalf("MkdirAll() error = %v", err)
 		}
 
-		_, data, err := client.ListSlideIDsOnDisk()
+		_, data, err := client.ListRecordIDsOnDisk()
 		if err != nil {
-			t.Fatalf("ListSlideIDsOnDisk() error = %v", err)
+			t.Fatalf("ListRecordIDsOnDisk() error = %v", err)
 		}
-		if len(data) != 1 || data[0] != "valid-slide" {
-			t.Fatalf("expected [valid-slide], got %v", data)
+		if len(data) != 1 || data[0] != "valid-record" {
+			t.Fatalf("expected [valid-record], got %v", data)
 		}
 	})
 
@@ -613,7 +613,7 @@ func TestListSlideIDsOnDisk(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(figuresDir, 0o755) })
 
-		_, _, err = client.ListSlideIDsOnDisk()
+		_, _, err = client.ListRecordIDsOnDisk()
 		if err == nil {
 			t.Fatal("expected error when figures directory is unreadable")
 		}
@@ -647,7 +647,7 @@ func TestListSlideIDsOnDisk(t *testing.T) {
 		}
 		t.Cleanup(func() { _ = os.Chmod(dataDir, 0o755) })
 
-		_, _, err = client.ListSlideIDsOnDisk()
+		_, _, err = client.ListRecordIDsOnDisk()
 		if err == nil {
 			t.Fatal("expected error when data directory is unreadable")
 		}
@@ -666,20 +666,20 @@ func TestNilReceiverGuards(t *testing.T) {
 		}
 	})
 
-	t.Run("ListSlideIDsOnDisk returns error", func(t *testing.T) {
-		_, _, err := nilClient.ListSlideIDsOnDisk()
+	t.Run("ListRecordIDsOnDisk returns error", func(t *testing.T) {
+		_, _, err := nilClient.ListRecordIDsOnDisk()
 		if err == nil {
-			t.Fatal("expected nil client ListSlideIDsOnDisk to fail")
+			t.Fatal("expected nil client ListRecordIDsOnDisk to fail")
 		}
 		if !strings.Contains(err.Error(), "filesystem client is required") {
 			t.Fatalf("expected 'filesystem client is required' in error, got %v", err)
 		}
 	})
 
-	t.Run("DeleteSlideDir returns error", func(t *testing.T) {
-		err := nilClient.DeleteSlideDir("slide-1")
+	t.Run("DeleteRecordDir returns error", func(t *testing.T) {
+		err := nilClient.DeleteRecordDir("record-1")
 		if err == nil {
-			t.Fatal("expected nil client DeleteSlideDir to fail")
+			t.Fatal("expected nil client DeleteRecordDir to fail")
 		}
 		if !strings.Contains(err.Error(), "filesystem client is required") {
 			t.Fatalf("expected 'filesystem client is required' in error, got %v", err)
@@ -687,7 +687,7 @@ func TestNilReceiverGuards(t *testing.T) {
 	})
 }
 
-func TestDeleteSlideDir(t *testing.T) {
+func TestDeleteRecordDir(t *testing.T) {
 	t.Run("removes existing figure and data directories", func(t *testing.T) {
 		root := t.TempDir()
 		client, err := NewClient(root)
@@ -696,8 +696,8 @@ func TestDeleteSlideDir(t *testing.T) {
 		}
 
 		// Create figure and data directories with files inside
-		figDir := filepath.Join(root, "figures", "slide-1")
-		dataDir := filepath.Join(root, "data", "slide-1")
+		figDir := filepath.Join(root, "figures", "record-1")
+		dataDir := filepath.Join(root, "data", "record-1")
 		if err := os.MkdirAll(figDir, 0o755); err != nil {
 			t.Fatalf("MkdirAll(figDir) error = %v", err)
 		}
@@ -711,8 +711,8 @@ func TestDeleteSlideDir(t *testing.T) {
 			t.Fatalf("WriteFile() error = %v", err)
 		}
 
-		if err := client.DeleteSlideDir("slide-1"); err != nil {
-			t.Fatalf("DeleteSlideDir() error = %v", err)
+		if err := client.DeleteRecordDir("record-1"); err != nil {
+			t.Fatalf("DeleteRecordDir() error = %v", err)
 		}
 
 		if _, err := os.Stat(figDir); !errors.Is(err, os.ErrNotExist) {
@@ -730,21 +730,21 @@ func TestDeleteSlideDir(t *testing.T) {
 			t.Fatalf("NewClient() error = %v", err)
 		}
 
-		// Neither figures/slide-1 nor data/slide-1 exist
-		if err := client.DeleteSlideDir("slide-1"); err != nil {
-			t.Fatalf("DeleteSlideDir() should tolerate missing dirs, got error = %v", err)
+		// Neither figures/record-1 nor data/record-1 exist
+		if err := client.DeleteRecordDir("record-1"); err != nil {
+			t.Fatalf("DeleteRecordDir() should tolerate missing dirs, got error = %v", err)
 		}
 	})
 
-	t.Run("rejects empty slideID", func(t *testing.T) {
+	t.Run("rejects empty recordID", func(t *testing.T) {
 		root := t.TempDir()
 		client, err := NewClient(root)
 		if err != nil {
 			t.Fatalf("NewClient() error = %v", err)
 		}
 
-		if err := client.DeleteSlideDir(""); err == nil {
-			t.Fatal("expected error for empty slideID")
+		if err := client.DeleteRecordDir(""); err == nil {
+			t.Fatal("expected error for empty recordID")
 		}
 	})
 
@@ -755,7 +755,7 @@ func TestDeleteSlideDir(t *testing.T) {
 			t.Fatalf("NewClient() error = %v", err)
 		}
 
-		figDir := filepath.Join(root, "figures", "slide-2")
+		figDir := filepath.Join(root, "figures", "record-2")
 		if err := os.MkdirAll(figDir, 0o755); err != nil {
 			t.Fatalf("MkdirAll() error = %v", err)
 		}
@@ -768,8 +768,8 @@ func TestDeleteSlideDir(t *testing.T) {
 			t.Fatalf("WriteFile() error = %v", err)
 		}
 
-		if err := client.DeleteSlideDir("slide-2"); err != nil {
-			t.Fatalf("DeleteSlideDir() error = %v", err)
+		if err := client.DeleteRecordDir("record-2"); err != nil {
+			t.Fatalf("DeleteRecordDir() error = %v", err)
 		}
 
 		if _, err := os.Stat(fileA); !errors.Is(err, os.ErrNotExist) {

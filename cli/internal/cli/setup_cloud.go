@@ -136,7 +136,7 @@ func runSetupInitCloudSchema(ctx context.Context, stdout io.Writer, neonURL stri
 // cloud configuration. When interactive is true, a merge preview is shown and
 // confirmation is required before writing.
 //
-// Args: localRepo is required when interactive is true (for merge preview slide count).
+// Args: localRepo is required when interactive is true (for merge preview record count).
 func runSetupCloud(
 	ctx context.Context,
 	stdout io.Writer,
@@ -213,19 +213,19 @@ func runSetupCloud(
 			return fmt.Errorf("create temporary postgres repository: %w", err)
 		}
 
-		localSlides, err := localRepo.ListSlides(ctx, repository.ListSlidesFilter{})
+		localRecords, err := localRepo.ListRecords(ctx, repository.ListRecordsFilter{})
 		if err != nil {
-			return fmt.Errorf("count local slides: %w", err)
+			return fmt.Errorf("count local records: %w", err)
 		}
-		cloudSlides, err := cloudRepo.ListSlides(ctx, repository.ListSlidesFilter{})
+		cloudRecords, err := cloudRepo.ListRecords(ctx, repository.ListRecordsFilter{})
 		if err != nil {
-			return fmt.Errorf("count cloud slides: %w", err)
+			return fmt.Errorf("count cloud records: %w", err)
 		}
 
 		_, _ = fmt.Fprintf(stdout, "\nMerge preview:\n")
-		_, _ = fmt.Fprintf(stdout, "  Local:  %d slide(s)\n", len(localSlides))
-		_, _ = fmt.Fprintf(stdout, "  Cloud:  %d slide(s)\n", len(cloudSlides))
-		_, _ = fmt.Fprintf(stdout, "  After sync, all slides will be merged.\n\n")
+		_, _ = fmt.Fprintf(stdout, "  Local:  %d record(s)\n", len(localRecords))
+		_, _ = fmt.Fprintf(stdout, "  Cloud:  %d record(s)\n", len(cloudRecords))
+		_, _ = fmt.Fprintf(stdout, "  After sync, all records will be merged.\n\n")
 
 		proceed, err := promptConfirmFn(stdin, stdout, "Proceed?")
 		if err != nil {

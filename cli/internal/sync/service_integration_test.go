@@ -102,8 +102,8 @@ func TestServiceSyncIntegrationRoundTripBetweenLocals(t *testing.T) {
 	localOneRepo, localOneFS, localOneSession := newLocalDependencies(t)
 	localTwoRepo, localTwoFS, localTwoSession := newLocalDependencies(t)
 
-	bundle := SlideBundle{
-		Slide: repository.Slide{
+	bundle := RecordBundle{
+		Record: repository.Record{
 			ID:          "20260308-a1b2c3d4",
 			Date:        "2026-03-08",
 			DayOrder:    "a0",
@@ -111,13 +111,13 @@ func TestServiceSyncIntegrationRoundTripBetweenLocals(t *testing.T) {
 			CreatedAt:   time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC),
 			UpdatedAt:   time.Date(2026, 3, 8, 10, 1, 0, 0, time.UTC),
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID:  "20260308-a1b2c3d4",
+		Figures: []repository.RecordFigure{{
+			RecordID:  "20260308-a1b2c3d4",
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 		}},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID:  "20260308-a1b2c3d4",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID:  "20260308-a1b2c3d4",
 			Filename: "metrics.csv",
 			S3Key:    "data/20260308-a1b2c3d4/metrics.csv",
 			Size:     8,
@@ -126,8 +126,8 @@ func TestServiceSyncIntegrationRoundTripBetweenLocals(t *testing.T) {
 	}
 
 	insertBundle(t, localOneRepo, bundle)
-	writeLocalAsset(t, localOneFS, true, bundle.Slide.ID, "plot.png", "FIGURE")
-	writeLocalAsset(t, localOneFS, false, bundle.Slide.ID, "metrics.csv", "1,2,3\n")
+	writeLocalAsset(t, localOneFS, true, bundle.Record.ID, "plot.png", "FIGURE")
+	writeLocalAsset(t, localOneFS, false, bundle.Record.ID, "metrics.csv", "1,2,3\n")
 
 	serviceOne, err := NewService(localOneRepo, cloudRepo, localOneFS, cloudObjects, localOneSession)
 	if err != nil {
@@ -145,12 +145,12 @@ func TestServiceSyncIntegrationRoundTripBetweenLocals(t *testing.T) {
 		t.Fatalf("serviceTwo.Sync() error = %v", err)
 	}
 
-	got := loadBundleFromRepository(t, ctx, localTwoRepo, bundle.Slide.ID)
+	got := loadBundleFromRepository(t, ctx, localTwoRepo, bundle.Record.ID)
 	assertBundleEqual(t, got, bundle)
-	if got := readLocalAsset(t, localTwoFS, true, bundle.Slide.ID, "plot.png"); got != "FIGURE" {
+	if got := readLocalAsset(t, localTwoFS, true, bundle.Record.ID, "plot.png"); got != "FIGURE" {
 		t.Fatalf("local two figure = %q, want %q", got, "FIGURE")
 	}
-	dataPath, err := localTwoFS.ResolveDataFilePath(bundle.Slide.ID, "metrics.csv")
+	dataPath, err := localTwoFS.ResolveDataFilePath(bundle.Record.ID, "metrics.csv")
 	if err != nil {
 		t.Fatalf("ResolveDataFilePath() error = %v", err)
 	}
@@ -164,8 +164,8 @@ func TestServiceSyncIntegrationCloudLaterEditWins(t *testing.T) {
 	cloudRepo, cloudObjects := newCloudDependencies(t)
 	localRepo, localFS, localSession := newLocalDependencies(t)
 
-	bundle := SlideBundle{
-		Slide: repository.Slide{
+	bundle := RecordBundle{
+		Record: repository.Record{
 			ID:          "20260308-b1c2d3e4",
 			Date:        "2026-03-08",
 			DayOrder:    "a1",
@@ -173,15 +173,15 @@ func TestServiceSyncIntegrationCloudLaterEditWins(t *testing.T) {
 			CreatedAt:   time.Date(2026, 3, 8, 11, 0, 0, 0, time.UTC),
 			UpdatedAt:   time.Date(2026, 3, 8, 11, 1, 0, 0, time.UTC),
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID:  "20260308-b1c2d3e4",
+		Figures: []repository.RecordFigure{{
+			RecordID:  "20260308-b1c2d3e4",
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-b1c2d3e4/plot.png",
 		}},
 	}
 
 	insertBundle(t, localRepo, bundle)
-	writeLocalAsset(t, localFS, true, bundle.Slide.ID, "plot.png", "ORIGINAL")
+	writeLocalAsset(t, localFS, true, bundle.Record.ID, "plot.png", "ORIGINAL")
 
 	service, err := NewService(localRepo, cloudRepo, localFS, cloudObjects, localSession)
 	if err != nil {
@@ -192,26 +192,26 @@ func TestServiceSyncIntegrationCloudLaterEditWins(t *testing.T) {
 	}
 
 	localUpdatedAt := time.Now().UTC().Add(1 * time.Minute)
-	if _, err := localRepo.UpdateSlide(ctx, repository.UpdateSlideInput{
-		ID:          bundle.Slide.ID,
-		Date:        bundle.Slide.Date,
-		DayOrder:    bundle.Slide.DayOrder,
+	if _, err := localRepo.UpdateRecord(ctx, repository.UpdateRecordInput{
+		ID:          bundle.Record.ID,
+		Date:        bundle.Record.Date,
+		DayOrder:    bundle.Record.DayOrder,
 		HTMLContent: strPtr("<html>local edit</html>"),
 		UpdatedAt:   &localUpdatedAt,
 	}); err != nil {
-		t.Fatalf("local UpdateSlide() error = %v", err)
+		t.Fatalf("local UpdateRecord() error = %v", err)
 	}
-	writeLocalAsset(t, localFS, true, bundle.Slide.ID, "plot.png", "LOCAL")
+	writeLocalAsset(t, localFS, true, bundle.Record.ID, "plot.png", "LOCAL")
 
 	cloudUpdatedAt := localUpdatedAt.Add(1 * time.Minute)
-	if _, err := cloudRepo.UpdateSlide(ctx, repository.UpdateSlideInput{
-		ID:          bundle.Slide.ID,
-		Date:        bundle.Slide.Date,
-		DayOrder:    bundle.Slide.DayOrder,
+	if _, err := cloudRepo.UpdateRecord(ctx, repository.UpdateRecordInput{
+		ID:          bundle.Record.ID,
+		Date:        bundle.Record.Date,
+		DayOrder:    bundle.Record.DayOrder,
 		HTMLContent: strPtr("<html>cloud edit</html>"),
 		UpdatedAt:   &cloudUpdatedAt,
 	}); err != nil {
-		t.Fatalf("cloud UpdateSlide() error = %v", err)
+		t.Fatalf("cloud UpdateRecord() error = %v", err)
 	}
 	if err := cloudObjects.Upload(ctx, "figures/20260308-b1c2d3e4/plot.png", strings.NewReader("CLOUD")); err != nil {
 		t.Fatalf("cloud figure upload error = %v", err)
@@ -221,14 +221,14 @@ func TestServiceSyncIntegrationCloudLaterEditWins(t *testing.T) {
 		t.Fatalf("second Sync() error = %v", err)
 	}
 
-	got := loadBundleFromRepository(t, ctx, localRepo, bundle.Slide.ID)
-	if got.Slide.HTMLContent != "<html>cloud edit</html>" {
-		t.Fatalf("local HTMLContent = %q, want cloud edit", got.Slide.HTMLContent)
+	got := loadBundleFromRepository(t, ctx, localRepo, bundle.Record.ID)
+	if got.Record.HTMLContent != "<html>cloud edit</html>" {
+		t.Fatalf("local HTMLContent = %q, want cloud edit", got.Record.HTMLContent)
 	}
-	if !got.Slide.UpdatedAt.Equal(cloudUpdatedAt) {
-		t.Fatalf("local UpdatedAt = %v, want %v", got.Slide.UpdatedAt, cloudUpdatedAt)
+	if !got.Record.UpdatedAt.Equal(cloudUpdatedAt) {
+		t.Fatalf("local UpdatedAt = %v, want %v", got.Record.UpdatedAt, cloudUpdatedAt)
 	}
-	if got := readLocalAsset(t, localFS, true, bundle.Slide.ID, "plot.png"); got != "CLOUD" {
+	if got := readLocalAsset(t, localFS, true, bundle.Record.ID, "plot.png"); got != "CLOUD" {
 		t.Fatalf("local figure = %q, want %q", got, "CLOUD")
 	}
 }
@@ -297,7 +297,7 @@ func newCloudDependencies(t *testing.T) (repository.Repository, *s3client.Client
 	}
 	t.Cleanup(func() { pool.Close() })
 
-	// Create a test user required by the user_id FK on slides.
+	// Create a test user required by the user_id FK on records.
 	const testUserID = "test-user-sync-integration"
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)`,
@@ -352,47 +352,47 @@ func newCloudDependencies(t *testing.T) (repository.Repository, *s3client.Client
 	return repo, client
 }
 
-func insertBundle(t *testing.T, repo repository.Repository, bundle SlideBundle) {
+func insertBundle(t *testing.T, repo repository.Repository, bundle RecordBundle) {
 	t.Helper()
 
 	ctx := context.Background()
-	createdAt := bundle.Slide.CreatedAt
-	updatedAt := bundle.Slide.UpdatedAt
-	if _, err := repo.CreateSlide(ctx, repository.CreateSlideInput{
-		ID:           bundle.Slide.ID,
-		Date:         bundle.Slide.Date,
-		DayOrder:     bundle.Slide.DayOrder,
-		HTMLContent:  bundle.Slide.HTMLContent,
-		Notes:        bundle.Slide.Notes,
-		ProjectID:    bundle.Slide.ProjectID,
-		GitRemoteURL: bundle.Slide.GitRemoteURL,
-		GitHash:      bundle.Slide.GitHash,
+	createdAt := bundle.Record.CreatedAt
+	updatedAt := bundle.Record.UpdatedAt
+	if _, err := repo.CreateRecord(ctx, repository.CreateRecordInput{
+		ID:           bundle.Record.ID,
+		Date:         bundle.Record.Date,
+		DayOrder:     bundle.Record.DayOrder,
+		HTMLContent:  bundle.Record.HTMLContent,
+		Notes:        bundle.Record.Notes,
+		ProjectID:    bundle.Record.ProjectID,
+		GitRemoteURL: bundle.Record.GitRemoteURL,
+		GitHash:      bundle.Record.GitHash,
 		CreatedAt:    &createdAt,
 		UpdatedAt:    &updatedAt,
-		DeletedAt:    bundle.Slide.DeletedAt,
+		DeletedAt:    bundle.Record.DeletedAt,
 	}); err != nil {
-		t.Fatalf("CreateSlide() error = %v", err)
+		t.Fatalf("CreateRecord() error = %v", err)
 	}
 	for _, figure := range bundle.Figures {
-		if _, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-			SlideID:  figure.SlideID,
+		if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID:  figure.RecordID,
 			Filename: figure.Filename,
 			S3Key:    figure.S3Key,
 			AltText:  figure.AltText,
 		}); err != nil {
-			t.Fatalf("CreateSlideFigure() error = %v", err)
+			t.Fatalf("CreateRecordFigure() error = %v", err)
 		}
 	}
 	for _, dataFile := range bundle.DataFiles {
-		if _, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-			SlideID:     dataFile.SlideID,
+		if _, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+			RecordID:     dataFile.RecordID,
 			Filename:    dataFile.Filename,
 			S3Key:       dataFile.S3Key,
 			Size:        dataFile.Size,
 			Hash:        dataFile.Hash,
 			Description: dataFile.Description,
 		}); err != nil {
-			t.Fatalf("CreateSlideDataFile() error = %v", err)
+			t.Fatalf("CreateRecordDataFile() error = %v", err)
 		}
 	}
 }
@@ -401,21 +401,21 @@ func loadBundleFromRepository(
 	t *testing.T,
 	ctx context.Context,
 	repo repository.Repository,
-	slideID string,
-) SlideBundle {
+	recordID string,
+) RecordBundle {
 	t.Helper()
 
-	slide, err := repo.GetSlideByID(ctx, slideID)
+	record, err := repo.GetRecordByID(ctx, recordID)
 	if err != nil {
-		t.Fatalf("GetSlideByID() error = %v", err)
+		t.Fatalf("GetRecordByID() error = %v", err)
 	}
-	figures, err := repo.ListSlideFiguresBySlideID(ctx, slideID)
+	figures, err := repo.ListRecordFiguresByRecordID(ctx, recordID)
 	if err != nil {
-		t.Fatalf("ListSlideFiguresBySlideID() error = %v", err)
+		t.Fatalf("ListRecordFiguresByRecordID() error = %v", err)
 	}
-	dataFiles, err := repo.ListSlideDataFilesBySlideID(ctx, slideID)
+	dataFiles, err := repo.ListRecordDataFilesByRecordID(ctx, recordID)
 	if err != nil {
-		t.Fatalf("ListSlideDataFilesBySlideID() error = %v", err)
+		t.Fatalf("ListRecordDataFilesByRecordID() error = %v", err)
 	}
-	return SlideBundle{Slide: slide, Figures: figures, DataFiles: dataFiles}
+	return RecordBundle{Record: record, Figures: figures, DataFiles: dataFiles}
 }

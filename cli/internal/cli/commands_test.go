@@ -22,10 +22,10 @@ func TestEditCommandSuccess(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	// Add a slide
+	// Add a record
 	inputDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>original</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte("<html>original</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 
@@ -35,18 +35,18 @@ func TestEditCommandSuccess(t *testing.T) {
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
 	// Edit with new content
 	editDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html>updated</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(editDir, "record.html"), []byte("<html>updated</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, editDir)
 
 	editOut := &bytes.Buffer{}
 	editCmd := NewRootCommand(RootCommandOptions{Stdout: editOut, Stderr: &bytes.Buffer{}})
-	editCmd.SetArgs([]string{"edit", slideID, editDir})
+	editCmd.SetArgs([]string{"edit", recordID, editDir})
 	if err := editCmd.Execute(); err != nil {
 		t.Fatalf("edit: %v", err)
 	}
@@ -67,15 +67,15 @@ func TestEditCommandNotFound(t *testing.T) {
 	}
 
 	editDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte("<html>x</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(editDir, "record.html"), []byte("<html>x</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, editDir)
 
 	editCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	editCmd.SetArgs([]string{"edit", "nonexistent-id", editDir})
 	if err := editCmd.Execute(); err == nil {
-		t.Fatal("expected error for nonexistent slide ID")
+		t.Fatal("expected error for nonexistent record ID")
 	}
 }
 
@@ -100,7 +100,7 @@ func TestEditCommandWithFigures(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	// Add a slide with a figure
+	// Add a record with a figure
 	inputDir := t.TempDir()
 	figDir := filepath.Join(inputDir, "figures")
 	if err := os.MkdirAll(figDir, 0o755); err != nil {
@@ -109,8 +109,8 @@ func TestEditCommandWithFigures(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(figDir, "original.png"), []byte("png-data"), 0o644); err != nil {
 		t.Fatalf("write original.png: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte(`<html><img src="figures/original.png"></html>`), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte(`<html><img src="figures/original.png"></html>`), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 
@@ -120,7 +120,7 @@ func TestEditCommandWithFigures(t *testing.T) {
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
 	// Edit with different figures
 	editDir := t.TempDir()
@@ -131,14 +131,14 @@ func TestEditCommandWithFigures(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(editFigDir, "new.png"), []byte("new-png-data"), 0o644); err != nil {
 		t.Fatalf("write new.png: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(editDir, "slide.html"), []byte(`<html><img src="figures/new.png"></html>`), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(editDir, "record.html"), []byte(`<html><img src="figures/new.png"></html>`), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, editDir)
 
 	editOut := &bytes.Buffer{}
 	editCmd := NewRootCommand(RootCommandOptions{Stdout: editOut, Stderr: &bytes.Buffer{}})
-	editCmd.SetArgs([]string{"edit", slideID, editDir})
+	editCmd.SetArgs([]string{"edit", recordID, editDir})
 	if err := editCmd.Execute(); err != nil {
 		t.Fatalf("edit with figures: %v", err)
 	}
@@ -163,8 +163,8 @@ func TestDeleteCommandSuccess(t *testing.T) {
 	}
 
 	inputDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte("<html>test</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 
@@ -174,11 +174,11 @@ func TestDeleteCommandSuccess(t *testing.T) {
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
 	delOut := &bytes.Buffer{}
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: delOut, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", slideID})
+	delCmd.SetArgs([]string{"delete", recordID})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestDeleteCommandNotFound(t *testing.T) {
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", "nonexistent-id"})
 	if err := delCmd.Execute(); err == nil {
-		t.Fatal("expected error for nonexistent slide ID")
+		t.Fatal("expected error for nonexistent record ID")
 	}
 }
 
@@ -231,8 +231,8 @@ func TestRestoreCommandSuccess(t *testing.T) {
 	}
 
 	inputDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte("<html>test</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 
@@ -242,11 +242,11 @@ func TestRestoreCommandSuccess(t *testing.T) {
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
-	// Delete the slide first
+	// Delete the record first
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", slideID})
+	delCmd.SetArgs([]string{"delete", recordID})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestRestoreCommandSuccess(t *testing.T) {
 	// Restore it
 	restoreOut := &bytes.Buffer{}
 	restoreCmd := NewRootCommand(RootCommandOptions{Stdout: restoreOut, Stderr: &bytes.Buffer{}})
-	restoreCmd.SetArgs([]string{"restore", slideID})
+	restoreCmd.SetArgs([]string{"restore", recordID})
 	if err := restoreCmd.Execute(); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestRestoreCommandNotFound(t *testing.T) {
 	restoreCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	restoreCmd.SetArgs([]string{"restore", "nonexistent-id"})
 	if err := restoreCmd.Execute(); err == nil {
-		t.Fatal("expected error for nonexistent slide ID")
+		t.Fatal("expected error for nonexistent record ID")
 	}
 }
 
@@ -307,8 +307,8 @@ func TestMoveCommandChangesDate(t *testing.T) {
 	}
 
 	inputDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte("<html>test</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 
@@ -318,11 +318,11 @@ func TestMoveCommandChangesDate(t *testing.T) {
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
 	moveOut := &bytes.Buffer{}
 	moveCmd := NewRootCommand(RootCommandOptions{Stdout: moveOut, Stderr: &bytes.Buffer{}})
-	moveCmd.SetArgs([]string{"move", slideID, "--date", "2025-07-15"})
+	moveCmd.SetArgs([]string{"move", recordID, "--date", "2025-07-15"})
 	if err := moveCmd.Execute(); err != nil {
 		t.Fatalf("move: %v", err)
 	}
@@ -342,10 +342,10 @@ func TestMoveCommandPositionFirst(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	// Add two slides on the same date
+	// Add two records on the same date
 	inputDir1 := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir1, "slide.html"), []byte("<html>first</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir1, "record.html"), []byte("<html>first</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir1)
 
@@ -357,8 +357,8 @@ func TestMoveCommandPositionFirst(t *testing.T) {
 	}
 
 	inputDir2 := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir2, "slide.html"), []byte("<html>second</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir2, "record.html"), []byte("<html>second</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir2)
 
@@ -368,12 +368,12 @@ func TestMoveCommandPositionFirst(t *testing.T) {
 	if err := addCmd2.Execute(); err != nil {
 		t.Fatalf("add second: %v", err)
 	}
-	slideID2 := strings.TrimSpace(addOut2.String())
+	recordID2 := strings.TrimSpace(addOut2.String())
 
-	// Move second slide to --first
+	// Move second record to --first
 	moveOut := &bytes.Buffer{}
 	moveCmd := NewRootCommand(RootCommandOptions{Stdout: moveOut, Stderr: &bytes.Buffer{}})
-	moveCmd.SetArgs([]string{"move", slideID2, "--first"})
+	moveCmd.SetArgs([]string{"move", recordID2, "--first"})
 	if err := moveCmd.Execute(); err != nil {
 		t.Fatalf("move --first: %v", err)
 	}
@@ -394,8 +394,8 @@ func TestMoveCommandNoFlags(t *testing.T) {
 	}
 
 	inputDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte("<html>test</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 
@@ -405,10 +405,10 @@ func TestMoveCommandNoFlags(t *testing.T) {
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
 	moveCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	moveCmd.SetArgs([]string{"move", slideID})
+	moveCmd.SetArgs([]string{"move", recordID})
 	err := moveCmd.Execute()
 	if err == nil {
 		t.Fatal("expected error when no flags provided")
@@ -431,7 +431,7 @@ func TestMoveCommandNotFound(t *testing.T) {
 	moveCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	moveCmd.SetArgs([]string{"move", "nonexistent-id", "--date", "2025-07-15"})
 	if err := moveCmd.Execute(); err == nil {
-		t.Fatal("expected error for nonexistent slide ID")
+		t.Fatal("expected error for nonexistent record ID")
 	}
 }
 
@@ -457,8 +457,8 @@ func TestMoveCommandInvalidDate(t *testing.T) {
 	}
 
 	inputDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<html>test</html>"), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte("<html>test</html>"), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 
@@ -468,10 +468,10 @@ func TestMoveCommandInvalidDate(t *testing.T) {
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	slideID := strings.TrimSpace(addOut.String())
+	recordID := strings.TrimSpace(addOut.String())
 
 	moveCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	moveCmd.SetArgs([]string{"move", slideID, "--date", "bad"})
+	moveCmd.SetArgs([]string{"move", recordID, "--date", "bad"})
 	err := moveCmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for invalid date")
@@ -485,8 +485,8 @@ func TestMoveCommandInvalidDate(t *testing.T) {
 
 func TestEditWithDataFiles(t *testing.T) {
 	setupEnv(t)
-	// Add a slide with data files
-	id := addSlideWithContent(t,
+	// Add a record with data files
+	id := addRecordWithContent(t,
 		"<html>original</html>", "", "",
 		nil,
 		map[string][]byte{"old.csv": []byte("old data")},
@@ -494,7 +494,7 @@ func TestEditWithDataFiles(t *testing.T) {
 
 	// Edit with different data files
 	newDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(newDir, "slide.html"), []byte("<html>edited</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(newDir, "record.html"), []byte("<html>edited</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	writeDefaultProvenanceMetadata(t, newDir)
@@ -521,7 +521,7 @@ func TestEditWithDataFiles(t *testing.T) {
 func TestEditReplacesFiguresAndDataFiles(t *testing.T) {
 	setupEnv(t)
 	// Add with both figures and data files
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/old.png">body</html>`,
 		"notes",
 		"",
@@ -531,7 +531,7 @@ func TestEditReplacesFiguresAndDataFiles(t *testing.T) {
 
 	// Edit with new figures and data
 	newDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(newDir, "slide.html"), []byte(`<html><img src="figures/new.png">new</html>`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(newDir, "record.html"), []byte(`<html><img src="figures/new.png">new</html>`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	writeDefaultProvenanceMetadata(t, newDir)
@@ -569,9 +569,9 @@ func TestEditReplacesFiguresAndDataFiles(t *testing.T) {
 
 func TestMovePositionAfter(t *testing.T) {
 	setupEnv(t)
-	id1 := addSlide(t, "--date", "2025-06-01")
-	id2 := addSlide(t, "--date", "2025-06-01")
-	id3 := addSlide(t, "--date", "2025-06-01")
+	id1 := addRecord(t, "--date", "2025-06-01")
+	id2 := addRecord(t, "--date", "2025-06-01")
+	id3 := addRecord(t, "--date", "2025-06-01")
 
 	// Move id3 after id1
 	stdout := &bytes.Buffer{}
@@ -588,9 +588,9 @@ func TestMovePositionAfter(t *testing.T) {
 
 func TestMovePositionBefore(t *testing.T) {
 	setupEnv(t)
-	id1 := addSlide(t, "--date", "2025-06-02")
-	_ = addSlide(t, "--date", "2025-06-02")
-	id3 := addSlide(t, "--date", "2025-06-02")
+	id1 := addRecord(t, "--date", "2025-06-02")
+	_ = addRecord(t, "--date", "2025-06-02")
+	id3 := addRecord(t, "--date", "2025-06-02")
 
 	// Move id1 before id3
 	stdout := &bytes.Buffer{}
@@ -606,8 +606,8 @@ func TestMovePositionBefore(t *testing.T) {
 
 func TestMovePositionLast(t *testing.T) {
 	setupEnv(t)
-	id1 := addSlide(t, "--date", "2025-06-03")
-	_ = addSlide(t, "--date", "2025-06-03")
+	id1 := addRecord(t, "--date", "2025-06-03")
+	_ = addRecord(t, "--date", "2025-06-03")
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -619,9 +619,9 @@ func TestMovePositionLast(t *testing.T) {
 
 func TestMoveDateAndPosition(t *testing.T) {
 	setupEnv(t)
-	id := addSlide(t, "--date", "2025-06-04")
-	// Add some slides on target date
-	_ = addSlide(t, "--date", "2025-06-05")
+	id := addRecord(t, "--date", "2025-06-04")
+	// Add some records on target date
+	_ = addRecord(t, "--date", "2025-06-05")
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})

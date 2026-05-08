@@ -26,7 +26,7 @@ func TestRunFetchNoModeSelector(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when no mode selector")
 	}
-	if !strings.Contains(err.Error(), "specify a slide ID") {
+	if !strings.Contains(err.Error(), "specify a record ID") {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
@@ -34,16 +34,16 @@ func TestRunFetchNoModeSelector(t *testing.T) {
 func TestRunFetchMultipleModeSelectors(t *testing.T) {
 	tests := []struct {
 		name    string
-		slideID string
+		recordID string
 		opts    fetchOptions
 	}{
-		{"slide+project", "abc", fetchOptions{Project: "org/proj"}},
-		{"slide+recent", "abc", fetchOptions{Recent: "3d"}},
+		{"record+project", "abc", fetchOptions{Project: "org/proj"}},
+		{"record+recent", "abc", fetchOptions{Recent: "3d"}},
 		{"project+recent", "", fetchOptions{Project: "org/proj", Recent: "3d"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, tt.slideID, tt.opts)
+			err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, tt.recordID, tt.opts)
 			if err == nil {
 				t.Fatal("expected error for multiple mode selectors")
 			}
@@ -61,11 +61,11 @@ func TestNewFetchCommandParsesFlagsAndRunsFetch(t *testing.T) {
 
 	proj := "org/proj"
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slidesByProject: map[string][]repository.Slide{
+		recordsByProject: map[string][]repository.Record{
 			proj: {{ID: "s1", Date: "2025-01-01", ProjectID: proj}},
 		},
-		dataFiles: map[string][]repository.SlideDataFile{
-			"s1": {{ID: 1, SlideID: "s1", Filename: "a.txt", S3Key: "data/s1/a.txt"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"s1": {{ID: 1, RecordID: "s1", Filename: "a.txt", S3Key: "data/s1/a.txt"}},
 		},
 		s3Data: map[string]string{"data/s1/a.txt": "alpha"},
 	})
@@ -83,24 +83,24 @@ func TestNewFetchCommandParsesFlagsAndRunsFetch(t *testing.T) {
 	}
 }
 
-func TestNewFetchCommandPassesSlideIDArgument(t *testing.T) {
+func TestNewFetchCommandPassesRecordIDArgument(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv(pcHomeEnvVar, homeDir)
 	outputDir := t.TempDir()
 
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slides: map[string]repository.Slide{
-			"slide-arg": {ID: "slide-arg", Date: "2025-03-01"},
+		records: map[string]repository.Record{
+			"record-arg": {ID: "record-arg", Date: "2025-03-01"},
 		},
-		dataFiles: map[string][]repository.SlideDataFile{
-			"slide-arg": {{ID: 1, SlideID: "slide-arg", Filename: "a.txt", S3Key: "data/slide-arg/a.txt"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"record-arg": {{ID: 1, RecordID: "record-arg", Filename: "a.txt", S3Key: "data/record-arg/a.txt"}},
 		},
-		s3Data: map[string]string{"data/slide-arg/a.txt": "alpha"},
+		s3Data: map[string]string{"data/record-arg/a.txt": "alpha"},
 	})
 
 	stdout := &bytes.Buffer{}
 	cmd := newFetchCommand(stdout, &bytes.Buffer{})
-	cmd.SetArgs([]string{"slide-arg", "--output", outputDir})
+	cmd.SetArgs([]string{"record-arg", "--output", outputDir})
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("ExecuteContext() error = %v", err)
 	}
@@ -121,7 +121,7 @@ func TestRunFetchCloudNotConfigured(t *testing.T) {
 		return nil, errCloudNotConfigured
 	}
 
-	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "slide-id", fetchOptions{})
+	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "record-id", fetchOptions{})
 	if err == nil {
 		t.Fatal("expected error when cloud is not configured")
 	}
@@ -140,7 +140,7 @@ func TestRunFetchCloudOpenError(t *testing.T) {
 		return nil, errors.New("connection failed")
 	}
 
-	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "slide-id", fetchOptions{})
+	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "record-id", fetchOptions{})
 	if err == nil {
 		t.Fatal("expected error on cloud open failure")
 	}
@@ -149,29 +149,29 @@ func TestRunFetchCloudOpenError(t *testing.T) {
 	}
 }
 
-// --- Slide mode ---
+// --- Record mode ---
 
-func TestRunFetchSlideSuccess(t *testing.T) {
+func TestRunFetchRecordSuccess(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv(pcHomeEnvVar, homeDir)
 	outputDir := t.TempDir()
 
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slides: map[string]repository.Slide{
-			"slide-1": {ID: "slide-1", Date: "2025-03-01"},
+		records: map[string]repository.Record{
+			"record-1": {ID: "record-1", Date: "2025-03-01"},
 		},
-		dataFiles: map[string][]repository.SlideDataFile{
-			"slide-1": {
-				{ID: 1, SlideID: "slide-1", Filename: "report.csv", S3Key: "data/slide-1/report.csv"},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"record-1": {
+				{ID: 1, RecordID: "record-1", Filename: "report.csv", S3Key: "data/record-1/report.csv"},
 			},
 		},
 		s3Data: map[string]string{
-			"data/slide-1/report.csv": "col1,col2\n1,2\n",
+			"data/record-1/report.csv": "col1,col2\n1,2\n",
 		},
 	})
 
 	stdout := &bytes.Buffer{}
-	err := runFetch(context.Background(), stdout, &bytes.Buffer{}, "slide-1", fetchOptions{Output: outputDir})
+	err := runFetch(context.Background(), stdout, &bytes.Buffer{}, "record-1", fetchOptions{Output: outputDir})
 	if err != nil {
 		t.Fatalf("runFetch() error = %v", err)
 	}
@@ -181,7 +181,7 @@ func TestRunFetchSlideSuccess(t *testing.T) {
 	}
 
 	// Verify file was written.
-	content, err := os.ReadFile(filepath.Join(outputDir, "slide-1", "report.csv"))
+	content, err := os.ReadFile(filepath.Join(outputDir, "record-1", "report.csv"))
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
@@ -190,7 +190,7 @@ func TestRunFetchSlideSuccess(t *testing.T) {
 	}
 }
 
-func TestRunFetchSlideNotFound(t *testing.T) {
+func TestRunFetchRecordNotFound(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv(pcHomeEnvVar, homeDir)
 
@@ -198,25 +198,25 @@ func TestRunFetchSlideNotFound(t *testing.T) {
 
 	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "nonexistent", fetchOptions{Output: t.TempDir()})
 	if err == nil {
-		t.Fatal("expected error for nonexistent slide")
+		t.Fatal("expected error for nonexistent record")
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
 
-func TestRunFetchSlideNoDataFiles(t *testing.T) {
+func TestRunFetchRecordNoDataFiles(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv(pcHomeEnvVar, homeDir)
 
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slides: map[string]repository.Slide{
-			"slide-1": {ID: "slide-1", Date: "2025-03-01"},
+		records: map[string]repository.Record{
+			"record-1": {ID: "record-1", Date: "2025-03-01"},
 		},
 	})
 
 	stdout := &bytes.Buffer{}
-	err := runFetch(context.Background(), stdout, &bytes.Buffer{}, "slide-1", fetchOptions{Output: t.TempDir()})
+	err := runFetch(context.Background(), stdout, &bytes.Buffer{}, "record-1", fetchOptions{Output: t.TempDir()})
 	if err != nil {
 		t.Fatalf("runFetch() error = %v", err)
 	}
@@ -234,15 +234,15 @@ func TestRunFetchProjectSuccess(t *testing.T) {
 
 	proj := "org/proj"
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slidesByProject: map[string][]repository.Slide{
+		recordsByProject: map[string][]repository.Record{
 			proj: {
 				{ID: "s1", Date: "2025-01-01", ProjectID: proj},
 				{ID: "s2", Date: "2025-01-02", ProjectID: proj},
 			},
 		},
-		dataFiles: map[string][]repository.SlideDataFile{
-			"s1": {{ID: 1, SlideID: "s1", Filename: "a.txt", S3Key: "data/s1/a.txt"}},
-			"s2": {{ID: 2, SlideID: "s2", Filename: "b.txt", S3Key: "data/s2/b.txt"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"s1": {{ID: 1, RecordID: "s1", Filename: "a.txt", S3Key: "data/s1/a.txt"}},
+			"s2": {{ID: 2, RecordID: "s2", Filename: "b.txt", S3Key: "data/s2/b.txt"}},
 		},
 		s3Data: map[string]string{
 			"data/s1/a.txt": "alpha",
@@ -259,13 +259,13 @@ func TestRunFetchProjectSuccess(t *testing.T) {
 		t.Fatalf("expected 2 files downloaded, got %q", stdout.String())
 	}
 
-	for _, f := range []struct{ slide, file, content string }{
+	for _, f := range []struct{ record, file, content string }{
 		{"s1", "a.txt", "alpha"},
 		{"s2", "b.txt", "beta"},
 	} {
-		data, err := os.ReadFile(filepath.Join(outputDir, f.slide, f.file))
+		data, err := os.ReadFile(filepath.Join(outputDir, f.record, f.file))
 		if err != nil {
-			t.Fatalf("ReadFile %s/%s error = %v", f.slide, f.file, err)
+			t.Fatalf("ReadFile %s/%s error = %v", f.record, f.file, err)
 		}
 		if string(data) != f.content {
 			t.Fatalf("expected %q, got %q", f.content, string(data))
@@ -281,11 +281,11 @@ func TestRunFetchRecentSuccess(t *testing.T) {
 	outputDir := t.TempDir()
 
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slidesByDateFrom: map[string][]repository.Slide{
+		recordsByDateFrom: map[string][]repository.Record{
 			"*": {{ID: "r1", Date: "2025-03-01"}},
 		},
-		dataFiles: map[string][]repository.SlideDataFile{
-			"r1": {{ID: 1, SlideID: "r1", Filename: "data.bin", S3Key: "data/r1/data.bin"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"r1": {{ID: 1, RecordID: "r1", Filename: "data.bin", S3Key: "data/r1/data.bin"}},
 		},
 		s3Data: map[string]string{
 			"data/r1/data.bin": "binary",
@@ -321,16 +321,16 @@ func TestRunFetchS3DownloadError(t *testing.T) {
 	t.Setenv(pcHomeEnvVar, homeDir)
 
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slides: map[string]repository.Slide{
-			"slide-1": {ID: "slide-1", Date: "2025-03-01"},
+		records: map[string]repository.Record{
+			"record-1": {ID: "record-1", Date: "2025-03-01"},
 		},
-		dataFiles: map[string][]repository.SlideDataFile{
-			"slide-1": {{ID: 1, SlideID: "slide-1", Filename: "missing.csv", S3Key: "data/slide-1/missing.csv"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"record-1": {{ID: 1, RecordID: "record-1", Filename: "missing.csv", S3Key: "data/record-1/missing.csv"}},
 		},
 		s3Error: errors.New("access denied"),
 	})
 
-	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "slide-1", fetchOptions{Output: t.TempDir()})
+	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "record-1", fetchOptions{Output: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error on S3 download failure")
 	}
@@ -344,14 +344,14 @@ func TestDownloadS3FileFnWritesAtomically(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("method = %s, want GET", r.Method)
 		}
-		if r.URL.Path != "/test-bucket/data/slide/report.csv" {
-			t.Fatalf("path = %s, want /test-bucket/data/slide/report.csv", r.URL.Path)
+		if r.URL.Path != "/test-bucket/data/record/report.csv" {
+			t.Fatalf("path = %s, want /test-bucket/data/record/report.csv", r.URL.Path)
 		}
 		_, _ = w.Write([]byte("a,b\n1,2\n"))
 	}))
 
 	destPath := filepath.Join(t.TempDir(), "nested", "report.csv")
-	if err := downloadS3FileFn(context.Background(), client, "data/slide/report.csv", destPath); err != nil {
+	if err := downloadS3FileFn(context.Background(), client, "data/record/report.csv", destPath); err != nil {
 		t.Fatalf("downloadS3FileFn() error = %v", err)
 	}
 	got, err := os.ReadFile(destPath)
@@ -373,7 +373,7 @@ func TestDownloadS3FileFnReportsLocalWriteErrors(t *testing.T) {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	err := downloadS3FileFn(context.Background(), client, "data/slide/report.csv", filepath.Join(blockerPath, "report.csv"))
+	err := downloadS3FileFn(context.Background(), client, "data/record/report.csv", filepath.Join(blockerPath, "report.csv"))
 	if err == nil {
 		t.Fatal("expected directory creation error")
 	}
@@ -403,19 +403,19 @@ func TestRunFetchDefaultOutputPath(t *testing.T) {
 	t.Setenv(pcHomeEnvVar, homeDir)
 
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slides: map[string]repository.Slide{
-			"slide-1": {ID: "slide-1", Date: "2025-03-01"},
+		records: map[string]repository.Record{
+			"record-1": {ID: "record-1", Date: "2025-03-01"},
 		},
-		dataFiles: map[string][]repository.SlideDataFile{
-			"slide-1": {{ID: 1, SlideID: "slide-1", Filename: "f.txt", S3Key: "data/slide-1/f.txt"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"record-1": {{ID: 1, RecordID: "record-1", Filename: "f.txt", S3Key: "data/record-1/f.txt"}},
 		},
 		s3Data: map[string]string{
-			"data/slide-1/f.txt": "content",
+			"data/record-1/f.txt": "content",
 		},
 	})
 
 	stdout := &bytes.Buffer{}
-	err := runFetch(context.Background(), stdout, &bytes.Buffer{}, "slide-1", fetchOptions{})
+	err := runFetch(context.Background(), stdout, &bytes.Buffer{}, "record-1", fetchOptions{})
 	if err != nil {
 		t.Fatalf("runFetch() error = %v", err)
 	}
@@ -426,7 +426,7 @@ func TestRunFetchDefaultOutputPath(t *testing.T) {
 	}
 
 	// Verify file exists at default path.
-	_, err = os.Stat(filepath.Join(expectedDir, "slide-1", "f.txt"))
+	_, err = os.Stat(filepath.Join(expectedDir, "record-1", "f.txt"))
 	if err != nil {
 		t.Fatalf("expected file at default path: %v", err)
 	}
@@ -471,71 +471,71 @@ func TestParseRecentWindow(t *testing.T) {
 	}
 }
 
-// --- ListSlides error paths ---
+// --- ListRecords error paths ---
 
-func TestRunFetchProjectListSlidesError(t *testing.T) {
+func TestRunFetchProjectListRecordsError(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv(pcHomeEnvVar, homeDir)
 
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		listSlidesErr: errors.New("db error"),
+		listRecordsErr: errors.New("db error"),
 	})
 
 	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "", fetchOptions{Project: "org/proj", Output: t.TempDir()})
 	if err == nil {
-		t.Fatal("expected error on list slides failure")
+		t.Fatal("expected error on list records failure")
 	}
-	if !strings.Contains(err.Error(), "list project slides") {
+	if !strings.Contains(err.Error(), "list project records") {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
 
-func TestRunFetchRecentListSlidesError(t *testing.T) {
+func TestRunFetchRecentListRecordsError(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv(pcHomeEnvVar, homeDir)
 
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		listSlidesErr: errors.New("db error"),
+		listRecordsErr: errors.New("db error"),
 	})
 
 	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "", fetchOptions{Recent: "1d", Output: t.TempDir()})
 	if err == nil {
-		t.Fatal("expected error on list slides failure")
+		t.Fatal("expected error on list records failure")
 	}
-	if !strings.Contains(err.Error(), "list recent slides") {
+	if !strings.Contains(err.Error(), "list recent records") {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
 
-func TestRunFetchSlideGetSlideError(t *testing.T) {
+func TestRunFetchRecordGetRecordError(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv(pcHomeEnvVar, homeDir)
 
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		getSlideErr: errors.New("db error"),
+		getRecordErr: errors.New("db error"),
 	})
 
-	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "slide-1", fetchOptions{Output: t.TempDir()})
+	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "record-1", fetchOptions{Output: t.TempDir()})
 	if err == nil {
-		t.Fatal("expected error on get slide failure")
+		t.Fatal("expected error on get record failure")
 	}
-	if !strings.Contains(err.Error(), "get slide") {
+	if !strings.Contains(err.Error(), "get record") {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
 
-func TestRunFetchSlideListDataFilesError(t *testing.T) {
+func TestRunFetchRecordListDataFilesError(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv(pcHomeEnvVar, homeDir)
 
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slides: map[string]repository.Slide{
-			"slide-1": {ID: "slide-1", Date: "2025-03-01"},
+		records: map[string]repository.Record{
+			"record-1": {ID: "record-1", Date: "2025-03-01"},
 		},
 		listDataFilesErr: errors.New("db error"),
 	})
 
-	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "slide-1", fetchOptions{Output: t.TempDir()})
+	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "record-1", fetchOptions{Output: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error on list data files failure")
 	}
@@ -550,7 +550,7 @@ func TestRunFetchProjectCollectDataFilesError(t *testing.T) {
 
 	proj := "org/proj"
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slidesByProject: map[string][]repository.Slide{
+		recordsByProject: map[string][]repository.Record{
 			proj: {{ID: "s1", Date: "2025-01-01", ProjectID: proj}},
 		},
 		listDataFilesErr: errors.New("data files error"),
@@ -560,7 +560,7 @@ func TestRunFetchProjectCollectDataFilesError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error on collect data files failure")
 	}
-	if !strings.Contains(err.Error(), "list data files for slide") {
+	if !strings.Contains(err.Error(), "list data files for record") {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
@@ -571,11 +571,11 @@ func TestRunFetchPathTraversalSanitized(t *testing.T) {
 
 	outputDir := t.TempDir()
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slides: map[string]repository.Slide{
+		records: map[string]repository.Record{
 			"s1": {ID: "s1", Date: "2025-01-01"},
 		},
-		dataFiles: map[string][]repository.SlideDataFile{
-			"s1": {{SlideID: "../../etc", Filename: "../passwd", S3Key: "k"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"s1": {{RecordID: "../../etc", Filename: "../passwd", S3Key: "k"}},
 		},
 		s3Data: map[string]string{"k": "data"},
 	})
@@ -604,11 +604,11 @@ func TestRunFetchPathTraversalEmptyComponentRejected(t *testing.T) {
 
 	// filepath.Base("") returns ".", which is rejected.
 	mockCloudStackForFetch(t, &fetchMockConfig{
-		slides: map[string]repository.Slide{
+		records: map[string]repository.Record{
 			"s1": {ID: "s1", Date: "2025-01-01"},
 		},
-		dataFiles: map[string][]repository.SlideDataFile{
-			"s1": {{SlideID: "s1", Filename: "", S3Key: "k"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"s1": {{RecordID: "s1", Filename: "", S3Key: "k"}},
 		},
 		s3Data: map[string]string{"k": "data"},
 	})
@@ -626,14 +626,14 @@ func TestRunFetchPathTraversalEmptyComponentRejected(t *testing.T) {
 
 // fetchMockConfig configures the mock cloud stack for fetch tests.
 type fetchMockConfig struct {
-	slides           map[string]repository.Slide           // keyed by slide ID
-	slidesByProject  map[string][]repository.Slide         // keyed by project ID
-	slidesByDateFrom map[string][]repository.Slide         // keyed by "*" (any date from)
-	dataFiles        map[string][]repository.SlideDataFile // keyed by slide ID
+	records           map[string]repository.Record           // keyed by record ID
+	recordsByProject  map[string][]repository.Record         // keyed by project ID
+	recordsByDateFrom map[string][]repository.Record         // keyed by "*" (any date from)
+	dataFiles        map[string][]repository.RecordDataFile // keyed by record ID
 	s3Data           map[string]string                     // keyed by S3 key
 	s3Error          error
-	getSlideErr      error
-	listSlidesErr    error
+	getRecordErr      error
+	listRecordsErr    error
 	listDataFilesErr error
 }
 
@@ -698,33 +698,33 @@ type fetchMockRepo struct {
 	cfg *fetchMockConfig
 }
 
-func (m *fetchMockRepo) GetSlideByID(_ context.Context, id string) (repository.Slide, error) {
-	if m.cfg.getSlideErr != nil {
-		return repository.Slide{}, m.cfg.getSlideErr
+func (m *fetchMockRepo) GetRecordByID(_ context.Context, id string) (repository.Record, error) {
+	if m.cfg.getRecordErr != nil {
+		return repository.Record{}, m.cfg.getRecordErr
 	}
-	slide, ok := m.cfg.slides[id]
+	record, ok := m.cfg.records[id]
 	if !ok {
-		return repository.Slide{}, repository.ErrNotFound
+		return repository.Record{}, repository.ErrNotFound
 	}
-	return slide, nil
+	return record, nil
 }
 
-func (m *fetchMockRepo) ListSlides(_ context.Context, filter repository.ListSlidesFilter) ([]repository.Slide, error) {
-	if m.cfg.listSlidesErr != nil {
-		return nil, m.cfg.listSlidesErr
+func (m *fetchMockRepo) ListRecords(_ context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error) {
+	if m.cfg.listRecordsErr != nil {
+		return nil, m.cfg.listRecordsErr
 	}
 	if filter.ProjectID != nil {
-		return m.cfg.slidesByProject[*filter.ProjectID], nil
+		return m.cfg.recordsByProject[*filter.ProjectID], nil
 	}
 	if filter.DateFrom != nil {
-		return m.cfg.slidesByDateFrom["*"], nil
+		return m.cfg.recordsByDateFrom["*"], nil
 	}
 	return nil, nil
 }
 
-func (m *fetchMockRepo) ListSlideDataFilesBySlideID(_ context.Context, slideID string) ([]repository.SlideDataFile, error) {
+func (m *fetchMockRepo) ListRecordDataFilesByRecordID(_ context.Context, recordID string) ([]repository.RecordDataFile, error) {
 	if m.cfg.listDataFilesErr != nil {
 		return nil, m.cfg.listDataFilesErr
 	}
-	return m.cfg.dataFiles[slideID], nil
+	return m.cfg.dataFiles[recordID], nil
 }

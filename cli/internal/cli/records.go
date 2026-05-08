@@ -99,7 +99,7 @@ func runList(ctx context.Context, stdout io.Writer, stderr io.Writer, opts recor
 		return fmt.Errorf("--all cannot be used with --cursor")
 	}
 
-	filter, err := buildListSlidesFilter(opts.recordFilterOptions)
+	filter, err := buildListRecordsFilter(opts.recordFilterOptions)
 	if err != nil {
 		return err
 	}
@@ -114,23 +114,23 @@ func runList(ctx context.Context, stdout io.Writer, stderr io.Writer, opts recor
 	}
 	defer func() { _ = stack.Close() }()
 
-	slides, err := stack.Repo.ListSlides(ctx, filter)
+	records, err := stack.Repo.ListRecords(ctx, filter)
 	if err != nil {
 		return fmt.Errorf("list records: %w", err)
 	}
-	sortRecordsForDiscovery(slides)
-	slides = applyRecordCursor(slides, cursor)
+	sortRecordsForDiscovery(records)
+	records = applyRecordCursor(records, cursor)
 
 	itemCap := opts.Limit + 1
-	if opts.All || len(slides) < itemCap {
-		itemCap = len(slides)
+	if opts.All || len(records) < itemCap {
+		itemCap = len(records)
 	}
 	items := make([]recordListItem, 0, itemCap)
-	for _, slide := range slides {
+	for _, record := range records {
 		if !opts.All && len(items) > opts.Limit {
 			break
 		}
-		item, err := buildRecordListItem(ctx, stack.Repo, slide)
+		item, err := buildRecordListItem(ctx, stack.Repo, record)
 		if err != nil {
 			return err
 		}
@@ -231,29 +231,29 @@ func runStats(ctx context.Context, stdout io.Writer, _ io.Writer, opts recordSta
 	activeFilter := baseFilter
 	activeFilter.IncludeDeleted = false
 	activeFilter.OnlyDeleted = false
-	activeSlides, err := stack.Repo.ListSlides(ctx, activeFilter)
+	activeRecords, err := stack.Repo.ListRecords(ctx, activeFilter)
 	if err != nil {
 		return fmt.Errorf("list active records: %w", err)
 	}
 	deletedFilter := baseFilter
 	deletedFilter.IncludeDeleted = true
 	deletedFilter.OnlyDeleted = true
-	deletedSlides, err := stack.Repo.ListSlides(ctx, deletedFilter)
+	deletedRecords, err := stack.Repo.ListRecords(ctx, deletedFilter)
 	if err != nil {
 		return fmt.Errorf("list deleted records: %w", err)
 	}
 
-	selectedSlides := activeSlides
+	selectedRecords := activeRecords
 	if opts.Deleted {
-		selectedSlides = deletedSlides
+		selectedRecords = deletedRecords
 	}
-	stats, err := buildRecordStats(ctx, homeDir, stack, selectedSlides)
+	stats, err := buildRecordStats(ctx, homeDir, stack, selectedRecords)
 	if err != nil {
 		return err
 	}
-	stats.ActiveRecordCount = len(activeSlides)
-	stats.DeletedRecordCount = len(deletedSlides)
-	stats.SelectedRecordCount = len(selectedSlides)
+	stats.ActiveRecordCount = len(activeRecords)
+	stats.DeletedRecordCount = len(deletedRecords)
+	stats.SelectedRecordCount = len(selectedRecords)
 
 	if opts.Format == "json" {
 		return writeIndentedJSON(stdout, stats)
@@ -316,7 +316,7 @@ func runFilesList(ctx context.Context, stdout io.Writer, _ io.Writer, opts files
 	default:
 		return fmt.Errorf("unknown format %q: expected table or json", opts.Format)
 	}
-	filter, err := buildListSlidesFilter(opts.recordFilterOptions)
+	filter, err := buildListRecordsFilter(opts.recordFilterOptions)
 	if err != nil {
 		return err
 	}
@@ -327,31 +327,31 @@ func runFilesList(ctx context.Context, stdout io.Writer, _ io.Writer, opts files
 	defer func() { _ = stack.Close() }()
 
 	recordID := strings.TrimSpace(opts.RecordID)
-	var slides []repository.Slide
+	var records []repository.Record
 	if recordID != "" {
-		slide, err := stack.Repo.GetSlideByID(ctx, recordID)
+		record, err := stack.Repo.GetRecordByID(ctx, recordID)
 		if err != nil {
 			return fmt.Errorf("record %q not found", recordID)
 		}
-		if !recordMatchesFilter(slide, filter) {
+		if !recordMatchesFilter(record, filter) {
 			return fmt.Errorf("record %q does not match the requested filters", recordID)
 		}
-		slides = []repository.Slide{slide}
+		records = []repository.Record{record}
 	} else {
-		slides, err = stack.Repo.ListSlides(ctx, filter)
+		records, err = stack.Repo.ListRecords(ctx, filter)
 		if err != nil {
 			return fmt.Errorf("list records: %w", err)
 		}
-		sortRecordsForDiscovery(slides)
+		sortRecordsForDiscovery(records)
 	}
 
 	items := make([]fileInventoryItem, 0)
-	for _, slide := range slides {
-		slideItems, err := buildFileInventoryItems(ctx, stack, slide)
+	for _, record := range records {
+		recordItems, err := buildFileInventoryItems(ctx, stack, record)
 		if err != nil {
 			return err
 		}
-		items = append(items, slideItems...)
+		items = append(items, recordItems...)
 	}
 
 	if opts.Format == "json" {
@@ -360,17 +360,17 @@ func runFilesList(ctx context.Context, stdout io.Writer, _ io.Writer, opts files
 	return writeFilesListTable(stdout, items)
 }
 
-func recordMatchesFilter(slide repository.Slide, filter repository.ListSlidesFilter) bool {
-	if filter.ProjectID != nil && slide.ProjectID != *filter.ProjectID {
+func recordMatchesFilter(record repository.Record, filter repository.ListRecordsFilter) bool {
+	if filter.ProjectID != nil && record.ProjectID != *filter.ProjectID {
 		return false
 	}
-	if filter.DateFrom != nil && slide.Date < *filter.DateFrom {
+	if filter.DateFrom != nil && record.Date < *filter.DateFrom {
 		return false
 	}
-	if filter.DateTo != nil && slide.Date > *filter.DateTo {
+	if filter.DateTo != nil && record.Date > *filter.DateTo {
 		return false
 	}
-	deleted := slide.DeletedAt != nil
+	deleted := record.DeletedAt != nil
 	if filter.OnlyDeleted && !deleted {
 		return false
 	}
@@ -387,10 +387,10 @@ func addRecordFilterFlags(cmd *cobra.Command, opts *recordFilterOptions) {
 	cmd.Flags().BoolVar(&opts.Deleted, "deleted", false, "Show only soft-deleted records")
 }
 
-func buildListSlidesFilter(opts recordFilterOptions) (repository.ListSlidesFilter, error) {
+func buildListRecordsFilter(opts recordFilterOptions) (repository.ListRecordsFilter, error) {
 	filter, err := buildBaseRecordFilter(opts)
 	if err != nil {
-		return repository.ListSlidesFilter{}, err
+		return repository.ListRecordsFilter{}, err
 	}
 	if opts.Deleted {
 		filter.IncludeDeleted = true
@@ -399,20 +399,20 @@ func buildListSlidesFilter(opts recordFilterOptions) (repository.ListSlidesFilte
 	return filter, nil
 }
 
-func buildBaseRecordFilter(opts recordFilterOptions) (repository.ListSlidesFilter, error) {
+func buildBaseRecordFilter(opts recordFilterOptions) (repository.ListRecordsFilter, error) {
 	from := strings.TrimSpace(opts.DateFrom)
 	to := strings.TrimSpace(opts.DateTo)
 	if from != "" && !isValidRecordDate(from) {
-		return repository.ListSlidesFilter{}, fmt.Errorf("invalid --from date %q: expected YYYY-MM-DD", from)
+		return repository.ListRecordsFilter{}, fmt.Errorf("invalid --from date %q: expected YYYY-MM-DD", from)
 	}
 	if to != "" && !isValidRecordDate(to) {
-		return repository.ListSlidesFilter{}, fmt.Errorf("invalid --to date %q: expected YYYY-MM-DD", to)
+		return repository.ListRecordsFilter{}, fmt.Errorf("invalid --to date %q: expected YYYY-MM-DD", to)
 	}
 	if from != "" && to != "" && from > to {
-		return repository.ListSlidesFilter{}, fmt.Errorf("--from must be on or before --to")
+		return repository.ListRecordsFilter{}, fmt.Errorf("--from must be on or before --to")
 	}
 
-	filter := repository.ListSlidesFilter{}
+	filter := repository.ListRecordsFilter{}
 	if project := strings.TrimSpace(opts.ProjectID); project != "" {
 		filter.ProjectID = &project
 	}
@@ -430,8 +430,8 @@ func isValidRecordDate(value string) bool {
 	return err == nil && parsed.Format("2006-01-02") == value
 }
 
-func sortRecordsForDiscovery(slides []repository.Slide) {
-	slices.SortFunc(slides, func(a, b repository.Slide) int {
+func sortRecordsForDiscovery(records []repository.Record) {
+	slices.SortFunc(records, func(a, b repository.Record) int {
 		if a.Date > b.Date {
 			return -1
 		}
@@ -454,26 +454,26 @@ func sortRecordsForDiscovery(slides []repository.Slide) {
 	})
 }
 
-func applyRecordCursor(slides []repository.Slide, cursor *cliCursorPayload) []repository.Slide {
+func applyRecordCursor(records []repository.Record, cursor *cliCursorPayload) []repository.Record {
 	if cursor == nil {
-		return slides
+		return records
 	}
-	for i, slide := range slides {
-		if recordIsAfterCursor(slide, cursor) {
-			return slides[i:]
+	for i, record := range records {
+		if recordIsAfterCursor(record, cursor) {
+			return records[i:]
 		}
 	}
 	return nil
 }
 
-func recordIsAfterCursor(slide repository.Slide, cursor *cliCursorPayload) bool {
-	if slide.Date != cursor.Date {
-		return slide.Date < cursor.Date
+func recordIsAfterCursor(record repository.Record, cursor *cliCursorPayload) bool {
+	if record.Date != cursor.Date {
+		return record.Date < cursor.Date
 	}
-	if slide.DayOrder != cursor.DayOrder {
-		return slide.DayOrder > cursor.DayOrder
+	if record.DayOrder != cursor.DayOrder {
+		return record.DayOrder > cursor.DayOrder
 	}
-	return slide.ID > cursor.ID
+	return record.ID > cursor.ID
 }
 
 func encodeCLICursor(cursor cliCursorPayload) string {
@@ -499,61 +499,61 @@ func decodeCLICursor(raw string) (*cliCursorPayload, error) {
 	return &cursor, nil
 }
 
-func buildRecordListItem(ctx context.Context, repo repository.Repository, slide repository.Slide) (recordListItem, error) {
-	figures, err := repo.ListSlideFiguresBySlideID(ctx, slide.ID)
+func buildRecordListItem(ctx context.Context, repo repository.Repository, record repository.Record) (recordListItem, error) {
+	figures, err := repo.ListRecordFiguresByRecordID(ctx, record.ID)
 	if err != nil {
-		return recordListItem{}, fmt.Errorf("list figures for %s: %w", slide.ID, err)
+		return recordListItem{}, fmt.Errorf("list figures for %s: %w", record.ID, err)
 	}
-	dataFiles, err := repo.ListSlideDataFilesBySlideID(ctx, slide.ID)
+	dataFiles, err := repo.ListRecordDataFilesByRecordID(ctx, record.ID)
 	if err != nil {
-		return recordListItem{}, fmt.Errorf("list data files for %s: %w", slide.ID, err)
+		return recordListItem{}, fmt.Errorf("list data files for %s: %w", record.ID, err)
 	}
 	item := recordListItem{
-		ID:             slide.ID,
-		Date:           slide.Date,
-		DayOrder:       slide.DayOrder,
-		ProjectID:      slide.ProjectID,
-		SourceDeviceID: slide.SourceDeviceID,
-		UpdatedAt:      formatCLITime(slide.UpdatedAt),
-		DeletedAt:      formatCLITimePtr(slide.DeletedAt),
-		HasHTML:        slide.HTMLContent != nil,
-		HasNotes:       slide.Notes != nil,
+		ID:             record.ID,
+		Date:           record.Date,
+		DayOrder:       record.DayOrder,
+		ProjectID:      record.ProjectID,
+		SourceDeviceID: record.SourceDeviceID,
+		UpdatedAt:      formatCLITime(record.UpdatedAt),
+		DeletedAt:      formatCLITimePtr(record.DeletedAt),
+		HasHTML:        record.HTMLContent != nil,
+		HasNotes:       record.Notes != nil,
 		FigureCount:    len(figures),
 		DataFileCount:  len(dataFiles),
 	}
 	return item, nil
 }
 
-func buildRecordStats(ctx context.Context, homeDir string, stack *localStack, slides []repository.Slide) (recordStatsJSON, error) {
+func buildRecordStats(ctx context.Context, homeDir string, stack *localStack, records []repository.Record) (recordStatsJSON, error) {
 	stats := recordStatsJSON{}
-	for _, slide := range slides {
-		if stats.OldestRecordDate == nil || slide.Date < *stats.OldestRecordDate {
-			date := slide.Date
+	for _, record := range records {
+		if stats.OldestRecordDate == nil || record.Date < *stats.OldestRecordDate {
+			date := record.Date
 			stats.OldestRecordDate = &date
 		}
-		if stats.NewestRecordDate == nil || slide.Date > *stats.NewestRecordDate {
-			date := slide.Date
+		if stats.NewestRecordDate == nil || record.Date > *stats.NewestRecordDate {
+			date := record.Date
 			stats.NewestRecordDate = &date
 		}
-		if slide.HTMLContent != nil {
+		if record.HTMLContent != nil {
 			stats.HTMLRecordCount++
 		}
-		if slide.Notes != nil {
+		if record.Notes != nil {
 			stats.NotesRecordCount++
 		}
 
-		figures, err := stack.Repo.ListSlideFiguresBySlideID(ctx, slide.ID)
+		figures, err := stack.Repo.ListRecordFiguresByRecordID(ctx, record.ID)
 		if err != nil {
-			return recordStatsJSON{}, fmt.Errorf("list figures for %s: %w", slide.ID, err)
+			return recordStatsJSON{}, fmt.Errorf("list figures for %s: %w", record.ID, err)
 		}
-		dataFiles, err := stack.Repo.ListSlideDataFilesBySlideID(ctx, slide.ID)
+		dataFiles, err := stack.Repo.ListRecordDataFilesByRecordID(ctx, record.ID)
 		if err != nil {
-			return recordStatsJSON{}, fmt.Errorf("list data files for %s: %w", slide.ID, err)
+			return recordStatsJSON{}, fmt.Errorf("list data files for %s: %w", record.ID, err)
 		}
 		stats.FigureCount += len(figures)
 		stats.DataFileCount += len(dataFiles)
 		for _, figure := range figures {
-			size, ok, err := statLocalAttachment(stack.FS.ResolveFigurePath, slide.ID, figure.Filename)
+			size, ok, err := statLocalAttachment(stack.FS.ResolveFigurePath, record.ID, figure.Filename)
 			if err != nil {
 				return recordStatsJSON{}, err
 			}
@@ -565,7 +565,7 @@ func buildRecordStats(ctx context.Context, homeDir string, stack *localStack, sl
 		}
 		for _, dataFile := range dataFiles {
 			stats.RecordedDataFileBytes += dataFile.Size
-			size, ok, err := statLocalAttachment(stack.FS.ResolveDataFilePath, slide.ID, dataFile.Filename)
+			size, ok, err := statLocalAttachment(stack.FS.ResolveDataFilePath, record.ID, dataFile.Filename)
 			if err != nil {
 				return recordStatsJSON{}, err
 			}
@@ -585,25 +585,25 @@ func buildRecordStats(ctx context.Context, homeDir string, stack *localStack, sl
 	return stats, nil
 }
 
-func buildFileInventoryItems(ctx context.Context, stack *localStack, slide repository.Slide) ([]fileInventoryItem, error) {
-	figures, err := stack.Repo.ListSlideFiguresBySlideID(ctx, slide.ID)
+func buildFileInventoryItems(ctx context.Context, stack *localStack, record repository.Record) ([]fileInventoryItem, error) {
+	figures, err := stack.Repo.ListRecordFiguresByRecordID(ctx, record.ID)
 	if err != nil {
-		return nil, fmt.Errorf("list figures for %s: %w", slide.ID, err)
+		return nil, fmt.Errorf("list figures for %s: %w", record.ID, err)
 	}
-	dataFiles, err := stack.Repo.ListSlideDataFilesBySlideID(ctx, slide.ID)
+	dataFiles, err := stack.Repo.ListRecordDataFilesByRecordID(ctx, record.ID)
 	if err != nil {
-		return nil, fmt.Errorf("list data files for %s: %w", slide.ID, err)
+		return nil, fmt.Errorf("list data files for %s: %w", record.ID, err)
 	}
 	items := make([]fileInventoryItem, 0, len(figures)+len(dataFiles))
 	for _, figure := range figures {
-		path, size, status, err := resolveLocalAttachment(stack.FS.ResolveFigurePath, slide.ID, figure.Filename)
+		path, size, status, err := resolveLocalAttachment(stack.FS.ResolveFigurePath, record.ID, figure.Filename)
 		if err != nil {
 			return nil, err
 		}
 		items = append(items, fileInventoryItem{
-			RecordID:  slide.ID,
-			Date:      slide.Date,
-			ProjectID: slide.ProjectID,
+			RecordID:  record.ID,
+			Date:      record.Date,
+			ProjectID: record.ProjectID,
 			Kind:      "figure",
 			Filename:  figure.Filename,
 			S3Key:     figure.S3Key,
@@ -613,16 +613,16 @@ func buildFileInventoryItems(ctx context.Context, stack *localStack, slide repos
 		})
 	}
 	for _, dataFile := range dataFiles {
-		path, size, status, err := resolveLocalAttachment(stack.FS.ResolveDataFilePath, slide.ID, dataFile.Filename)
+		path, size, status, err := resolveLocalAttachment(stack.FS.ResolveDataFilePath, record.ID, dataFile.Filename)
 		if err != nil {
 			return nil, err
 		}
 		recordedSize := dataFile.Size
 		hash := dataFile.Hash
 		items = append(items, fileInventoryItem{
-			RecordID:     slide.ID,
-			Date:         slide.Date,
-			ProjectID:    slide.ProjectID,
+			RecordID:     record.ID,
+			Date:         record.Date,
+			ProjectID:    record.ProjectID,
 			Kind:         "data",
 			Filename:     dataFile.Filename,
 			S3Key:        dataFile.S3Key,
@@ -636,8 +636,8 @@ func buildFileInventoryItems(ctx context.Context, stack *localStack, slide repos
 	return items, nil
 }
 
-func statLocalAttachment(resolve func(string, string) (string, error), slideID string, filename string) (int64, bool, error) {
-	path, err := resolve(slideID, filename)
+func statLocalAttachment(resolve func(string, string) (string, error), recordID string, filename string) (int64, bool, error) {
+	path, err := resolve(recordID, filename)
 	if err != nil {
 		return 0, false, err
 	}
@@ -654,8 +654,8 @@ func statLocalAttachment(resolve func(string, string) (string, error), slideID s
 	return info.Size(), true, nil
 }
 
-func resolveLocalAttachment(resolve func(string, string) (string, error), slideID string, filename string) (string, *int64, string, error) {
-	path, err := resolve(slideID, filename)
+func resolveLocalAttachment(resolve func(string, string) (string, error), recordID string, filename string) (string, *int64, string, error) {
+	path, err := resolve(recordID, filename)
 	if err != nil {
 		return "", nil, "", err
 	}

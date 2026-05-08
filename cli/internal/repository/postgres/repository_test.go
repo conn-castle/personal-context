@@ -95,7 +95,7 @@ func newPostgresRepo(t *testing.T) repository.Repository {
 		t.Fatalf("ApplySchema() error = %v", err)
 	}
 
-	// Create a test user required by the user_id FK on slides.
+	// Create a test user required by the user_id FK on records.
 	const testUserID = "test-user-contract"
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)`,
@@ -147,7 +147,7 @@ func newConcreteRepo(t *testing.T) (*Repository, *pgxpool.Pool) {
 		t.Fatalf("ApplySchema() error = %v", err)
 	}
 
-	// Create a test user required by the user_id FK on slides.
+	// Create a test user required by the user_id FK on records.
 	const testUserID = "test-user-concrete"
 	if _, err := pool.Exec(ctx,
 		`INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)`,
@@ -170,7 +170,7 @@ func newConcreteRepo(t *testing.T) (*Repository, *pgxpool.Pool) {
 	return repo, pool
 }
 
-func mustCreateSlide(t *testing.T, repo repository.Repository, input repository.CreateSlideInput) repository.Slide {
+func mustCreateRecord(t *testing.T, repo repository.Repository, input repository.CreateRecordInput) repository.Record {
 	t.Helper()
 
 	if input.ProjectID == "" {
@@ -185,11 +185,11 @@ func mustCreateSlide(t *testing.T, repo repository.Repository, input repository.
 	if _, err := repo.CreateDevice(context.Background(), repository.CreateRegistryInput{ID: input.SourceDeviceID}); err != nil && !errors.Is(err, repository.ErrConflict) {
 		t.Fatalf("CreateDevice(%q) error = %v", input.SourceDeviceID, err)
 	}
-	slide, err := repo.CreateSlide(context.Background(), input)
+	record, err := repo.CreateRecord(context.Background(), input)
 	if err != nil {
-		t.Fatalf("CreateSlide() error = %v", err)
+		t.Fatalf("CreateRecord() error = %v", err)
 	}
-	return slide
+	return record
 }
 
 func testHTML(value string) *string {
@@ -214,16 +214,16 @@ func TestPostgresRepositoryContractSuite(t *testing.T) {
 	repositorytest.RunContractSuite(t, newPostgresRepo)
 }
 
-func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
+func TestRecordValidationConflictAndNotFoundBranches(t *testing.T) {
 	repo, _ := newConcreteRepo(t)
 	ctx := context.Background()
 
-	_, err := repo.GetSlideByID(ctx, "")
+	_, err := repo.GetRecordByID(ctx, "")
 	if !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument for empty id, got %v", err)
 	}
 
-	_, err = repo.CreateSlide(ctx, repository.CreateSlideInput{})
+	_, err = repo.CreateRecord(ctx, repository.CreateRecordInput{})
 	if !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument for invalid create input, got %v", err)
 	}
@@ -231,7 +231,7 @@ func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
 	createdAt := time.Date(2026, time.March, 5, 10, 11, 12, 123000000, time.FixedZone("UTC+2", 2*60*60))
 	updatedAt := createdAt.Add(2 * time.Minute)
 	deletedAt := updatedAt.Add(1 * time.Minute)
-	slide := mustCreateSlide(t, repo, repository.CreateSlideInput{
+	record := mustCreateRecord(t, repo, repository.CreateRecordInput{
 		ID:          "20260305-a1b2c3d4",
 		Date:        "2026-03-05",
 		HTMLContent: testHTML("<h1>x</h1>"),
@@ -239,17 +239,17 @@ func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
 		UpdatedAt:   &updatedAt,
 		DeletedAt:   &deletedAt,
 	})
-	if slide.DayOrder != "n" {
-		t.Fatalf("expected default day_order n, got %q", slide.DayOrder)
+	if record.DayOrder != "n" {
+		t.Fatalf("expected default day_order n, got %q", record.DayOrder)
 	}
-	if slide.CreatedAt.Location() != time.UTC || slide.UpdatedAt.Location() != time.UTC {
-		t.Fatalf("expected timestamps normalized to UTC, got created=%v updated=%v", slide.CreatedAt, slide.UpdatedAt)
+	if record.CreatedAt.Location() != time.UTC || record.UpdatedAt.Location() != time.UTC {
+		t.Fatalf("expected timestamps normalized to UTC, got created=%v updated=%v", record.CreatedAt, record.UpdatedAt)
 	}
-	if slide.DeletedAt == nil {
+	if record.DeletedAt == nil {
 		t.Fatal("expected deleted_at to be persisted")
 	}
 
-	_, err = repo.CreateSlide(ctx, repository.CreateSlideInput{
+	_, err = repo.CreateRecord(ctx, repository.CreateRecordInput{
 		ID:             "20260305-a1b2c3d4",
 		Date:           "2026-03-05",
 		DayOrder:       "a",
@@ -258,15 +258,15 @@ func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
 		SourceDeviceID: "test-device",
 	})
 	if !errors.Is(err, repository.ErrConflict) {
-		t.Fatalf("expected ErrConflict for duplicate slide id, got %v", err)
+		t.Fatalf("expected ErrConflict for duplicate record id, got %v", err)
 	}
 
-	_, err = repo.UpdateSlide(ctx, repository.UpdateSlideInput{})
+	_, err = repo.UpdateRecord(ctx, repository.UpdateRecordInput{})
 	if !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument for invalid update input, got %v", err)
 	}
 
-	_, err = repo.UpdateSlide(ctx, repository.UpdateSlideInput{
+	_, err = repo.UpdateRecord(ctx, repository.UpdateRecordInput{
 		ID:             "20260305-ffffeeee",
 		Date:           "2026-03-05",
 		DayOrder:       "a",
@@ -275,16 +275,16 @@ func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
 		SourceDeviceID: "test-device",
 	})
 	if !errors.Is(err, repository.ErrNotFound) {
-		t.Fatalf("expected ErrNotFound for missing slide update, got %v", err)
+		t.Fatalf("expected ErrNotFound for missing record update, got %v", err)
 	}
 
-	if err := repo.SoftDeleteSlide(ctx, "20260305-ffffeeee"); !errors.Is(err, repository.ErrNotFound) {
+	if err := repo.SoftDeleteRecord(ctx, "20260305-ffffeeee"); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing soft delete, got %v", err)
 	}
-	if err := repo.RestoreSlide(ctx, "20260305-ffffeeee"); !errors.Is(err, repository.ErrNotFound) {
+	if err := repo.RestoreRecord(ctx, "20260305-ffffeeee"); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing restore, got %v", err)
 	}
-	if err := repo.DeleteSlide(ctx, "20260305-ffffeeee"); !errors.Is(err, repository.ErrNotFound) {
+	if err := repo.DeleteRecord(ctx, "20260305-ffffeeee"); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing delete, got %v", err)
 	}
 }
@@ -292,19 +292,19 @@ func TestSlideValidationConflictAndNotFoundBranches(t *testing.T) {
 func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 	repo, _ := newConcreteRepo(t)
 	ctx := context.Background()
-	slide := mustCreateSlide(t, repo, repository.CreateSlideInput{
+	record := mustCreateRecord(t, repo, repository.CreateRecordInput{
 		ID:          "20260305-11112222",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
 		HTMLContent: testHTML("<h1>assets</h1>"),
 	})
 
-	_, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{})
+	_, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{})
 	if !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument for invalid figure create, got %v", err)
 	}
-	_, err = repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-		SlideID:  "20260305-missing00",
+	_, err = repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+		RecordID:  "20260305-missing00",
 		Filename: "x.png",
 		S3Key:    "figures/20260305-missing00/x.png",
 	})
@@ -312,33 +312,33 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 		t.Fatalf("expected ErrForeignKeyViolation for orphan figure create, got %v", err)
 	}
 
-	figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-		SlideID:  slide.ID,
+	figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+		RecordID:  record.ID,
 		Filename: "x.png",
 		S3Key:    "figures/20260305-11112222/x.png",
 	})
 	if err != nil {
-		t.Fatalf("CreateSlideFigure() error = %v", err)
+		t.Fatalf("CreateRecordFigure() error = %v", err)
 	}
-	if _, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{ID: figure.ID}); err != nil {
-		t.Fatalf("UpdateSlideFigure() with minimal input should succeed, got %v", err)
+	if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{ID: figure.ID}); err != nil {
+		t.Fatalf("UpdateRecordFigure() with minimal input should succeed, got %v", err)
 	}
-	if _, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{ID: 999999, Filename: "new.png"}); !errors.Is(err, repository.ErrNotFound) {
+	if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{ID: 999999, Filename: "new.png"}); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing figure update, got %v", err)
 	}
-	if _, err := repo.ListSlideFiguresBySlideID(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
-		t.Fatalf("expected ErrInvalidArgument for empty slideID list figures, got %v", err)
+	if _, err := repo.ListRecordFiguresByRecordID(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for empty recordID list figures, got %v", err)
 	}
-	if err := repo.DeleteSlideFigure(ctx, 999999); !errors.Is(err, repository.ErrNotFound) {
+	if err := repo.DeleteRecordFigure(ctx, 999999); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing figure delete, got %v", err)
 	}
 
-	_, err = repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{})
+	_, err = repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{})
 	if !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument for invalid data file create, got %v", err)
 	}
-	_, err = repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-		SlideID:  "20260305-missing00",
+	_, err = repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+		RecordID:  "20260305-missing00",
 		Filename: "missing.csv",
 		S3Key:    "data/20260305-missing00/missing.csv",
 		Size:     1,
@@ -348,8 +348,8 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 		t.Fatalf("expected ErrForeignKeyViolation for orphan data-file create, got %v", err)
 	}
 
-	_, err = repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-		SlideID:  slide.ID,
+	_, err = repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+		RecordID:  record.ID,
 		Filename: "x.csv",
 		S3Key:    "data/20260305-11112222/x.csv",
 		Size:     -1,
@@ -358,33 +358,33 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 	if !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument for negative file size, got %v", err)
 	}
-	dataFile, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-		SlideID:  slide.ID,
+	dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+		RecordID:  record.ID,
 		Filename: "x.csv",
 		S3Key:    "data/20260305-11112222/x.csv",
 		Size:     1,
 		Hash:     strings.Repeat("a", 64),
 	})
 	if err != nil {
-		t.Fatalf("CreateSlideDataFile() error = %v", err)
+		t.Fatalf("CreateRecordDataFile() error = %v", err)
 	}
-	if _, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{ID: dataFile.ID}); err != nil {
-		t.Fatalf("UpdateSlideDataFile() with minimal input should succeed, got %v", err)
+	if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{ID: dataFile.ID}); err != nil {
+		t.Fatalf("UpdateRecordDataFile() with minimal input should succeed, got %v", err)
 	}
-	if _, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{ID: 999999, Filename: "new.csv"}); !errors.Is(err, repository.ErrNotFound) {
+	if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{ID: 999999, Filename: "new.csv"}); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing data-file update, got %v", err)
 	}
 	negativeSize := int64(-1)
-	if _, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+	if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{
 		ID:   dataFile.ID,
 		Size: &negativeSize,
 	}); !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument for negative data-file update size, got %v", err)
 	}
-	if _, err := repo.ListSlideDataFilesBySlideID(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
-		t.Fatalf("expected ErrInvalidArgument for empty slideID list data files, got %v", err)
+	if _, err := repo.ListRecordDataFilesByRecordID(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for empty recordID list data files, got %v", err)
 	}
-	if err := repo.DeleteSlideDataFile(ctx, 999999); !errors.Is(err, repository.ErrNotFound) {
+	if err := repo.DeleteRecordDataFile(ctx, 999999); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing data-file delete, got %v", err)
 	}
 }
@@ -400,73 +400,73 @@ func TestAssetQueriesAreUserScoped(t *testing.T) {
 		t.Fatalf("New() for secondary user error = %v", err)
 	}
 
-	slideA := mustCreateSlide(t, repoA, repository.CreateSlideInput{
+	recordA := mustCreateRecord(t, repoA, repository.CreateRecordInput{
 		ID:          "20260305-abcdd001",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
 		HTMLContent: testHTML("<h1>user-a</h1>"),
 	})
-	slideB := mustCreateSlide(t, repoB, repository.CreateSlideInput{
+	recordB := mustCreateRecord(t, repoB, repository.CreateRecordInput{
 		ID:          "20260305-abcdd002",
 		Date:        "2026-03-05",
 		DayOrder:    "b",
 		HTMLContent: testHTML("<h1>user-b</h1>"),
 	})
 
-	figureA, err := repoA.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-		SlideID:  slideA.ID,
+	figureA, err := repoA.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+		RecordID:  recordA.ID,
 		Filename: "a.png",
 		S3Key:    "figures/20260305-abcdd001/a.png",
 	})
 	if err != nil {
-		t.Fatalf("CreateSlideFigure() for user A error = %v", err)
+		t.Fatalf("CreateRecordFigure() for user A error = %v", err)
 	}
-	if _, err := repoB.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-		SlideID:  slideA.ID,
+	if _, err := repoB.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+		RecordID:  recordA.ID,
 		Filename: "cross.png",
 		S3Key:    "figures/20260305-abcdd001/cross.png",
 	}); !errors.Is(err, repository.ErrForeignKeyViolation) {
 		t.Fatalf("expected ErrForeignKeyViolation for cross-user figure create, got %v", err)
 	}
-	if _, err := repoB.GetSlideFigureByID(ctx, figureA.ID); !errors.Is(err, repository.ErrNotFound) {
+	if _, err := repoB.GetRecordFigureByID(ctx, figureA.ID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for cross-user figure get, got %v", err)
 	}
-	if _, err := repoB.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{
+	if _, err := repoB.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{
 		ID:       figureA.ID,
 		Filename: "steal.png",
 	}); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for cross-user figure update, got %v", err)
 	}
-	figuresForAFromB, err := repoB.ListSlideFiguresBySlideID(ctx, slideA.ID)
+	figuresForAFromB, err := repoB.ListRecordFiguresByRecordID(ctx, recordA.ID)
 	if err != nil {
-		t.Fatalf("ListSlideFiguresBySlideID() for cross-user slide error = %v", err)
+		t.Fatalf("ListRecordFiguresByRecordID() for cross-user record error = %v", err)
 	}
 	if len(figuresForAFromB) != 0 {
 		t.Fatalf("expected no cross-user figures, got %d", len(figuresForAFromB))
 	}
-	if err := repoB.DeleteSlideFigure(ctx, figureA.ID); !errors.Is(err, repository.ErrNotFound) {
+	if err := repoB.DeleteRecordFigure(ctx, figureA.ID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for cross-user figure delete, got %v", err)
 	}
-	if _, err := repoB.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-		SlideID:  slideB.ID,
+	if _, err := repoB.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+		RecordID:  recordB.ID,
 		Filename: "b.png",
 		S3Key:    "figures/20260305-abcdd002/b.png",
 	}); err != nil {
 		t.Fatalf("expected same-user figure create to succeed, got %v", err)
 	}
 
-	dataFileA, err := repoA.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-		SlideID:  slideA.ID,
+	dataFileA, err := repoA.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+		RecordID:  recordA.ID,
 		Filename: "a.csv",
 		S3Key:    "data/20260305-abcdd001/a.csv",
 		Size:     16,
 		Hash:     strings.Repeat("a", 64),
 	})
 	if err != nil {
-		t.Fatalf("CreateSlideDataFile() for user A error = %v", err)
+		t.Fatalf("CreateRecordDataFile() for user A error = %v", err)
 	}
-	if _, err := repoB.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-		SlideID:  slideA.ID,
+	if _, err := repoB.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+		RecordID:  recordA.ID,
 		Filename: "cross.csv",
 		S3Key:    "data/20260305-abcdd001/cross.csv",
 		Size:     1,
@@ -474,27 +474,27 @@ func TestAssetQueriesAreUserScoped(t *testing.T) {
 	}); !errors.Is(err, repository.ErrForeignKeyViolation) {
 		t.Fatalf("expected ErrForeignKeyViolation for cross-user data-file create, got %v", err)
 	}
-	if _, err := repoB.GetSlideDataFileByID(ctx, dataFileA.ID); !errors.Is(err, repository.ErrNotFound) {
+	if _, err := repoB.GetRecordDataFileByID(ctx, dataFileA.ID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for cross-user data-file get, got %v", err)
 	}
-	if _, err := repoB.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+	if _, err := repoB.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{
 		ID:       dataFileA.ID,
 		Filename: "steal.csv",
 	}); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for cross-user data-file update, got %v", err)
 	}
-	filesForAFromB, err := repoB.ListSlideDataFilesBySlideID(ctx, slideA.ID)
+	filesForAFromB, err := repoB.ListRecordDataFilesByRecordID(ctx, recordA.ID)
 	if err != nil {
-		t.Fatalf("ListSlideDataFilesBySlideID() for cross-user slide error = %v", err)
+		t.Fatalf("ListRecordDataFilesByRecordID() for cross-user record error = %v", err)
 	}
 	if len(filesForAFromB) != 0 {
 		t.Fatalf("expected no cross-user data files, got %d", len(filesForAFromB))
 	}
-	if err := repoB.DeleteSlideDataFile(ctx, dataFileA.ID); !errors.Is(err, repository.ErrNotFound) {
+	if err := repoB.DeleteRecordDataFile(ctx, dataFileA.ID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for cross-user data-file delete, got %v", err)
 	}
-	if _, err := repoB.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-		SlideID:  slideB.ID,
+	if _, err := repoB.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+		RecordID:  recordB.ID,
 		Filename: "b.csv",
 		S3Key:    "data/20260305-abcdd002/b.csv",
 		Size:     8,
@@ -527,7 +527,7 @@ func TestApplySchemaRejectsLegacyPreAuthCloudSchema(t *testing.T) {
 	defer pool.Close()
 
 	if _, err := pool.Exec(ctx, `
-		CREATE TABLE slides (
+		CREATE TABLE records (
 			id TEXT PRIMARY KEY,
 			date DATE NOT NULL,
 			day_order TEXT NOT NULL DEFAULT 'n',
@@ -588,11 +588,11 @@ func TestApplySchemaIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestSchemaRejectsNegativeSlideDataFileSize(t *testing.T) {
+func TestSchemaRejectsNegativeRecordDataFileSize(t *testing.T) {
 	repo, pool := newConcreteRepo(t)
 	ctx := context.Background()
 
-	slide := mustCreateSlide(t, repo, repository.CreateSlideInput{
+	record := mustCreateRecord(t, repo, repository.CreateRecordInput{
 		ID:          "20260305-dddd0001",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
@@ -601,8 +601,8 @@ func TestSchemaRejectsNegativeSlideDataFileSize(t *testing.T) {
 
 	_, err := pool.Exec(
 		ctx,
-		`INSERT INTO slide_data_files (slide_id, filename, s3_key, size, hash) VALUES ($1, $2, $3, $4, $5)`,
-		slide.ID,
+		`INSERT INTO record_data_files (record_id, filename, s3_key, size, hash) VALUES ($1, $2, $3, $4, $5)`,
+		record.ID,
 		"bad.csv",
 		"data/20260305-dddd0001/bad.csv",
 		-1,
@@ -620,31 +620,31 @@ func TestFigureAndDataFileNoOpUpdatesDoNotBumpSyncVersion(t *testing.T) {
 	repo, _ := newConcreteRepo(t)
 	ctx := context.Background()
 
-	slide := mustCreateSlide(t, repo, repository.CreateSlideInput{
+	record := mustCreateRecord(t, repo, repository.CreateRecordInput{
 		ID:          "20260305-dddd0002",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
 		HTMLContent: testHTML("<h1>sync</h1>"),
 	})
 
-	figure, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-		SlideID:  slide.ID,
+	figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+		RecordID:  record.ID,
 		Filename: "plot.png",
 		S3Key:    "figures/20260305-dddd0002/plot.png",
 	})
 	if err != nil {
-		t.Fatalf("CreateSlideFigure() error = %v", err)
+		t.Fatalf("CreateRecordFigure() error = %v", err)
 	}
 
-	dataFile, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-		SlideID:  slide.ID,
+	dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+		RecordID:  record.ID,
 		Filename: "data.csv",
 		S3Key:    "data/20260305-dddd0002/data.csv",
 		Size:     4,
 		Hash:     strings.Repeat("b", 64),
 	})
 	if err != nil {
-		t.Fatalf("CreateSlideDataFile() error = %v", err)
+		t.Fatalf("CreateRecordDataFile() error = %v", err)
 	}
 
 	beforeNoOp, err := repo.GetSyncVersion(ctx)
@@ -652,11 +652,11 @@ func TestFigureAndDataFileNoOpUpdatesDoNotBumpSyncVersion(t *testing.T) {
 		t.Fatalf("GetSyncVersion() before no-op updates error = %v", err)
 	}
 
-	if _, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{ID: figure.ID}); err != nil {
-		t.Fatalf("UpdateSlideFigure() no-op error = %v", err)
+	if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{ID: figure.ID}); err != nil {
+		t.Fatalf("UpdateRecordFigure() no-op error = %v", err)
 	}
-	if _, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{ID: dataFile.ID}); err != nil {
-		t.Fatalf("UpdateSlideDataFile() no-op error = %v", err)
+	if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{ID: dataFile.ID}); err != nil {
+		t.Fatalf("UpdateRecordDataFile() no-op error = %v", err)
 	}
 
 	afterNoOp, err := repo.GetSyncVersion(ctx)
@@ -667,19 +667,19 @@ func TestFigureAndDataFileNoOpUpdatesDoNotBumpSyncVersion(t *testing.T) {
 		t.Fatalf("expected no-op updates not to bump sync version, before=%d after=%d", beforeNoOp.Version, afterNoOp.Version)
 	}
 
-	if _, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{
+	if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{
 		ID:       figure.ID,
 		Filename: "plot-v2.png",
 	}); err != nil {
-		t.Fatalf("UpdateSlideFigure() meaningful update error = %v", err)
+		t.Fatalf("UpdateRecordFigure() meaningful update error = %v", err)
 	}
 
 	newSize := int64(5)
-	if _, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+	if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{
 		ID:   dataFile.ID,
 		Size: &newSize,
 	}); err != nil {
-		t.Fatalf("UpdateSlideDataFile() meaningful update error = %v", err)
+		t.Fatalf("UpdateRecordDataFile() meaningful update error = %v", err)
 	}
 
 	afterMeaningful, err := repo.GetSyncVersion(ctx)
@@ -787,8 +787,8 @@ func TestErrorPathsWithClosedPool(t *testing.T) {
 	repo, pool := newConcreteRepo(t)
 	ctx := context.Background()
 
-	// Create a slide so we have a valid ID for methods that need it.
-	slide := mustCreateSlide(t, repo, repository.CreateSlideInput{
+	// Create a record so we have a valid ID for methods that need it.
+	record := mustCreateRecord(t, repo, repository.CreateRecordInput{
 		ID:          "20260305-aaaa0001",
 		Date:        "2026-03-05",
 		DayOrder:    "a",
@@ -798,29 +798,29 @@ func TestErrorPathsWithClosedPool(t *testing.T) {
 	// Close the pool to force all subsequent operations to fail.
 	pool.Close()
 
-	if _, err := repo.ListSlides(ctx, repository.ListSlidesFilter{}); err == nil {
-		t.Fatal("expected error for ListSlides on closed pool")
+	if _, err := repo.ListRecords(ctx, repository.ListRecordsFilter{}); err == nil {
+		t.Fatal("expected error for ListRecords on closed pool")
 	}
-	if err := repo.SoftDeleteSlide(ctx, slide.ID); err == nil {
-		t.Fatal("expected error for SoftDeleteSlide on closed pool")
+	if err := repo.SoftDeleteRecord(ctx, record.ID); err == nil {
+		t.Fatal("expected error for SoftDeleteRecord on closed pool")
 	}
-	if err := repo.RestoreSlide(ctx, slide.ID); err == nil {
-		t.Fatal("expected error for RestoreSlide on closed pool")
+	if err := repo.RestoreRecord(ctx, record.ID); err == nil {
+		t.Fatal("expected error for RestoreRecord on closed pool")
 	}
-	if err := repo.DeleteSlide(ctx, slide.ID); err == nil {
-		t.Fatal("expected error for DeleteSlide on closed pool")
+	if err := repo.DeleteRecord(ctx, record.ID); err == nil {
+		t.Fatal("expected error for DeleteRecord on closed pool")
 	}
-	if _, err := repo.ListSlideFiguresBySlideID(ctx, slide.ID); err == nil {
-		t.Fatal("expected error for ListSlideFiguresBySlideID on closed pool")
+	if _, err := repo.ListRecordFiguresByRecordID(ctx, record.ID); err == nil {
+		t.Fatal("expected error for ListRecordFiguresByRecordID on closed pool")
 	}
-	if err := repo.DeleteSlideFigure(ctx, 1); err == nil {
-		t.Fatal("expected error for DeleteSlideFigure on closed pool")
+	if err := repo.DeleteRecordFigure(ctx, 1); err == nil {
+		t.Fatal("expected error for DeleteRecordFigure on closed pool")
 	}
-	if _, err := repo.ListSlideDataFilesBySlideID(ctx, slide.ID); err == nil {
-		t.Fatal("expected error for ListSlideDataFilesBySlideID on closed pool")
+	if _, err := repo.ListRecordDataFilesByRecordID(ctx, record.ID); err == nil {
+		t.Fatal("expected error for ListRecordDataFilesByRecordID on closed pool")
 	}
-	if err := repo.DeleteSlideDataFile(ctx, 1); err == nil {
-		t.Fatal("expected error for DeleteSlideDataFile on closed pool")
+	if err := repo.DeleteRecordDataFile(ctx, 1); err == nil {
+		t.Fatal("expected error for DeleteRecordDataFile on closed pool")
 	}
 	if _, err := repo.ListTemplates(ctx); err == nil {
 		t.Fatal("expected error for ListTemplates on closed pool")
@@ -837,44 +837,44 @@ func TestErrorPathsWithClosedPool(t *testing.T) {
 	if _, err := repo.ListDevices(ctx, true); err == nil {
 		t.Fatal("expected error for ListDevices on closed pool")
 	}
-	if _, err := repo.GetSlideByID(ctx, slide.ID); err == nil {
-		t.Fatal("expected error for GetSlideByID on closed pool")
+	if _, err := repo.GetRecordByID(ctx, record.ID); err == nil {
+		t.Fatal("expected error for GetRecordByID on closed pool")
 	}
-	if _, err := repo.CreateSlide(ctx, repository.CreateSlideInput{
+	if _, err := repo.CreateRecord(ctx, repository.CreateRecordInput{
 		ID: "20260305-aaaa0002", Date: "2026-03-05", HTMLContent: testHTML("<h1>x</h1>"), ProjectID: "test/project", SourceDeviceID: "test-device",
 	}); err == nil {
-		t.Fatal("expected error for CreateSlide on closed pool")
+		t.Fatal("expected error for CreateRecord on closed pool")
 	}
-	if _, err := repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-		ID: slide.ID, Date: "2026-03-05", DayOrder: "a", HTMLContent: testHTML("<h1>x</h1>"), ProjectID: "test/project", SourceDeviceID: "test-device",
+	if _, err := repo.UpdateRecord(ctx, repository.UpdateRecordInput{
+		ID: record.ID, Date: "2026-03-05", DayOrder: "a", HTMLContent: testHTML("<h1>x</h1>"), ProjectID: "test/project", SourceDeviceID: "test-device",
 	}); err == nil {
-		t.Fatal("expected error for UpdateSlide on closed pool")
+		t.Fatal("expected error for UpdateRecord on closed pool")
 	}
-	if _, err := repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-		SlideID: slide.ID, Filename: "x.png", S3Key: "figures/x.png",
+	if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+		RecordID: record.ID, Filename: "x.png", S3Key: "figures/x.png",
 	}); err == nil {
-		t.Fatal("expected error for CreateSlideFigure on closed pool")
+		t.Fatal("expected error for CreateRecordFigure on closed pool")
 	}
-	if _, err := repo.GetSlideFigureByID(ctx, 1); err == nil {
-		t.Fatal("expected error for GetSlideFigureByID on closed pool")
+	if _, err := repo.GetRecordFigureByID(ctx, 1); err == nil {
+		t.Fatal("expected error for GetRecordFigureByID on closed pool")
 	}
-	if _, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{
+	if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{
 		ID: 1, Filename: "y.png",
 	}); err == nil {
-		t.Fatal("expected error for UpdateSlideFigure on closed pool")
+		t.Fatal("expected error for UpdateRecordFigure on closed pool")
 	}
-	if _, err := repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-		SlideID: slide.ID, Filename: "x.csv", S3Key: "data/x.csv", Size: 1, Hash: strings.Repeat("a", 64),
+	if _, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+		RecordID: record.ID, Filename: "x.csv", S3Key: "data/x.csv", Size: 1, Hash: strings.Repeat("a", 64),
 	}); err == nil {
-		t.Fatal("expected error for CreateSlideDataFile on closed pool")
+		t.Fatal("expected error for CreateRecordDataFile on closed pool")
 	}
-	if _, err := repo.GetSlideDataFileByID(ctx, 1); err == nil {
-		t.Fatal("expected error for GetSlideDataFileByID on closed pool")
+	if _, err := repo.GetRecordDataFileByID(ctx, 1); err == nil {
+		t.Fatal("expected error for GetRecordDataFileByID on closed pool")
 	}
-	if _, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+	if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{
 		ID: 1, Filename: "y.csv",
 	}); err == nil {
-		t.Fatal("expected error for UpdateSlideDataFile on closed pool")
+		t.Fatal("expected error for UpdateRecordDataFile on closed pool")
 	}
 	if _, err := repo.CreateTemplate(ctx, repository.CreateTemplateInput{
 		Name: "t", HTMLContent: "<main>x</main>",

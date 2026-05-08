@@ -5,10 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SpreadsheetViewer } from "@/components/spreadsheet-viewer";
 
-const selectSlideMock = vi.fn();
-const fetchSlidesMock = vi.fn();
+const selectRecordMock = vi.fn();
+const fetchRecordsMock = vi.fn();
 const fetchProjectsMock = vi.fn();
-const refreshSlidesMock = vi.fn();
+const refreshRecordsMock = vi.fn();
 
 function createStorageMock(): Storage {
   const store = new Map<string, string>();
@@ -35,14 +35,14 @@ function createStorageMock(): Storage {
   };
 }
 
-vi.mock("@/hooks/use-slides", () => ({
-  useSlides: () => ({
-    slides: [
+vi.mock("@/hooks/use-records", () => ({
+  useRecords: () => ({
+    records: [
       {
-        id: "20260311-slide-1",
+        id: "20260311-record-1",
         date: "2026-03-11",
         day_order: "a0",
-        html_content: "<p>Slide 1</p>",
+        html_content: "<p>Record 1</p>",
         project_id: "alpha",
         source_device_id: "device-a",
         source_ref: null,
@@ -52,10 +52,10 @@ vi.mock("@/hooks/use-slides", () => ({
         data_file_count: 0,
       },
       {
-        id: "20260311-slide-2",
+        id: "20260311-record-2",
         date: "2026-03-11",
         day_order: "a1",
-        html_content: "<p>Slide 2</p>",
+        html_content: "<p>Record 2</p>",
         project_id: "alpha",
         source_device_id: "device-a",
         source_ref: null,
@@ -65,11 +65,11 @@ vi.mock("@/hooks/use-slides", () => ({
         data_file_count: 0,
       },
     ],
-    selectedSlide: {
-      id: "20260311-slide-1",
+    selectedRecord: {
+      id: "20260311-record-1",
       date: "2026-03-11",
       day_order: "a0",
-      html_content: "<p>Slide 1</p>",
+      html_content: "<p>Record 1</p>",
       notes: "",
       figures: [],
       data_files: [],
@@ -85,17 +85,17 @@ vi.mock("@/hooks/use-slides", () => ({
     projects: [],
     error: null,
     hasMore: false,
-    fetchSlides: fetchSlidesMock,
+    fetchRecords: fetchRecordsMock,
     fetchMore: vi.fn(),
-    selectSlide: selectSlideMock,
-    updateSlide: vi.fn(),
-    deleteSlide: vi.fn(),
-    restoreSlide: vi.fn(),
+    selectRecord: selectRecordMock,
+    updateRecord: vi.fn(),
+    deleteRecord: vi.fn(),
+    restoreRecord: vi.fn(),
     fetchProjects: fetchProjectsMock,
-    refreshSlides: refreshSlidesMock,
+    refreshRecords: refreshRecordsMock,
     isLoading: false,
     isFetchingMore: false,
-    reorderSlide: vi.fn(),
+    reorderRecord: vi.fn(),
   }),
 }));
 
@@ -120,32 +120,32 @@ vi.mock("@/components/settings-overlay", () => ({
   SettingsOverlay: () => null,
 }));
 
-vi.mock("@/components/slide-navigation", () => ({
-  SlideNavigation: () => <div>navigation</div>,
+vi.mock("@/components/record-navigation", () => ({
+  RecordNavigation: () => <div>navigation</div>,
 }));
 
-vi.mock("@/components/slide-viewer", () => ({
-  SlideViewer: () => <div>viewer</div>,
+vi.mock("@/components/record-viewer", () => ({
+  RecordViewer: () => <div>viewer</div>,
 }));
 
-vi.mock("@/components/slide-details", () => ({
-  SlideDetails: () => <div>details</div>,
+vi.mock("@/components/record-details", () => ({
+  RecordDetails: () => <div>details</div>,
 }));
 
 vi.mock("@/components/collapsed-details-strip", () => ({
   CollapsedDetailsStrip: () => <div>collapsed-details</div>,
 }));
 
-vi.mock("@/components/slide-metadata-bar", () => ({
-  SlideMetadataBar: () => <div>metadata</div>,
+vi.mock("@/components/record-metadata-bar", () => ({
+  RecordMetadataBar: () => <div>metadata</div>,
 }));
 
 vi.mock("@/components/project-picker", () => ({
   ProjectPicker: () => <div>project-picker</div>,
 }));
 
-vi.mock("@/components/slide-date-picker", () => ({
-  SlideDatePicker: () => <div>date-picker</div>,
+vi.mock("@/components/record-date-picker", () => ({
+  RecordDatePicker: () => <div>date-picker</div>,
 }));
 
 vi.mock("@/components/ui/resizable", () => ({
@@ -175,20 +175,20 @@ describe("SpreadsheetViewer", () => {
       value: storage,
       configurable: true,
     });
-    selectSlideMock.mockReset();
-    fetchSlidesMock.mockReset();
+    selectRecordMock.mockReset();
+    fetchRecordsMock.mockReset();
     fetchProjectsMock.mockReset();
-    refreshSlidesMock.mockReset();
+    refreshRecordsMock.mockReset();
   });
 
-  it("persists the newly selected slide when navigating with the keyboard", () => {
+  it("persists the newly selected record when navigating with the keyboard", () => {
     render(<SpreadsheetViewer />);
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
 
-    expect(selectSlideMock).toHaveBeenCalledWith("20260311-slide-2");
-    expect(window.localStorage.getItem("pc:lastSelectedSlideId")).toBe(
-      JSON.stringify("20260311-slide-2")
+    expect(selectRecordMock).toHaveBeenCalledWith("20260311-record-2");
+    expect(window.localStorage.getItem("pc:lastSelectedRecordId")).toBe(
+      JSON.stringify("20260311-record-2")
     );
   });
 });

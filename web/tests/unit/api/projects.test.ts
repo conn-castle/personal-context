@@ -77,7 +77,7 @@ describe("GET /api/projects", () => {
     expect(body.projects).toEqual(["org/alpha", "org/beta"]);
   });
 
-  it("lists projects from the registry instead of slide rows", async () => {
+  it("lists projects from the registry instead of record rows", async () => {
     mockSql.mockResolvedValue([{ id: "org/active" }]);
 
     const req = new NextRequest("http://localhost/api/projects");
@@ -92,7 +92,7 @@ describe("GET /api/projects", () => {
     const fullQuery = queryParts.join("");
     expect(fullQuery).toContain("FROM projects");
     expect(fullQuery).toContain("archived_at IS NULL");
-    expect(fullQuery).not.toContain("FROM slides");
+    expect(fullQuery).not.toContain("FROM records");
   });
 
   it("returns empty array when no projects exist", async () => {

@@ -108,7 +108,7 @@ run_go_tool_tests_updateformula() {
       valid_formula="$tmp_dir/valid-formula.rb"
       cat > "$valid_formula" << 'EOF'
 class PersonalContext < Formula
-  desc "Personal structured vault for searchable knowledge, data, files, and slides"
+  desc "Personal structured vault for searchable knowledge, data, files, and records"
   homepage "https://github.com/conn-castle/personal-context"
   url "https://example.com/old-url.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"

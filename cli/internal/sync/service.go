@@ -21,8 +21,8 @@ var osFileChmod = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode
 
 // LocalFiles resolves canonical local figure/data paths for sync operations.
 type LocalFiles interface {
-	ResolveFigurePath(slideID string, filename string) (string, error)
-	ResolveDataFilePath(slideID string, filename string) (string, error)
+	ResolveFigurePath(recordID string, filename string) (string, error)
+	ResolveDataFilePath(recordID string, filename string) (string, error)
 }
 
 // ObjectStore provides the cloud object operations required by sync.
@@ -56,7 +56,7 @@ type syncDirection struct {
 	sourceRepo  repository.Repository
 	targetRepo  repository.Repository
 	winningSide Winner
-	apply       func(context.Context, SlideBundle, *SlideBundle) error
+	apply       func(context.Context, RecordBundle, *RecordBundle) error
 }
 
 // NewService validates and constructs a sync service.
@@ -106,10 +106,10 @@ func (s *Service) Sync(ctx context.Context) (err error) {
 		}
 	}()
 
-	if err := s.pushChangedSlides(ctx, window.LastSync); err != nil {
+	if err := s.pushChangedRecords(ctx, window.LastSync); err != nil {
 		return err
 	}
-	if err := s.pullChangedSlides(ctx, window.LastSync); err != nil {
+	if err := s.pullChangedRecords(ctx, window.LastSync); err != nil {
 		return err
 	}
 	if err := s.updateCloudVersion(ctx); err != nil {
@@ -121,8 +121,8 @@ func (s *Service) Sync(ctx context.Context) (err error) {
 	return nil
 }
 
-func (s *Service) pushChangedSlides(ctx context.Context, since time.Time) error {
-	return s.syncChangedSlides(ctx, since, syncDirection{
+func (s *Service) pushChangedRecords(ctx context.Context, since time.Time) error {
+	return s.syncChangedRecords(ctx, since, syncDirection{
 		name:        "push",
 		sourceLabel: "local",
 		targetLabel: "cloud",
@@ -133,8 +133,8 @@ func (s *Service) pushChangedSlides(ctx context.Context, since time.Time) error 
 	})
 }
 
-func (s *Service) pullChangedSlides(ctx context.Context, since time.Time) error {
-	return s.syncChangedSlides(ctx, since, syncDirection{
+func (s *Service) pullChangedRecords(ctx context.Context, since time.Time) error {
+	return s.syncChangedRecords(ctx, since, syncDirection{
 		name:        "pull",
 		sourceLabel: "cloud",
 		targetLabel: "local",
@@ -145,8 +145,8 @@ func (s *Service) pullChangedSlides(ctx context.Context, since time.Time) error 
 	})
 }
 
-// syncChangedSlides runs one mirrored push/pull pass with consistent error labels.
-func (s *Service) syncChangedSlides(
+// syncChangedRecords runs one mirrored push/pull pass with consistent error labels.
+func (s *Service) syncChangedRecords(
 	ctx context.Context,
 	since time.Time,
 	direction syncDirection,
@@ -155,24 +155,24 @@ func (s *Service) syncChangedSlides(
 		return fmt.Errorf("sync %s registries: %w", direction.name, err)
 	}
 
-	slides, err := s.listChangedSlides(ctx, direction.sourceRepo, since)
+	records, err := s.listChangedRecords(ctx, direction.sourceRepo, since)
 	if err != nil {
 		return fmt.Errorf("list %s changes: %w", direction.sourceLabel, err)
 	}
 
-	for _, slide := range slides {
-		sourceBundle, err := s.bundleForSlide(ctx, direction.sourceRepo, slide)
+	for _, record := range records {
+		sourceBundle, err := s.bundleForRecord(ctx, direction.sourceRepo, record)
 		if err != nil {
-			return fmt.Errorf("load %s bundle %s: %w", direction.sourceLabel, slide.ID, err)
+			return fmt.Errorf("load %s bundle %s: %w", direction.sourceLabel, record.ID, err)
 		}
 
-		targetBundle, exists, err := s.loadBundle(ctx, direction.targetRepo, slide.ID)
+		targetBundle, exists, err := s.loadBundle(ctx, direction.targetRepo, record.ID)
 		if err != nil {
-			return fmt.Errorf("load %s bundle %s: %w", direction.targetLabel, slide.ID, err)
+			return fmt.Errorf("load %s bundle %s: %w", direction.targetLabel, record.ID, err)
 		}
 		if !exists {
 			if err := direction.apply(ctx, sourceBundle, nil); err != nil {
-				return fmt.Errorf("%s new %s slide %s: %w", direction.name, direction.sourceLabel, slide.ID, err)
+				return fmt.Errorf("%s new %s record %s: %w", direction.name, direction.sourceLabel, record.ID, err)
 			}
 			continue
 		}
@@ -186,13 +186,13 @@ func (s *Service) syncChangedSlides(
 
 		_, winner, err := ResolveBundle(localBundle, cloudBundle)
 		if err != nil {
-			return fmt.Errorf("resolve %s bundle %s: %w", direction.name, slide.ID, err)
+			return fmt.Errorf("resolve %s bundle %s: %w", direction.name, record.ID, err)
 		}
 		if winner != direction.winningSide {
 			continue
 		}
 		if err := direction.apply(ctx, sourceBundle, &targetBundle); err != nil {
-			return fmt.Errorf("%s %s slide %s: %w", direction.name, direction.sourceLabel, slide.ID, err)
+			return fmt.Errorf("%s %s record %s: %w", direction.name, direction.sourceLabel, record.ID, err)
 		}
 	}
 
@@ -233,52 +233,52 @@ func (s *Service) updateCloudVersion(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) listChangedSlides(
+func (s *Service) listChangedRecords(
 	ctx context.Context,
 	repo repository.Repository,
 	since time.Time,
-) ([]repository.Slide, error) {
-	slides, err := repo.ListSlides(ctx, repository.ListSlidesFilter{IncludeDeleted: true})
+) ([]repository.Record, error) {
+	records, err := repo.ListRecords(ctx, repository.ListRecordsFilter{IncludeDeleted: true})
 	if err != nil {
 		return nil, err
 	}
-	return syncengine.FilterSlidesUpdatedSince(slides, since), nil
+	return syncengine.FilterRecordsUpdatedSince(records, since), nil
 }
 
 func (s *Service) loadBundle(
 	ctx context.Context,
 	repo repository.Repository,
-	slideID string,
-) (SlideBundle, bool, error) {
-	slide, err := repo.GetSlideByID(ctx, slideID)
+	recordID string,
+) (RecordBundle, bool, error) {
+	record, err := repo.GetRecordByID(ctx, recordID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return SlideBundle{}, false, nil
+			return RecordBundle{}, false, nil
 		}
-		return SlideBundle{}, false, err
+		return RecordBundle{}, false, err
 	}
-	bundle, err := s.bundleForSlide(ctx, repo, slide)
+	bundle, err := s.bundleForRecord(ctx, repo, record)
 	if err != nil {
-		return SlideBundle{}, false, err
+		return RecordBundle{}, false, err
 	}
 	return bundle, true, nil
 }
 
-func (s *Service) bundleForSlide(
+func (s *Service) bundleForRecord(
 	ctx context.Context,
 	repo repository.Repository,
-	slide repository.Slide,
-) (SlideBundle, error) {
-	figures, err := repo.ListSlideFiguresBySlideID(ctx, slide.ID)
+	record repository.Record,
+) (RecordBundle, error) {
+	figures, err := repo.ListRecordFiguresByRecordID(ctx, record.ID)
 	if err != nil {
-		return SlideBundle{}, fmt.Errorf("list figures: %w", err)
+		return RecordBundle{}, fmt.Errorf("list figures: %w", err)
 	}
-	dataFiles, err := repo.ListSlideDataFilesBySlideID(ctx, slide.ID)
+	dataFiles, err := repo.ListRecordDataFilesByRecordID(ctx, record.ID)
 	if err != nil {
-		return SlideBundle{}, fmt.Errorf("list data files: %w", err)
+		return RecordBundle{}, fmt.Errorf("list data files: %w", err)
 	}
-	return SlideBundle{
-		Slide:     slide,
+	return RecordBundle{
+		Record:     record,
 		Figures:   figures,
 		DataFiles: dataFiles,
 	}, nil
@@ -286,16 +286,16 @@ func (s *Service) bundleForSlide(
 
 func (s *Service) applyBundleToCloud(
 	ctx context.Context,
-	desired SlideBundle,
-	existing *SlideBundle,
+	desired RecordBundle,
+	existing *RecordBundle,
 ) error {
-	if err := applySlide(ctx, s.cloudRepo, desired.Slide, existing != nil); err != nil {
-		return fmt.Errorf("apply slide to cloud: %w", err)
+	if err := applyRecord(ctx, s.cloudRepo, desired.Record, existing != nil); err != nil {
+		return fmt.Errorf("apply record to cloud: %w", err)
 	}
-	if err := s.applyFiguresToCloud(ctx, desired.Slide.ID, desired.Figures, figuresOf(existing)); err != nil {
+	if err := s.applyFiguresToCloud(ctx, desired.Record.ID, desired.Figures, figuresOf(existing)); err != nil {
 		return fmt.Errorf("apply figures to cloud: %w", err)
 	}
-	if err := s.applyDataFilesToCloud(ctx, desired.Slide.ID, desired.DataFiles, dataFilesOf(existing)); err != nil {
+	if err := s.applyDataFilesToCloud(ctx, desired.Record.ID, desired.DataFiles, dataFilesOf(existing)); err != nil {
 		return fmt.Errorf("apply data files to cloud: %w", err)
 	}
 	return nil
@@ -303,74 +303,74 @@ func (s *Service) applyBundleToCloud(
 
 func (s *Service) applyBundleToLocal(
 	ctx context.Context,
-	desired SlideBundle,
-	existing *SlideBundle,
+	desired RecordBundle,
+	existing *RecordBundle,
 ) error {
-	if err := applySlide(ctx, s.localRepo, desired.Slide, existing != nil); err != nil {
-		return fmt.Errorf("apply slide to local: %w", err)
+	if err := applyRecord(ctx, s.localRepo, desired.Record, existing != nil); err != nil {
+		return fmt.Errorf("apply record to local: %w", err)
 	}
-	if err := s.applyFiguresToLocal(ctx, desired.Slide.ID, desired.Figures, figuresOf(existing)); err != nil {
+	if err := s.applyFiguresToLocal(ctx, desired.Record.ID, desired.Figures, figuresOf(existing)); err != nil {
 		return fmt.Errorf("apply figures to local: %w", err)
 	}
-	if err := s.applyDataFilesToLocal(ctx, desired.Slide.ID, desired.DataFiles, dataFilesOf(existing)); err != nil {
+	if err := s.applyDataFilesToLocal(ctx, desired.Record.ID, desired.DataFiles, dataFilesOf(existing)); err != nil {
 		return fmt.Errorf("apply data files to local: %w", err)
 	}
 	return nil
 }
 
-func applySlide(
+func applyRecord(
 	ctx context.Context,
 	repo repository.Repository,
-	slide repository.Slide,
+	record repository.Record,
 	exists bool,
 ) error {
 	if exists {
-		_, err := repo.UpdateSlide(ctx, repository.UpdateSlideInput{
-			ID:             slide.ID,
-			Date:           slide.Date,
-			DayOrder:       slide.DayOrder,
-			HTMLContent:    slide.HTMLContent,
-			Notes:          slide.Notes,
-			ProjectID:      slide.ProjectID,
-			SourceDeviceID: slide.SourceDeviceID,
-			SourceRef:      slide.SourceRef,
-			GitRemoteURL:   slide.GitRemoteURL,
-			GitHash:        slide.GitHash,
-			UpdatedAt:      &slide.UpdatedAt,
-			DeletedAt:      slide.DeletedAt,
+		_, err := repo.UpdateRecord(ctx, repository.UpdateRecordInput{
+			ID:             record.ID,
+			Date:           record.Date,
+			DayOrder:       record.DayOrder,
+			HTMLContent:    record.HTMLContent,
+			Notes:          record.Notes,
+			ProjectID:      record.ProjectID,
+			SourceDeviceID: record.SourceDeviceID,
+			SourceRef:      record.SourceRef,
+			GitRemoteURL:   record.GitRemoteURL,
+			GitHash:        record.GitHash,
+			UpdatedAt:      &record.UpdatedAt,
+			DeletedAt:      record.DeletedAt,
 		})
 		return err
 	}
 
-	_, err := repo.CreateSlide(ctx, repository.CreateSlideInput{
-		ID:             slide.ID,
-		Date:           slide.Date,
-		DayOrder:       slide.DayOrder,
-		HTMLContent:    slide.HTMLContent,
-		Notes:          slide.Notes,
-		ProjectID:      slide.ProjectID,
-		SourceDeviceID: slide.SourceDeviceID,
-		SourceRef:      slide.SourceRef,
-		GitRemoteURL:   slide.GitRemoteURL,
-		GitHash:        slide.GitHash,
-		CreatedAt:      &slide.CreatedAt,
-		UpdatedAt:      &slide.UpdatedAt,
-		DeletedAt:      slide.DeletedAt,
+	_, err := repo.CreateRecord(ctx, repository.CreateRecordInput{
+		ID:             record.ID,
+		Date:           record.Date,
+		DayOrder:       record.DayOrder,
+		HTMLContent:    record.HTMLContent,
+		Notes:          record.Notes,
+		ProjectID:      record.ProjectID,
+		SourceDeviceID: record.SourceDeviceID,
+		SourceRef:      record.SourceRef,
+		GitRemoteURL:   record.GitRemoteURL,
+		GitHash:        record.GitHash,
+		CreatedAt:      &record.CreatedAt,
+		UpdatedAt:      &record.UpdatedAt,
+		DeletedAt:      record.DeletedAt,
 	})
 	return err
 }
 
 func (s *Service) applyFiguresToCloud(
 	ctx context.Context,
-	slideID string,
-	desired []repository.SlideFigure,
-	existing []repository.SlideFigure,
+	recordID string,
+	desired []repository.RecordFigure,
+	existing []repository.RecordFigure,
 ) error {
-	if err := s.uploadDesiredFigureFiles(ctx, slideID, desired); err != nil {
+	if err := s.uploadDesiredFigureFiles(ctx, recordID, desired); err != nil {
 		return err
 	}
 
-	plan, err := PlanFigureReconciliation(slideID, existing, desired)
+	plan, err := PlanFigureReconciliation(recordID, existing, desired)
 	if err != nil {
 		return err
 	}
@@ -378,14 +378,14 @@ func (s *Service) applyFiguresToCloud(
 	existingByID := indexFiguresByID(existing)
 
 	for _, create := range plan.Creates {
-		if _, err := s.cloudRepo.CreateSlideFigure(ctx, create); err != nil {
+		if _, err := s.cloudRepo.CreateRecordFigure(ctx, create); err != nil {
 			return err
 		}
 	}
 
 	for _, update := range plan.Updates {
 		old := existingByID[update.ID]
-		if _, err := s.cloudRepo.UpdateSlideFigure(ctx, update); err != nil {
+		if _, err := s.cloudRepo.UpdateRecordFigure(ctx, update); err != nil {
 			return err
 		}
 		if old.S3Key != update.S3Key {
@@ -397,7 +397,7 @@ func (s *Service) applyFiguresToCloud(
 
 	for _, deleteID := range plan.DeleteIDs {
 		old := existingByID[deleteID]
-		if err := s.cloudRepo.DeleteSlideFigure(ctx, deleteID); err != nil {
+		if err := s.cloudRepo.DeleteRecordFigure(ctx, deleteID); err != nil {
 			return err
 		}
 		if err := s.cloudObjects.Delete(ctx, old.S3Key); err != nil {
@@ -410,11 +410,11 @@ func (s *Service) applyFiguresToCloud(
 
 func (s *Service) applyDataFilesToCloud(
 	ctx context.Context,
-	slideID string,
-	desired []repository.SlideDataFile,
-	existing []repository.SlideDataFile,
+	recordID string,
+	desired []repository.RecordDataFile,
+	existing []repository.RecordDataFile,
 ) error {
-	plan, err := PlanDataFileReconciliation(slideID, existing, desired)
+	plan, err := PlanDataFileReconciliation(recordID, existing, desired)
 	if err != nil {
 		return err
 	}
@@ -422,20 +422,20 @@ func (s *Service) applyDataFilesToCloud(
 	existingByID := indexDataFilesByID(existing)
 
 	for _, create := range plan.Creates {
-		path, err := s.localFS.ResolveDataFilePath(slideID, create.Filename)
+		path, err := s.localFS.ResolveDataFilePath(recordID, create.Filename)
 		if err != nil {
 			return err
 		}
 		if _, err := s.uploadDataFileIfPresent(ctx, create.S3Key, path); err != nil {
 			return err
 		}
-		if _, err := s.cloudRepo.CreateSlideDataFile(ctx, create); err != nil {
+		if _, err := s.cloudRepo.CreateRecordDataFile(ctx, create); err != nil {
 			return err
 		}
 	}
 
 	for _, update := range plan.Updates {
-		path, err := s.localFS.ResolveDataFilePath(slideID, update.Filename)
+		path, err := s.localFS.ResolveDataFilePath(recordID, update.Filename)
 		if err != nil {
 			return err
 		}
@@ -452,7 +452,7 @@ func (s *Service) applyDataFilesToCloud(
 				update.S3Key,
 			)
 		}
-		if _, err := s.cloudRepo.UpdateSlideDataFile(ctx, update); err != nil {
+		if _, err := s.cloudRepo.UpdateRecordDataFile(ctx, update); err != nil {
 			return err
 		}
 		if uploaded && old.S3Key != update.S3Key {
@@ -464,7 +464,7 @@ func (s *Service) applyDataFilesToCloud(
 
 	for _, deleteID := range plan.DeleteIDs {
 		old := existingByID[deleteID]
-		if err := s.cloudRepo.DeleteSlideDataFile(ctx, deleteID); err != nil {
+		if err := s.cloudRepo.DeleteRecordDataFile(ctx, deleteID); err != nil {
 			return err
 		}
 		if err := s.cloudObjects.Delete(ctx, old.S3Key); err != nil {
@@ -477,15 +477,15 @@ func (s *Service) applyDataFilesToCloud(
 
 func (s *Service) applyFiguresToLocal(
 	ctx context.Context,
-	slideID string,
-	desired []repository.SlideFigure,
-	existing []repository.SlideFigure,
+	recordID string,
+	desired []repository.RecordFigure,
+	existing []repository.RecordFigure,
 ) error {
-	if err := s.downloadDesiredFigureFiles(ctx, slideID, desired); err != nil {
+	if err := s.downloadDesiredFigureFiles(ctx, recordID, desired); err != nil {
 		return err
 	}
 
-	plan, err := PlanFigureReconciliation(slideID, existing, desired)
+	plan, err := PlanFigureReconciliation(recordID, existing, desired)
 	if err != nil {
 		return err
 	}
@@ -493,23 +493,23 @@ func (s *Service) applyFiguresToLocal(
 	existingByID := indexFiguresByID(existing)
 
 	for _, create := range plan.Creates {
-		if _, err := s.localRepo.CreateSlideFigure(ctx, create); err != nil {
+		if _, err := s.localRepo.CreateRecordFigure(ctx, create); err != nil {
 			return err
 		}
 	}
 
 	for _, update := range plan.Updates {
-		if _, err := s.localRepo.UpdateSlideFigure(ctx, update); err != nil {
+		if _, err := s.localRepo.UpdateRecordFigure(ctx, update); err != nil {
 			return err
 		}
 	}
 
 	for _, deleteID := range plan.DeleteIDs {
 		old := existingByID[deleteID]
-		if err := s.localRepo.DeleteSlideFigure(ctx, deleteID); err != nil {
+		if err := s.localRepo.DeleteRecordFigure(ctx, deleteID); err != nil {
 			return err
 		}
-		if err := s.removeLocalFigureFileIfPresent(slideID, old.Filename); err != nil {
+		if err := s.removeLocalFigureFileIfPresent(recordID, old.Filename); err != nil {
 			return err
 		}
 	}
@@ -520,13 +520,13 @@ func (s *Service) applyFiguresToLocal(
 // uploadDesiredFigureFiles refreshes cloud figure binaries before metadata reconciliation.
 func (s *Service) uploadDesiredFigureFiles(
 	ctx context.Context,
-	slideID string,
-	desired []repository.SlideFigure,
+	recordID string,
+	desired []repository.RecordFigure,
 ) error {
 	// File content may change without metadata changes, so metadata reconciliation
 	// alone is not enough to keep S3 current.
 	for _, figure := range desired {
-		path, err := s.localFS.ResolveFigurePath(slideID, figure.Filename)
+		path, err := s.localFS.ResolveFigurePath(recordID, figure.Filename)
 		if err != nil {
 			return err
 		}
@@ -540,12 +540,12 @@ func (s *Service) uploadDesiredFigureFiles(
 // downloadDesiredFigureFiles refreshes local figure binaries before metadata reconciliation.
 func (s *Service) downloadDesiredFigureFiles(
 	ctx context.Context,
-	slideID string,
-	desired []repository.SlideFigure,
+	recordID string,
+	desired []repository.RecordFigure,
 ) error {
 	// Even if metadata is unchanged, the local binary may be stale when cloud wins.
 	for _, figure := range desired {
-		path, err := s.localFS.ResolveFigurePath(slideID, figure.Filename)
+		path, err := s.localFS.ResolveFigurePath(recordID, figure.Filename)
 		if err != nil {
 			return err
 		}
@@ -558,11 +558,11 @@ func (s *Service) downloadDesiredFigureFiles(
 
 func (s *Service) applyDataFilesToLocal(
 	ctx context.Context,
-	slideID string,
-	desired []repository.SlideDataFile,
-	existing []repository.SlideDataFile,
+	recordID string,
+	desired []repository.RecordDataFile,
+	existing []repository.RecordDataFile,
 ) error {
-	plan, err := PlanDataFileReconciliation(slideID, existing, desired)
+	plan, err := PlanDataFileReconciliation(recordID, existing, desired)
 	if err != nil {
 		return err
 	}
@@ -570,29 +570,29 @@ func (s *Service) applyDataFilesToLocal(
 	existingByID := indexDataFilesByID(existing)
 
 	for _, create := range plan.Creates {
-		if _, err := s.localRepo.CreateSlideDataFile(ctx, create); err != nil {
+		if _, err := s.localRepo.CreateRecordDataFile(ctx, create); err != nil {
 			return err
 		}
-		if err := s.removeLocalDataFileIfPresent(slideID, create.Filename); err != nil {
+		if err := s.removeLocalDataFileIfPresent(recordID, create.Filename); err != nil {
 			return err
 		}
 	}
 
 	for _, update := range plan.Updates {
-		if _, err := s.localRepo.UpdateSlideDataFile(ctx, update); err != nil {
+		if _, err := s.localRepo.UpdateRecordDataFile(ctx, update); err != nil {
 			return err
 		}
-		if err := s.removeLocalDataFileIfPresent(slideID, update.Filename); err != nil {
+		if err := s.removeLocalDataFileIfPresent(recordID, update.Filename); err != nil {
 			return err
 		}
 	}
 
 	for _, deleteID := range plan.DeleteIDs {
 		old := existingByID[deleteID]
-		if err := s.localRepo.DeleteSlideDataFile(ctx, deleteID); err != nil {
+		if err := s.localRepo.DeleteRecordDataFile(ctx, deleteID); err != nil {
 			return err
 		}
-		if err := s.removeLocalDataFileIfPresent(slideID, old.Filename); err != nil {
+		if err := s.removeLocalDataFileIfPresent(recordID, old.Filename); err != nil {
 			return err
 		}
 	}
@@ -686,46 +686,46 @@ func removeFileIfPresent(path string) error {
 	return nil
 }
 
-func indexFiguresByID(figures []repository.SlideFigure) map[int64]repository.SlideFigure {
-	byID := make(map[int64]repository.SlideFigure, len(figures))
+func indexFiguresByID(figures []repository.RecordFigure) map[int64]repository.RecordFigure {
+	byID := make(map[int64]repository.RecordFigure, len(figures))
 	for _, figure := range figures {
 		byID[figure.ID] = figure
 	}
 	return byID
 }
 
-func indexDataFilesByID(dataFiles []repository.SlideDataFile) map[int64]repository.SlideDataFile {
-	byID := make(map[int64]repository.SlideDataFile, len(dataFiles))
+func indexDataFilesByID(dataFiles []repository.RecordDataFile) map[int64]repository.RecordDataFile {
+	byID := make(map[int64]repository.RecordDataFile, len(dataFiles))
 	for _, dataFile := range dataFiles {
 		byID[dataFile.ID] = dataFile
 	}
 	return byID
 }
 
-func (s *Service) removeLocalFigureFileIfPresent(slideID string, filename string) error {
-	path, err := s.localFS.ResolveFigurePath(slideID, filename)
+func (s *Service) removeLocalFigureFileIfPresent(recordID string, filename string) error {
+	path, err := s.localFS.ResolveFigurePath(recordID, filename)
 	if err != nil {
 		return err
 	}
 	return removeFileIfPresent(path)
 }
 
-func (s *Service) removeLocalDataFileIfPresent(slideID string, filename string) error {
-	path, err := s.localFS.ResolveDataFilePath(slideID, filename)
+func (s *Service) removeLocalDataFileIfPresent(recordID string, filename string) error {
+	path, err := s.localFS.ResolveDataFilePath(recordID, filename)
 	if err != nil {
 		return err
 	}
 	return removeFileIfPresent(path)
 }
 
-func figuresOf(bundle *SlideBundle) []repository.SlideFigure {
+func figuresOf(bundle *RecordBundle) []repository.RecordFigure {
 	if bundle == nil {
 		return nil
 	}
 	return bundle.Figures
 }
 
-func dataFilesOf(bundle *SlideBundle) []repository.SlideDataFile {
+func dataFilesOf(bundle *RecordBundle) []repository.RecordDataFile {
 	if bundle == nil {
 		return nil
 	}

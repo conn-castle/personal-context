@@ -21,7 +21,7 @@ import (
 
 func TestGCCloudNotConfiguredStillDeletesLocally(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	// Soft-delete.
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -61,7 +61,7 @@ func TestGCCloudNotConfiguredStillDeletesLocally(t *testing.T) {
 
 func TestGCCloudUnreachableWarnsOnStderr(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", id})
@@ -97,7 +97,7 @@ func TestGCCloudUnreachableWarnsOnStderr(t *testing.T) {
 
 func TestGCCloudDeletesFromCloudRepo(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", id})
@@ -111,8 +111,8 @@ func TestGCCloudDeletesFromCloudRepo(t *testing.T) {
 
 	cloudDeleteCalls := make([]string, 0)
 	cloudMock := &gcMockRepo{
-		deleteSlide: func(_ context.Context, slideID string) error {
-			cloudDeleteCalls = append(cloudDeleteCalls, slideID)
+		deleteRecord: func(_ context.Context, recordID string) error {
+			cloudDeleteCalls = append(cloudDeleteCalls, recordID)
 			return nil
 		},
 	}
@@ -130,7 +130,7 @@ func TestGCCloudDeletesFromCloudRepo(t *testing.T) {
 	}
 
 	if len(cloudDeleteCalls) != 1 || cloudDeleteCalls[0] != id {
-		t.Fatalf("expected cloud DeleteSlide(%s), got %v", id, cloudDeleteCalls)
+		t.Fatalf("expected cloud DeleteRecord(%s), got %v", id, cloudDeleteCalls)
 	}
 	if !strings.Contains(stdout.String(), "Deleted "+id) {
 		t.Fatalf("expected local deletion, got %q", stdout.String())
@@ -139,7 +139,7 @@ func TestGCCloudDeletesFromCloudRepo(t *testing.T) {
 
 func TestGCCloudDeleteNotFoundIsIgnored(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", id})
@@ -152,7 +152,7 @@ func TestGCCloudDeleteNotFoundIsIgnored(t *testing.T) {
 	t.Cleanup(func() { openCloudStackFn = origCloud })
 
 	cloudMock := &gcMockRepo{
-		deleteSlide: func(context.Context, string) error {
+		deleteRecord: func(context.Context, string) error {
 			return repository.ErrNotFound
 		},
 	}
@@ -175,9 +175,9 @@ func TestGCCloudDeleteNotFoundIsIgnored(t *testing.T) {
 	}
 }
 
-func TestGCCloudDeleteErrorSkipsSlide(t *testing.T) {
+func TestGCCloudDeleteErrorSkipsRecord(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", id})
@@ -190,7 +190,7 @@ func TestGCCloudDeleteErrorSkipsSlide(t *testing.T) {
 	t.Cleanup(func() { openCloudStackFn = origCloud })
 
 	cloudMock := &gcMockRepo{
-		deleteSlide: func(context.Context, string) error {
+		deleteRecord: func(context.Context, string) error {
 			return errors.New("cloud db error")
 		},
 	}
@@ -208,18 +208,18 @@ func TestGCCloudDeleteErrorSkipsSlide(t *testing.T) {
 		t.Fatalf("runGC() error = %v", err)
 	}
 
-	// Slide should be skipped with a warning, not deleted locally.
-	if !strings.Contains(stderr.String(), "Warning: failed to delete slide") {
+	// Record should be skipped with a warning, not deleted locally.
+	if !strings.Contains(stderr.String(), "Warning: failed to delete record") {
 		t.Fatalf("expected cloud delete warning on stderr, got %q", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Removed 0 slide(s)") {
+	if !strings.Contains(stdout.String(), "Removed 0 record(s)") {
 		t.Fatalf("expected 0 removed, got %q", stdout.String())
 	}
 }
 
 func TestGCAutoSyncCalledAfterDeletion(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", id})
@@ -257,15 +257,15 @@ func TestGCAutoSyncCalledAfterDeletion(t *testing.T) {
 	}
 }
 
-// gcMockRepo implements repository.Repository with configurable DeleteSlide for gc tests.
+// gcMockRepo implements repository.Repository with configurable DeleteRecord for gc tests.
 type gcMockRepo struct {
 	mockRepo
-	deleteSlide func(ctx context.Context, id string) error
+	deleteRecord func(ctx context.Context, id string) error
 }
 
-func (m *gcMockRepo) DeleteSlide(ctx context.Context, id string) error {
-	if m.deleteSlide != nil {
-		return m.deleteSlide(ctx, id)
+func (m *gcMockRepo) DeleteRecord(ctx context.Context, id string) error {
+	if m.deleteRecord != nil {
+		return m.deleteRecord(ctx, id)
 	}
 	return nil
 }
@@ -289,7 +289,7 @@ func TestGCEmptyTrash(t *testing.T) {
 func TestGCDeletesExpiredTrash(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/fig.png">content</html>`, "", "",
 		map[string][]byte{"fig.png": []byte("image")},
 		map[string][]byte{"data.csv": []byte("a,b")},
@@ -316,11 +316,11 @@ func TestGCDeletesExpiredTrash(t *testing.T) {
 	if !strings.Contains(out, fmt.Sprintf("Deleted %s", id)) {
 		t.Fatalf("expected 'Deleted %s' in output, got %q", id, out)
 	}
-	if !strings.Contains(out, "Removed 1 slide(s).") {
+	if !strings.Contains(out, "Removed 1 record(s).") {
 		t.Fatalf("expected summary, got %q", out)
 	}
 
-	// Verify slide is gone from DB.
+	// Verify record is gone from DB.
 	dbPath := filepath.Join(homeDir, "personal-context", ".pc", "pc.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -328,11 +328,11 @@ func TestGCDeletesExpiredTrash(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM slides WHERE id = ?", id).Scan(&count); err != nil {
+	if err := db.QueryRow("SELECT COUNT(*) FROM records WHERE id = ?", id).Scan(&count); err != nil {
 		t.Fatalf("query: %v", err)
 	}
 	if count != 0 {
-		t.Fatalf("expected slide to be hard-deleted, got count=%d", count)
+		t.Fatalf("expected record to be hard-deleted, got count=%d", count)
 	}
 
 	// Verify files are removed.
@@ -349,7 +349,7 @@ func TestGCDeletesExpiredTrash(t *testing.T) {
 func TestGCLeavesYoungTrashUnit(t *testing.T) {
 	setupEnv(t)
 
-	id := addSlide(t)
+	id := addRecord(t)
 
 	// Soft-delete (just now).
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -373,8 +373,8 @@ func TestGCLeavesYoungTrashUnit(t *testing.T) {
 func TestGCMixedAgesUnit(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	idOld := addSlide(t, "--date", "2025-01-01")
-	idYoung := addSlide(t, "--date", "2025-01-02")
+	idOld := addRecord(t, "--date", "2025-01-01")
+	idYoung := addRecord(t, "--date", "2025-01-02")
 
 	// Soft-delete both.
 	for _, id := range []string{idOld, idYoung} {
@@ -397,30 +397,30 @@ func TestGCMixedAgesUnit(t *testing.T) {
 	}
 	out := stdout.String()
 	if !strings.Contains(out, idOld) {
-		t.Fatalf("expected old slide %s to be deleted, got %q", idOld, out)
+		t.Fatalf("expected old record %s to be deleted, got %q", idOld, out)
 	}
 	if strings.Contains(out, idYoung) {
-		t.Fatalf("expected young slide %s to NOT be deleted, got %q", idYoung, out)
+		t.Fatalf("expected young record %s to NOT be deleted, got %q", idYoung, out)
 	}
 }
 
-func TestGCListSlidesDBError(t *testing.T) {
+func TestGCListRecordsDBError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	// Corrupt slides table.
-	corruptTable(t, homeDir, "slides")
+	// Corrupt records table.
+	corruptTable(t, homeDir, "records")
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"gc"})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slides table missing")
+		t.Fatal("expected error when records table missing")
 	}
 }
 
-func TestGCDeleteSlideError(t *testing.T) {
+func TestGCDeleteRecordError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
 	// Soft-delete
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -432,11 +432,11 @@ func TestGCDeleteSlideError(t *testing.T) {
 	// Backdate to 31 days ago
 	backdateDeletedAtUnit(t, homeDir, id, 31)
 
-	// Drop the slides table so DeleteSlide fails
-	// But first we need to make ListSlides succeed... so we use a different approach:
-	// Corrupt the slide_figures table referenced by cascade delete
+	// Drop the records table so DeleteRecord fails
+	// But first we need to make ListRecords succeed... so we use a different approach:
+	// Corrupt the record_figures table referenced by cascade delete
 	// Actually, we need a simpler approach: drop sync_version to make delete trigger fail.
-	// DeleteSlide is a hard DELETE FROM slides, which triggers slides_sync_bump_after_delete.
+	// DeleteRecord is a hard DELETE FROM records, which triggers records_sync_bump_after_delete.
 	corruptTable(t, homeDir, "sync_version")
 
 	stdout := &bytes.Buffer{}
@@ -444,16 +444,16 @@ func TestGCDeleteSlideError(t *testing.T) {
 	gcCmd.SetArgs([]string{"gc"})
 	err := gcCmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when DeleteSlide trigger fails")
+		t.Fatal("expected error when DeleteRecord trigger fails")
 	}
-	if !strings.Contains(err.Error(), "hard delete slide") {
-		t.Fatalf("expected 'hard delete slide' error, got %v", err)
+	if !strings.Contains(err.Error(), "hard delete record") {
+		t.Fatalf("expected 'hard delete record' error, got %v", err)
 	}
 }
 
-func TestGCDeleteSlideDirError(t *testing.T) {
+func TestGCDeleteRecordDirError(t *testing.T) {
 	homeDir := setupEnv(t)
-	id := addSlideWithContent(t,
+	id := addRecordWithContent(t,
 		`<html><img src="figures/fig.png">content</html>`, "", "",
 		map[string][]byte{"fig.png": []byte("image")},
 		nil,
@@ -470,11 +470,11 @@ func TestGCDeleteSlideDirError(t *testing.T) {
 	backdateDeletedAtUnit(t, homeDir, id, 31)
 
 	// Make the figures directory unwritable so RemoveAll fails
-	figureSlideDir := filepath.Join(homeDir, "personal-context", "figures", id)
-	if err := os.Chmod(figureSlideDir, 0o000); err != nil {
+	figureRecordDir := filepath.Join(homeDir, "personal-context", "figures", id)
+	if err := os.Chmod(figureRecordDir, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(figureSlideDir, 0o755) })
+	t.Cleanup(func() { _ = os.Chmod(figureRecordDir, 0o755) })
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
@@ -485,7 +485,7 @@ func TestGCDeleteSlideDirError(t *testing.T) {
 		t.Fatalf("expected gc to succeed with a warning, got error: %v", err)
 	}
 	output := stderr.String()
-	if !strings.Contains(output, "Warning: failed to remove files for slide") {
+	if !strings.Contains(output, "Warning: failed to remove files for record") {
 		t.Fatalf("expected warning about failed file removal in stderr, got %q", output)
 	}
 }

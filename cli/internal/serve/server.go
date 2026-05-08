@@ -87,17 +87,17 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/projects", s.handleListProjects)
-	mux.HandleFunc("GET /api/slides", s.handleListSlides)
-	mux.HandleFunc("DELETE /api/slides/trash", s.handlePurgeTrash)
-	mux.HandleFunc("GET /api/slides/{id}", s.handleGetSlide)
-	mux.HandleFunc("PATCH /api/slides/{id}", s.handlePatchSlide)
-	mux.HandleFunc("DELETE /api/slides/{id}", s.handleDeleteSlide)
-	mux.HandleFunc("POST /api/slides/{id}/restore", s.handleRestoreSlide)
-	mux.HandleFunc("PATCH /api/slides/{id}/order", s.handleReorderSlide)
+	mux.HandleFunc("GET /api/records", s.handleListRecords)
+	mux.HandleFunc("DELETE /api/records/trash", s.handlePurgeTrash)
+	mux.HandleFunc("GET /api/records/{id}", s.handleGetRecord)
+	mux.HandleFunc("PATCH /api/records/{id}", s.handlePatchRecord)
+	mux.HandleFunc("DELETE /api/records/{id}", s.handleDeleteRecord)
+	mux.HandleFunc("POST /api/records/{id}/restore", s.handleRestoreRecord)
+	mux.HandleFunc("PATCH /api/records/{id}/order", s.handleReorderRecord)
 	mux.HandleFunc("GET /api/sync/version", s.handleSyncVersion)
 	mux.HandleFunc("GET /api/sync/changes", s.handleSyncChanges)
-	mux.HandleFunc("GET /api/files/{slideId}/{fileType}/{filename}", s.handleGetFile)
-	mux.HandleFunc("GET /local-files/{slideId}/{fileType}/{filename}", s.handleServeFile)
+	mux.HandleFunc("GET /api/files/{recordId}/{fileType}/{filename}", s.handleGetFile)
+	mux.HandleFunc("GET /local-files/{recordId}/{fileType}/{filename}", s.handleServeFile)
 }
 
 // --- JSON helpers ---
@@ -201,9 +201,9 @@ func formatTimePtr(t *time.Time) *string {
 	return &s
 }
 
-// --- Slide ID validation ---
+// --- Record ID validation ---
 
-func isValidSlideID(id string) bool {
+func isValidRecordID(id string) bool {
 	if len(id) != 17 {
 		return false
 	}
@@ -259,17 +259,17 @@ func isValidGitHash(hash string) bool {
 	return true
 }
 
-type listSlidesQuery struct {
+type listRecordsQuery struct {
 	limit  int
 	cursor *cursorPayload
-	filter repository.ListSlidesFilter
+	filter repository.ListRecordsFilter
 }
 
-// parseListSlidesQuery normalizes the list-slides query parameters into one struct.
-func parseListSlidesQuery(query url.Values) (listSlidesQuery, string) {
-	parsed := listSlidesQuery{
+// parseListRecordsQuery normalizes the list-records query parameters into one struct.
+func parseListRecordsQuery(query url.Values) (listRecordsQuery, string) {
+	parsed := listRecordsQuery{
 		limit:  20,
-		filter: repository.ListSlidesFilter{},
+		filter: repository.ListRecordsFilter{},
 	}
 
 	if raw := query.Get("limit"); raw != "" {
@@ -288,7 +288,7 @@ func parseListSlidesQuery(query url.Values) (listSlidesQuery, string) {
 	if raw := query.Get("cursor"); raw != "" {
 		cursor, err := decodeCursor(raw)
 		if err != nil {
-			return listSlidesQuery{}, "Invalid cursor format"
+			return listRecordsQuery{}, "Invalid cursor format"
 		}
 		parsed.cursor = cursor
 	}
@@ -305,7 +305,7 @@ func parseListSlidesQuery(query url.Values) (listSlidesQuery, string) {
 	if updatedAfter := query.Get("updated_after"); updatedAfter != "" {
 		timestamp, err := time.Parse(time.RFC3339Nano, updatedAfter)
 		if err != nil {
-			return listSlidesQuery{}, "Invalid updated_after timestamp"
+			return listRecordsQuery{}, "Invalid updated_after timestamp"
 		}
 		parsed.filter.UpdatedAfter = &timestamp
 	}
@@ -313,7 +313,7 @@ func parseListSlidesQuery(query url.Values) (listSlidesQuery, string) {
 	return parsed, ""
 }
 
-type slideSummary struct {
+type recordSummary struct {
 	ID             string  `json:"id"`
 	Date           string  `json:"date"`
 	DayOrder       string  `json:"day_order"`
@@ -327,7 +327,7 @@ type slideSummary struct {
 	DataFileCount  int     `json:"data_file_count"`
 }
 
-type slideFile struct {
+type recordFile struct {
 	Filename    string  `json:"filename"`
 	S3Key       string  `json:"s3_key"`
 	Size        *int64  `json:"size,omitempty"`
@@ -336,7 +336,7 @@ type slideFile struct {
 	Description *string `json:"description"`
 }
 
-type slideDetail struct {
+type recordDetail struct {
 	ID             string      `json:"id"`
 	Date           string      `json:"date"`
 	DayOrder       string      `json:"day_order"`
@@ -350,8 +350,8 @@ type slideDetail struct {
 	CreatedAt      string      `json:"created_at"`
 	UpdatedAt      string      `json:"updated_at"`
 	DeletedAt      *string     `json:"deleted_at"`
-	Figures        []slideFile `json:"figures"`
-	DataFiles      []slideFile `json:"data_files"`
+	Figures        []recordFile `json:"figures"`
+	DataFiles      []recordFile `json:"data_files"`
 }
 
 func decodeJSONObject(r *http.Request) (map[string]any, string) {
@@ -457,7 +457,7 @@ type reorderInput struct {
 	ReferenceID *string
 }
 
-func validateReorderBody(body map[string]any, slideID string) (reorderInput, string) {
+func validateReorderBody(body map[string]any, recordID string) (reorderInput, string) {
 	positionRaw, ok := body["position"]
 	if !ok || positionRaw == nil {
 		return reorderInput{}, "position is required"
@@ -486,11 +486,11 @@ func validateReorderBody(body map[string]any, slideID string) (reorderInput, str
 		if referenceString == "" {
 			return reorderInput{}, fmt.Sprintf("position.reference_id is required for kind %q", kind)
 		}
-		if !isValidSlideID(referenceString) {
+		if !isValidRecordID(referenceString) {
 			return reorderInput{}, "Invalid reference_id format"
 		}
-		if referenceString == slideID {
-			return reorderInput{}, "Cannot reorder a slide relative to itself"
+		if referenceString == recordID {
+			return reorderInput{}, "Cannot reorder a record relative to itself"
 		}
 		referenceID = &referenceString
 	}
@@ -511,55 +511,55 @@ func validateReorderBody(body map[string]any, slideID string) (reorderInput, str
 	}, ""
 }
 
-func (s *Server) buildSlideSummary(ctx context.Context, slide repository.Slide) (slideSummary, error) {
-	figures, err := s.repo.ListSlideFiguresBySlideID(ctx, slide.ID)
+func (s *Server) buildRecordSummary(ctx context.Context, record repository.Record) (recordSummary, error) {
+	figures, err := s.repo.ListRecordFiguresByRecordID(ctx, record.ID)
 	if err != nil {
-		return slideSummary{}, err
+		return recordSummary{}, err
 	}
-	dataFiles, err := s.repo.ListSlideDataFilesBySlideID(ctx, slide.ID)
+	dataFiles, err := s.repo.ListRecordDataFilesByRecordID(ctx, record.ID)
 	if err != nil {
-		return slideSummary{}, err
+		return recordSummary{}, err
 	}
 
-	return slideSummary{
-		ID:             slide.ID,
-		Date:           slide.Date,
-		DayOrder:       slide.DayOrder,
-		HTMLContent:    slide.HTMLContent,
-		ProjectID:      slide.ProjectID,
-		SourceDeviceID: slide.SourceDeviceID,
-		SourceRef:      slide.SourceRef,
-		UpdatedAt:      formatTime(slide.UpdatedAt),
-		DeletedAt:      formatTimePtr(slide.DeletedAt),
+	return recordSummary{
+		ID:             record.ID,
+		Date:           record.Date,
+		DayOrder:       record.DayOrder,
+		HTMLContent:    record.HTMLContent,
+		ProjectID:      record.ProjectID,
+		SourceDeviceID: record.SourceDeviceID,
+		SourceRef:      record.SourceRef,
+		UpdatedAt:      formatTime(record.UpdatedAt),
+		DeletedAt:      formatTimePtr(record.DeletedAt),
 		FigureCount:    len(figures),
 		DataFileCount:  len(dataFiles),
 	}, nil
 }
 
-func (s *Server) buildSlideFiles(ctx context.Context, slideID string) ([]slideFile, []slideFile, error) {
-	figures, err := s.repo.ListSlideFiguresBySlideID(ctx, slideID)
+func (s *Server) buildRecordFiles(ctx context.Context, recordID string) ([]recordFile, []recordFile, error) {
+	figures, err := s.repo.ListRecordFiguresByRecordID(ctx, recordID)
 	if err != nil {
 		return nil, nil, err
 	}
-	dataFiles, err := s.repo.ListSlideDataFilesBySlideID(ctx, slideID)
+	dataFiles, err := s.repo.ListRecordDataFilesByRecordID(ctx, recordID)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	figureFiles := make([]slideFile, len(figures))
+	figureFiles := make([]recordFile, len(figures))
 	for i, figure := range figures {
-		figureFiles[i] = slideFile{
+		figureFiles[i] = recordFile{
 			Filename: figure.Filename,
 			S3Key:    figure.S3Key,
 			AltText:  figure.AltText,
 		}
 	}
 
-	dataFileList := make([]slideFile, len(dataFiles))
+	dataFileList := make([]recordFile, len(dataFiles))
 	for i, dataFile := range dataFiles {
 		size := dataFile.Size
 		hash := dataFile.Hash
-		dataFileList[i] = slideFile{
+		dataFileList[i] = recordFile{
 			Filename:    dataFile.Filename,
 			S3Key:       dataFile.S3Key,
 			Size:        &size,
@@ -571,26 +571,26 @@ func (s *Server) buildSlideFiles(ctx context.Context, slideID string) ([]slideFi
 	return figureFiles, dataFileList, nil
 }
 
-func (s *Server) buildSlideDetail(ctx context.Context, slide repository.Slide) (slideDetail, error) {
-	figureFiles, dataFileList, err := s.buildSlideFiles(ctx, slide.ID)
+func (s *Server) buildRecordDetail(ctx context.Context, record repository.Record) (recordDetail, error) {
+	figureFiles, dataFileList, err := s.buildRecordFiles(ctx, record.ID)
 	if err != nil {
-		return slideDetail{}, err
+		return recordDetail{}, err
 	}
 
-	return slideDetail{
-		ID:             slide.ID,
-		Date:           slide.Date,
-		DayOrder:       slide.DayOrder,
-		HTMLContent:    slide.HTMLContent,
-		Notes:          slide.Notes,
-		ProjectID:      slide.ProjectID,
-		SourceDeviceID: slide.SourceDeviceID,
-		SourceRef:      slide.SourceRef,
-		GitRemoteURL:   slide.GitRemoteURL,
-		GitHash:        slide.GitHash,
-		CreatedAt:      formatTime(slide.CreatedAt),
-		UpdatedAt:      formatTime(slide.UpdatedAt),
-		DeletedAt:      formatTimePtr(slide.DeletedAt),
+	return recordDetail{
+		ID:             record.ID,
+		Date:           record.Date,
+		DayOrder:       record.DayOrder,
+		HTMLContent:    record.HTMLContent,
+		Notes:          record.Notes,
+		ProjectID:      record.ProjectID,
+		SourceDeviceID: record.SourceDeviceID,
+		SourceRef:      record.SourceRef,
+		GitRemoteURL:   record.GitRemoteURL,
+		GitHash:        record.GitHash,
+		CreatedAt:      formatTime(record.CreatedAt),
+		UpdatedAt:      formatTime(record.UpdatedAt),
+		DeletedAt:      formatTimePtr(record.DeletedAt),
 		Figures:        figureFiles,
 		DataFiles:      dataFileList,
 	}, nil
@@ -610,19 +610,19 @@ func (s *Server) handleInfo(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// handleStats returns aggregate counts: total slides, total projects, and trashed slides.
+// handleStats returns aggregate counts: total records, total projects, and trashed records.
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	totalSlides, err := s.repo.CountActiveSlides(ctx)
+	totalRecords, err := s.repo.CountActiveRecords(ctx)
 	if err != nil {
-		mapRepoError(w, err, "slides")
+		mapRepoError(w, err, "records")
 		return
 	}
 
-	trashedSlides, err := s.repo.CountTrashedSlides(ctx)
+	trashedRecords, err := s.repo.CountTrashedRecords(ctx)
 	if err != nil {
-		mapRepoError(w, err, "slides")
+		mapRepoError(w, err, "records")
 		return
 	}
 
@@ -633,13 +633,13 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]int{
-		"total_slides":   totalSlides,
+		"total_records":   totalRecords,
 		"total_projects": len(projects),
-		"trashed_slides": trashedSlides,
+		"trashed_records": trashedRecords,
 	})
 }
 
-// handlePurgeTrash hard-deletes all soft-deleted (trashed) slides and removes their
+// handlePurgeTrash hard-deletes all soft-deleted (trashed) records and removes their
 // filesystem directories for figures and data.
 func (s *Server) handlePurgeTrash(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -647,10 +647,10 @@ func (s *Server) handlePurgeTrash(w http.ResponseWriter, r *http.Request) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	// Bulk delete all soft-deleted slides and get their IDs for filesystem cleanup.
-	purgedIDs, err := s.repo.PurgeDeletedSlides(ctx)
+	// Bulk delete all soft-deleted records and get their IDs for filesystem cleanup.
+	purgedIDs, err := s.repo.PurgeDeletedRecords(ctx)
 	if err != nil {
-		mapRepoError(w, err, "slides")
+		mapRepoError(w, err, "records")
 		return
 	}
 
@@ -689,9 +689,9 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"projects": projectIDs})
 }
 
-func (s *Server) handleListSlides(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	parsedQuery, queryErr := parseListSlidesQuery(r.URL.Query())
+	parsedQuery, queryErr := parseListRecordsQuery(r.URL.Query())
 	if queryErr != "" {
 		writeError(w, http.StatusBadRequest, queryErr, "BAD_REQUEST")
 		return
@@ -700,46 +700,46 @@ func (s *Server) handleListSlides(w http.ResponseWriter, r *http.Request) {
 	// Fetch the full matching set, then sort and paginate in API order.
 	// The repository contract sorts ascending and applies LIMIT before returning,
 	// which would otherwise truncate the wrong end of the result set.
-	slides, err := s.repo.ListSlides(ctx, parsedQuery.filter)
+	records, err := s.repo.ListRecords(ctx, parsedQuery.filter)
 	if err != nil {
-		mapRepoError(w, err, "slides")
+		mapRepoError(w, err, "records")
 		return
 	}
 
-	sortSlidesForAPI(slides)
+	sortRecordsForAPI(records)
 
 	// Apply cursor-based pagination manually since repo doesn't support cursors
 	if parsedQuery.cursor != nil {
 		startIdx := -1
-		for i, slide := range slides {
-			if isAfterCursor(slide, parsedQuery.cursor) {
+		for i, record := range records {
+			if isAfterCursor(record, parsedQuery.cursor) {
 				startIdx = i
 				break
 			}
 		}
 		if startIdx == -1 {
-			slides = nil
+			records = nil
 		} else {
-			slides = slides[startIdx:]
+			records = records[startIdx:]
 		}
 	}
 
 	// Truncate to limit+1 for pagination after applying the final API sort.
-	if len(slides) > parsedQuery.limit+1 {
-		slides = slides[:parsedQuery.limit+1]
+	if len(records) > parsedQuery.limit+1 {
+		records = records[:parsedQuery.limit+1]
 	}
 
-	items := make([]slideSummary, 0, len(slides))
-	hasNextPage := len(slides) > parsedQuery.limit
-	resultSlides := slides
+	items := make([]recordSummary, 0, len(records))
+	hasNextPage := len(records) > parsedQuery.limit
+	resultRecords := records
 	if hasNextPage {
-		resultSlides = slides[:parsedQuery.limit]
+		resultRecords = records[:parsedQuery.limit]
 	}
 
-	for _, slide := range resultSlides {
-		item, err := s.buildSlideSummary(ctx, slide)
+	for _, record := range resultRecords {
+		item, err := s.buildRecordSummary(ctx, record)
 		if err != nil {
-			mapRepoError(w, err, "slide files")
+			mapRepoError(w, err, "record files")
 			return
 		}
 		items = append(items, item)
@@ -759,12 +759,12 @@ func (s *Server) handleListSlides(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// sortSlidesForAPI sorts slides in date DESC, day_order ASC, id ASC order.
-func sortSlidesForAPI(slides []repository.Slide) {
-	slices.SortFunc(slides, compareSlidesForAPI)
+// sortRecordsForAPI sorts records in date DESC, day_order ASC, id ASC order.
+func sortRecordsForAPI(records []repository.Record) {
+	slices.SortFunc(records, compareRecordsForAPI)
 }
 
-func compareSlidesForAPI(a, b repository.Slide) int {
+func compareRecordsForAPI(a, b repository.Record) int {
 	// Date DESC
 	if a.Date > b.Date {
 		return -1
@@ -789,27 +789,27 @@ func compareSlidesForAPI(a, b repository.Slide) int {
 	return 0
 }
 
-// isAfterCursor returns true if the slide should appear after the cursor position.
-func isAfterCursor(slide repository.Slide, cursor *cursorPayload) bool {
+// isAfterCursor returns true if the record should appear after the cursor position.
+func isAfterCursor(record repository.Record, cursor *cursorPayload) bool {
 	// Sort is date DESC, day_order ASC, id ASC
 	// So "after cursor" means:
 	// (date < cursor.date) OR
 	// (date == cursor.date AND day_order > cursor.day_order) OR
 	// (date == cursor.date AND day_order == cursor.day_order AND id > cursor.id)
-	if slide.Date < cursor.Date {
+	if record.Date < cursor.Date {
 		return true
 	}
-	if slide.Date == cursor.Date && slide.DayOrder > cursor.DayOrder {
+	if record.Date == cursor.Date && record.DayOrder > cursor.DayOrder {
 		return true
 	}
-	if slide.Date == cursor.Date && slide.DayOrder == cursor.DayOrder && slide.ID > cursor.ID {
+	if record.Date == cursor.Date && record.DayOrder == cursor.DayOrder && record.ID > cursor.ID {
 		return true
 	}
 	return false
 }
 
-// compareSlidesByDayOrder sorts siblings within a single date by day_order then ID.
-func compareSlidesByDayOrder(left, right repository.Slide) int {
+// compareRecordsByDayOrder sorts siblings within a single date by day_order then ID.
+func compareRecordsByDayOrder(left, right repository.Record) int {
 	if left.DayOrder < right.DayOrder {
 		return -1
 	}
@@ -825,42 +825,42 @@ func compareSlidesByDayOrder(left, right repository.Slide) int {
 	return 0
 }
 
-// findSlideIndexByID returns the index of a slide with the given ID or -1.
-func findSlideIndexByID(slides []repository.Slide, slideID string) int {
-	for index, slide := range slides {
-		if slide.ID == slideID {
+// findRecordIndexByID returns the index of a record with the given ID or -1.
+func findRecordIndexByID(records []repository.Record, recordID string) int {
+	for index, record := range records {
+		if record.ID == recordID {
 			return index
 		}
 	}
 	return -1
 }
 
-func (s *Server) handleGetSlide(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleGetRecord(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !isValidSlideID(id) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid slide ID: %s", id), "INVALID_ID")
+	if !isValidRecordID(id) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", id), "INVALID_ID")
 		return
 	}
 
 	ctx := r.Context()
-	slide, err := s.repo.GetSlideByID(ctx, id)
+	record, err := s.repo.GetRecordByID(ctx, id)
 	if err != nil {
-		mapRepoError(w, err, "Slide")
+		mapRepoError(w, err, "Record")
 		return
 	}
-	detail, err := s.buildSlideDetail(ctx, slide)
+	detail, err := s.buildRecordDetail(ctx, record)
 	if err != nil {
-		mapRepoError(w, err, "slide files")
+		mapRepoError(w, err, "record files")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"slide": detail})
+	writeJSON(w, http.StatusOK, map[string]any{"record": detail})
 }
 
-func (s *Server) handlePatchSlide(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handlePatchRecord(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !isValidSlideID(id) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid slide ID: %s", id), "INVALID_ID")
+	if !isValidRecordID(id) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", id), "INVALID_ID")
 		return
 	}
 
@@ -883,17 +883,17 @@ func (s *Server) handlePatchSlide(w http.ResponseWriter, r *http.Request) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	existing, err := s.repo.GetSlideByID(ctx, id)
+	existing, err := s.repo.GetRecordByID(ctx, id)
 	if err != nil {
-		mapRepoError(w, err, "Slide")
+		mapRepoError(w, err, "Record")
 		return
 	}
 	if existing.DeletedAt != nil {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("Slide not found: %s", id), "NOT_FOUND")
+		writeError(w, http.StatusNotFound, fmt.Sprintf("Record not found: %s", id), "NOT_FOUND")
 		return
 	}
 
-	input := repository.UpdateSlideInput{
+	input := repository.UpdateRecordInput{
 		ID:             existing.ID,
 		Date:           existing.Date,
 		DayOrder:       existing.DayOrder,
@@ -935,15 +935,15 @@ func (s *Server) handlePatchSlide(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updated, err := s.repo.UpdateSlide(ctx, input)
+	updated, err := s.repo.UpdateRecord(ctx, input)
 	if err != nil {
-		mapRepoError(w, err, "Slide")
+		mapRepoError(w, err, "Record")
 		return
 	}
 
-	detail, err := s.buildSlideDetail(ctx, updated)
+	detail, err := s.buildRecordDetail(ctx, updated)
 	if err != nil {
-		mapRepoError(w, err, "slide files")
+		mapRepoError(w, err, "record files")
 		return
 	}
 
@@ -954,37 +954,37 @@ func (s *Server) handlePatchSlide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"slide":        detail,
+		"record":        detail,
 		"sync_version": syncVersion.Version,
 	})
 }
 
-func (s *Server) handleDeleteSlide(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !isValidSlideID(id) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid slide ID: %s", id), "INVALID_ID")
+	if !isValidRecordID(id) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", id), "INVALID_ID")
 		return
 	}
 
 	ctx := r.Context()
-	current, err := s.repo.GetSlideByID(ctx, id)
+	current, err := s.repo.GetRecordByID(ctx, id)
 	if err != nil {
-		mapRepoError(w, err, "Slide")
+		mapRepoError(w, err, "Record")
 		return
 	}
 	if current.DeletedAt != nil {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("Slide not found or already deleted: %s", id), "NOT_FOUND")
+		writeError(w, http.StatusNotFound, fmt.Sprintf("Record not found or already deleted: %s", id), "NOT_FOUND")
 		return
 	}
 
-	if err := s.repo.SoftDeleteSlide(ctx, id); err != nil {
-		mapRepoError(w, err, "Slide")
+	if err := s.repo.SoftDeleteRecord(ctx, id); err != nil {
+		mapRepoError(w, err, "Record")
 		return
 	}
 
-	slide, err := s.repo.GetSlideByID(ctx, id)
+	record, err := s.repo.GetRecordByID(ctx, id)
 	if err != nil {
-		mapRepoError(w, err, "Slide")
+		mapRepoError(w, err, "Record")
 		return
 	}
 
@@ -995,39 +995,39 @@ func (s *Server) handleDeleteSlide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":           slide.ID,
-		"deleted_at":   formatTimePtr(slide.DeletedAt),
-		"updated_at":   formatTime(slide.UpdatedAt),
+		"id":           record.ID,
+		"deleted_at":   formatTimePtr(record.DeletedAt),
+		"updated_at":   formatTime(record.UpdatedAt),
 		"sync_version": syncVersion.Version,
 	})
 }
 
-func (s *Server) handleRestoreSlide(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleRestoreRecord(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !isValidSlideID(id) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid slide ID: %s", id), "INVALID_ID")
+	if !isValidRecordID(id) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", id), "INVALID_ID")
 		return
 	}
 
 	ctx := r.Context()
-	current, err := s.repo.GetSlideByID(ctx, id)
+	current, err := s.repo.GetRecordByID(ctx, id)
 	if err != nil {
-		mapRepoError(w, err, "Slide")
+		mapRepoError(w, err, "Record")
 		return
 	}
 	if current.DeletedAt == nil {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("Slide not found or not deleted: %s", id), "NOT_FOUND")
+		writeError(w, http.StatusNotFound, fmt.Sprintf("Record not found or not deleted: %s", id), "NOT_FOUND")
 		return
 	}
 
-	if err := s.repo.RestoreSlide(ctx, id); err != nil {
-		mapRepoError(w, err, "Slide")
+	if err := s.repo.RestoreRecord(ctx, id); err != nil {
+		mapRepoError(w, err, "Record")
 		return
 	}
 
-	slide, err := s.repo.GetSlideByID(ctx, id)
+	record, err := s.repo.GetRecordByID(ctx, id)
 	if err != nil {
-		mapRepoError(w, err, "Slide")
+		mapRepoError(w, err, "Record")
 		return
 	}
 
@@ -1038,17 +1038,17 @@ func (s *Server) handleRestoreSlide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":           slide.ID,
+		"id":           record.ID,
 		"deleted_at":   nil,
-		"updated_at":   formatTime(slide.UpdatedAt),
+		"updated_at":   formatTime(record.UpdatedAt),
 		"sync_version": syncVersion.Version,
 	})
 }
 
-func (s *Server) handleReorderSlide(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleReorderRecord(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !isValidSlideID(id) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid slide ID: %s", id), "INVALID_ID")
+	if !isValidRecordID(id) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", id), "INVALID_ID")
 		return
 	}
 
@@ -1071,13 +1071,13 @@ func (s *Server) handleReorderSlide(w http.ResponseWriter, r *http.Request) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	existing, err := s.repo.GetSlideByID(ctx, id)
+	existing, err := s.repo.GetRecordByID(ctx, id)
 	if err != nil {
-		mapRepoError(w, err, "Slide")
+		mapRepoError(w, err, "Record")
 		return
 	}
 	if existing.DeletedAt != nil {
-		writeError(w, http.StatusNotFound, fmt.Sprintf("Slide not found: %s", id), "NOT_FOUND")
+		writeError(w, http.StatusNotFound, fmt.Sprintf("Record not found: %s", id), "NOT_FOUND")
 		return
 	}
 
@@ -1086,23 +1086,23 @@ func (s *Server) handleReorderSlide(w http.ResponseWriter, r *http.Request) {
 		targetDate = *input.Date
 	}
 
-	// Get siblings for the target date (exclude the moving slide)
-	siblings, err := s.repo.ListSlides(ctx, repository.ListSlidesFilter{
+	// Get siblings for the target date (exclude the moving record)
+	siblings, err := s.repo.ListRecords(ctx, repository.ListRecordsFilter{
 		DateFrom: &targetDate,
 		DateTo:   &targetDate,
 	})
 	if err != nil {
-		mapRepoError(w, err, "slides")
+		mapRepoError(w, err, "records")
 		return
 	}
 
-	var dateSiblings []repository.Slide
+	var dateSiblings []repository.Record
 	for _, sl := range siblings {
 		if sl.Date == targetDate && sl.ID != id && sl.DeletedAt == nil {
 			dateSiblings = append(dateSiblings, sl)
 		}
 	}
-	slices.SortFunc(dateSiblings, compareSlidesByDayOrder)
+	slices.SortFunc(dateSiblings, compareRecordsByDayOrder)
 
 	newOrder, err := computeFractionalIndex(dateSiblings, input.Kind, input.ReferenceID)
 	if err != nil {
@@ -1111,7 +1111,7 @@ func (s *Server) handleReorderSlide(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Update via read-then-merge
-	updateInput := repository.UpdateSlideInput{
+	updateInput := repository.UpdateRecordInput{
 		ID:             existing.ID,
 		Date:           targetDate,
 		DayOrder:       newOrder,
@@ -1125,9 +1125,9 @@ func (s *Server) handleReorderSlide(w http.ResponseWriter, r *http.Request) {
 		DeletedAt:      existing.DeletedAt,
 	}
 
-	updated, err := s.repo.UpdateSlide(ctx, updateInput)
+	updated, err := s.repo.UpdateRecord(ctx, updateInput)
 	if err != nil {
-		mapRepoError(w, err, "Slide")
+		mapRepoError(w, err, "Record")
 		return
 	}
 
@@ -1147,7 +1147,7 @@ func (s *Server) handleReorderSlide(w http.ResponseWriter, r *http.Request) {
 }
 
 // computeFractionalIndex uses the Go fracdex library to compute a new day_order.
-func computeFractionalIndex(siblings []repository.Slide, kind string, refID *string) (string, error) {
+func computeFractionalIndex(siblings []repository.Record, kind string, refID *string) (string, error) {
 	// Import the fractional index library
 	switch kind {
 	case "first":
@@ -1161,9 +1161,9 @@ func computeFractionalIndex(siblings []repository.Slide, kind string, refID *str
 		}
 		return generateKeyBetween(siblings[len(siblings)-1].DayOrder, ""), nil
 	case "before":
-		refIdx := findSlideIndexByID(siblings, *refID)
+		refIdx := findRecordIndexByID(siblings, *refID)
 		if refIdx == -1 {
-			return "", fmt.Errorf("reference slide not found: %s", *refID)
+			return "", fmt.Errorf("reference record not found: %s", *refID)
 		}
 		prevOrder := ""
 		if refIdx > 0 {
@@ -1171,9 +1171,9 @@ func computeFractionalIndex(siblings []repository.Slide, kind string, refID *str
 		}
 		return generateKeyBetween(prevOrder, siblings[refIdx].DayOrder), nil
 	case "after":
-		refIdx := findSlideIndexByID(siblings, *refID)
+		refIdx := findRecordIndexByID(siblings, *refID)
 		if refIdx == -1 {
-			return "", fmt.Errorf("reference slide not found: %s", *refID)
+			return "", fmt.Errorf("reference record not found: %s", *refID)
 		}
 		nextOrder := ""
 		if refIdx < len(siblings)-1 {
@@ -1237,26 +1237,26 @@ func (s *Server) handleSyncChanges(w http.ResponseWriter, r *http.Request) {
 	// Snapshot window: capture server_now BEFORE querying
 	serverNow := time.Now().UTC()
 
-	filter := repository.ListSlidesFilter{
+	filter := repository.ListRecordsFilter{
 		IncludeDeleted: true,
 		UpdatedAfter:   &sinceTime,
 		UpdatedBefore:  &serverNow,
 	}
 
-	slides, err := s.repo.ListSlides(ctx, filter)
+	records, err := s.repo.ListRecords(ctx, filter)
 	if err != nil {
-		mapRepoError(w, err, "slides")
+		mapRepoError(w, err, "records")
 		return
 	}
 
 	// Sort for API: date DESC, day_order ASC, id ASC
-	sortSlidesForAPI(slides)
+	sortRecordsForAPI(records)
 
-	items := make([]slideSummary, 0, len(slides))
-	for _, slide := range slides {
-		item, err := s.buildSlideSummary(ctx, slide)
+	items := make([]recordSummary, 0, len(records))
+	for _, record := range records {
+		item, err := s.buildRecordSummary(ctx, record)
 		if err != nil {
-			mapRepoError(w, err, "slide files")
+			mapRepoError(w, err, "record files")
 			return
 		}
 		items = append(items, item)
@@ -1269,12 +1269,12 @@ func (s *Server) handleSyncChanges(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
-	slideID := r.PathValue("slideId")
+	recordID := r.PathValue("recordId")
 	fileType := r.PathValue("fileType")
 	filename := r.PathValue("filename")
 
-	if !isValidSlideID(slideID) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid slide ID: %s", slideID), "INVALID_ID")
+	if !isValidRecordID(recordID) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", recordID), "INVALID_ID")
 		return
 	}
 
@@ -1289,9 +1289,9 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	fileExists, err := s.slideFileExists(ctx, slideID, fileType, filename)
+	fileExists, err := s.recordFileExists(ctx, recordID, fileType, filename)
 	if err != nil {
-		mapRepoError(w, err, "slide files")
+		mapRepoError(w, err, "record files")
 		return
 	}
 
@@ -1310,7 +1310,7 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 		"%s://%s/local-files/%s/%s/%s",
 		scheme,
 		host,
-		url.PathEscape(slideID),
+		url.PathEscape(recordID),
 		url.PathEscape(fileType),
 		url.PathEscape(filename),
 	)
@@ -1321,16 +1321,16 @@ func (s *Server) handleGetFile(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// slideFileExists reports whether the requested slide file is present in repository metadata.
-func (s *Server) slideFileExists(
+// recordFileExists reports whether the requested record file is present in repository metadata.
+func (s *Server) recordFileExists(
 	ctx context.Context,
-	slideID string,
+	recordID string,
 	fileType string,
 	filename string,
 ) (bool, error) {
 	switch fileType {
 	case "figures":
-		figures, err := s.repo.ListSlideFiguresBySlideID(ctx, slideID)
+		figures, err := s.repo.ListRecordFiguresByRecordID(ctx, recordID)
 		if err != nil {
 			return false, err
 		}
@@ -1341,7 +1341,7 @@ func (s *Server) slideFileExists(
 		}
 		return false, nil
 	case "data":
-		dataFiles, err := s.repo.ListSlideDataFilesBySlideID(ctx, slideID)
+		dataFiles, err := s.repo.ListRecordDataFilesByRecordID(ctx, recordID)
 		if err != nil {
 			return false, err
 		}
@@ -1357,11 +1357,11 @@ func (s *Server) slideFileExists(
 }
 
 func (s *Server) handleServeFile(w http.ResponseWriter, r *http.Request) {
-	slideID := r.PathValue("slideId")
+	recordID := r.PathValue("recordId")
 	fileType := r.PathValue("fileType")
 	filename := r.PathValue("filename")
 
-	if !isValidSlideID(slideID) || !isValidFilename(filename) {
+	if !isValidRecordID(recordID) || !isValidFilename(filename) {
 		http.NotFound(w, r)
 		return
 	}
@@ -1371,7 +1371,7 @@ func (s *Server) handleServeFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filePath := filepath.Join(s.dataDir, fileType, slideID, filename)
+	filePath := filepath.Join(s.dataDir, fileType, recordID, filename)
 
 	// Verify the resolved path is within the data directory
 	absPath, err := filepath.Abs(filePath)

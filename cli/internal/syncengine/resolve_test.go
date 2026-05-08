@@ -7,116 +7,116 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
-func TestResolveSlideWinnerLocalOnly(t *testing.T) {
-	local := slideAt("local", time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC), nil)
+func TestResolveRecordWinnerLocalOnly(t *testing.T) {
+	local := recordAt("local", time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC), nil)
 
-	got, err := ResolveSlideWinner(&local, nil)
+	got, err := ResolveRecordWinner(&local, nil)
 	if err != nil {
-		t.Fatalf("ResolveSlideWinner() error = %v", err)
+		t.Fatalf("ResolveRecordWinner() error = %v", err)
 	}
 	if got != OutcomeLocal {
-		t.Fatalf("ResolveSlideWinner() = %q, want %q", got, OutcomeLocal)
+		t.Fatalf("ResolveRecordWinner() = %q, want %q", got, OutcomeLocal)
 	}
 }
 
-func TestResolveSlideWinnerRemoteOnly(t *testing.T) {
-	remote := slideAt("remote", time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC), nil)
+func TestResolveRecordWinnerRemoteOnly(t *testing.T) {
+	remote := recordAt("remote", time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC), nil)
 
-	got, err := ResolveSlideWinner(nil, &remote)
+	got, err := ResolveRecordWinner(nil, &remote)
 	if err != nil {
-		t.Fatalf("ResolveSlideWinner() error = %v", err)
+		t.Fatalf("ResolveRecordWinner() error = %v", err)
 	}
 	if got != OutcomeRemote {
-		t.Fatalf("ResolveSlideWinner() = %q, want %q", got, OutcomeRemote)
+		t.Fatalf("ResolveRecordWinner() = %q, want %q", got, OutcomeRemote)
 	}
 }
 
-func TestResolveSlideWinnerLaterEditWins(t *testing.T) {
-	local := slideAt("slide", time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC), nil)
-	remote := slideAt("slide", time.Date(2026, 3, 8, 9, 59, 59, 0, time.UTC), nil)
+func TestResolveRecordWinnerLaterEditWins(t *testing.T) {
+	local := recordAt("record", time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC), nil)
+	remote := recordAt("record", time.Date(2026, 3, 8, 9, 59, 59, 0, time.UTC), nil)
 
-	got, err := ResolveSlideWinner(&local, &remote)
+	got, err := ResolveRecordWinner(&local, &remote)
 	if err != nil {
-		t.Fatalf("ResolveSlideWinner() error = %v", err)
+		t.Fatalf("ResolveRecordWinner() error = %v", err)
 	}
 	if got != OutcomeLocal {
-		t.Fatalf("ResolveSlideWinner() = %q, want %q", got, OutcomeLocal)
+		t.Fatalf("ResolveRecordWinner() = %q, want %q", got, OutcomeLocal)
 	}
 }
 
-func TestResolveSlideWinnerLaterDeleteWins(t *testing.T) {
+func TestResolveRecordWinnerLaterDeleteWins(t *testing.T) {
 	remoteDeleteAt := time.Date(2026, 3, 8, 10, 1, 0, 0, time.UTC)
-	local := slideAt("slide", time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC), nil)
-	remote := slideAt("slide", time.Date(2026, 3, 8, 9, 59, 0, 0, time.UTC), &remoteDeleteAt)
+	local := recordAt("record", time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC), nil)
+	remote := recordAt("record", time.Date(2026, 3, 8, 9, 59, 0, 0, time.UTC), &remoteDeleteAt)
 
-	got, err := ResolveSlideWinner(&local, &remote)
+	got, err := ResolveRecordWinner(&local, &remote)
 	if err != nil {
-		t.Fatalf("ResolveSlideWinner() error = %v", err)
+		t.Fatalf("ResolveRecordWinner() error = %v", err)
 	}
 	if got != OutcomeRemote {
-		t.Fatalf("ResolveSlideWinner() = %q, want %q", got, OutcomeRemote)
+		t.Fatalf("ResolveRecordWinner() = %q, want %q", got, OutcomeRemote)
 	}
 }
 
-func TestResolveSlideWinnerTimestampTieEditBeatsDelete(t *testing.T) {
+func TestResolveRecordWinnerTimestampTieEditBeatsDelete(t *testing.T) {
 	tie := time.Date(2026, 3, 8, 10, 0, 0, 123000000, time.UTC)
-	local := slideAt("slide", tie, nil)
-	remote := slideAt("slide", tie, &tie)
+	local := recordAt("record", tie, nil)
+	remote := recordAt("record", tie, &tie)
 
-	got, err := ResolveSlideWinner(&local, &remote)
+	got, err := ResolveRecordWinner(&local, &remote)
 	if err != nil {
-		t.Fatalf("ResolveSlideWinner() error = %v", err)
+		t.Fatalf("ResolveRecordWinner() error = %v", err)
 	}
 	if got != OutcomeLocal {
-		t.Fatalf("ResolveSlideWinner() = %q, want %q", got, OutcomeLocal)
+		t.Fatalf("ResolveRecordWinner() = %q, want %q", got, OutcomeLocal)
 	}
 }
 
-func TestResolveSlideWinnerEqualStateReturnsEqual(t *testing.T) {
+func TestResolveRecordWinnerEqualStateReturnsEqual(t *testing.T) {
 	updatedAt := time.Date(2026, 3, 8, 10, 0, 0, 123456789, time.UTC)
-	local := slideAt("slide", updatedAt, nil)
-	remote := slideAt("slide", updatedAt, nil)
+	local := recordAt("record", updatedAt, nil)
+	remote := recordAt("record", updatedAt, nil)
 
-	got, err := ResolveSlideWinner(&local, &remote)
+	got, err := ResolveRecordWinner(&local, &remote)
 	if err != nil {
-		t.Fatalf("ResolveSlideWinner() error = %v", err)
+		t.Fatalf("ResolveRecordWinner() error = %v", err)
 	}
 	if got != OutcomeEqual {
-		t.Fatalf("ResolveSlideWinner() = %q, want %q", got, OutcomeEqual)
+		t.Fatalf("ResolveRecordWinner() = %q, want %q", got, OutcomeEqual)
 	}
 }
 
-func TestFilterSlidesUpdatedSinceUsesInclusiveMillisecondComparison(t *testing.T) {
+func TestFilterRecordsUpdatedSinceUsesInclusiveMillisecondComparison(t *testing.T) {
 	since := time.Date(2026, 3, 8, 10, 0, 0, 123400000, time.UTC)
-	slides := []repository.Slide{
-		slideAt("before", time.Date(2026, 3, 8, 10, 0, 0, 122999999, time.UTC), nil),
-		slideAt("equal-ms", time.Date(2026, 3, 8, 10, 0, 0, 123999999, time.UTC), nil),
-		slideAt("after", time.Date(2026, 3, 8, 10, 0, 0, 124000000, time.UTC), nil),
+	records := []repository.Record{
+		recordAt("before", time.Date(2026, 3, 8, 10, 0, 0, 122999999, time.UTC), nil),
+		recordAt("equal-ms", time.Date(2026, 3, 8, 10, 0, 0, 123999999, time.UTC), nil),
+		recordAt("after", time.Date(2026, 3, 8, 10, 0, 0, 124000000, time.UTC), nil),
 	}
 
-	filtered := FilterSlidesUpdatedSince(slides, since)
+	filtered := FilterRecordsUpdatedSince(records, since)
 	if len(filtered) != 2 {
-		t.Fatalf("len(FilterSlidesUpdatedSince()) = %d, want 2", len(filtered))
+		t.Fatalf("len(FilterRecordsUpdatedSince()) = %d, want 2", len(filtered))
 	}
 	if filtered[0].ID != "equal-ms" || filtered[1].ID != "after" {
-		t.Fatalf("FilterSlidesUpdatedSince() IDs = [%s %s], want [equal-ms after]", filtered[0].ID, filtered[1].ID)
+		t.Fatalf("FilterRecordsUpdatedSince() IDs = [%s %s], want [equal-ms after]", filtered[0].ID, filtered[1].ID)
 	}
 }
 
-func TestFilterSlidesUpdatedSinceRestoreRemainsVisible(t *testing.T) {
+func TestFilterRecordsUpdatedSinceRestoreRemainsVisible(t *testing.T) {
 	restoreAt := time.Date(2026, 3, 8, 11, 0, 0, 0, time.UTC)
 	deleteAt := time.Date(2026, 3, 8, 10, 30, 0, 0, time.UTC)
-	slide := slideAt("restored", restoreAt, &deleteAt)
-	slide.DeletedAt = nil
+	record := recordAt("restored", restoreAt, &deleteAt)
+	record.DeletedAt = nil
 
-	filtered := FilterSlidesUpdatedSince([]repository.Slide{slide}, time.Date(2026, 3, 8, 10, 59, 59, 0, time.UTC))
+	filtered := FilterRecordsUpdatedSince([]repository.Record{record}, time.Date(2026, 3, 8, 10, 59, 59, 0, time.UTC))
 	if len(filtered) != 1 || filtered[0].ID != "restored" {
-		t.Fatalf("FilterSlidesUpdatedSince() = %#v, want restored slide", filtered)
+		t.Fatalf("FilterRecordsUpdatedSince() = %#v, want restored record", filtered)
 	}
 }
 
 func TestFigureMapByFilenameRejectsDuplicates(t *testing.T) {
-	figures := []repository.SlideFigure{
+	figures := []repository.RecordFigure{
 		{Filename: "plot.png"},
 		{Filename: "plot.png"},
 	}
@@ -127,7 +127,7 @@ func TestFigureMapByFilenameRejectsDuplicates(t *testing.T) {
 }
 
 func TestDataFileMapByFilenameRejectsDuplicates(t *testing.T) {
-	files := []repository.SlideDataFile{
+	files := []repository.RecordDataFile{
 		{Filename: "metrics.csv"},
 		{Filename: "metrics.csv"},
 	}
@@ -137,127 +137,127 @@ func TestDataFileMapByFilenameRejectsDuplicates(t *testing.T) {
 	}
 }
 
-func TestResolveSlideWinnerBothNilReturnsError(t *testing.T) {
-	_, err := ResolveSlideWinner(nil, nil)
+func TestResolveRecordWinnerBothNilReturnsError(t *testing.T) {
+	_, err := ResolveRecordWinner(nil, nil)
 	if err == nil {
-		t.Fatal("ResolveSlideWinner(nil, nil) error = nil, want validation failure")
+		t.Fatal("ResolveRecordWinner(nil, nil) error = nil, want validation failure")
 	}
 }
 
-func TestResolveSlideWinnerDeletedTiebreaker(t *testing.T) {
+func TestResolveRecordWinnerDeletedTiebreaker(t *testing.T) {
 	// Same effective timestamp; local is deleted, remote is active -> remote wins (active wins).
 	// To hit lines 38-42 (localAction.deleted != remoteAction.deleted), one side's
-	// deletedAt must be AFTER its updatedAt so latestSlideAction returns deleted=true.
+	// deletedAt must be AFTER its updatedAt so latestRecordAction returns deleted=true.
 	tie := time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC)
 	laterDelete := tie.Add(time.Millisecond)
-	localDeleted := slideAt("slide", tie, &laterDelete)
-	// latestSlideAction for localDeleted: deletedAt (tie+1ms) > updatedAt (tie), so
+	localDeleted := recordAt("record", tie, &laterDelete)
+	// latestRecordAction for localDeleted: deletedAt (tie+1ms) > updatedAt (tie), so
 	// returns {when: tie+1ms, deleted: true, active: false}.
 
-	// Remote active: latestSlideAction returns {when: tie+1ms, deleted: false, active: true}.
+	// Remote active: latestRecordAction returns {when: tie+1ms, deleted: false, active: true}.
 	// We need remote to also have when == tie+1ms. Set remote updatedAt = tie+1ms.
-	remoteActive := slideAt("slide", laterDelete, nil)
+	remoteActive := recordAt("record", laterDelete, nil)
 
 	// Now both have when = tie+1ms. local deleted, remote not -> lines 38-42.
 	// !localAction.deleted is false, so return OutcomeRemote.
-	got, err := ResolveSlideWinner(&localDeleted, &remoteActive)
+	got, err := ResolveRecordWinner(&localDeleted, &remoteActive)
 	if err != nil {
-		t.Fatalf("ResolveSlideWinner() error = %v", err)
+		t.Fatalf("ResolveRecordWinner() error = %v", err)
 	}
 	if got != OutcomeRemote {
-		t.Fatalf("ResolveSlideWinner() = %q, want %q (active beats deleted at same timestamp)", got, OutcomeRemote)
+		t.Fatalf("ResolveRecordWinner() = %q, want %q (active beats deleted at same timestamp)", got, OutcomeRemote)
 	}
 }
 
-func TestResolveSlideWinnerDeletedTiebreakerLocalActive(t *testing.T) {
+func TestResolveRecordWinnerDeletedTiebreakerLocalActive(t *testing.T) {
 	// Same effective timestamp; remote is deleted, local is active -> local wins.
 	tie := time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC)
 	laterDelete := tie.Add(time.Millisecond)
 
-	localActive := slideAt("slide", laterDelete, nil)
-	remoteDeleted := slideAt("slide", tie, &laterDelete)
+	localActive := recordAt("record", laterDelete, nil)
+	remoteDeleted := recordAt("record", tie, &laterDelete)
 
-	got, err := ResolveSlideWinner(&localActive, &remoteDeleted)
+	got, err := ResolveRecordWinner(&localActive, &remoteDeleted)
 	if err != nil {
-		t.Fatalf("ResolveSlideWinner() error = %v", err)
+		t.Fatalf("ResolveRecordWinner() error = %v", err)
 	}
 	if got != OutcomeLocal {
-		t.Fatalf("ResolveSlideWinner() = %q, want %q (active beats deleted at same timestamp)", got, OutcomeLocal)
+		t.Fatalf("ResolveRecordWinner() = %q, want %q (active beats deleted at same timestamp)", got, OutcomeLocal)
 	}
 }
 
-func TestResolveSlideWinnerMoreActiveLocalTiebreaker(t *testing.T) {
+func TestResolveRecordWinnerMoreActiveLocalTiebreaker(t *testing.T) {
 	// Same effective timestamp, same deleted state, but local is "more active"
 	// (local has nil DeletedAt, remote has non-nil DeletedAt even though action is not deleted).
-	// This hits lines 43-46: slideIsMoreActive.
+	// This hits lines 43-46: recordIsMoreActive.
 	tie := time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC)
 
-	// Local: updatedAt = tie, no DeletedAt -> latestSlideAction: {when: tie, deleted: false, active: true}
-	local := slideAt("slide", tie, nil)
+	// Local: updatedAt = tie, no DeletedAt -> latestRecordAction: {when: tie, deleted: false, active: true}
+	local := recordAt("record", tie, nil)
 
 	// Remote: updatedAt = tie, DeletedAt = some time BEFORE updatedAt
-	// latestSlideAction: DeletedAt != nil, but deletedAt.After(updatedAt) is false,
+	// latestRecordAction: DeletedAt != nil, but deletedAt.After(updatedAt) is false,
 	// so returns {when: tie, deleted: false, active: true} — same deleted/active state.
-	// But slideIsMoreActive(local, remote) checks left.DeletedAt==nil && right.DeletedAt!=nil.
+	// But recordIsMoreActive(local, remote) checks left.DeletedAt==nil && right.DeletedAt!=nil.
 	earlyDelete := tie.Add(-time.Hour)
-	remote := slideAt("slide", tie, &earlyDelete)
+	remote := recordAt("record", tie, &earlyDelete)
 
-	got, err := ResolveSlideWinner(&local, &remote)
+	got, err := ResolveRecordWinner(&local, &remote)
 	if err != nil {
-		t.Fatalf("ResolveSlideWinner() error = %v", err)
+		t.Fatalf("ResolveRecordWinner() error = %v", err)
 	}
 	if got != OutcomeLocal {
-		t.Fatalf("ResolveSlideWinner() = %q, want %q (local more active)", got, OutcomeLocal)
+		t.Fatalf("ResolveRecordWinner() = %q, want %q (local more active)", got, OutcomeLocal)
 	}
 }
 
-func TestResolveSlideWinnerMoreActiveRemoteTiebreaker(t *testing.T) {
+func TestResolveRecordWinnerMoreActiveRemoteTiebreaker(t *testing.T) {
 	// Mirror: remote is "more active" than local.
 	tie := time.Date(2026, 3, 8, 10, 0, 0, 0, time.UTC)
 	earlyDelete := tie.Add(-time.Hour)
 
-	local := slideAt("slide", tie, &earlyDelete)
-	remote := slideAt("slide", tie, nil)
+	local := recordAt("record", tie, &earlyDelete)
+	remote := recordAt("record", tie, nil)
 
-	got, err := ResolveSlideWinner(&local, &remote)
+	got, err := ResolveRecordWinner(&local, &remote)
 	if err != nil {
-		t.Fatalf("ResolveSlideWinner() error = %v", err)
+		t.Fatalf("ResolveRecordWinner() error = %v", err)
 	}
 	if got != OutcomeRemote {
-		t.Fatalf("ResolveSlideWinner() = %q, want %q (remote more active)", got, OutcomeRemote)
+		t.Fatalf("ResolveRecordWinner() = %q, want %q (remote more active)", got, OutcomeRemote)
 	}
 }
 
-func TestFilterSlidesUpdatedSinceZeroSinceReturnsCopy(t *testing.T) {
-	slides := []repository.Slide{
-		slideAt("a", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil),
-		slideAt("b", time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC), nil),
+func TestFilterRecordsUpdatedSinceZeroSinceReturnsCopy(t *testing.T) {
+	records := []repository.Record{
+		recordAt("a", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), nil),
+		recordAt("b", time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC), nil),
 	}
 
-	filtered := FilterSlidesUpdatedSince(slides, time.Time{})
+	filtered := FilterRecordsUpdatedSince(records, time.Time{})
 	if len(filtered) != 2 {
-		t.Fatalf("len(FilterSlidesUpdatedSince()) = %d, want 2", len(filtered))
+		t.Fatalf("len(FilterRecordsUpdatedSince()) = %d, want 2", len(filtered))
 	}
 	if filtered[0].ID != "a" || filtered[1].ID != "b" {
-		t.Fatalf("FilterSlidesUpdatedSince() IDs = [%s %s], want [a b]", filtered[0].ID, filtered[1].ID)
+		t.Fatalf("FilterRecordsUpdatedSince() IDs = [%s %s], want [a b]", filtered[0].ID, filtered[1].ID)
 	}
 
 	// Verify it's a copy, not the same slice.
 	filtered[0].ID = "modified"
-	if slides[0].ID == "modified" {
-		t.Fatal("FilterSlidesUpdatedSince() returned the same slice, not a copy")
+	if records[0].ID == "modified" {
+		t.Fatal("FilterRecordsUpdatedSince() returned the same slice, not a copy")
 	}
 }
 
-func TestFilterSlidesUpdatedSinceEmptySlice(t *testing.T) {
-	filtered := FilterSlidesUpdatedSince(nil, time.Now())
+func TestFilterRecordsUpdatedSinceEmptySlice(t *testing.T) {
+	filtered := FilterRecordsUpdatedSince(nil, time.Now())
 	if len(filtered) != 0 {
-		t.Fatalf("len(FilterSlidesUpdatedSince(nil)) = %d, want 0", len(filtered))
+		t.Fatalf("len(FilterRecordsUpdatedSince(nil)) = %d, want 0", len(filtered))
 	}
 }
 
 func TestFigureMapByFilenameHappyPath(t *testing.T) {
-	figures := []repository.SlideFigure{
+	figures := []repository.RecordFigure{
 		{Filename: "plot.png", S3Key: "s3://bucket/plot.png"},
 		{Filename: "chart.svg", S3Key: "s3://bucket/chart.svg"},
 	}
@@ -288,7 +288,7 @@ func TestFigureMapByFilenameNilSlice(t *testing.T) {
 }
 
 func TestDataFileMapByFilenameHappyPath(t *testing.T) {
-	files := []repository.SlideDataFile{
+	files := []repository.RecordDataFile{
 		{Filename: "metrics.csv", S3Key: "s3://bucket/metrics.csv"},
 		{Filename: "data.json", S3Key: "s3://bucket/data.json"},
 	}
@@ -315,8 +315,8 @@ func TestDataFileMapByFilenameNilSlice(t *testing.T) {
 	}
 }
 
-func slideAt(id string, updatedAt time.Time, deletedAt *time.Time) repository.Slide {
-	return repository.Slide{
+func recordAt(id string, updatedAt time.Time, deletedAt *time.Time) repository.Record {
+	return repository.Record{
 		ID:        id,
 		UpdatedAt: updatedAt,
 		DeletedAt: deletedAt,

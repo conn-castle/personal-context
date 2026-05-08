@@ -8,29 +8,29 @@ import (
 	"path/filepath"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
-	"github.com/conn-castle/personal-context/cli/internal/slideio"
+	"github.com/conn-castle/personal-context/cli/internal/recordio"
 )
 
 type editExistingAssets struct {
-	Figures            []repository.SlideFigure
-	DataFiles          []repository.SlideDataFile
-	FigureByFilename   map[string]repository.SlideFigure
-	DataFileByFilename map[string]repository.SlideDataFile
+	Figures            []repository.RecordFigure
+	DataFiles          []repository.RecordDataFile
+	FigureByFilename   map[string]repository.RecordFigure
+	DataFileByFilename map[string]repository.RecordDataFile
 }
 
 type stagedEditInput struct {
-	Figures   []repository.CreateSlideFigureInput
-	DataFiles []repository.CreateSlideDataFileInput
+	Figures   []repository.CreateRecordFigureInput
+	DataFiles []repository.CreateRecordDataFileInput
 }
 
 type editMutationState struct {
-	slideUpdated       bool
+	recordUpdated       bool
 	createdFigureIDs   []int64
-	updatedFigures     []repository.SlideFigure
-	deletedFigures     []repository.SlideFigure
+	updatedFigures     []repository.RecordFigure
+	deletedFigures     []repository.RecordFigure
 	createdDataFileIDs []int64
-	updatedDataFiles   []repository.SlideDataFile
-	deletedDataFiles   []repository.SlideDataFile
+	updatedDataFiles   []repository.RecordDataFile
+	deletedDataFiles   []repository.RecordDataFile
 	stagedFiles        []stagedReplacementFile
 	committedFiles     []committedReplacementFile
 }
@@ -46,13 +46,13 @@ type committedReplacementFile struct {
 }
 
 // loadExistingEditAssets gathers the current figure and data-file rows for a
-// slide, plus filename indexes used during reconciliation.
+// record, plus filename indexes used during reconciliation.
 func loadExistingEditAssets(ctx context.Context, repo repository.Repository, id string) (editExistingAssets, error) {
-	figures, err := repo.ListSlideFiguresBySlideID(ctx, id)
+	figures, err := repo.ListRecordFiguresByRecordID(ctx, id)
 	if err != nil {
 		return editExistingAssets{}, fmt.Errorf("list old figures: %w", err)
 	}
-	dataFiles, err := repo.ListSlideDataFilesBySlideID(ctx, id)
+	dataFiles, err := repo.ListRecordDataFilesByRecordID(ctx, id)
 	if err != nil {
 		return editExistingAssets{}, fmt.Errorf("list old data files: %w", err)
 	}
@@ -60,8 +60,8 @@ func loadExistingEditAssets(ctx context.Context, repo repository.Repository, id 
 	existingAssets := editExistingAssets{
 		Figures:            figures,
 		DataFiles:          dataFiles,
-		FigureByFilename:   make(map[string]repository.SlideFigure, len(figures)),
-		DataFileByFilename: make(map[string]repository.SlideDataFile, len(dataFiles)),
+		FigureByFilename:   make(map[string]repository.RecordFigure, len(figures)),
+		DataFileByFilename: make(map[string]repository.RecordDataFile, len(dataFiles)),
 	}
 	for _, figure := range figures {
 		existingAssets.FigureByFilename[figure.Filename] = figure
@@ -74,10 +74,10 @@ func loadExistingEditAssets(ctx context.Context, repo repository.Repository, id 
 
 // stageEditInputFiles copies incoming assets into temporary files and builds
 // the repository payloads that point at their canonical destinations.
-func stageEditInputFiles(id string, input slideio.SlideInput, stack *localStack, mutations *editMutationState) (stagedEditInput, error) {
+func stageEditInputFiles(id string, input recordio.RecordInput, stack *localStack, mutations *editMutationState) (stagedEditInput, error) {
 	staged := stagedEditInput{
-		Figures:   make([]repository.CreateSlideFigureInput, 0, len(input.Figures)),
-		DataFiles: make([]repository.CreateSlideDataFileInput, 0, len(input.DataFiles)),
+		Figures:   make([]repository.CreateRecordFigureInput, 0, len(input.Figures)),
+		DataFiles: make([]repository.CreateRecordDataFileInput, 0, len(input.DataFiles)),
 	}
 
 	for _, figurePath := range input.Figures {
@@ -94,8 +94,8 @@ func stageEditInputFiles(id string, input slideio.SlideInput, stack *localStack,
 			TempPath:  tempPath,
 			FinalPath: finalPath,
 		})
-		staged.Figures = append(staged.Figures, repository.CreateSlideFigureInput{
-			SlideID:  id,
+		staged.Figures = append(staged.Figures, repository.CreateRecordFigureInput{
+			RecordID:  id,
 			Filename: filename,
 			S3Key:    filepath.ToSlash(filepath.Join("figures", id, filename)),
 		})
@@ -115,12 +115,12 @@ func stageEditInputFiles(id string, input slideio.SlideInput, stack *localStack,
 			TempPath:  tempPath,
 			FinalPath: finalPath,
 		})
-		hash, err := slideio.HashFile(dataPath)
+		hash, err := recordio.HashFile(dataPath)
 		if err != nil {
 			return stagedEditInput{}, fmt.Errorf("hash data file %s: %w", filename, err)
 		}
-		staged.DataFiles = append(staged.DataFiles, repository.CreateSlideDataFileInput{
-			SlideID:  id,
+		staged.DataFiles = append(staged.DataFiles, repository.CreateRecordDataFileInput{
+			RecordID:  id,
 			Filename: filename,
 			S3Key:    filepath.ToSlash(filepath.Join("data", id, filename)),
 			Size:     size,
@@ -136,15 +136,15 @@ func stageEditInputFiles(id string, input slideio.SlideInput, stack *localStack,
 func upsertEditFigureRecords(
 	ctx context.Context,
 	repo repository.Repository,
-	figures []repository.CreateSlideFigureInput,
-	existingByFilename map[string]repository.SlideFigure,
+	figures []repository.CreateRecordFigureInput,
+	existingByFilename map[string]repository.RecordFigure,
 	mutations *editMutationState,
 ) (map[string]struct{}, error) {
 	newFigureNames := make(map[string]struct{}, len(figures))
 	for _, figure := range figures {
 		newFigureNames[figure.Filename] = struct{}{}
 		if oldFigure, exists := existingByFilename[figure.Filename]; exists {
-			if _, err := repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{
+			if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{
 				ID:       oldFigure.ID,
 				Filename: figure.Filename,
 				S3Key:    figure.S3Key,
@@ -155,7 +155,7 @@ func upsertEditFigureRecords(
 			continue
 		}
 
-		createdFigure, err := repo.CreateSlideFigure(ctx, figure)
+		createdFigure, err := repo.CreateRecordFigure(ctx, figure)
 		if err != nil {
 			return nil, fmt.Errorf("create figure record %s: %w", figure.Filename, err)
 		}
@@ -170,8 +170,8 @@ func upsertEditFigureRecords(
 func upsertEditDataFileRecords(
 	ctx context.Context,
 	repo repository.Repository,
-	dataFiles []repository.CreateSlideDataFileInput,
-	existingByFilename map[string]repository.SlideDataFile,
+	dataFiles []repository.CreateRecordDataFileInput,
+	existingByFilename map[string]repository.RecordDataFile,
 	mutations *editMutationState,
 ) (map[string]struct{}, error) {
 	newDataFileNames := make(map[string]struct{}, len(dataFiles))
@@ -180,7 +180,7 @@ func upsertEditDataFileRecords(
 		if oldDataFile, exists := existingByFilename[dataFile.Filename]; exists {
 			size := dataFile.Size
 			hash := dataFile.Hash
-			if _, err := repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+			if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{
 				ID:       oldDataFile.ID,
 				Filename: dataFile.Filename,
 				S3Key:    dataFile.S3Key,
@@ -193,7 +193,7 @@ func upsertEditDataFileRecords(
 			continue
 		}
 
-		createdDataFile, err := repo.CreateSlideDataFile(ctx, dataFile)
+		createdDataFile, err := repo.CreateRecordDataFile(ctx, dataFile)
 		if err != nil {
 			return nil, fmt.Errorf("create data file record %s: %w", dataFile.Filename, err)
 		}
@@ -207,7 +207,7 @@ func upsertEditDataFileRecords(
 func deleteRemovedEditFigures(
 	ctx context.Context,
 	repo repository.Repository,
-	figures []repository.SlideFigure,
+	figures []repository.RecordFigure,
 	newFigureNames map[string]struct{},
 	mutations *editMutationState,
 ) ([]string, error) {
@@ -216,7 +216,7 @@ func deleteRemovedEditFigures(
 		if _, stillPresent := newFigureNames[oldFigure.Filename]; stillPresent {
 			continue
 		}
-		if err := repo.DeleteSlideFigure(ctx, oldFigure.ID); err != nil {
+		if err := repo.DeleteRecordFigure(ctx, oldFigure.ID); err != nil {
 			return nil, fmt.Errorf("delete old figure record %s: %w", oldFigure.Filename, err)
 		}
 		mutations.deletedFigures = append(mutations.deletedFigures, oldFigure)
@@ -230,7 +230,7 @@ func deleteRemovedEditFigures(
 func deleteRemovedEditDataFiles(
 	ctx context.Context,
 	repo repository.Repository,
-	dataFiles []repository.SlideDataFile,
+	dataFiles []repository.RecordDataFile,
 	newDataFileNames map[string]struct{},
 	mutations *editMutationState,
 ) ([]string, error) {
@@ -239,7 +239,7 @@ func deleteRemovedEditDataFiles(
 		if _, stillPresent := newDataFileNames[oldDataFile.Filename]; stillPresent {
 			continue
 		}
-		if err := repo.DeleteSlideDataFile(ctx, oldDataFile.ID); err != nil {
+		if err := repo.DeleteRecordDataFile(ctx, oldDataFile.ID); err != nil {
 			return nil, fmt.Errorf("delete old data file record %s: %w", oldDataFile.Filename, err)
 		}
 		mutations.deletedDataFiles = append(mutations.deletedDataFiles, oldDataFile)
@@ -299,14 +299,14 @@ func (s *editMutationState) finalizeCommittedFiles(success bool) {
 	}
 }
 
-// rollbackRepository restores slide and child-row state after a failed edit.
-func (s *editMutationState) rollbackRepository(ctx context.Context, repo repository.Repository, existing repository.Slide) {
+// rollbackRepository restores record and child-row state after a failed edit.
+func (s *editMutationState) rollbackRepository(ctx context.Context, repo repository.Repository, existing repository.Record) {
 	if s.hasChildRowMutations() {
 		for _, createdID := range s.createdFigureIDs {
-			_ = repo.DeleteSlideFigure(ctx, createdID)
+			_ = repo.DeleteRecordFigure(ctx, createdID)
 		}
 		for _, oldFigure := range s.updatedFigures {
-			_, _ = repo.UpdateSlideFigure(ctx, repository.UpdateSlideFigureInput{
+			_, _ = repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{
 				ID:       oldFigure.ID,
 				Filename: oldFigure.Filename,
 				S3Key:    oldFigure.S3Key,
@@ -314,20 +314,20 @@ func (s *editMutationState) rollbackRepository(ctx context.Context, repo reposit
 			})
 		}
 		for _, oldFigure := range s.deletedFigures {
-			_, _ = repo.CreateSlideFigure(ctx, repository.CreateSlideFigureInput{
-				SlideID:  oldFigure.SlideID,
+			_, _ = repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+				RecordID:  oldFigure.RecordID,
 				Filename: oldFigure.Filename,
 				S3Key:    oldFigure.S3Key,
 				AltText:  oldFigure.AltText,
 			})
 		}
 		for _, createdID := range s.createdDataFileIDs {
-			_ = repo.DeleteSlideDataFile(ctx, createdID)
+			_ = repo.DeleteRecordDataFile(ctx, createdID)
 		}
 		for _, oldDataFile := range s.updatedDataFiles {
 			size := oldDataFile.Size
 			hash := oldDataFile.Hash
-			_, _ = repo.UpdateSlideDataFile(ctx, repository.UpdateSlideDataFileInput{
+			_, _ = repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{
 				ID:          oldDataFile.ID,
 				Filename:    oldDataFile.Filename,
 				S3Key:       oldDataFile.S3Key,
@@ -337,8 +337,8 @@ func (s *editMutationState) rollbackRepository(ctx context.Context, repo reposit
 			})
 		}
 		for _, oldDataFile := range s.deletedDataFiles {
-			_, _ = repo.CreateSlideDataFile(ctx, repository.CreateSlideDataFileInput{
-				SlideID:     oldDataFile.SlideID,
+			_, _ = repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+				RecordID:     oldDataFile.RecordID,
 				Filename:    oldDataFile.Filename,
 				S3Key:       oldDataFile.S3Key,
 				Size:        oldDataFile.Size,
@@ -348,10 +348,10 @@ func (s *editMutationState) rollbackRepository(ctx context.Context, repo reposit
 		}
 	}
 
-	if !s.slideUpdated {
+	if !s.recordUpdated {
 		return
 	}
-	_, _ = repo.UpdateSlide(ctx, repository.UpdateSlideInput{
+	_, _ = repo.UpdateRecord(ctx, repository.UpdateRecordInput{
 		ID:             existing.ID,
 		Date:           existing.Date,
 		DayOrder:       existing.DayOrder,

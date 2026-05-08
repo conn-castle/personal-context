@@ -20,8 +20,8 @@ func TestResolveBundleLocalWinsWhenUpdatedLater(t *testing.T) {
 	if winner != WinnerLocal {
 		t.Fatalf("winner = %q, want %q", winner, WinnerLocal)
 	}
-	if got.Slide.UpdatedAt != local.Slide.UpdatedAt {
-		t.Fatalf("unexpected winner bundle: %+v", got.Slide)
+	if got.Record.UpdatedAt != local.Record.UpdatedAt {
+		t.Fatalf("unexpected winner bundle: %+v", got.Record)
 	}
 }
 
@@ -38,8 +38,8 @@ func TestResolveBundleCloudWinsWhenUpdatedLater(t *testing.T) {
 	if winner != WinnerCloud {
 		t.Fatalf("winner = %q, want %q", winner, WinnerCloud)
 	}
-	if got.Slide.UpdatedAt != cloud.Slide.UpdatedAt {
-		t.Fatalf("unexpected winner bundle: %+v", got.Slide)
+	if got.Record.UpdatedAt != cloud.Record.UpdatedAt {
+		t.Fatalf("unexpected winner bundle: %+v", got.Record)
 	}
 }
 
@@ -57,8 +57,8 @@ func TestResolveBundleDeleteWinsWhenDeletedAfterEdit(t *testing.T) {
 	if winner != WinnerCloud {
 		t.Fatalf("winner = %q, want %q", winner, WinnerCloud)
 	}
-	if got.Slide.DeletedAt == nil || !got.Slide.DeletedAt.Equal(deletedAt) {
-		t.Fatalf("expected deleted bundle to win, got %+v", got.Slide)
+	if got.Record.DeletedAt == nil || !got.Record.DeletedAt.Equal(deletedAt) {
+		t.Fatalf("expected deleted bundle to win, got %+v", got.Record)
 	}
 }
 
@@ -75,8 +75,8 @@ func TestResolveBundleEditWinsOnDeleteTie(t *testing.T) {
 	if winner != WinnerLocal {
 		t.Fatalf("winner = %q, want %q", winner, WinnerLocal)
 	}
-	if got.Slide.DeletedAt != nil {
-		t.Fatalf("expected edit to win tie, got deleted bundle %+v", got.Slide)
+	if got.Record.DeletedAt != nil {
+		t.Fatalf("expected edit to win tie, got deleted bundle %+v", got.Record)
 	}
 }
 
@@ -85,7 +85,7 @@ func TestResolveBundleExactEditTieReturnsNone(t *testing.T) {
 
 	local := newBundle("20260308-a1b2c3d4", base, nil)
 	cloud := newBundle("20260308-a1b2c3d4", base, nil)
-	cloud.Slide.HTMLContent = strPtr("<h1>cloud</h1>")
+	cloud.Record.HTMLContent = strPtr("<h1>cloud</h1>")
 
 	_, winner, err := ResolveBundle(local, cloud)
 	if err != nil {
@@ -109,16 +109,16 @@ func TestResolveBundleRejectsMismatchedIDs(t *testing.T) {
 func TestPlanFigureReconciliationMatchesByFilename(t *testing.T) {
 	plan, err := PlanFigureReconciliation(
 		"20260308-a1b2c3d4",
-		[]repository.SlideFigure{{
+		[]repository.RecordFigure{{
 			ID:       1,
-			SlideID:  "20260308-a1b2c3d4",
+			RecordID:  "20260308-a1b2c3d4",
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 			AltText:  strPtr("before"),
 		}},
-		[]repository.SlideFigure{{
+		[]repository.RecordFigure{{
 			ID:       99,
-			SlideID:  "20260308-a1b2c3d4",
+			RecordID:  "20260308-a1b2c3d4",
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-a1b2c3d4/plot-v2.png",
 			AltText:  strPtr("after"),
@@ -144,9 +144,9 @@ func TestPlanFigureReconciliationMatchesByFilename(t *testing.T) {
 func TestPlanFigureReconciliationDeletesMissingRows(t *testing.T) {
 	plan, err := PlanFigureReconciliation(
 		"20260308-a1b2c3d4",
-		[]repository.SlideFigure{{
+		[]repository.RecordFigure{{
 			ID:       1,
-			SlideID:  "20260308-a1b2c3d4",
+			RecordID:  "20260308-a1b2c3d4",
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 		}},
@@ -163,18 +163,18 @@ func TestPlanFigureReconciliationDeletesMissingRows(t *testing.T) {
 func TestPlanDataFileReconciliationMatchesByFilename(t *testing.T) {
 	plan, err := PlanDataFileReconciliation(
 		"20260308-a1b2c3d4",
-		[]repository.SlideDataFile{{
+		[]repository.RecordDataFile{{
 			ID:          7,
-			SlideID:     "20260308-a1b2c3d4",
+			RecordID:     "20260308-a1b2c3d4",
 			Filename:    "metrics.csv",
 			S3Key:       "data/20260308-a1b2c3d4/metrics.csv",
 			Size:        10,
 			Hash:        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 			Description: strPtr("before"),
 		}},
-		[]repository.SlideDataFile{{
+		[]repository.RecordDataFile{{
 			ID:          42,
-			SlideID:     "20260308-a1b2c3d4",
+			RecordID:     "20260308-a1b2c3d4",
 			Filename:    "metrics.csv",
 			S3Key:       "data/20260308-a1b2c3d4/metrics-v2.csv",
 			Size:        12,
@@ -203,7 +203,7 @@ func TestPlanDataFileReconciliationCreatesNewRows(t *testing.T) {
 	plan, err := PlanDataFileReconciliation(
 		"20260308-a1b2c3d4",
 		nil,
-		[]repository.SlideDataFile{{
+		[]repository.RecordDataFile{{
 			Filename: "metrics.csv",
 			S3Key:    "data/20260308-a1b2c3d4/metrics.csv",
 			Size:     10,
@@ -216,64 +216,64 @@ func TestPlanDataFileReconciliationCreatesNewRows(t *testing.T) {
 	if len(plan.Creates) != 1 {
 		t.Fatalf("expected one create, got %+v", plan.Creates)
 	}
-	if plan.Creates[0].SlideID != "20260308-a1b2c3d4" {
-		t.Fatalf("expected create to target slide, got %+v", plan.Creates[0])
+	if plan.Creates[0].RecordID != "20260308-a1b2c3d4" {
+		t.Fatalf("expected create to target record, got %+v", plan.Creates[0])
 	}
 }
 
-func TestResolveBundleErrorsOnEmptyLocalSlideID(t *testing.T) {
+func TestResolveBundleErrorsOnEmptyLocalRecordID(t *testing.T) {
 	base := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
 	local := newBundle("", base, nil)
 	cloud := newBundle("20260308-a1b2c3d4", base, nil)
 
 	_, _, err := ResolveBundle(local, cloud)
 	if err == nil {
-		t.Fatal("expected error for empty local slide id")
+		t.Fatal("expected error for empty local record id")
 	}
-	if got := err.Error(); got != "local slide id is required" {
-		t.Fatalf("error = %q, want 'local slide id is required'", got)
+	if got := err.Error(); got != "local record id is required" {
+		t.Fatalf("error = %q, want 'local record id is required'", got)
 	}
 }
 
-func TestResolveBundleErrorsOnEmptyCloudSlideID(t *testing.T) {
+func TestResolveBundleErrorsOnEmptyCloudRecordID(t *testing.T) {
 	base := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
 	local := newBundle("20260308-a1b2c3d4", base, nil)
 	cloud := newBundle("", base, nil)
 
 	_, _, err := ResolveBundle(local, cloud)
 	if err == nil {
-		t.Fatal("expected error for empty cloud slide id")
+		t.Fatal("expected error for empty cloud record id")
 	}
-	if got := err.Error(); got != "cloud slide id is required" {
-		t.Fatalf("error = %q, want 'cloud slide id is required'", got)
+	if got := err.Error(); got != "cloud record id is required" {
+		t.Fatalf("error = %q, want 'cloud record id is required'", got)
 	}
 }
 
-func TestResolveBundleErrorsOnWhitespaceOnlySlideID(t *testing.T) {
+func TestResolveBundleErrorsOnWhitespaceOnlyRecordID(t *testing.T) {
 	base := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
 	local := newBundle("   ", base, nil)
 	cloud := newBundle("20260308-a1b2c3d4", base, nil)
 
 	_, _, err := ResolveBundle(local, cloud)
 	if err == nil {
-		t.Fatal("expected error for whitespace-only local slide id")
+		t.Fatal("expected error for whitespace-only local record id")
 	}
 }
 
-func TestPlanFigureReconciliationErrorsOnEmptySlideID(t *testing.T) {
+func TestPlanFigureReconciliationErrorsOnEmptyRecordID(t *testing.T) {
 	_, err := PlanFigureReconciliation("", nil, nil)
 	if err == nil {
-		t.Fatal("expected error for empty slide id")
+		t.Fatal("expected error for empty record id")
 	}
-	if got := err.Error(); got != "slide id is required" {
-		t.Fatalf("error = %q, want 'slide id is required'", got)
+	if got := err.Error(); got != "record id is required" {
+		t.Fatalf("error = %q, want 'record id is required'", got)
 	}
 }
 
-func TestPlanFigureReconciliationErrorsOnWhitespaceSlideID(t *testing.T) {
+func TestPlanFigureReconciliationErrorsOnWhitespaceRecordID(t *testing.T) {
 	_, err := PlanFigureReconciliation("   ", nil, nil)
 	if err == nil {
-		t.Fatal("expected error for whitespace-only slide id")
+		t.Fatal("expected error for whitespace-only record id")
 	}
 }
 
@@ -281,7 +281,7 @@ func TestPlanFigureReconciliationErrorsOnEmptyDesiredFilename(t *testing.T) {
 	_, err := PlanFigureReconciliation(
 		"20260308-a1b2c3d4",
 		nil,
-		[]repository.SlideFigure{{
+		[]repository.RecordFigure{{
 			Filename: "",
 			S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 		}},
@@ -295,7 +295,7 @@ func TestPlanFigureReconciliationErrorsOnEmptyDesiredS3Key(t *testing.T) {
 	_, err := PlanFigureReconciliation(
 		"20260308-a1b2c3d4",
 		nil,
-		[]repository.SlideFigure{{
+		[]repository.RecordFigure{{
 			Filename: "plot.png",
 			S3Key:    "",
 		}},
@@ -309,8 +309,8 @@ func TestPlanFigureReconciliationCreatesNewFigures(t *testing.T) {
 	plan, err := PlanFigureReconciliation(
 		"20260308-a1b2c3d4",
 		nil,
-		[]repository.SlideFigure{{
-			SlideID:  "20260308-a1b2c3d4",
+		[]repository.RecordFigure{{
+			RecordID:  "20260308-a1b2c3d4",
 			Filename: "new.png",
 			S3Key:    "figures/20260308-a1b2c3d4/new.png",
 			AltText:  strPtr("a new figure"),
@@ -322,8 +322,8 @@ func TestPlanFigureReconciliationCreatesNewFigures(t *testing.T) {
 	if len(plan.Creates) != 1 {
 		t.Fatalf("expected one create, got %d", len(plan.Creates))
 	}
-	if plan.Creates[0].SlideID != "20260308-a1b2c3d4" {
-		t.Fatalf("create SlideID = %q, want %q", plan.Creates[0].SlideID, "20260308-a1b2c3d4")
+	if plan.Creates[0].RecordID != "20260308-a1b2c3d4" {
+		t.Fatalf("create RecordID = %q, want %q", plan.Creates[0].RecordID, "20260308-a1b2c3d4")
 	}
 	if plan.Creates[0].Filename != "new.png" {
 		t.Fatalf("create Filename = %q, want %q", plan.Creates[0].Filename, "new.png")
@@ -340,9 +340,9 @@ func TestPlanFigureReconciliationCreatesNewFigures(t *testing.T) {
 }
 
 func TestPlanFigureReconciliationExactMatchNoChanges(t *testing.T) {
-	figures := []repository.SlideFigure{{
+	figures := []repository.RecordFigure{{
 		ID:       1,
-		SlideID:  "20260308-a1b2c3d4",
+		RecordID:  "20260308-a1b2c3d4",
 		Filename: "plot.png",
 		S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 		AltText:  strPtr("same alt"),
@@ -363,9 +363,9 @@ func TestPlanFigureReconciliationExactMatchNoChanges(t *testing.T) {
 }
 
 func TestPlanFigureReconciliationExactMatchNilAltText(t *testing.T) {
-	figures := []repository.SlideFigure{{
+	figures := []repository.RecordFigure{{
 		ID:       1,
-		SlideID:  "20260308-a1b2c3d4",
+		RecordID:  "20260308-a1b2c3d4",
 		Filename: "plot.png",
 		S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 		AltText:  nil,
@@ -379,20 +379,20 @@ func TestPlanFigureReconciliationExactMatchNilAltText(t *testing.T) {
 	}
 }
 
-func TestPlanDataFileReconciliationErrorsOnEmptySlideID(t *testing.T) {
+func TestPlanDataFileReconciliationErrorsOnEmptyRecordID(t *testing.T) {
 	_, err := PlanDataFileReconciliation("", nil, nil)
 	if err == nil {
-		t.Fatal("expected error for empty slide id")
+		t.Fatal("expected error for empty record id")
 	}
-	if got := err.Error(); got != "slide id is required" {
-		t.Fatalf("error = %q, want 'slide id is required'", got)
+	if got := err.Error(); got != "record id is required" {
+		t.Fatalf("error = %q, want 'record id is required'", got)
 	}
 }
 
-func TestPlanDataFileReconciliationErrorsOnWhitespaceSlideID(t *testing.T) {
+func TestPlanDataFileReconciliationErrorsOnWhitespaceRecordID(t *testing.T) {
 	_, err := PlanDataFileReconciliation("  \t ", nil, nil)
 	if err == nil {
-		t.Fatal("expected error for whitespace-only slide id")
+		t.Fatal("expected error for whitespace-only record id")
 	}
 }
 
@@ -400,7 +400,7 @@ func TestPlanDataFileReconciliationErrorsOnEmptyDesiredFilename(t *testing.T) {
 	_, err := PlanDataFileReconciliation(
 		"20260308-a1b2c3d4",
 		nil,
-		[]repository.SlideDataFile{{
+		[]repository.RecordDataFile{{
 			Filename: "",
 			S3Key:    "data/20260308-a1b2c3d4/metrics.csv",
 			Hash:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -415,7 +415,7 @@ func TestPlanDataFileReconciliationErrorsOnEmptyDesiredS3Key(t *testing.T) {
 	_, err := PlanDataFileReconciliation(
 		"20260308-a1b2c3d4",
 		nil,
-		[]repository.SlideDataFile{{
+		[]repository.RecordDataFile{{
 			Filename: "metrics.csv",
 			S3Key:    "",
 			Hash:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -430,7 +430,7 @@ func TestPlanDataFileReconciliationErrorsOnEmptyDesiredHash(t *testing.T) {
 	_, err := PlanDataFileReconciliation(
 		"20260308-a1b2c3d4",
 		nil,
-		[]repository.SlideDataFile{{
+		[]repository.RecordDataFile{{
 			Filename: "metrics.csv",
 			S3Key:    "data/20260308-a1b2c3d4/metrics.csv",
 			Hash:     "",
@@ -444,9 +444,9 @@ func TestPlanDataFileReconciliationErrorsOnEmptyDesiredHash(t *testing.T) {
 func TestPlanDataFileReconciliationDeletesMissingRows(t *testing.T) {
 	plan, err := PlanDataFileReconciliation(
 		"20260308-a1b2c3d4",
-		[]repository.SlideDataFile{{
+		[]repository.RecordDataFile{{
 			ID:       5,
-			SlideID:  "20260308-a1b2c3d4",
+			RecordID:  "20260308-a1b2c3d4",
 			Filename: "old.csv",
 			S3Key:    "data/20260308-a1b2c3d4/old.csv",
 			Size:     10,
@@ -469,9 +469,9 @@ func TestPlanDataFileReconciliationDeletesMissingRows(t *testing.T) {
 }
 
 func TestPlanDataFileReconciliationExactMatchNoChanges(t *testing.T) {
-	dataFiles := []repository.SlideDataFile{{
+	dataFiles := []repository.RecordDataFile{{
 		ID:          1,
-		SlideID:     "20260308-a1b2c3d4",
+		RecordID:     "20260308-a1b2c3d4",
 		Filename:    "metrics.csv",
 		S3Key:       "data/20260308-a1b2c3d4/metrics.csv",
 		Size:        10,
@@ -494,9 +494,9 @@ func TestPlanDataFileReconciliationExactMatchNoChanges(t *testing.T) {
 }
 
 func TestPlanDataFileReconciliationExactMatchNilDescription(t *testing.T) {
-	dataFiles := []repository.SlideDataFile{{
+	dataFiles := []repository.RecordDataFile{{
 		ID:          1,
-		SlideID:     "20260308-a1b2c3d4",
+		RecordID:     "20260308-a1b2c3d4",
 		Filename:    "metrics.csv",
 		S3Key:       "data/20260308-a1b2c3d4/metrics.csv",
 		Size:        10,
@@ -512,9 +512,9 @@ func TestPlanDataFileReconciliationExactMatchNilDescription(t *testing.T) {
 	}
 }
 
-func newBundle(id string, updatedAt time.Time, deletedAt *time.Time) SlideBundle {
-	return SlideBundle{
-		Slide: repository.Slide{
+func newBundle(id string, updatedAt time.Time, deletedAt *time.Time) RecordBundle {
+	return RecordBundle{
+		Record: repository.Record{
 			ID:          id,
 			HTMLContent: strPtr("<h1>local</h1>"),
 			UpdatedAt:   updatedAt,

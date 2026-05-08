@@ -14,7 +14,7 @@ Runs a full local Phase 3 verification flow:
 - delete
 - restore
 
-Then prepares a previewable HTML slide bundle and opens it in the default browser.
+Then prepares a previewable HTML record bundle and opens it in the default browser.
 
 Options:
   --no-open                Do not open the preview in a browser.
@@ -88,10 +88,10 @@ pc_bin="${artifacts_root}/pc"
 
 mkdir -p "${input_a}/figures" "${input_a}/data" "${input_b}" "${input_edit}/figures" "${input_edit}/data" "${preview_dir}/figures"
 
-cat >"${input_a}/slide.html" <<'HTML'
+cat >"${input_a}/record.html" <<'HTML'
 <html>
   <body>
-    <h1>Slide A</h1>
+    <h1>Record A</h1>
     <img src="figures/plot.svg" alt="Plot 1" />
   </body>
 </html>
@@ -119,14 +119,14 @@ x,y
 1,2
 CSV
 
-cat >"${input_b}/slide.html" <<'HTML'
-<html><body><h1>Slide B</h1></body></html>
+cat >"${input_b}/record.html" <<'HTML'
+<html><body><h1>Record B</h1></body></html>
 HTML
 
-cat >"${input_edit}/slide.html" <<'HTML'
+cat >"${input_edit}/record.html" <<'HTML'
 <html>
   <body>
-    <h1>Slide A edited</h1>
+    <h1>Record A edited</h1>
     <img src="figures/plot2.svg" alt="Plot 2" />
   </body>
 </html>
@@ -177,10 +177,10 @@ run_pc project add "phase3/manual" >/dev/null
 run_pc project add "phase3/edited" >/dev/null
 
 id1="$(run_pc add --date 2025-03-01 --device "${device_id}" "${input_a}" | tr -d '\r\n')"
-[[ "${id1}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected slide ID format from first add: ${id1}"
+[[ "${id1}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected record ID format from first add: ${id1}"
 
 id2="$(run_pc add --date 2025-03-01 --device "${device_id}" --project "phase3/manual" "${input_b}" | tr -d '\r\n')"
-[[ "${id2}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected slide ID format from second add: ${id2}"
+[[ "${id2}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected record ID format from second add: ${id2}"
 
 show_text="$(run_pc show "${id1}")"
 for expected in "ID:" "${id1}" "Project:" "phase3/manual" "Notes:" "Initial notes" "Figures:" "Data files:"; do
@@ -198,15 +198,15 @@ edited_text="$(run_pc show "${id1}")"
 for expected in "Project:" "phase3/edited" "Notes:" "Edited notes" "plot2.svg" "metrics2.csv"; do
 	[[ "${edited_text}" == *"${expected}"* ]] || fail "edited show output missing: ${expected}"
 done
-[[ "${edited_text}" != *"plot.svg"* ]] || fail "edited slide still lists old figure plot.svg"
-[[ "${edited_text}" != *"metrics.csv"* ]] || fail "edited slide still lists old data file metrics.csv"
+[[ "${edited_text}" != *"plot.svg"* ]] || fail "edited record still lists old figure plot.svg"
+[[ "${edited_text}" != *"metrics.csv"* ]] || fail "edited record still lists old data file metrics.csv"
 
 move_out="$(run_pc move "${id2}" --first)"
 [[ "${move_out}" == *"moved"* ]] || fail "move output did not include success message"
 
 extract_day_order() {
-	local slide_id="$1"
-	run_pc show "${slide_id}" | awk -F':' '/^DayOrder:/ {gsub(/^[ \t]+/, "", $2); print $2; exit}'
+	local record_id="$1"
+	run_pc show "${record_id}" | awk -F':' '/^DayOrder:/ {gsub(/^[ \t]+/, "", $2); print $2; exit}'
 }
 
 day_order_lt() {
@@ -221,7 +221,7 @@ order_1="$(extract_day_order "${id1}")"
 order_2="$(extract_day_order "${id2}")"
 [[ -n "${order_1}" ]] || fail "missing day order for ${id1}"
 [[ -n "${order_2}" ]] || fail "missing day order for ${id2}"
-day_order_lt "${order_2}" "${order_1}" || fail "move --first did not reorder slides (${id2} day_order=${order_2}, ${id1} day_order=${order_1})"
+day_order_lt "${order_2}" "${order_1}" || fail "move --first did not reorder records (${id2} day_order=${order_2}, ${id1} day_order=${order_1})"
 
 delete_out="$(run_pc delete "${id1}")"
 [[ "${delete_out}" == *"deleted"* ]] || fail "delete output did not include success message"
@@ -235,10 +235,10 @@ restore_out="$(run_pc restore "${id1}")"
 [[ "${restore_out}" == *"restored"* ]] || fail "restore output did not include success message"
 
 restored_json="$(run_pc show --format json "${id1}")"
-[[ "${restored_json}" == *'"deleted_at": null'* ]] || fail "restored slide still has non-null deleted_at"
-[[ "${restored_json}" == *'Slide A edited'* ]] || fail "restored slide does not contain edited HTML"
+[[ "${restored_json}" == *'"deleted_at": null'* ]] || fail "restored record still has non-null deleted_at"
+[[ "${restored_json}" == *'Record A edited'* ]] || fail "restored record does not contain edited HTML"
 
-cp "${input_edit}/slide.html" "${preview_dir}/slide.html"
+cp "${input_edit}/record.html" "${preview_dir}/record.html"
 cp "${input_edit}/figures/plot2.svg" "${preview_dir}/figures/plot2.svg"
 
 cat >"${preview_dir}/viewer.html" <<'HTML'
@@ -247,7 +247,7 @@ cat >"${preview_dir}/viewer.html" <<'HTML'
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Phase 3 Slide Preview</title>
+    <title>Phase 3 Record Preview</title>
     <style>
       body {
         margin: 0;
@@ -258,7 +258,7 @@ cat >"${preview_dir}/viewer.html" <<'HTML'
         font-family: sans-serif;
       }
 
-      #slide-boundary {
+      #record-boundary {
         width: min(90vw, 1280px);
         aspect-ratio: 16 / 9;
         border: 3px solid #dc2626;
@@ -266,7 +266,7 @@ cat >"${preview_dir}/viewer.html" <<'HTML'
         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
       }
 
-      #slide-frame {
+      #record-frame {
         width: 100%;
         height: 100%;
         border: 0;
@@ -274,8 +274,8 @@ cat >"${preview_dir}/viewer.html" <<'HTML'
     </style>
   </head>
   <body>
-    <div id="slide-boundary">
-      <iframe id="slide-frame" title="Slide Preview" src="./slide.html"></iframe>
+    <div id="record-boundary">
+      <iframe id="record-frame" title="Record Preview" src="./record.html"></iframe>
     </div>
   </body>
 </html>
@@ -303,7 +303,7 @@ cat <<SUMMARY
 Phase 3 verification passed.
 Artifacts root: ${artifacts_root}
 PC_HOME: ${pc_home}
-Slide IDs:
+Record IDs:
   - ${id1}
   - ${id2}
 Preview file: ${preview_file}

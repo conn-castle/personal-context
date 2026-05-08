@@ -53,7 +53,7 @@ describe("middleware auth gate", () => {
   });
 
   it("allows unauthenticated API request with bearer token", async () => {
-    const req = makeRequest("http://localhost/api/slides", {
+    const req = makeRequest("http://localhost/api/records", {
       headers: { authorization: "Bearer test-key" },
     });
 
@@ -62,7 +62,7 @@ describe("middleware auth gate", () => {
   });
 
   it("allows lowercase/padded bearer tokens", async () => {
-    const req = makeRequest("http://localhost/api/slides", {
+    const req = makeRequest("http://localhost/api/records", {
       headers: { authorization: "   bearer   test-key   " },
     });
 
@@ -80,7 +80,7 @@ describe("middleware auth gate", () => {
   });
 
   it("returns 401 JSON for unauthenticated protected API route", async () => {
-    const req = makeRequest("http://localhost/api/slides");
+    const req = makeRequest("http://localhost/api/records");
 
     const res = await middleware(req);
     expect(res.status).toBe(401);
@@ -108,7 +108,7 @@ describe("middleware auth gate", () => {
 
   it("skips auth in local mode", async () => {
     process.env.LOCAL_BACKEND_URL = "http://127.0.0.1:9876";
-    const req = makeRequest("http://localhost/api/slides");
+    const req = makeRequest("http://localhost/api/records");
 
     const res = await middleware(req);
     expect(res.status).toBe(200);
@@ -116,7 +116,7 @@ describe("middleware auth gate", () => {
 
   it("returns 500 for invalid local backend URL", async () => {
     process.env.LOCAL_BACKEND_URL = "https://example.com";
-    const req = makeRequest("http://localhost/api/slides");
+    const req = makeRequest("http://localhost/api/records");
 
     const res = await middleware(req);
     expect(res.status).toBe(500);

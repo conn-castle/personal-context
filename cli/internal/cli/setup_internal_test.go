@@ -20,16 +20,16 @@ import (
 type mockRepo struct {
 	getTemplateByNameFn func(ctx context.Context, name string) (repository.Template, error)
 	createTemplateFn    func(ctx context.Context, input repository.CreateTemplateInput) (repository.Template, error)
-	createSlideFn       func(ctx context.Context, input repository.CreateSlideInput) (repository.Slide, error)
-	getSlideByIDFn      func(ctx context.Context, id string) (repository.Slide, error)
-	listSlidesFn        func(ctx context.Context, filter repository.ListSlidesFilter) ([]repository.Slide, error)
-	listFiguresFn       func(ctx context.Context, slideID string) ([]repository.SlideFigure, error)
-	createFigureFn      func(ctx context.Context, input repository.CreateSlideFigureInput) (repository.SlideFigure, error)
-	updateFigureFn      func(ctx context.Context, input repository.UpdateSlideFigureInput) (repository.SlideFigure, error)
+	createRecordFn       func(ctx context.Context, input repository.CreateRecordInput) (repository.Record, error)
+	getRecordByIDFn      func(ctx context.Context, id string) (repository.Record, error)
+	listRecordsFn        func(ctx context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error)
+	listFiguresFn       func(ctx context.Context, recordID string) ([]repository.RecordFigure, error)
+	createFigureFn      func(ctx context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error)
+	updateFigureFn      func(ctx context.Context, input repository.UpdateRecordFigureInput) (repository.RecordFigure, error)
 	deleteFigureFn      func(ctx context.Context, id int64) error
-	listDataFilesFn     func(ctx context.Context, slideID string) ([]repository.SlideDataFile, error)
-	createDataFileFn    func(ctx context.Context, input repository.CreateSlideDataFileInput) (repository.SlideDataFile, error)
-	updateDataFileFn    func(ctx context.Context, input repository.UpdateSlideDataFileInput) (repository.SlideDataFile, error)
+	listDataFilesFn     func(ctx context.Context, recordID string) ([]repository.RecordDataFile, error)
+	createDataFileFn    func(ctx context.Context, input repository.CreateRecordDataFileInput) (repository.RecordDataFile, error)
+	updateDataFileFn    func(ctx context.Context, input repository.UpdateRecordDataFileInput) (repository.RecordDataFile, error)
 	deleteDataFileFn    func(ctx context.Context, id int64) error
 	createProjectFn     func(ctx context.Context, input repository.CreateRegistryInput) (repository.Project, error)
 	getProjectByIDFn    func(ctx context.Context, id string) (repository.Project, error)
@@ -54,79 +54,79 @@ func (m *mockRepo) CreateTemplate(ctx context.Context, input repository.CreateTe
 }
 
 // Stubs for remaining Repository interface methods.
-func (m *mockRepo) CreateSlide(ctx context.Context, input repository.CreateSlideInput) (repository.Slide, error) {
-	if m.createSlideFn != nil {
-		return m.createSlideFn(ctx, input)
+func (m *mockRepo) CreateRecord(ctx context.Context, input repository.CreateRecordInput) (repository.Record, error) {
+	if m.createRecordFn != nil {
+		return m.createRecordFn(ctx, input)
 	}
-	return repository.Slide{}, nil
+	return repository.Record{}, nil
 }
-func (m *mockRepo) GetSlideByID(ctx context.Context, id string) (repository.Slide, error) {
-	if m.getSlideByIDFn != nil {
-		return m.getSlideByIDFn(ctx, id)
+func (m *mockRepo) GetRecordByID(ctx context.Context, id string) (repository.Record, error) {
+	if m.getRecordByIDFn != nil {
+		return m.getRecordByIDFn(ctx, id)
 	}
-	return repository.Slide{}, nil
+	return repository.Record{}, nil
 }
-func (m *mockRepo) UpdateSlide(context.Context, repository.UpdateSlideInput) (repository.Slide, error) {
-	return repository.Slide{}, nil
+func (m *mockRepo) UpdateRecord(context.Context, repository.UpdateRecordInput) (repository.Record, error) {
+	return repository.Record{}, nil
 }
-func (m *mockRepo) ListSlides(ctx context.Context, filter repository.ListSlidesFilter) ([]repository.Slide, error) {
-	if m.listSlidesFn != nil {
-		return m.listSlidesFn(ctx, filter)
+func (m *mockRepo) ListRecords(ctx context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error) {
+	if m.listRecordsFn != nil {
+		return m.listRecordsFn(ctx, filter)
 	}
 	return nil, nil
 }
-func (m *mockRepo) SoftDeleteSlide(context.Context, string) error { return nil }
-func (m *mockRepo) RestoreSlide(context.Context, string) error    { return nil }
-func (m *mockRepo) DeleteSlide(context.Context, string) error     { return nil }
-func (m *mockRepo) CreateSlideFigure(ctx context.Context, input repository.CreateSlideFigureInput) (repository.SlideFigure, error) {
+func (m *mockRepo) SoftDeleteRecord(context.Context, string) error { return nil }
+func (m *mockRepo) RestoreRecord(context.Context, string) error    { return nil }
+func (m *mockRepo) DeleteRecord(context.Context, string) error     { return nil }
+func (m *mockRepo) CreateRecordFigure(ctx context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
 	if m.createFigureFn != nil {
 		return m.createFigureFn(ctx, input)
 	}
-	return repository.SlideFigure{}, nil
+	return repository.RecordFigure{}, nil
 }
-func (m *mockRepo) GetSlideFigureByID(context.Context, int64) (repository.SlideFigure, error) {
-	return repository.SlideFigure{}, nil
+func (m *mockRepo) GetRecordFigureByID(context.Context, int64) (repository.RecordFigure, error) {
+	return repository.RecordFigure{}, nil
 }
-func (m *mockRepo) UpdateSlideFigure(ctx context.Context, input repository.UpdateSlideFigureInput) (repository.SlideFigure, error) {
+func (m *mockRepo) UpdateRecordFigure(ctx context.Context, input repository.UpdateRecordFigureInput) (repository.RecordFigure, error) {
 	if m.updateFigureFn != nil {
 		return m.updateFigureFn(ctx, input)
 	}
-	return repository.SlideFigure{}, nil
+	return repository.RecordFigure{}, nil
 }
-func (m *mockRepo) ListSlideFiguresBySlideID(ctx context.Context, slideID string) ([]repository.SlideFigure, error) {
+func (m *mockRepo) ListRecordFiguresByRecordID(ctx context.Context, recordID string) ([]repository.RecordFigure, error) {
 	if m.listFiguresFn != nil {
-		return m.listFiguresFn(ctx, slideID)
+		return m.listFiguresFn(ctx, recordID)
 	}
 	return nil, nil
 }
-func (m *mockRepo) DeleteSlideFigure(ctx context.Context, id int64) error {
+func (m *mockRepo) DeleteRecordFigure(ctx context.Context, id int64) error {
 	if m.deleteFigureFn != nil {
 		return m.deleteFigureFn(ctx, id)
 	}
 	return nil
 }
-func (m *mockRepo) CreateSlideDataFile(ctx context.Context, input repository.CreateSlideDataFileInput) (repository.SlideDataFile, error) {
+func (m *mockRepo) CreateRecordDataFile(ctx context.Context, input repository.CreateRecordDataFileInput) (repository.RecordDataFile, error) {
 	if m.createDataFileFn != nil {
 		return m.createDataFileFn(ctx, input)
 	}
-	return repository.SlideDataFile{}, nil
+	return repository.RecordDataFile{}, nil
 }
-func (m *mockRepo) GetSlideDataFileByID(context.Context, int64) (repository.SlideDataFile, error) {
-	return repository.SlideDataFile{}, nil
+func (m *mockRepo) GetRecordDataFileByID(context.Context, int64) (repository.RecordDataFile, error) {
+	return repository.RecordDataFile{}, nil
 }
-func (m *mockRepo) UpdateSlideDataFile(ctx context.Context, input repository.UpdateSlideDataFileInput) (repository.SlideDataFile, error) {
+func (m *mockRepo) UpdateRecordDataFile(ctx context.Context, input repository.UpdateRecordDataFileInput) (repository.RecordDataFile, error) {
 	if m.updateDataFileFn != nil {
 		return m.updateDataFileFn(ctx, input)
 	}
-	return repository.SlideDataFile{}, nil
+	return repository.RecordDataFile{}, nil
 }
-func (m *mockRepo) ListSlideDataFilesBySlideID(ctx context.Context, slideID string) ([]repository.SlideDataFile, error) {
+func (m *mockRepo) ListRecordDataFilesByRecordID(ctx context.Context, recordID string) ([]repository.RecordDataFile, error) {
 	if m.listDataFilesFn != nil {
-		return m.listDataFilesFn(ctx, slideID)
+		return m.listDataFilesFn(ctx, recordID)
 	}
 	return nil, nil
 }
-func (m *mockRepo) DeleteSlideDataFile(ctx context.Context, id int64) error {
+func (m *mockRepo) DeleteRecordDataFile(ctx context.Context, id int64) error {
 	if m.deleteDataFileFn != nil {
 		return m.deleteDataFileFn(ctx, id)
 	}
@@ -190,9 +190,9 @@ func (m *mockRepo) UpsertDeviceForImport(ctx context.Context, device repository.
 	}
 	return true, nil
 }
-func (m *mockRepo) CountActiveSlides(context.Context) (int, error)       { return 0, nil }
-func (m *mockRepo) CountTrashedSlides(context.Context) (int, error)      { return 0, nil }
-func (m *mockRepo) PurgeDeletedSlides(context.Context) ([]string, error) { return nil, nil }
+func (m *mockRepo) CountActiveRecords(context.Context) (int, error)       { return 0, nil }
+func (m *mockRepo) CountTrashedRecords(context.Context) (int, error)      { return 0, nil }
+func (m *mockRepo) PurgeDeletedRecords(context.Context) ([]string, error) { return nil, nil }
 
 func TestSeedTemplatesAllNew(t *testing.T) {
 	created := make(map[string]bool)

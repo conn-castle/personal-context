@@ -16,14 +16,14 @@ func TestSearchTableNoResults(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "No matching slides found.") {
-		t.Fatalf("expected 'No matching slides found.', got %q", stdout.String())
+	if !strings.Contains(stdout.String(), "No matching records found.") {
+		t.Fatalf("expected 'No matching records found.', got %q", stdout.String())
 	}
 }
 
 func TestSearchTableWithResults(t *testing.T) {
 	setupEnv(t)
-	addSlideWithContent(t, "<html>searchable content here</html>", "my notes about kittens", "", nil, nil)
+	addRecordWithContent(t, "<html>searchable content here</html>", "my notes about kittens", "", nil, nil)
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -40,8 +40,8 @@ func TestSearchTableWithResults(t *testing.T) {
 
 func TestSearchTableWithProject(t *testing.T) {
 	setupEnv(t)
-	addSlideWithContent(t, "<html>project slide</html>", "", `{"project_id":"alpha"}`, nil, nil)
-	addSlideWithContent(t, "<html>project slide beta</html>", "", `{"project_id":"beta"}`, nil, nil)
+	addRecordWithContent(t, "<html>project record</html>", "", `{"project_id":"alpha"}`, nil, nil)
+	addRecordWithContent(t, "<html>project record beta</html>", "", `{"project_id":"beta"}`, nil, nil)
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -61,7 +61,7 @@ func TestSearchTableWithProject(t *testing.T) {
 
 func TestSearchIDsFormat(t *testing.T) {
 	setupEnv(t)
-	id := addSlideWithContent(t, "<html>ids output test</html>", "ids notes content", "", nil, nil)
+	id := addRecordWithContent(t, "<html>ids output test</html>", "ids notes content", "", nil, nil)
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -72,7 +72,7 @@ func TestSearchIDsFormat(t *testing.T) {
 
 	out := strings.TrimSpace(stdout.String())
 	if !strings.Contains(out, id) {
-		t.Fatalf("expected slide ID %s in output, got %q", id, out)
+		t.Fatalf("expected record ID %s in output, got %q", id, out)
 	}
 }
 
@@ -94,7 +94,7 @@ func TestSearchIDsFormatEmpty(t *testing.T) {
 
 func TestSearchJSONFormat(t *testing.T) {
 	setupEnv(t)
-	addSlideWithContent(t, "<html>json search test</html>", "json notes", `{"project_id":"proj-search"}`, nil, nil)
+	addRecordWithContent(t, "<html>json search test</html>", "json notes", `{"project_id":"proj-search"}`, nil, nil)
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -136,9 +136,9 @@ func TestSearchJSONFormatEmpty(t *testing.T) {
 
 func TestSearchJSONWithDeletedAt(t *testing.T) {
 	setupEnv(t)
-	id := addSlide(t)
+	id := addRecord(t)
 
-	// Soft-delete the slide
+	// Soft-delete the record
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", id})
 	if err := delCmd.Execute(); err != nil {
@@ -162,27 +162,27 @@ func TestSearchJSONWithDeletedAt(t *testing.T) {
 		if r.ID == id {
 			found = true
 			if r.DeletedAt == nil {
-				t.Fatal("expected deleted_at to be set for deleted slide")
+				t.Fatal("expected deleted_at to be set for deleted record")
 			}
 		}
 	}
 	if !found {
-		t.Fatalf("expected slide %s in deleted results", id)
+		t.Fatalf("expected record %s in deleted results", id)
 	}
 }
 
 func TestSearchExcludesDeletedByDefault(t *testing.T) {
 	setupEnv(t)
-	id := addSlideWithContent(t, "<html>deletable slide for exclusion test</html>", "", "", nil, nil)
+	id := addRecordWithContent(t, "<html>deletable record for exclusion test</html>", "", "", nil, nil)
 
-	// Soft-delete the slide.
+	// Soft-delete the record.
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	delCmd.SetArgs([]string{"delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
-	// Search without --deleted should exclude the soft-deleted slide.
+	// Search without --deleted should exclude the soft-deleted record.
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"search", "deletable", "--format", "ids"})
@@ -191,7 +191,7 @@ func TestSearchExcludesDeletedByDefault(t *testing.T) {
 	}
 
 	if strings.Contains(stdout.String(), id) {
-		t.Fatalf("expected deleted slide %s to be excluded from default search, got %q", id, stdout.String())
+		t.Fatalf("expected deleted record %s to be excluded from default search, got %q", id, stdout.String())
 	}
 }
 
@@ -235,8 +235,8 @@ func TestSearchNegativeLimit(t *testing.T) {
 
 func TestSearchWithLimit(t *testing.T) {
 	setupEnv(t)
-	addSlideWithContent(t, "<html>limit test one</html>", "limit notes one", "", nil, nil)
-	addSlideWithContent(t, "<html>limit test two</html>", "limit notes two", "", nil, nil)
+	addRecordWithContent(t, "<html>limit test one</html>", "limit notes one", "", nil, nil)
+	addRecordWithContent(t, "<html>limit test two</html>", "limit notes two", "", nil, nil)
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -251,22 +251,22 @@ func TestSearchWithLimit(t *testing.T) {
 	}
 }
 
-func TestSearchListSlidesDBError(t *testing.T) {
+func TestSearchListRecordsDBError(t *testing.T) {
 	homeDir := setupEnv(t)
 
-	// Corrupt slides table.
-	corruptTable(t, homeDir, "slides")
+	// Corrupt records table.
+	corruptTable(t, homeDir, "records")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"search", "query"})
 	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected error when slides table missing")
+		t.Fatal("expected error when records table missing")
 	}
 }
 
 func TestSearchTableProjectColumn(t *testing.T) {
 	setupEnv(t)
-	addSlideWithContent(t, "<html>project column test</html>", "", `{"project_id":"myproj"}`, nil, nil)
+	addRecordWithContent(t, "<html>project column test</html>", "", `{"project_id":"myproj"}`, nil, nil)
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})

@@ -72,7 +72,7 @@ func (s *cloudStack) Close() error {
 }
 
 // openCloudStack initializes the Postgres repository and S3 client for cloud mode.
-// userID scopes all slide and sync queries to the authenticated user.
+// userID scopes all record and sync queries to the authenticated user.
 func openCloudStack(ctx context.Context, homeDir string, userID string) (*cloudStack, error) {
 	if strings.TrimSpace(homeDir) == "" {
 		return nil, fmt.Errorf("home directory is required")

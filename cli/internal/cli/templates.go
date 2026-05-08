@@ -7,12 +7,12 @@ var builtinTemplates = []repository.CreateTemplateInput{
 	{
 		Name:        "text-only",
 		HTMLContent: textOnlyTemplateHTML,
-		Description: strPtr("Plain text slide with a heading and body."),
+		Description: strPtr("Plain text record with a heading and body."),
 	},
 	{
 		Name:        "single-image",
 		HTMLContent: singleImageTemplateHTML,
-		Description: strPtr("Slide with a single centered image and optional caption."),
+		Description: strPtr("Record with a single centered image and optional caption."),
 	},
 }
 

@@ -5,13 +5,13 @@ import type { ErrorResponseBody } from "@/lib/api-error";
 import { isValidISOTimestamp } from "@/lib/validation";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
 import { requireUser } from "@/lib/auth-helpers";
-import type { SyncChangesResponse, SlideSummary } from "@/lib/types";
+import type { SyncChangesResponse, RecordSummary } from "@/lib/types";
 
 /**
  * GET /api/sync/changes?since={ISO 8601 UTC}
  *
- * Returns slides modified at or after the given timestamp (>= comparison,
- * per Decision t7u8v9). Includes soft-deleted slides so clients can
+ * Returns records modified at or after the given timestamp (>= comparison,
+ * per Decision t7u8v9). Includes soft-deleted records so clients can
  * synchronize deletions.
  */
 export async function GET(
@@ -51,23 +51,23 @@ export async function GET(
            s.source_device_id, s.source_ref, s.updated_at, s.deleted_at,
            COALESCE(fc.figure_count, 0) AS figure_count,
            COALESCE(dc.data_file_count, 0) AS data_file_count
-         FROM slides s
+         FROM records s
          LEFT JOIN (
-           SELECT slide_id, COUNT(*)::int AS figure_count
-           FROM slide_figures
-           GROUP BY slide_id
-         ) fc ON fc.slide_id = s.id
+           SELECT record_id, COUNT(*)::int AS figure_count
+           FROM record_figures
+           GROUP BY record_id
+         ) fc ON fc.record_id = s.id
          LEFT JOIN (
-           SELECT slide_id, COUNT(*)::int AS data_file_count
-           FROM slide_data_files
-           GROUP BY slide_id
-         ) dc ON dc.slide_id = s.id
+           SELECT record_id, COUNT(*)::int AS data_file_count
+           FROM record_data_files
+           GROUP BY record_id
+         ) dc ON dc.record_id = s.id
          WHERE s.user_id = $1 AND s.updated_at >= $2 AND s.updated_at <= $3
          ORDER BY s.date DESC, s.day_order ASC, s.id ASC`,
       [user.id, since, serverNow]
     )) as Record<string, unknown>[];
 
-    const slideSummaries: SlideSummary[] = items.map((row) => ({
+    const recordSummaries: RecordSummary[] = items.map((row) => ({
       id: row.id as string,
       date: row.date as string,
       day_order: row.day_order as string,
@@ -81,7 +81,7 @@ export async function GET(
       data_file_count: Number(row.data_file_count),
     }));
 
-    return NextResponse.json({ items: slideSummaries, server_now: serverNow });
+    return NextResponse.json({ items: recordSummaries, server_now: serverNow });
   } catch (err) {
     console.error("GET /api/sync/changes error:", err);
     return internalError("Failed to fetch sync changes");

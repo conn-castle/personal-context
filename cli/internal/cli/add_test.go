@@ -27,8 +27,8 @@ func makeInputFolder(t *testing.T, opts inputFolderOpts) string {
 	if opts.HTMLContent == "" {
 		opts.HTMLContent = "<html><body>Test</body></html>"
 	}
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte(opts.HTMLContent), 0o644); err != nil {
-		t.Fatalf("write slide.html: %v", err)
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte(opts.HTMLContent), 0o644); err != nil {
+		t.Fatalf("write record.html: %v", err)
 	}
 
 	if opts.Notes != "" {
@@ -113,7 +113,7 @@ func TestAddCommandSuccess(t *testing.T) {
 
 	id := strings.TrimSpace(stdout.String())
 	if id == "" {
-		t.Fatal("expected slide ID on stdout, got empty string")
+		t.Fatal("expected record ID on stdout, got empty string")
 	}
 }
 
@@ -132,7 +132,7 @@ func TestAddCommandWithDateFlag(t *testing.T) {
 
 	id := strings.TrimSpace(stdout.String())
 	if id == "" {
-		t.Fatal("expected slide ID on stdout")
+		t.Fatal("expected record ID on stdout")
 	}
 }
 
@@ -151,7 +151,7 @@ func TestAddCommandWithProjectFlag(t *testing.T) {
 
 	id := strings.TrimSpace(stdout.String())
 	if id == "" {
-		t.Fatal("expected slide ID on stdout")
+		t.Fatal("expected record ID on stdout")
 	}
 }
 
@@ -175,7 +175,7 @@ func TestAddCommandWithFigures(t *testing.T) {
 
 	id := strings.TrimSpace(stdout.String())
 	if id == "" {
-		t.Fatal("expected slide ID on stdout")
+		t.Fatal("expected record ID on stdout")
 	}
 }
 
@@ -198,7 +198,7 @@ func TestAddCommandWithDataFiles(t *testing.T) {
 
 	id := strings.TrimSpace(stdout.String())
 	if id == "" {
-		t.Fatal("expected slide ID on stdout")
+		t.Fatal("expected record ID on stdout")
 	}
 
 	// Verify data file was persisted: show --format json should list it.
@@ -249,9 +249,9 @@ func TestAddCommandInvalidDate(t *testing.T) {
 	}
 }
 
-func TestAddCommandMissingSlideHTMLStoresNull(t *testing.T) {
+func TestAddCommandMissingRecordHTMLStoresNull(t *testing.T) {
 	setupEnv(t)
-	// Create an empty directory with no slide.html.
+	// Create an empty directory with no record.html.
 	emptyDir := t.TempDir()
 	writeDefaultProvenanceMetadata(t, emptyDir)
 
@@ -262,10 +262,10 @@ func TestAddCommandMissingSlideHTMLStoresNull(t *testing.T) {
 
 	err := cmd.Execute()
 	if err != nil {
-		t.Fatalf("add without slide.html: %v", err)
+		t.Fatalf("add without record.html: %v", err)
 	}
 	if strings.TrimSpace(stdout.String()) == "" {
-		t.Fatal("expected slide ID on stdout")
+		t.Fatal("expected record ID on stdout")
 	}
 }
 
@@ -278,25 +278,25 @@ func TestRunAddStoresNullHTMLAndSourceRef(t *testing.T) {
 	if err := runAdd(context.Background(), stdout, stderr, inputDir, "2026-05-07", "", "", "opaque-source", position{kind: "last"}); err != nil {
 		t.Fatalf("runAdd() error = %v", err)
 	}
-	slideID := strings.TrimSpace(stdout.String())
+	recordID := strings.TrimSpace(stdout.String())
 	stack, err := openLocalStack(os.Getenv("PC_HOME"))
 	if err != nil {
 		t.Fatalf("open stack: %v", err)
 	}
 	defer func() { _ = stack.Close() }()
-	slide, err := stack.Repo.GetSlideByID(context.Background(), slideID)
+	record, err := stack.Repo.GetRecordByID(context.Background(), recordID)
 	if err != nil {
-		t.Fatalf("GetSlideByID() error = %v", err)
+		t.Fatalf("GetRecordByID() error = %v", err)
 	}
-	if slide.HTMLContent != nil {
-		t.Fatalf("HTMLContent = %q, want nil", *slide.HTMLContent)
+	if record.HTMLContent != nil {
+		t.Fatalf("HTMLContent = %q, want nil", *record.HTMLContent)
 	}
-	if slide.SourceRef == nil || *slide.SourceRef != "opaque-source" {
-		t.Fatalf("SourceRef = %v", slide.SourceRef)
+	if record.SourceRef == nil || *record.SourceRef != "opaque-source" {
+		t.Fatalf("SourceRef = %v", record.SourceRef)
 	}
 }
 
-func TestRunAddRejectsArchivedProjectBeforeCreatingSlide(t *testing.T) {
+func TestRunAddRejectsArchivedProjectBeforeCreatingRecord(t *testing.T) {
 	setupEnv(t)
 	inputDir := makeInputFolder(t, inputFolderOpts{
 		MetadataJSON: `{"project_id":"archived-project","source_device_id":"test-device"}`,
@@ -347,34 +347,34 @@ func TestAddCommandMutuallyExclusiveFlags(t *testing.T) {
 func TestAddCommandPositionFirst(t *testing.T) {
 	setupEnv(t)
 
-	// Add the first slide (default position = last).
+	// Add the first record (default position = last).
 	inputDir1 := makeInputFolder(t, inputFolderOpts{
-		HTMLContent: "<html><body>Slide 1</body></html>",
+		HTMLContent: "<html><body>Record 1</body></html>",
 	})
 	stdout1 := &bytes.Buffer{}
 	cmd1 := NewRootCommand(RootCommandOptions{Stdout: stdout1, Stderr: &bytes.Buffer{}})
 	cmd1.SetArgs([]string{"add", "--date", "2025-07-01", inputDir1})
 	if err := cmd1.Execute(); err != nil {
-		t.Fatalf("add slide 1 failed: %v", err)
+		t.Fatalf("add record 1 failed: %v", err)
 	}
 	id1 := strings.TrimSpace(stdout1.String())
 	if id1 == "" {
-		t.Fatal("expected slide 1 ID")
+		t.Fatal("expected record 1 ID")
 	}
 
-	// Add the second slide with --first on the same date.
+	// Add the second record with --first on the same date.
 	inputDir2 := makeInputFolder(t, inputFolderOpts{
-		HTMLContent: "<html><body>Slide 2</body></html>",
+		HTMLContent: "<html><body>Record 2</body></html>",
 	})
 	stdout2 := &bytes.Buffer{}
 	cmd2 := NewRootCommand(RootCommandOptions{Stdout: stdout2, Stderr: &bytes.Buffer{}})
 	cmd2.SetArgs([]string{"add", "--first", "--date", "2025-07-01", inputDir2})
 	if err := cmd2.Execute(); err != nil {
-		t.Fatalf("add slide 2 --first failed: %v", err)
+		t.Fatalf("add record 2 --first failed: %v", err)
 	}
 	id2 := strings.TrimSpace(stdout2.String())
 	if id2 == "" {
-		t.Fatal("expected slide 2 ID")
+		t.Fatal("expected record 2 ID")
 	}
 }
 
@@ -420,28 +420,28 @@ func TestResolvePositionFlagsFirst(t *testing.T) {
 }
 
 func TestResolvePositionFlagsAfter(t *testing.T) {
-	pos, err := resolvePositionFlags(false, false, "slide-abc", "")
+	pos, err := resolvePositionFlags(false, false, "record-abc", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if pos.kind != "after" {
 		t.Fatalf("expected kind 'after', got %q", pos.kind)
 	}
-	if pos.referenceID != "slide-abc" {
-		t.Fatalf("expected referenceID 'slide-abc', got %q", pos.referenceID)
+	if pos.referenceID != "record-abc" {
+		t.Fatalf("expected referenceID 'record-abc', got %q", pos.referenceID)
 	}
 }
 
 func TestResolvePositionFlagsBefore(t *testing.T) {
-	pos, err := resolvePositionFlags(false, false, "", "slide-xyz")
+	pos, err := resolvePositionFlags(false, false, "", "record-xyz")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if pos.kind != "before" {
 		t.Fatalf("expected kind 'before', got %q", pos.kind)
 	}
-	if pos.referenceID != "slide-xyz" {
-		t.Fatalf("expected referenceID 'slide-xyz', got %q", pos.referenceID)
+	if pos.referenceID != "record-xyz" {
+		t.Fatalf("expected referenceID 'record-xyz', got %q", pos.referenceID)
 	}
 }
 
@@ -488,20 +488,20 @@ func TestResolvePositionFlagsLastExplicit(t *testing.T) {
 
 func TestComputeDayOrderFirst(t *testing.T) {
 	setupEnv(t)
-	// Add two slides on same date so the list is non-empty
-	id1 := addSlide(t, "--date", "2025-05-01")
-	id2 := addSlide(t, "--date", "2025-05-01")
+	// Add two records on same date so the list is non-empty
+	id1 := addRecord(t, "--date", "2025-05-01")
+	id2 := addRecord(t, "--date", "2025-05-01")
 
 	// Now add a third with --first
-	id3 := addSlide(t, "--date", "2025-05-01", "--first")
+	id3 := addRecord(t, "--date", "2025-05-01", "--first")
 
 	order1 := getDayOrder(t, id1)
 	order2 := getDayOrder(t, id2)
 	order3 := getDayOrder(t, id3)
 
-	// --first slide should sort before both existing slides
+	// --first record should sort before both existing records
 	if order3 >= order1 {
-		t.Fatalf("--first slide day_order %q should be < first existing %q", order3, order1)
+		t.Fatalf("--first record day_order %q should be < first existing %q", order3, order1)
 	}
 	if order1 >= order2 {
 		t.Fatalf("original order violated: id1 %q should be < id2 %q", order1, order2)
@@ -510,31 +510,31 @@ func TestComputeDayOrderFirst(t *testing.T) {
 
 func TestComputeDayOrderAfter(t *testing.T) {
 	setupEnv(t)
-	id1 := addSlide(t, "--date", "2025-05-02")
-	id2 := addSlide(t, "--date", "2025-05-02")
+	id1 := addRecord(t, "--date", "2025-05-02")
+	id2 := addRecord(t, "--date", "2025-05-02")
 
 	// Add a third after id1 (should be between id1 and id2)
-	id3 := addSlide(t, "--date", "2025-05-02", "--after", id1)
+	id3 := addRecord(t, "--date", "2025-05-02", "--after", id1)
 
 	order1 := getDayOrder(t, id1)
 	order2 := getDayOrder(t, id2)
 	order3 := getDayOrder(t, id3)
 
 	if order3 <= order1 {
-		t.Fatalf("--after id1: new slide day_order %q should be > id1 %q", order3, order1)
+		t.Fatalf("--after id1: new record day_order %q should be > id1 %q", order3, order1)
 	}
 	if order3 >= order2 {
-		t.Fatalf("--after id1: new slide day_order %q should be < id2 %q", order3, order2)
+		t.Fatalf("--after id1: new record day_order %q should be < id2 %q", order3, order2)
 	}
 }
 
 func TestComputeDayOrderAfterLast(t *testing.T) {
 	setupEnv(t)
-	id1 := addSlide(t, "--date", "2025-05-03")
-	id2 := addSlide(t, "--date", "2025-05-03")
+	id1 := addRecord(t, "--date", "2025-05-03")
+	id2 := addRecord(t, "--date", "2025-05-03")
 
-	// Add after the last slide (should use GenerateAtEnd)
-	id3 := addSlide(t, "--date", "2025-05-03", "--after", id2)
+	// Add after the last record (should use GenerateAtEnd)
+	id3 := addRecord(t, "--date", "2025-05-03", "--after", id2)
 
 	order1 := getDayOrder(t, id1)
 	order2 := getDayOrder(t, id2)
@@ -544,44 +544,44 @@ func TestComputeDayOrderAfterLast(t *testing.T) {
 		t.Fatalf("original order violated: id1 %q should be < id2 %q", order1, order2)
 	}
 	if order3 <= order2 {
-		t.Fatalf("--after last: new slide day_order %q should be > id2 %q", order3, order2)
+		t.Fatalf("--after last: new record day_order %q should be > id2 %q", order3, order2)
 	}
 }
 
 func TestComputeDayOrderBefore(t *testing.T) {
 	setupEnv(t)
-	id1 := addSlide(t, "--date", "2025-05-04")
-	id2 := addSlide(t, "--date", "2025-05-04")
+	id1 := addRecord(t, "--date", "2025-05-04")
+	id2 := addRecord(t, "--date", "2025-05-04")
 
 	// Add before id2 (should be between id1 and id2)
-	id3 := addSlide(t, "--date", "2025-05-04", "--before", id2)
+	id3 := addRecord(t, "--date", "2025-05-04", "--before", id2)
 
 	order1 := getDayOrder(t, id1)
 	order2 := getDayOrder(t, id2)
 	order3 := getDayOrder(t, id3)
 
 	if order3 <= order1 {
-		t.Fatalf("--before id2: new slide day_order %q should be > id1 %q", order3, order1)
+		t.Fatalf("--before id2: new record day_order %q should be > id1 %q", order3, order1)
 	}
 	if order3 >= order2 {
-		t.Fatalf("--before id2: new slide day_order %q should be < id2 %q", order3, order2)
+		t.Fatalf("--before id2: new record day_order %q should be < id2 %q", order3, order2)
 	}
 }
 
 func TestComputeDayOrderBeforeFirst(t *testing.T) {
 	setupEnv(t)
-	id1 := addSlide(t, "--date", "2025-05-05")
-	id2 := addSlide(t, "--date", "2025-05-05")
+	id1 := addRecord(t, "--date", "2025-05-05")
+	id2 := addRecord(t, "--date", "2025-05-05")
 
-	// Add before the first slide (should use GenerateAtStart)
-	id3 := addSlide(t, "--date", "2025-05-05", "--before", id1)
+	// Add before the first record (should use GenerateAtStart)
+	id3 := addRecord(t, "--date", "2025-05-05", "--before", id1)
 
 	order1 := getDayOrder(t, id1)
 	order2 := getDayOrder(t, id2)
 	order3 := getDayOrder(t, id3)
 
 	if order3 >= order1 {
-		t.Fatalf("--before first: new slide day_order %q should be < id1 %q", order3, order1)
+		t.Fatalf("--before first: new record day_order %q should be < id1 %q", order3, order1)
 	}
 	if order1 >= order2 {
 		t.Fatalf("original order violated: id1 %q should be < id2 %q", order1, order2)
@@ -590,10 +590,10 @@ func TestComputeDayOrderBeforeFirst(t *testing.T) {
 
 func TestComputeDayOrderAfterNotFound(t *testing.T) {
 	setupEnv(t)
-	addSlide(t, "--date", "2025-05-06")
+	addRecord(t, "--date", "2025-05-06")
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>X</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>X</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	writeDefaultProvenanceMetadata(t, dir)
@@ -603,17 +603,17 @@ func TestComputeDayOrderAfterNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for --after nonexistent")
 	}
-	if !strings.Contains(err.Error(), "reference slide") {
-		t.Fatalf("expected reference slide error, got: %v", err)
+	if !strings.Contains(err.Error(), "reference record") {
+		t.Fatalf("expected reference record error, got: %v", err)
 	}
 }
 
 func TestComputeDayOrderBeforeNotFound(t *testing.T) {
 	setupEnv(t)
-	addSlide(t, "--date", "2025-05-07")
+	addRecord(t, "--date", "2025-05-07")
 
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "slide.html"), []byte("<html>X</html>"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "record.html"), []byte("<html>X</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	writeDefaultProvenanceMetadata(t, dir)
@@ -623,7 +623,7 @@ func TestComputeDayOrderBeforeNotFound(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for --before nonexistent")
 	}
-	if !strings.Contains(err.Error(), "reference slide") {
-		t.Fatalf("expected reference slide error, got: %v", err)
+	if !strings.Contains(err.Error(), "reference record") {
+		t.Fatalf("expected reference record error, got: %v", err)
 	}
 }

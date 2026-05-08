@@ -8,12 +8,12 @@
 -- This file documents the intended schema structure.
 --
 -- Sort key: (date, day_order, id) — id is the universal tiebreaker.
--- Slide ID format: {YYYYMMDD}-{8-random-hex} (e.g., 20250304-a3f2b7e1).
--- Soft deletes: deleted_at column on slides (for sync and trash/restore).
+-- Record ID format: {YYYYMMDD}-{8-random-hex} (e.g., 20250304-a3f2b7e1).
+-- Soft deletes: deleted_at column on records (for sync and trash/restore).
 -- No title column. No tags column. Project is a plain string with slash convention.
 --
 -- TIMEZONE RULE: All timestamps stored as UTC (TIMESTAMPTZ in Postgres,
--- ISO 8601 with Z suffix in SQLite). Date fields (slide date) are stored
+-- ISO 8601 with Z suffix in SQLite). Date fields (record date) are stored
 -- as DATE (no time component). "Today" is determined by local time at the
 -- point of creation, then stored as a date. All reads convert to local
 -- timezone for display.
@@ -24,7 +24,7 @@
 -- the UPDATE explicitly sets updated_at (for sync/import to preserve original
 -- timestamps). Sync/import bypasses the trigger by providing explicit values.
 --
--- MULTI-USER: The users and api_keys tables, plus the user_id column on slides
+-- MULTI-USER: The users and api_keys tables, plus the user_id column on records
 -- and the per-user sync_version table, are Postgres-only. SQLite remains
 -- single-user (local mode). The schema equivalence guard has exceptions for
 -- these Postgres-only structures.
@@ -83,10 +83,10 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE INDEX IF NOT EXISTS idx_devices_user ON devices (user_id);
 CREATE INDEX IF NOT EXISTS idx_devices_archived ON devices (archived_at) WHERE archived_at IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS slides (
+CREATE TABLE IF NOT EXISTS records (
     id              TEXT PRIMARY KEY CHECK (id ~ '^\d{8}-[0-9a-f]{8}$'),
     user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,  -- Postgres only; absent in SQLite
-    date            DATE NOT NULL,                  -- local date when slide was created/assigned
+    date            DATE NOT NULL,                  -- local date when record was created/assigned
     day_order       TEXT NOT NULL DEFAULT 'n',
     html_content    TEXT,
     notes           TEXT,
@@ -102,46 +102,46 @@ CREATE TABLE IF NOT EXISTS slides (
     FOREIGN KEY (user_id, source_device_id) REFERENCES devices(user_id, id) ON DELETE RESTRICT
 );
 
-CREATE INDEX IF NOT EXISTS idx_slides_user ON slides (user_id);
-CREATE INDEX IF NOT EXISTS idx_slides_date ON slides (date, day_order, id);
-CREATE INDEX IF NOT EXISTS idx_slides_project ON slides (project_id);
-CREATE INDEX IF NOT EXISTS idx_slides_source_device ON slides (source_device_id);
-CREATE INDEX IF NOT EXISTS idx_slides_updated ON slides (updated_at);
-CREATE INDEX IF NOT EXISTS idx_slides_deleted ON slides (deleted_at) WHERE deleted_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_records_user ON records (user_id);
+CREATE INDEX IF NOT EXISTS idx_records_date ON records (date, day_order, id);
+CREATE INDEX IF NOT EXISTS idx_records_project ON records (project_id);
+CREATE INDEX IF NOT EXISTS idx_records_source_device ON records (source_device_id);
+CREATE INDEX IF NOT EXISTS idx_records_updated ON records (updated_at);
+CREATE INDEX IF NOT EXISTS idx_records_deleted ON records (deleted_at) WHERE deleted_at IS NOT NULL;
 
-CREATE TABLE IF NOT EXISTS slide_figures (
+CREATE TABLE IF NOT EXISTS record_figures (
     id              SERIAL PRIMARY KEY,
-    slide_id        TEXT NOT NULL REFERENCES slides(id) ON DELETE CASCADE,
+    record_id        TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,
     filename        TEXT NOT NULL CHECK (length(filename) > 0 AND position('/' in filename) = 0),
     s3_key          TEXT NOT NULL CHECK (s3_key ~ '^figures/'),
     alt_text        TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (slide_id, filename)
+    UNIQUE (record_id, filename)
 );
 
-CREATE INDEX IF NOT EXISTS idx_figures_slide ON slide_figures (slide_id);
+CREATE INDEX IF NOT EXISTS idx_figures_record ON record_figures (record_id);
 
--- INVARIANT: Child rows (slide_figures, slide_data_files) are only modified as
--- part of a parent slide operation (pc add, pc edit, sync). Never independently.
--- The parent slide's updated_at is the authoritative change signal for sync.
+-- INVARIANT: Child rows (record_figures, record_data_files) are only modified as
+-- part of a parent record operation (pc add, pc edit, sync). Never independently.
+-- The parent record's updated_at is the authoritative change signal for sync.
 -- The sync_version triggers on child tables may cause harmless false positives
--- (version bump without discoverable slide changes) during sync operations.
+-- (version bump without discoverable record changes) during sync operations.
 -- If independent child modification commands are ever added, a cross-table
--- trigger to bump parent slide updated_at should be added at that time.
+-- trigger to bump parent record updated_at should be added at that time.
 
-CREATE TABLE IF NOT EXISTS slide_data_files (
+CREATE TABLE IF NOT EXISTS record_data_files (
     id              SERIAL PRIMARY KEY,
-    slide_id        TEXT NOT NULL REFERENCES slides(id) ON DELETE CASCADE,
+    record_id        TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,
     filename        TEXT NOT NULL CHECK (length(filename) > 0 AND position('/' in filename) = 0),
     s3_key          TEXT NOT NULL CHECK (s3_key ~ '^data/'),
     size            BIGINT NOT NULL CHECK (size >= 0),
     hash            TEXT NOT NULL CHECK (hash ~ '^[0-9a-f]{64}$'),
     description     TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (slide_id, filename)
+    UNIQUE (record_id, filename)
 );
 
-CREATE INDEX IF NOT EXISTS idx_data_files_slide ON slide_data_files (slide_id);
+CREATE INDEX IF NOT EXISTS idx_data_files_record ON record_data_files (record_id);
 
 CREATE TABLE IF NOT EXISTS templates (
     name            TEXT PRIMARY KEY,
@@ -163,11 +163,11 @@ DECLARE
     _user_id TEXT;
 BEGIN
     -- Resolve the user_id from the triggering row.
-    -- For slides: directly on the row. For child tables: join via slide_id.
-    IF TG_TABLE_NAME = 'slides' THEN
+    -- For records: directly on the row. For child tables: join via record_id.
+    IF TG_TABLE_NAME = 'records' THEN
         _user_id := COALESCE(NEW.user_id, OLD.user_id);
-    ELSIF TG_TABLE_NAME IN ('slide_figures', 'slide_data_files') THEN
-        SELECT user_id INTO _user_id FROM slides WHERE id = COALESCE(NEW.slide_id, OLD.slide_id);
+    ELSIF TG_TABLE_NAME IN ('record_figures', 'record_data_files') THEN
+        SELECT user_id INTO _user_id FROM records WHERE id = COALESCE(NEW.record_id, OLD.record_id);
     ELSIF TG_TABLE_NAME IN ('projects', 'devices') THEN
         _user_id := COALESCE(NEW.user_id, OLD.user_id);
     ELSIF TG_TABLE_NAME = 'templates' THEN
@@ -189,14 +189,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS slides_sync_bump_after_insert ON slides;
-CREATE TRIGGER slides_sync_bump_after_insert
-    AFTER INSERT ON slides
+DROP TRIGGER IF EXISTS records_sync_bump_after_insert ON records;
+CREATE TRIGGER records_sync_bump_after_insert
+    AFTER INSERT ON records
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
-DROP TRIGGER IF EXISTS slides_sync_bump_after_update ON slides;
-CREATE TRIGGER slides_sync_bump_after_update
-    AFTER UPDATE ON slides
+DROP TRIGGER IF EXISTS records_sync_bump_after_update ON records;
+CREATE TRIGGER records_sync_bump_after_update
+    AFTER UPDATE ON records
     FOR EACH ROW
     WHEN (
         OLD.id IS DISTINCT FROM NEW.id OR
@@ -213,44 +213,44 @@ CREATE TRIGGER slides_sync_bump_after_update
     )
     EXECUTE FUNCTION bump_sync_version();
 
-DROP TRIGGER IF EXISTS slides_sync_bump_after_delete ON slides;
-CREATE TRIGGER slides_sync_bump_after_delete
-    AFTER DELETE ON slides
+DROP TRIGGER IF EXISTS records_sync_bump_after_delete ON records;
+CREATE TRIGGER records_sync_bump_after_delete
+    AFTER DELETE ON records
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
-DROP TRIGGER IF EXISTS figures_sync_bump_after_insert ON slide_figures;
+DROP TRIGGER IF EXISTS figures_sync_bump_after_insert ON record_figures;
 CREATE TRIGGER figures_sync_bump_after_insert
-    AFTER INSERT ON slide_figures
+    AFTER INSERT ON record_figures
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
-DROP TRIGGER IF EXISTS figures_sync_bump_after_update ON slide_figures;
+DROP TRIGGER IF EXISTS figures_sync_bump_after_update ON record_figures;
 CREATE TRIGGER figures_sync_bump_after_update
-    AFTER UPDATE ON slide_figures
+    AFTER UPDATE ON record_figures
     FOR EACH ROW
     WHEN (
-        OLD.slide_id IS DISTINCT FROM NEW.slide_id OR
+        OLD.record_id IS DISTINCT FROM NEW.record_id OR
         OLD.filename IS DISTINCT FROM NEW.filename OR
         OLD.s3_key IS DISTINCT FROM NEW.s3_key OR
         OLD.alt_text IS DISTINCT FROM NEW.alt_text
     )
     EXECUTE FUNCTION bump_sync_version();
 
-DROP TRIGGER IF EXISTS figures_sync_bump_after_delete ON slide_figures;
+DROP TRIGGER IF EXISTS figures_sync_bump_after_delete ON record_figures;
 CREATE TRIGGER figures_sync_bump_after_delete
-    AFTER DELETE ON slide_figures
+    AFTER DELETE ON record_figures
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
-DROP TRIGGER IF EXISTS data_files_sync_bump_after_insert ON slide_data_files;
+DROP TRIGGER IF EXISTS data_files_sync_bump_after_insert ON record_data_files;
 CREATE TRIGGER data_files_sync_bump_after_insert
-    AFTER INSERT ON slide_data_files
+    AFTER INSERT ON record_data_files
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
-DROP TRIGGER IF EXISTS data_files_sync_bump_after_update ON slide_data_files;
+DROP TRIGGER IF EXISTS data_files_sync_bump_after_update ON record_data_files;
 CREATE TRIGGER data_files_sync_bump_after_update
-    AFTER UPDATE ON slide_data_files
+    AFTER UPDATE ON record_data_files
     FOR EACH ROW
     WHEN (
-        OLD.slide_id IS DISTINCT FROM NEW.slide_id OR
+        OLD.record_id IS DISTINCT FROM NEW.record_id OR
         OLD.filename IS DISTINCT FROM NEW.filename OR
         OLD.s3_key IS DISTINCT FROM NEW.s3_key OR
         OLD.size IS DISTINCT FROM NEW.size OR
@@ -259,9 +259,9 @@ CREATE TRIGGER data_files_sync_bump_after_update
     )
     EXECUTE FUNCTION bump_sync_version();
 
-DROP TRIGGER IF EXISTS data_files_sync_bump_after_delete ON slide_data_files;
+DROP TRIGGER IF EXISTS data_files_sync_bump_after_delete ON record_data_files;
 CREATE TRIGGER data_files_sync_bump_after_delete
-    AFTER DELETE ON slide_data_files
+    AFTER DELETE ON record_data_files
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
 DROP TRIGGER IF EXISTS templates_sync_bump_after_insert ON templates;
@@ -352,9 +352,9 @@ CREATE TRIGGER users_auto_updated_at
     BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
 
-DROP TRIGGER IF EXISTS slides_auto_updated_at ON slides;
-CREATE TRIGGER slides_auto_updated_at
-    BEFORE UPDATE ON slides
+DROP TRIGGER IF EXISTS records_auto_updated_at ON records;
+CREATE TRIGGER records_auto_updated_at
+    BEFORE UPDATE ON records
     FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
 
 DROP TRIGGER IF EXISTS templates_auto_updated_at ON templates;

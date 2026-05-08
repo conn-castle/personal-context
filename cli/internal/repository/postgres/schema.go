@@ -38,7 +38,7 @@ func ApplySchema(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func detectLegacyPreAuthSchema(ctx context.Context, pool *pgxpool.Pool) (bool, string, error) {
-	slidesExists, err := tableExists(ctx, pool, "slides")
+	recordsExists, err := tableExists(ctx, pool, "records")
 	if err != nil {
 		return false, "", err
 	}
@@ -46,16 +46,16 @@ func detectLegacyPreAuthSchema(ctx context.Context, pool *pgxpool.Pool) (bool, s
 	if err != nil {
 		return false, "", err
 	}
-	if slidesExists && !usersExists {
-		return true, "slides table exists but users table is missing", nil
+	if recordsExists && !usersExists {
+		return true, "records table exists but users table is missing", nil
 	}
-	if slidesExists {
-		hasSlideUserID, err := columnExists(ctx, pool, "slides", "user_id")
+	if recordsExists {
+		hasRecordUserID, err := columnExists(ctx, pool, "records", "user_id")
 		if err != nil {
 			return false, "", err
 		}
-		if !hasSlideUserID {
-			return true, "slides.user_id is missing", nil
+		if !hasRecordUserID {
+			return true, "records.user_id is missing", nil
 		}
 	}
 

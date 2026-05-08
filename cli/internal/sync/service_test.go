@@ -17,24 +17,24 @@ import (
 )
 
 func TestServiceSyncPushesLocalBundleToCloud(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 4, 5, 987000000, time.UTC)
-	bundle := SlideBundle{
-		Slide: repository.Slide{
-			ID:          slideID,
+	bundle := RecordBundle{
+		Record: repository.Record{
+			ID:          recordID,
 			Date:        "2026-03-08",
 			DayOrder:    "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID:  slideID,
+		Figures: []repository.RecordFigure{{
+			RecordID:  recordID,
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 		}},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID:  slideID,
+		DataFiles: []repository.RecordDataFile{{
+			RecordID:  recordID,
 			Filename: "metrics.csv",
 			S3Key:    "data/20260308-a1b2c3d4/metrics.csv",
 			Size:     7,
@@ -44,17 +44,17 @@ func TestServiceSyncPushesLocalBundleToCloud(t *testing.T) {
 
 	service, localRepo, cloudRepo, localFS, objects, cursorStore := newTestService(
 		t,
-		[]SlideBundle{bundle},
+		[]RecordBundle{bundle},
 		nil,
 	)
-	writeLocalAsset(t, localFS, true, slideID, "plot.png", "FIGURE")
-	writeLocalAsset(t, localFS, false, slideID, "metrics.csv", "1,2,3\n")
+	writeLocalAsset(t, localFS, true, recordID, "plot.png", "FIGURE")
+	writeLocalAsset(t, localFS, false, recordID, "metrics.csv", "1,2,3\n")
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	assertBundleEqual(t, cloudRepo.bundle(slideID), localRepo.bundle(slideID))
+	assertBundleEqual(t, cloudRepo.bundle(recordID), localRepo.bundle(recordID))
 	if got := objects.objects["figures/20260308-a1b2c3d4/plot.png"]; got != "FIGURE" {
 		t.Fatalf("uploaded figure = %q, want %q", got, "FIGURE")
 	}
@@ -72,24 +72,24 @@ func TestServiceSyncPushesLocalBundleToCloud(t *testing.T) {
 }
 
 func TestServiceSyncPullsCloudBundleToLocalWithoutDownloadingDataFiles(t *testing.T) {
-	slideID := "20260308-deadbeef"
+	recordID := "20260308-deadbeef"
 	now := time.Date(2026, 3, 8, 18, 30, 0, 123000000, time.UTC)
-	bundle := SlideBundle{
-		Slide: repository.Slide{
-			ID:          slideID,
+	bundle := RecordBundle{
+		Record: repository.Record{
+			ID:          recordID,
 			Date:        "2026-03-08",
 			DayOrder:    "a1",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID:  slideID,
+		Figures: []repository.RecordFigure{{
+			RecordID:  recordID,
 			Filename: "chart.png",
 			S3Key:    "figures/20260308-deadbeef/chart.png",
 		}},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID:  slideID,
+		DataFiles: []repository.RecordDataFile{{
+			RecordID:  recordID,
 			Filename: "report.csv",
 			S3Key:    "data/20260308-deadbeef/report.csv",
 			Size:     9,
@@ -100,7 +100,7 @@ func TestServiceSyncPullsCloudBundleToLocalWithoutDownloadingDataFiles(t *testin
 	service, localRepo, _, localFS, objects, _ := newTestService(
 		t,
 		nil,
-		[]SlideBundle{bundle},
+		[]RecordBundle{bundle},
 	)
 	objects.objects["figures/20260308-deadbeef/chart.png"] = "CLOUD-FIGURE"
 	objects.objects["data/20260308-deadbeef/report.csv"] = "CLOUD-DATA"
@@ -109,11 +109,11 @@ func TestServiceSyncPullsCloudBundleToLocalWithoutDownloadingDataFiles(t *testin
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	assertBundleEqual(t, localRepo.bundle(slideID), bundle)
-	if got := readLocalAsset(t, localFS, true, slideID, "chart.png"); got != "CLOUD-FIGURE" {
+	assertBundleEqual(t, localRepo.bundle(recordID), bundle)
+	if got := readLocalAsset(t, localFS, true, recordID, "chart.png"); got != "CLOUD-FIGURE" {
 		t.Fatalf("downloaded figure = %q, want %q", got, "CLOUD-FIGURE")
 	}
-	dataPath, err := localFS.ResolveDataFilePath(slideID, "report.csv")
+	dataPath, err := localFS.ResolveDataFilePath(recordID, "report.csv")
 	if err != nil {
 		t.Fatalf("ResolveDataFilePath() error = %v", err)
 	}
@@ -123,25 +123,25 @@ func TestServiceSyncPullsCloudBundleToLocalWithoutDownloadingDataFiles(t *testin
 }
 
 func TestServiceSyncLeavesLastSyncUnchangedOnFailure(t *testing.T) {
-	slideID := "20260308-feedface"
+	recordID := "20260308-feedface"
 	now := time.Date(2026, 3, 8, 20, 0, 0, 0, time.UTC)
-	bundle := SlideBundle{
-		Slide: repository.Slide{
-			ID:          slideID,
+	bundle := RecordBundle{
+		Record: repository.Record{
+			ID:          recordID,
 			Date:        "2026-03-08",
 			DayOrder:    "a2",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID:  slideID,
+		Figures: []repository.RecordFigure{{
+			RecordID:  recordID,
 			Filename: "missing.png",
 			S3Key:    "figures/20260308-feedface/missing.png",
 		}},
 	}
 
-	service, _, _, _, _, cursorStore := newTestService(t, nil, []SlideBundle{bundle})
+	service, _, _, _, _, cursorStore := newTestService(t, nil, []RecordBundle{bundle})
 
 	err := service.Sync(context.Background())
 	if err == nil {
@@ -158,34 +158,34 @@ func TestServiceSyncLeavesLastSyncUnchangedOnFailure(t *testing.T) {
 }
 
 func TestServiceSyncPullsLaterCloudEditOverLocalChange(t *testing.T) {
-	slideID := "20260308-cafebabe"
+	recordID := "20260308-cafebabe"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID:          slideID,
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID:          recordID,
 			Date:        "2026-03-08",
 			DayOrder:    "a3",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base,
 			UpdatedAt:   base.Add(1 * time.Minute),
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID:  slideID,
+		Figures: []repository.RecordFigure{{
+			RecordID:  recordID,
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-cafebabe/plot.png",
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID:          slideID,
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID:          recordID,
 			Date:        "2026-03-08",
 			DayOrder:    "a3",
 			HTMLContent: strPtr("<html>cloud wins</html>"),
 			CreatedAt:   base,
 			UpdatedAt:   base.Add(2 * time.Minute),
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID:  slideID,
+		Figures: []repository.RecordFigure{{
+			RecordID:  recordID,
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-cafebabe/plot.png",
 		}},
@@ -193,53 +193,53 @@ func TestServiceSyncPullsLaterCloudEditOverLocalChange(t *testing.T) {
 
 	service, localRepo, _, localFS, objects, _ := newTestService(
 		t,
-		[]SlideBundle{localBundle},
-		[]SlideBundle{cloudBundle},
+		[]RecordBundle{localBundle},
+		[]RecordBundle{cloudBundle},
 	)
-	writeLocalAsset(t, localFS, true, slideID, "plot.png", "LOCAL")
+	writeLocalAsset(t, localFS, true, recordID, "plot.png", "LOCAL")
 	objects.objects["figures/20260308-cafebabe/plot.png"] = "CLOUD"
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	assertBundleEqual(t, localRepo.bundle(slideID), cloudBundle)
-	if got := readLocalAsset(t, localFS, true, slideID, "plot.png"); got != "CLOUD" {
+	assertBundleEqual(t, localRepo.bundle(recordID), cloudBundle)
+	if got := readLocalAsset(t, localFS, true, recordID, "plot.png"); got != "CLOUD" {
 		t.Fatalf("local figure = %q, want %q", got, "CLOUD")
 	}
 }
 
 func TestServiceSyncPullsRenamedCloudFigureWithoutDeletingNewFile(t *testing.T) {
-	slideID := "20260308-rename01"
+	recordID := "20260308-rename01"
 	base := time.Date(2026, 3, 8, 13, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID:          slideID,
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID:          recordID,
 			Date:        "2026-03-08",
 			DayOrder:    "a4",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base,
 			UpdatedAt:   base,
 		},
-		Figures: []repository.SlideFigure{{
+		Figures: []repository.RecordFigure{{
 			ID:       1,
-			SlideID:  slideID,
+			RecordID:  recordID,
 			Filename: "old.png",
 			S3Key:    "figures/20260308-rename01/old.png",
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID:          slideID,
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID:          recordID,
 			Date:        "2026-03-08",
 			DayOrder:    "a4",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base,
 			UpdatedAt:   base.Add(1 * time.Minute),
 		},
-		Figures: []repository.SlideFigure{{
+		Figures: []repository.RecordFigure{{
 			ID:       1,
-			SlideID:  slideID,
+			RecordID:  recordID,
 			Filename: "new.png",
 			S3Key:    "figures/20260308-rename01/new.png",
 		}},
@@ -247,21 +247,21 @@ func TestServiceSyncPullsRenamedCloudFigureWithoutDeletingNewFile(t *testing.T) 
 
 	service, localRepo, _, localFS, objects, _ := newTestService(
 		t,
-		[]SlideBundle{localBundle},
-		[]SlideBundle{cloudBundle},
+		[]RecordBundle{localBundle},
+		[]RecordBundle{cloudBundle},
 	)
-	writeLocalAsset(t, localFS, true, slideID, "old.png", "OLD")
+	writeLocalAsset(t, localFS, true, recordID, "old.png", "OLD")
 	objects.objects["figures/20260308-rename01/new.png"] = "NEW"
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	assertBundleEqual(t, localRepo.bundle(slideID), cloudBundle)
-	if got := readLocalAsset(t, localFS, true, slideID, "new.png"); got != "NEW" {
+	assertBundleEqual(t, localRepo.bundle(recordID), cloudBundle)
+	if got := readLocalAsset(t, localFS, true, recordID, "new.png"); got != "NEW" {
 		t.Fatalf("renamed figure = %q, want %q", got, "NEW")
 	}
-	oldPath, err := localFS.ResolveFigurePath(slideID, "old.png")
+	oldPath, err := localFS.ResolveFigurePath(recordID, "old.png")
 	if err != nil {
 		t.Fatalf("ResolveFigurePath() error = %v", err)
 	}
@@ -404,14 +404,14 @@ func TestSyncErrorsOnUpdateCloudVersionUpdateVersionFailure(t *testing.T) {
 
 func TestSyncErrorsOnListLocalChanges(t *testing.T) {
 	localRepo := newMemoryRepo(nil)
-	localRepo.listSlidesErr = fmt.Errorf("local list failed")
+	localRepo.listRecordsErr = fmt.Errorf("local list failed")
 
 	service, _, _, _, _, _ := newTestService(t, nil, nil)
 	service.localRepo = localRepo
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from local ListSlides()")
+		t.Fatal("expected error from local ListRecords()")
 	}
 	if !strings.Contains(err.Error(), "local list failed") {
 		t.Fatalf("error = %q, want to contain 'local list failed'", err.Error())
@@ -420,14 +420,14 @@ func TestSyncErrorsOnListLocalChanges(t *testing.T) {
 
 func TestSyncErrorsOnListCloudChanges(t *testing.T) {
 	cloudRepo := newMemoryRepo(nil)
-	cloudRepo.listSlidesErr = fmt.Errorf("cloud list failed")
+	cloudRepo.listRecordsErr = fmt.Errorf("cloud list failed")
 
 	service, _, _, _, _, _ := newTestService(t, nil, nil)
 	service.cloudRepo = cloudRepo
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from cloud ListSlides()")
+		t.Fatal("expected error from cloud ListRecords()")
 	}
 	if !strings.Contains(err.Error(), "cloud list failed") {
 		t.Fatalf("error = %q, want to contain 'cloud list failed'", err.Error())
@@ -435,20 +435,20 @@ func TestSyncErrorsOnListCloudChanges(t *testing.T) {
 }
 
 func TestSyncErrorsOnLoadBundleNonNotFoundError(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
-	// Inject non-ErrNotFound error into cloud repo for GetSlideByID.
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
+	// Inject non-ErrNotFound error into cloud repo for GetRecordByID.
 	cloudRepo := service.cloudRepo.(*memoryRepo)
-	cloudRepo.getSlideByIDErr = fmt.Errorf("connection timeout")
+	cloudRepo.getRecordByIDErr = fmt.Errorf("connection timeout")
 
 	err := service.Sync(context.Background())
 	if err == nil {
@@ -459,48 +459,48 @@ func TestSyncErrorsOnLoadBundleNonNotFoundError(t *testing.T) {
 	}
 }
 
-func TestSyncErrorsOnBundleForSlideListFiguresError(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncErrorsOnBundleForRecordListFiguresError(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.listFiguresBySlideIDErr = fmt.Errorf("figures table locked")
+	localRepo.listFiguresByRecordIDErr = fmt.Errorf("figures table locked")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from bundleForSlide ListSlideFiguresBySlideID")
+		t.Fatal("expected error from bundleForRecord ListRecordFiguresByRecordID")
 	}
 	if !strings.Contains(err.Error(), "figures table locked") {
 		t.Fatalf("error = %q, want to contain 'figures table locked'", err.Error())
 	}
 }
 
-func TestSyncErrorsOnBundleForSlideListDataFilesError(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncErrorsOnBundleForRecordListDataFilesError(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.listDataFilesBySlideIDErr = fmt.Errorf("data files table locked")
+	localRepo.listDataFilesByRecordIDErr = fmt.Errorf("data files table locked")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from bundleForSlide ListSlideDataFilesBySlideID")
+		t.Fatal("expected error from bundleForRecord ListRecordDataFilesByRecordID")
 	}
 	if !strings.Contains(err.Error(), "data files table locked") {
 		t.Fatalf("error = %q, want to contain 'data files table locked'", err.Error())
@@ -508,23 +508,23 @@ func TestSyncErrorsOnBundleForSlideListDataFilesError(t *testing.T) {
 }
 
 func TestSyncErrorsOnUploadFileOpenFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID:  slideID,
+		Figures: []repository.RecordFigure{{
+			RecordID:  recordID,
 			Filename: "missing.png",
 			S3Key:    "figures/20260308-a1b2c3d4/missing.png",
 		}},
 	}
 
 	// Do NOT write the local file so os.Open fails.
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
 	err := service.Sync(context.Background())
 	if err == nil {
 		t.Fatal("expected error from uploadFile when local file does not exist")
@@ -535,22 +535,22 @@ func TestSyncErrorsOnUploadFileOpenFailure(t *testing.T) {
 }
 
 func TestSyncErrorsOnDownloadFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID:  slideID,
+		Figures: []repository.RecordFigure{{
+			RecordID:  recordID,
 			Filename: "chart.png",
 			S3Key:    "figures/20260308-a1b2c3d4/chart.png",
 		}},
 	}
 
-	service, _, _, _, objects, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, _, objects, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 	objects.downloadErr = fmt.Errorf("s3 access denied")
 
 	err := service.Sync(context.Background())
@@ -565,124 +565,124 @@ func TestSyncErrorsOnDownloadFailure(t *testing.T) {
 // --- Push: cloud exists but cloud wins -> skip ---
 
 func TestSyncPushSkipsWhenCloudWins(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud later</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
-	service, _, cloudRepo, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, cloudRepo, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
 	// Cloud should not have been overwritten by local.
-	got := cloudRepo.bundle(slideID)
-	if got.Slide.HTMLContent == nil || *got.Slide.HTMLContent != "<html>cloud later</html>" {
-		t.Fatalf("cloud HTMLContent = %v, want %q", got.Slide.HTMLContent, "<html>cloud later</html>")
+	got := cloudRepo.bundle(recordID)
+	if got.Record.HTMLContent == nil || *got.Record.HTMLContent != "<html>cloud later</html>" {
+		t.Fatalf("cloud HTMLContent = %v, want %q", got.Record.HTMLContent, "<html>cloud later</html>")
 	}
 }
 
 // --- Pull: local exists but local wins -> skip ---
 
 func TestSyncPullSkipsWhenLocalWins(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local later</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
 
-	service, localRepo, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, localRepo, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
 	// Local should not have been overwritten by cloud.
-	got := localRepo.bundle(slideID)
-	if got.Slide.HTMLContent == nil || *got.Slide.HTMLContent != "<html>local later</html>" {
-		t.Fatalf("local HTMLContent = %v, want %q", got.Slide.HTMLContent, "<html>local later</html>")
+	got := localRepo.bundle(recordID)
+	if got.Record.HTMLContent == nil || *got.Record.HTMLContent != "<html>local later</html>" {
+		t.Fatalf("local HTMLContent = %v, want %q", got.Record.HTMLContent, "<html>local later</html>")
 	}
 }
 
 // --- Push with figure create/update/delete on cloud ---
 
 func TestSyncPushFigureCreateUpdateDeleteOnCloud(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
 	// Local has: new.png (create), updated.png (update s3key), no old.png (delete)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		Figures: []repository.SlideFigure{
-			{SlideID: slideID, Filename: "new.png", S3Key: "figures/" + slideID + "/new.png"},
-			{SlideID: slideID, Filename: "updated.png", S3Key: "figures/" + slideID + "/updated-v2.png"},
+		Figures: []repository.RecordFigure{
+			{RecordID: recordID, Filename: "new.png", S3Key: "figures/" + recordID + "/new.png"},
+			{RecordID: recordID, Filename: "updated.png", S3Key: "figures/" + recordID + "/updated-v2.png"},
 		},
 	}
 	// Cloud has: updated.png (existing, different s3key), old.png (to be deleted)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{
-			{ID: 10, SlideID: slideID, Filename: "updated.png", S3Key: "figures/" + slideID + "/updated-v1.png"},
-			{ID: 11, SlideID: slideID, Filename: "old.png", S3Key: "figures/" + slideID + "/old.png"},
+		Figures: []repository.RecordFigure{
+			{ID: 10, RecordID: recordID, Filename: "updated.png", S3Key: "figures/" + recordID + "/updated-v1.png"},
+			{ID: 11, RecordID: recordID, Filename: "old.png", S3Key: "figures/" + recordID + "/old.png"},
 		},
 	}
 
-	service, _, cloudRepo, localFS, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, true, slideID, "new.png", "NEW-FIG")
-	writeLocalAsset(t, localFS, true, slideID, "updated.png", "UPDATED-FIG")
+	service, _, cloudRepo, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, true, recordID, "new.png", "NEW-FIG")
+	writeLocalAsset(t, localFS, true, recordID, "updated.png", "UPDATED-FIG")
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
 	// new.png should be uploaded and created in cloud repo.
-	if got := objects.objects["figures/"+slideID+"/new.png"]; got != "NEW-FIG" {
+	if got := objects.objects["figures/"+recordID+"/new.png"]; got != "NEW-FIG" {
 		t.Fatalf("uploaded new figure = %q, want %q", got, "NEW-FIG")
 	}
 	// updated.png should be uploaded with new s3 key; old s3 key should be deleted.
-	if got := objects.objects["figures/"+slideID+"/updated-v2.png"]; got != "UPDATED-FIG" {
+	if got := objects.objects["figures/"+recordID+"/updated-v2.png"]; got != "UPDATED-FIG" {
 		t.Fatalf("uploaded updated figure = %q, want %q", got, "UPDATED-FIG")
 	}
-	if _, exists := objects.objects["figures/"+slideID+"/updated-v1.png"]; exists {
+	if _, exists := objects.objects["figures/"+recordID+"/updated-v1.png"]; exists {
 		t.Fatal("expected old s3 key for updated figure to be deleted")
 	}
 	// old.png should be deleted from cloud object store and repo.
-	if _, exists := objects.objects["figures/"+slideID+"/old.png"]; exists {
+	if _, exists := objects.objects["figures/"+recordID+"/old.png"]; exists {
 		t.Fatal("expected deleted figure s3 object to be removed")
 	}
-	cloudFigures := cloudRepo.bundle(slideID).Figures
+	cloudFigures := cloudRepo.bundle(recordID).Figures
 	for _, fig := range cloudFigures {
 		if fig.Filename == "old.png" {
 			t.Fatal("expected old.png to be deleted from cloud repo")
@@ -693,57 +693,57 @@ func TestSyncPushFigureCreateUpdateDeleteOnCloud(t *testing.T) {
 // --- Push with data file create/update/delete on cloud ---
 
 func TestSyncPushDataFileCreateUpdateDeleteOnCloud(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{
-			{SlideID: slideID, Filename: "new.csv", S3Key: "data/" + slideID + "/new.csv",
+		DataFiles: []repository.RecordDataFile{
+			{RecordID: recordID, Filename: "new.csv", S3Key: "data/" + recordID + "/new.csv",
 				Size: 5, Hash: strings.Repeat("a", 64)},
-			{SlideID: slideID, Filename: "updated.csv", S3Key: "data/" + slideID + "/updated-v2.csv",
+			{RecordID: recordID, Filename: "updated.csv", S3Key: "data/" + recordID + "/updated-v2.csv",
 				Size: 12, Hash: strings.Repeat("b", 64)},
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{
-			{ID: 20, SlideID: slideID, Filename: "updated.csv", S3Key: "data/" + slideID + "/updated-v1.csv",
+		DataFiles: []repository.RecordDataFile{
+			{ID: 20, RecordID: recordID, Filename: "updated.csv", S3Key: "data/" + recordID + "/updated-v1.csv",
 				Size: 10, Hash: strings.Repeat("c", 64)},
-			{ID: 21, SlideID: slideID, Filename: "old.csv", S3Key: "data/" + slideID + "/old.csv",
+			{ID: 21, RecordID: recordID, Filename: "old.csv", S3Key: "data/" + recordID + "/old.csv",
 				Size: 8, Hash: strings.Repeat("d", 64)},
 		},
 	}
 
-	service, _, cloudRepo, localFS, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, false, slideID, "new.csv", "NEW-DATA")
-	writeLocalAsset(t, localFS, false, slideID, "updated.csv", "UPDATED-DATA")
+	service, _, cloudRepo, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, false, recordID, "new.csv", "NEW-DATA")
+	writeLocalAsset(t, localFS, false, recordID, "updated.csv", "UPDATED-DATA")
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
 	// new.csv uploaded and created.
-	if got := objects.objects["data/"+slideID+"/new.csv"]; got != "NEW-DATA" {
+	if got := objects.objects["data/"+recordID+"/new.csv"]; got != "NEW-DATA" {
 		t.Fatalf("uploaded new data file = %q, want %q", got, "NEW-DATA")
 	}
 	// updated.csv: old s3 key deleted.
-	if _, exists := objects.objects["data/"+slideID+"/updated-v1.csv"]; exists {
+	if _, exists := objects.objects["data/"+recordID+"/updated-v1.csv"]; exists {
 		t.Fatal("expected old s3 key for updated data file to be deleted")
 	}
 	// old.csv: deleted from object store and repo.
-	if _, exists := objects.objects["data/"+slideID+"/old.csv"]; exists {
+	if _, exists := objects.objects["data/"+recordID+"/old.csv"]; exists {
 		t.Fatal("expected deleted data file s3 object to be removed")
 	}
-	cloudDataFiles := cloudRepo.bundle(slideID).DataFiles
+	cloudDataFiles := cloudRepo.bundle(recordID).DataFiles
 	for _, df := range cloudDataFiles {
 		if df.Filename == "old.csv" {
 			t.Fatal("expected old.csv to be deleted from cloud repo")
@@ -751,44 +751,44 @@ func TestSyncPushDataFileCreateUpdateDeleteOnCloud(t *testing.T) {
 	}
 }
 
-// --- Pull slide that deletes local figures and data files ---
+// --- Pull record that deletes local figures and data files ---
 
 func TestSyncPullDeletesLocalFiguresAndDataFiles(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{
-			{ID: 1, SlideID: slideID, Filename: "obsolete.png", S3Key: "figures/" + slideID + "/obsolete.png"},
+		Figures: []repository.RecordFigure{
+			{ID: 1, RecordID: recordID, Filename: "obsolete.png", S3Key: "figures/" + recordID + "/obsolete.png"},
 		},
-		DataFiles: []repository.SlideDataFile{
-			{ID: 1, SlideID: slideID, Filename: "obsolete.csv", S3Key: "data/" + slideID + "/obsolete.csv",
+		DataFiles: []repository.RecordDataFile{
+			{ID: 1, RecordID: recordID, Filename: "obsolete.csv", S3Key: "data/" + recordID + "/obsolete.csv",
 				Size: 5, Hash: strings.Repeat("a", 64)},
 		},
 	}
 	// Cloud has no figures or data files (everything should be deleted locally).
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud wins</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
-	service, localRepo, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, true, slideID, "obsolete.png", "OBSOLETE-FIG")
-	writeLocalAsset(t, localFS, false, slideID, "obsolete.csv", "OBSOLETE-DATA")
+	service, localRepo, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, true, recordID, "obsolete.png", "OBSOLETE-FIG")
+	writeLocalAsset(t, localFS, false, recordID, "obsolete.csv", "OBSOLETE-DATA")
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := localRepo.bundle(slideID)
+	got := localRepo.bundle(recordID)
 	if len(got.Figures) != 0 {
 		t.Fatalf("expected no local figures, got %d", len(got.Figures))
 	}
@@ -797,11 +797,11 @@ func TestSyncPullDeletesLocalFiguresAndDataFiles(t *testing.T) {
 	}
 
 	// Check files removed from disk.
-	figPath, _ := localFS.ResolveFigurePath(slideID, "obsolete.png")
+	figPath, _ := localFS.ResolveFigurePath(recordID, "obsolete.png")
 	if _, err := os.Stat(figPath); !os.IsNotExist(err) {
 		t.Fatalf("expected obsolete figure file to be removed, stat error = %v", err)
 	}
-	dataPath, _ := localFS.ResolveDataFilePath(slideID, "obsolete.csv")
+	dataPath, _ := localFS.ResolveDataFilePath(recordID, "obsolete.csv")
 	if _, err := os.Stat(dataPath); !os.IsNotExist(err) {
 		t.Fatalf("expected obsolete data file to be removed, stat error = %v", err)
 	}
@@ -810,40 +810,40 @@ func TestSyncPullDeletesLocalFiguresAndDataFiles(t *testing.T) {
 // --- Pull with data file filename change (delete old local file) ---
 
 func TestSyncPullWithDataFileFilenameChange(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{
-			{ID: 1, SlideID: slideID, Filename: "old-name.csv", S3Key: "data/" + slideID + "/old-name.csv",
+		DataFiles: []repository.RecordDataFile{
+			{ID: 1, RecordID: recordID, Filename: "old-name.csv", S3Key: "data/" + recordID + "/old-name.csv",
 				Size: 5, Hash: strings.Repeat("a", 64)},
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{
-			{SlideID: slideID, Filename: "new-name.csv", S3Key: "data/" + slideID + "/new-name.csv",
+		DataFiles: []repository.RecordDataFile{
+			{RecordID: recordID, Filename: "new-name.csv", S3Key: "data/" + recordID + "/new-name.csv",
 				Size: 8, Hash: strings.Repeat("b", 64)},
 		},
 	}
 
-	service, localRepo, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, false, slideID, "old-name.csv", "OLD-DATA")
+	service, localRepo, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, false, recordID, "old-name.csv", "OLD-DATA")
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := localRepo.bundle(slideID)
+	got := localRepo.bundle(recordID)
 	if len(got.DataFiles) != 1 {
 		t.Fatalf("expected 1 data file, got %d", len(got.DataFiles))
 	}
@@ -852,7 +852,7 @@ func TestSyncPullWithDataFileFilenameChange(t *testing.T) {
 	}
 
 	// Old local file should be removed.
-	oldPath, _ := localFS.ResolveDataFilePath(slideID, "old-name.csv")
+	oldPath, _ := localFS.ResolveDataFilePath(recordID, "old-name.csv")
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Fatalf("expected old data file to be removed, stat error = %v", err)
 	}
@@ -861,39 +861,39 @@ func TestSyncPullWithDataFileFilenameChange(t *testing.T) {
 // --- Push: cloud bundle exists, local wins -> update cloud ---
 
 func TestSyncPushLocalWinsUpdatesCloud(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local wins</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot.png",
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot.png",
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud loses</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(1 * time.Minute),
 		},
 	}
 
-	service, _, cloudRepo, localFS, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, true, slideID, "plot.png", "LOCAL-FIGURE")
+	service, _, cloudRepo, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, true, recordID, "plot.png", "LOCAL-FIGURE")
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := cloudRepo.bundle(slideID)
-	if got.Slide.HTMLContent == nil || *got.Slide.HTMLContent != "<html>local wins</html>" {
-		t.Fatalf("cloud HTMLContent = %v, want %q", got.Slide.HTMLContent, "<html>local wins</html>")
+	got := cloudRepo.bundle(recordID)
+	if got.Record.HTMLContent == nil || *got.Record.HTMLContent != "<html>local wins</html>" {
+		t.Fatalf("cloud HTMLContent = %v, want %q", got.Record.HTMLContent, "<html>local wins</html>")
 	}
-	if uploadedFig := objects.objects["figures/"+slideID+"/plot.png"]; uploadedFig != "LOCAL-FIGURE" {
+	if uploadedFig := objects.objects["figures/"+recordID+"/plot.png"]; uploadedFig != "LOCAL-FIGURE" {
 		t.Fatalf("uploaded figure = %q, want %q", uploadedFig, "LOCAL-FIGURE")
 	}
 }
@@ -933,30 +933,30 @@ func TestWriteReaderToPathSuccess(t *testing.T) {
 	}
 }
 
-// --- Pull: new cloud slide with data files (create path for applyDataFilesToLocal) ---
+// --- Pull: new cloud record with data files (create path for applyDataFilesToLocal) ---
 
-func TestSyncPullNewCloudSlideWithDataFiles(t *testing.T) {
-	slideID := "20260308-newcloud1"
+func TestSyncPullNewCloudRecordWithDataFiles(t *testing.T) {
+	recordID := "20260308-newcloud1"
 	now := time.Date(2026, 3, 8, 18, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud new</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("d", 64),
 		}},
 	}
 
-	service, localRepo, _, localFS, _, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, localRepo, _, localFS, _, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := localRepo.bundle(slideID)
+	got := localRepo.bundle(recordID)
 	if len(got.DataFiles) != 1 {
 		t.Fatalf("expected 1 data file, got %d", len(got.DataFiles))
 	}
@@ -964,7 +964,7 @@ func TestSyncPullNewCloudSlideWithDataFiles(t *testing.T) {
 		t.Fatalf("data file filename = %q, want %q", got.DataFiles[0].Filename, "data.csv")
 	}
 	// Data files are NOT downloaded to local, but the old file at the path should be removed if present.
-	dataPath, _ := localFS.ResolveDataFilePath(slideID, "data.csv")
+	dataPath, _ := localFS.ResolveDataFilePath(recordID, "data.csv")
 	if _, err := os.Stat(dataPath); !os.IsNotExist(err) {
 		t.Fatalf("expected data file to not exist locally, stat error = %v", err)
 	}
@@ -973,50 +973,50 @@ func TestSyncPullNewCloudSlideWithDataFiles(t *testing.T) {
 // --- Pull with figure and data file updates (update path for applyDataFilesToLocal) ---
 
 func TestSyncPullUpdatesLocalDataFilesAndFigures(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{
-			{ID: 1, SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot.png",
+		Figures: []repository.RecordFigure{
+			{ID: 1, RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot.png",
 				AltText: strPtr("old alt")},
 		},
-		DataFiles: []repository.SlideDataFile{
-			{ID: 1, SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics.csv",
+		DataFiles: []repository.RecordDataFile{
+			{ID: 1, RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics.csv",
 				Size: 5, Hash: strings.Repeat("a", 64), Description: strPtr("old desc")},
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud wins</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		Figures: []repository.SlideFigure{
-			{SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v2.png",
+		Figures: []repository.RecordFigure{
+			{RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot-v2.png",
 				AltText: strPtr("new alt")},
 		},
-		DataFiles: []repository.SlideDataFile{
-			{SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics-v2.csv",
+		DataFiles: []repository.RecordDataFile{
+			{RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics-v2.csv",
 				Size: 10, Hash: strings.Repeat("b", 64), Description: strPtr("new desc")},
 		},
 	}
 
-	service, localRepo, _, localFS, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, true, slideID, "plot.png", "OLD-FIG")
-	writeLocalAsset(t, localFS, false, slideID, "metrics.csv", "OLD-DATA")
-	objects.objects["figures/"+slideID+"/plot-v2.png"] = "NEW-FIG"
+	service, localRepo, _, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, true, recordID, "plot.png", "OLD-FIG")
+	writeLocalAsset(t, localFS, false, recordID, "metrics.csv", "OLD-DATA")
+	objects.objects["figures/"+recordID+"/plot-v2.png"] = "NEW-FIG"
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := localRepo.bundle(slideID)
+	got := localRepo.bundle(recordID)
 	if len(got.Figures) != 1 || *got.Figures[0].AltText != "new alt" {
 		t.Fatalf("expected figure alt text to be 'new alt', got %+v", got.Figures)
 	}
@@ -1025,170 +1025,170 @@ func TestSyncPullUpdatesLocalDataFilesAndFigures(t *testing.T) {
 	}
 
 	// Figure should be downloaded from cloud.
-	figContent := readLocalAsset(t, localFS, true, slideID, "plot.png")
+	figContent := readLocalAsset(t, localFS, true, recordID, "plot.png")
 	if figContent != "NEW-FIG" {
 		t.Fatalf("local figure = %q, want %q", figContent, "NEW-FIG")
 	}
 }
 
-// --- applySlide error from UpdateSlide ---
+// --- applyRecord error from UpdateRecord ---
 
-func TestSyncPushErrorsOnApplySlideUpdateFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPushErrorsOnApplyRecordUpdateFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local wins</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	cloudRepo := service.cloudRepo.(*memoryRepo)
-	cloudRepo.updateSlideErr = fmt.Errorf("update slide denied")
+	cloudRepo.updateRecordErr = fmt.Errorf("update record denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from applySlide UpdateSlide")
+		t.Fatal("expected error from applyRecord UpdateRecord")
 	}
-	if !strings.Contains(err.Error(), "update slide denied") {
-		t.Fatalf("error = %q, want to contain 'update slide denied'", err.Error())
+	if !strings.Contains(err.Error(), "update record denied") {
+		t.Fatalf("error = %q, want to contain 'update record denied'", err.Error())
 	}
 }
 
-// --- applySlide error from CreateSlide ---
+// --- applyRecord error from CreateRecord ---
 
-func TestSyncPushErrorsOnApplySlideCreateFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPushErrorsOnApplyRecordCreateFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
 	cloudRepo := service.cloudRepo.(*memoryRepo)
-	cloudRepo.createSlideErr = fmt.Errorf("create slide denied")
+	cloudRepo.createRecordErr = fmt.Errorf("create record denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from applySlide CreateSlide")
+		t.Fatal("expected error from applyRecord CreateRecord")
 	}
-	if !strings.Contains(err.Error(), "create slide denied") {
-		t.Fatalf("error = %q, want to contain 'create slide denied'", err.Error())
+	if !strings.Contains(err.Error(), "create record denied") {
+		t.Fatalf("error = %q, want to contain 'create record denied'", err.Error())
 	}
 }
 
 // --- applyFiguresToCloud error paths ---
 
-func TestSyncPushErrorsOnCloudCreateSlideFigureFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPushErrorsOnCloudCreateRecordFigureFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "new.png", S3Key: "figures/" + slideID + "/new.png",
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "new.png", S3Key: "figures/" + recordID + "/new.png",
 		}},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
-	writeLocalAsset(t, localFS, true, slideID, "new.png", "FIG")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
+	writeLocalAsset(t, localFS, true, recordID, "new.png", "FIG")
 	cloudRepo := service.cloudRepo.(*memoryRepo)
-	cloudRepo.createSlideFigureErr = fmt.Errorf("create figure denied")
+	cloudRepo.createRecordFigureErr = fmt.Errorf("create figure denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from CreateSlideFigure")
+		t.Fatal("expected error from CreateRecordFigure")
 	}
 	if !strings.Contains(err.Error(), "create figure denied") {
 		t.Fatalf("error = %q, want to contain 'create figure denied'", err.Error())
 	}
 }
 
-func TestSyncPushErrorsOnCloudUpdateSlideFigureFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPushErrorsOnCloudUpdateRecordFigureFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v2.png",
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot-v2.png",
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{{
-			ID: 10, SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v1.png",
+		Figures: []repository.RecordFigure{{
+			ID: 10, RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot-v1.png",
 		}},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, true, slideID, "plot.png", "FIG")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, true, recordID, "plot.png", "FIG")
 	cloudRepo := service.cloudRepo.(*memoryRepo)
-	cloudRepo.updateSlideFigureErr = fmt.Errorf("update figure denied")
+	cloudRepo.updateRecordFigureErr = fmt.Errorf("update figure denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from UpdateSlideFigure")
+		t.Fatal("expected error from UpdateRecordFigure")
 	}
 	if !strings.Contains(err.Error(), "update figure denied") {
 		t.Fatalf("error = %q, want to contain 'update figure denied'", err.Error())
 	}
 }
 
-func TestSyncPushErrorsOnCloudDeleteSlideFigureFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPushErrorsOnCloudDeleteRecordFigureFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{{
-			ID: 10, SlideID: slideID, Filename: "old.png", S3Key: "figures/" + slideID + "/old.png",
+		Figures: []repository.RecordFigure{{
+			ID: 10, RecordID: recordID, Filename: "old.png", S3Key: "figures/" + recordID + "/old.png",
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	cloudRepo := service.cloudRepo.(*memoryRepo)
-	cloudRepo.deleteSlideFigureErr = fmt.Errorf("delete figure denied")
+	cloudRepo.deleteRecordFigureErr = fmt.Errorf("delete figure denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from DeleteSlideFigure on cloud")
+		t.Fatal("expected error from DeleteRecordFigure on cloud")
 	}
 	if !strings.Contains(err.Error(), "delete figure denied") {
 		t.Fatalf("error = %q, want to contain 'delete figure denied'", err.Error())
@@ -1196,28 +1196,28 @@ func TestSyncPushErrorsOnCloudDeleteSlideFigureFailure(t *testing.T) {
 }
 
 func TestSyncPushErrorsOnCloudDeleteObjectAfterDeleteFigure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{{
-			ID: 10, SlideID: slideID, Filename: "old.png", S3Key: "figures/" + slideID + "/old.png",
+		Figures: []repository.RecordFigure{{
+			ID: 10, RecordID: recordID, Filename: "old.png", S3Key: "figures/" + recordID + "/old.png",
 		}},
 	}
 
-	service, _, _, _, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	objects.deleteErr = fmt.Errorf("s3 delete denied")
 
 	err := service.Sync(context.Background())
@@ -1230,21 +1230,21 @@ func TestSyncPushErrorsOnCloudDeleteObjectAfterDeleteFigure(t *testing.T) {
 }
 
 func TestSyncPushErrorsOnUploadFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot.png",
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot.png",
 		}},
 	}
 
-	service, _, _, localFS, objects, _ := newTestService(t, []SlideBundle{localBundle}, nil)
-	writeLocalAsset(t, localFS, true, slideID, "plot.png", "FIG")
+	service, _, _, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, nil)
+	writeLocalAsset(t, localFS, true, recordID, "plot.png", "FIG")
 	objects.uploadErr = fmt.Errorf("s3 upload denied")
 
 	err := service.Sync(context.Background())
@@ -1258,106 +1258,106 @@ func TestSyncPushErrorsOnUploadFailure(t *testing.T) {
 
 // --- applyDataFilesToCloud error paths ---
 
-func TestSyncPushErrorsOnCloudCreateSlideDataFileFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPushErrorsOnCloudCreateRecordDataFileFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
-	writeLocalAsset(t, localFS, false, slideID, "metrics.csv", "DATA")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
+	writeLocalAsset(t, localFS, false, recordID, "metrics.csv", "DATA")
 	cloudRepo := service.cloudRepo.(*memoryRepo)
-	cloudRepo.createSlideDataFileErr = fmt.Errorf("create data file denied")
+	cloudRepo.createRecordDataFileErr = fmt.Errorf("create data file denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from CreateSlideDataFile")
+		t.Fatal("expected error from CreateRecordDataFile")
 	}
 	if !strings.Contains(err.Error(), "create data file denied") {
 		t.Fatalf("error = %q, want to contain 'create data file denied'", err.Error())
 	}
 }
 
-func TestSyncPushErrorsOnCloudUpdateSlideDataFileFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPushErrorsOnCloudUpdateRecordDataFileFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics-v2.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics-v2.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 20, SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics-v1.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 20, RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics-v1.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, false, slideID, "metrics.csv", "DATA")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, false, recordID, "metrics.csv", "DATA")
 	cloudRepo := service.cloudRepo.(*memoryRepo)
-	cloudRepo.updateSlideDataFileErr = fmt.Errorf("update data file denied")
+	cloudRepo.updateRecordDataFileErr = fmt.Errorf("update data file denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from UpdateSlideDataFile")
+		t.Fatal("expected error from UpdateRecordDataFile")
 	}
 	if !strings.Contains(err.Error(), "update data file denied") {
 		t.Fatalf("error = %q, want to contain 'update data file denied'", err.Error())
 	}
 }
 
-func TestSyncPushErrorsOnCloudDeleteSlideDataFileFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPushErrorsOnCloudDeleteRecordDataFileFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 20, SlideID: slideID, Filename: "old.csv", S3Key: "data/" + slideID + "/old.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 20, RecordID: recordID, Filename: "old.csv", S3Key: "data/" + recordID + "/old.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	cloudRepo := service.cloudRepo.(*memoryRepo)
-	cloudRepo.deleteSlideDataFileErr = fmt.Errorf("delete data file denied")
+	cloudRepo.deleteRecordDataFileErr = fmt.Errorf("delete data file denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from DeleteSlideDataFile")
+		t.Fatal("expected error from DeleteRecordDataFile")
 	}
 	if !strings.Contains(err.Error(), "delete data file denied") {
 		t.Fatalf("error = %q, want to contain 'delete data file denied'", err.Error())
@@ -1366,106 +1366,106 @@ func TestSyncPushErrorsOnCloudDeleteSlideDataFileFailure(t *testing.T) {
 
 // --- applyFiguresToLocal error paths ---
 
-func TestSyncPullErrorsOnLocalCreateSlideFigureFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnLocalCreateRecordFigureFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "new.png", S3Key: "figures/" + slideID + "/new.png",
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "new.png", S3Key: "figures/" + recordID + "/new.png",
 		}},
 	}
 
-	service, _, _, _, objects, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
-	objects.objects["figures/"+slideID+"/new.png"] = "FIG"
+	service, _, _, _, objects, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
+	objects.objects["figures/"+recordID+"/new.png"] = "FIG"
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.createSlideFigureErr = fmt.Errorf("local create figure denied")
+	localRepo.createRecordFigureErr = fmt.Errorf("local create figure denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from local CreateSlideFigure")
+		t.Fatal("expected error from local CreateRecordFigure")
 	}
 	if !strings.Contains(err.Error(), "local create figure denied") {
 		t.Fatalf("error = %q, want to contain 'local create figure denied'", err.Error())
 	}
 }
 
-func TestSyncPullErrorsOnLocalUpdateSlideFigureFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnLocalUpdateRecordFigureFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{{
-			ID: 1, SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot.png",
+		Figures: []repository.RecordFigure{{
+			ID: 1, RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot.png",
 			AltText: strPtr("old"),
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v2.png",
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot-v2.png",
 			AltText: strPtr("new"),
 		}},
 	}
 
-	service, _, _, localFS, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, true, slideID, "plot.png", "OLD")
-	objects.objects["figures/"+slideID+"/plot-v2.png"] = "NEW"
+	service, _, _, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, true, recordID, "plot.png", "OLD")
+	objects.objects["figures/"+recordID+"/plot-v2.png"] = "NEW"
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.updateSlideFigureErr = fmt.Errorf("local update figure denied")
+	localRepo.updateRecordFigureErr = fmt.Errorf("local update figure denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from local UpdateSlideFigure")
+		t.Fatal("expected error from local UpdateRecordFigure")
 	}
 	if !strings.Contains(err.Error(), "local update figure denied") {
 		t.Fatalf("error = %q, want to contain 'local update figure denied'", err.Error())
 	}
 }
 
-func TestSyncPullErrorsOnLocalDeleteSlideFigureFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnLocalDeleteRecordFigureFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{{
-			ID: 1, SlideID: slideID, Filename: "old.png", S3Key: "figures/" + slideID + "/old.png",
+		Figures: []repository.RecordFigure{{
+			ID: 1, RecordID: recordID, Filename: "old.png", S3Key: "figures/" + recordID + "/old.png",
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, true, slideID, "old.png", "OLD")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, true, recordID, "old.png", "OLD")
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.deleteSlideFigureErr = fmt.Errorf("local delete figure denied")
+	localRepo.deleteRecordFigureErr = fmt.Errorf("local delete figure denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from local DeleteSlideFigure")
+		t.Fatal("expected error from local DeleteRecordFigure")
 	}
 	if !strings.Contains(err.Error(), "local delete figure denied") {
 		t.Fatalf("error = %q, want to contain 'local delete figure denied'", err.Error())
@@ -1474,104 +1474,104 @@ func TestSyncPullErrorsOnLocalDeleteSlideFigureFailure(t *testing.T) {
 
 // --- applyDataFilesToLocal error paths ---
 
-func TestSyncPullErrorsOnLocalCreateSlideDataFileFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnLocalCreateRecordDataFileFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.createSlideDataFileErr = fmt.Errorf("local create data file denied")
+	localRepo.createRecordDataFileErr = fmt.Errorf("local create data file denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from local CreateSlideDataFile")
+		t.Fatal("expected error from local CreateRecordDataFile")
 	}
 	if !strings.Contains(err.Error(), "local create data file denied") {
 		t.Fatalf("error = %q, want to contain 'local create data file denied'", err.Error())
 	}
 }
 
-func TestSyncPullErrorsOnLocalUpdateSlideDataFileFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnLocalUpdateRecordDataFileFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 1, SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 1, RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "metrics.csv", S3Key: "data/" + slideID + "/metrics-v2.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics-v2.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.updateSlideDataFileErr = fmt.Errorf("local update data file denied")
+	localRepo.updateRecordDataFileErr = fmt.Errorf("local update data file denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from local UpdateSlideDataFile")
+		t.Fatal("expected error from local UpdateRecordDataFile")
 	}
 	if !strings.Contains(err.Error(), "local update data file denied") {
 		t.Fatalf("error = %q, want to contain 'local update data file denied'", err.Error())
 	}
 }
 
-func TestSyncPullErrorsOnLocalDeleteSlideDataFileFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnLocalDeleteRecordDataFileFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 1, SlideID: slideID, Filename: "old.csv", S3Key: "data/" + slideID + "/old.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 1, RecordID: recordID, Filename: "old.csv", S3Key: "data/" + recordID + "/old.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.deleteSlideDataFileErr = fmt.Errorf("local delete data file denied")
+	localRepo.deleteRecordDataFileErr = fmt.Errorf("local delete data file denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from local DeleteSlideDataFile")
+		t.Fatal("expected error from local DeleteRecordDataFile")
 	}
 	if !strings.Contains(err.Error(), "local delete data file denied") {
 		t.Fatalf("error = %q, want to contain 'local delete data file denied'", err.Error())
@@ -1581,45 +1581,45 @@ func TestSyncPullErrorsOnLocalDeleteSlideDataFileFailure(t *testing.T) {
 // --- Pull: figure filename rename triggers old file deletion ---
 
 func TestSyncPullFigureFilenameRenameDeletesOldFile(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{{
-			ID: 1, SlideID: slideID, Filename: "old-name.png", S3Key: "figures/" + slideID + "/old-name.png",
+		Figures: []repository.RecordFigure{{
+			ID: 1, RecordID: recordID, Filename: "old-name.png", S3Key: "figures/" + recordID + "/old-name.png",
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "new-name.png", S3Key: "figures/" + slideID + "/new-name.png",
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "new-name.png", S3Key: "figures/" + recordID + "/new-name.png",
 		}},
 	}
 
-	service, localRepo, _, localFS, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, true, slideID, "old-name.png", "OLD")
-	objects.objects["figures/"+slideID+"/new-name.png"] = "NEW"
+	service, localRepo, _, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, true, recordID, "old-name.png", "OLD")
+	objects.objects["figures/"+recordID+"/new-name.png"] = "NEW"
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := localRepo.bundle(slideID)
+	got := localRepo.bundle(recordID)
 	if len(got.Figures) != 1 || got.Figures[0].Filename != "new-name.png" {
 		t.Fatalf("expected renamed figure, got %+v", got.Figures)
 	}
 
 	// Old figure file should be removed.
-	oldPath, _ := localFS.ResolveFigurePath(slideID, "old-name.png")
+	oldPath, _ := localFS.ResolveFigurePath(recordID, "old-name.png")
 	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
 		t.Fatalf("expected old figure file to be removed, stat error = %v", err)
 	}
@@ -1628,42 +1628,42 @@ func TestSyncPullFigureFilenameRenameDeletesOldFile(t *testing.T) {
 // --- Pull: data file update with filename change (covers rename path in applyDataFilesToLocal) ---
 
 func TestSyncPullDataFileUpdateWithFilenameChange(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 1, SlideID: slideID, Filename: "old-data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 1, RecordID: recordID, Filename: "old-data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 	// Cloud has same filename pattern but the update will happen by filename match.
 	// Use different filename to trigger the rename path.
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "old-data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "old-data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
 
-	service, localRepo, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, false, slideID, "old-data.csv", "OLD-DATA")
+	service, localRepo, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, false, recordID, "old-data.csv", "OLD-DATA")
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := localRepo.bundle(slideID)
+	got := localRepo.bundle(recordID)
 	if len(got.DataFiles) != 1 {
 		t.Fatalf("expected 1 data file, got %d", len(got.DataFiles))
 	}
@@ -1675,21 +1675,21 @@ func TestSyncPullDataFileUpdateWithFilenameChange(t *testing.T) {
 // --- applyBundleToCloud and applyBundleToLocal error propagation ---
 
 func TestSyncPushErrorsOnApplyFiguresToCloudFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "fig.png", S3Key: "figures/" + slideID + "/fig.png",
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "fig.png", S3Key: "figures/" + recordID + "/fig.png",
 		}},
 	}
 
 	// Trigger ResolveFigurePath error by using a stub that fails.
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
 	service.localFS = &errLocalFiles{figurErr: fmt.Errorf("resolve figure path failed")}
 
 	err := service.Sync(context.Background())
@@ -1702,21 +1702,21 @@ func TestSyncPushErrorsOnApplyFiguresToCloudFailure(t *testing.T) {
 }
 
 func TestSyncPushErrorsOnApplyDataFilesToCloudResolvePathFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
 	service.localFS = &errLocalFiles{dataFileErr: fmt.Errorf("resolve data path failed")}
 
 	err := service.Sync(context.Background())
@@ -1729,20 +1729,20 @@ func TestSyncPushErrorsOnApplyDataFilesToCloudResolvePathFailure(t *testing.T) {
 }
 
 func TestSyncPullErrorsOnApplyFiguresToLocalResolvePathFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "fig.png", S3Key: "figures/" + slideID + "/fig.png",
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "fig.png", S3Key: "figures/" + recordID + "/fig.png",
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 	service.localFS = &errLocalFiles{figurErr: fmt.Errorf("local resolve figure failed")}
 
 	err := service.Sync(context.Background())
@@ -1755,21 +1755,21 @@ func TestSyncPullErrorsOnApplyFiguresToLocalResolvePathFailure(t *testing.T) {
 }
 
 func TestSyncPullErrorsOnApplyDataFilesToLocalResolvePathFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 	service.localFS = &errLocalFiles{dataFileErr: fmt.Errorf("local resolve data path failed")}
 
 	err := service.Sync(context.Background())
@@ -1781,50 +1781,50 @@ func TestSyncPullErrorsOnApplyDataFilesToLocalResolvePathFailure(t *testing.T) {
 	}
 }
 
-// --- Pull error paths for cloud-side bundleForSlide ---
+// --- Pull error paths for cloud-side bundleForRecord ---
 
-func TestSyncPullErrorsOnCloudBundleForSlideListFiguresError(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnCloudBundleForRecordListFiguresError(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 	cloudRepo := service.cloudRepo.(*memoryRepo)
-	cloudRepo.listFiguresBySlideIDErr = fmt.Errorf("cloud figures locked")
+	cloudRepo.listFiguresByRecordIDErr = fmt.Errorf("cloud figures locked")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from cloud bundleForSlide ListSlideFiguresBySlideID")
+		t.Fatal("expected error from cloud bundleForRecord ListRecordFiguresByRecordID")
 	}
 	if !strings.Contains(err.Error(), "cloud figures locked") {
 		t.Fatalf("error = %q, want to contain 'cloud figures locked'", err.Error())
 	}
 }
 
-func TestSyncPullErrorsOnCloudBundleForSlideListDataFilesError(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnCloudBundleForRecordListDataFilesError(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 	cloudRepo := service.cloudRepo.(*memoryRepo)
-	cloudRepo.listDataFilesBySlideIDErr = fmt.Errorf("cloud data files locked")
+	cloudRepo.listDataFilesByRecordIDErr = fmt.Errorf("cloud data files locked")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from cloud bundleForSlide ListSlideDataFilesBySlideID")
+		t.Fatal("expected error from cloud bundleForRecord ListRecordDataFilesByRecordID")
 	}
 	if !strings.Contains(err.Error(), "cloud data files locked") {
 		t.Fatalf("error = %q, want to contain 'cloud data files locked'", err.Error())
@@ -1834,19 +1834,19 @@ func TestSyncPullErrorsOnCloudBundleForSlideListDataFilesError(t *testing.T) {
 // --- Pull error: loadBundle non-ErrNotFound for local repo ---
 
 func TestSyncPullErrorsOnLoadLocalBundleNonNotFoundError(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.getSlideByIDErr = fmt.Errorf("local db timeout")
+	localRepo.getRecordByIDErr = fmt.Errorf("local db timeout")
 
 	err := service.Sync(context.Background())
 	if err == nil {
@@ -1897,94 +1897,94 @@ func TestSyncPropagatesLockReleaseError(t *testing.T) {
 	_ = window
 }
 
-// --- Pull: applyBundleToLocal slide apply error ---
+// --- Pull: applyBundleToLocal record apply error ---
 
-func TestSyncPullErrorsOnApplySlideToLocalFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnApplyRecordToLocalFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.createSlideErr = fmt.Errorf("local create slide denied")
+	localRepo.createRecordErr = fmt.Errorf("local create record denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from applySlide to local")
+		t.Fatal("expected error from applyRecord to local")
 	}
-	if !strings.Contains(err.Error(), "local create slide denied") {
-		t.Fatalf("error = %q, want to contain 'local create slide denied'", err.Error())
+	if !strings.Contains(err.Error(), "local create record denied") {
+		t.Fatalf("error = %q, want to contain 'local create record denied'", err.Error())
 	}
 }
 
-func TestSyncPullErrorsOnApplySlideUpdateToLocalFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnApplyRecordUpdateToLocalFailure(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.updateSlideErr = fmt.Errorf("local update slide denied")
+	localRepo.updateRecordErr = fmt.Errorf("local update record denied")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from applySlide UpdateSlide to local")
+		t.Fatal("expected error from applyRecord UpdateRecord to local")
 	}
-	if !strings.Contains(err.Error(), "local update slide denied") {
-		t.Fatalf("error = %q, want to contain 'local update slide denied'", err.Error())
+	if !strings.Contains(err.Error(), "local update record denied") {
+		t.Fatalf("error = %q, want to contain 'local update record denied'", err.Error())
 	}
 }
 
-// --- loadBundle: bundleForSlide error after GetSlideByID success ---
+// --- loadBundle: bundleForRecord error after GetRecordByID success ---
 
-func TestSyncPullErrorsOnLoadBundleBundleForSlideError(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnLoadBundleBundleForRecordError(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
-	// Put the slide in local so loadBundle's GetSlideByID succeeds,
-	// but inject error on ListSlideFiguresBySlideID so bundleForSlide fails.
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	// Put the record in local so loadBundle's GetRecordByID succeeds,
+	// but inject error on ListRecordFiguresByRecordID so bundleForRecord fails.
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	localRepo := service.localRepo.(*memoryRepo)
-	localRepo.listFiguresBySlideIDErr = fmt.Errorf("local figures table error")
+	localRepo.listFiguresByRecordIDErr = fmt.Errorf("local figures table error")
 
 	err := service.Sync(context.Background())
 	if err == nil {
-		t.Fatal("expected error from loadBundle/bundleForSlide")
+		t.Fatal("expected error from loadBundle/bundleForRecord")
 	}
 	if !strings.Contains(err.Error(), "local figures table error") {
 		t.Fatalf("error = %q, want to contain 'local figures table error'", err.Error())
@@ -1994,41 +1994,41 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideError(t *testing.T) {
 // --- Pull: applyFiguresToLocal delete path fully exercised ---
 
 func TestSyncPullDeleteFigureWithFileRemoval(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{
-			{ID: 1, SlideID: slideID, Filename: "delete-me.png", S3Key: "figures/" + slideID + "/delete-me.png"},
-			{ID: 2, SlideID: slideID, Filename: "keep-me.png", S3Key: "figures/" + slideID + "/keep-me.png"},
+		Figures: []repository.RecordFigure{
+			{ID: 1, RecordID: recordID, Filename: "delete-me.png", S3Key: "figures/" + recordID + "/delete-me.png"},
+			{ID: 2, RecordID: recordID, Filename: "keep-me.png", S3Key: "figures/" + recordID + "/keep-me.png"},
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		Figures: []repository.SlideFigure{
-			{SlideID: slideID, Filename: "keep-me.png", S3Key: "figures/" + slideID + "/keep-me.png"},
+		Figures: []repository.RecordFigure{
+			{RecordID: recordID, Filename: "keep-me.png", S3Key: "figures/" + recordID + "/keep-me.png"},
 		},
 	}
 
-	service, localRepo, _, localFS, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, true, slideID, "delete-me.png", "DELETE")
-	writeLocalAsset(t, localFS, true, slideID, "keep-me.png", "KEEP")
-	objects.objects["figures/"+slideID+"/keep-me.png"] = "KEEP"
+	service, localRepo, _, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, true, recordID, "delete-me.png", "DELETE")
+	writeLocalAsset(t, localFS, true, recordID, "keep-me.png", "KEEP")
+	objects.objects["figures/"+recordID+"/keep-me.png"] = "KEEP"
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := localRepo.bundle(slideID)
+	got := localRepo.bundle(recordID)
 	if len(got.Figures) != 1 {
 		t.Fatalf("expected 1 figure, got %d", len(got.Figures))
 	}
@@ -2036,7 +2036,7 @@ func TestSyncPullDeleteFigureWithFileRemoval(t *testing.T) {
 		t.Fatalf("kept figure = %q, want %q", got.Figures[0].Filename, "keep-me.png")
 	}
 
-	deletedPath, _ := localFS.ResolveFigurePath(slideID, "delete-me.png")
+	deletedPath, _ := localFS.ResolveFigurePath(recordID, "delete-me.png")
 	if _, err := os.Stat(deletedPath); !os.IsNotExist(err) {
 		t.Fatalf("expected deleted figure file to be removed, stat error = %v", err)
 	}
@@ -2045,41 +2045,41 @@ func TestSyncPullDeleteFigureWithFileRemoval(t *testing.T) {
 // --- Pull: applyDataFilesToLocal full delete path ---
 
 func TestSyncPullDeleteDataFileWithFileRemoval(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{
-			{ID: 1, SlideID: slideID, Filename: "delete-me.csv", S3Key: "data/" + slideID + "/delete-me.csv",
+		DataFiles: []repository.RecordDataFile{
+			{ID: 1, RecordID: recordID, Filename: "delete-me.csv", S3Key: "data/" + recordID + "/delete-me.csv",
 				Size: 5, Hash: strings.Repeat("a", 64)},
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
-	service, localRepo, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, false, slideID, "delete-me.csv", "DELETE")
+	service, localRepo, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, false, recordID, "delete-me.csv", "DELETE")
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := localRepo.bundle(slideID)
+	got := localRepo.bundle(recordID)
 	if len(got.DataFiles) != 0 {
 		t.Fatalf("expected 0 data files, got %d", len(got.DataFiles))
 	}
 
-	deletedPath, _ := localFS.ResolveDataFilePath(slideID, "delete-me.csv")
+	deletedPath, _ := localFS.ResolveDataFilePath(recordID, "delete-me.csv")
 	if _, err := os.Stat(deletedPath); !os.IsNotExist(err) {
 		t.Fatalf("expected deleted data file to be removed, stat error = %v", err)
 	}
@@ -2088,48 +2088,48 @@ func TestSyncPullDeleteDataFileWithFileRemoval(t *testing.T) {
 // --- Pull: applyDataFilesToLocal update with filename rename ---
 
 func TestSyncPullDataFileUpdateWithFilenameRename(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{
-			{ID: 1, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{
+			{ID: 1, RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 				Size: 5, Hash: strings.Repeat("a", 64)},
 		},
 	}
 	// Cloud renamed the file.
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{
-			{SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
+		DataFiles: []repository.RecordDataFile{
+			{RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
 				Size: 10, Hash: strings.Repeat("b", 64)},
 		},
 	}
 
-	service, localRepo, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, false, slideID, "data.csv", "OLD")
+	service, localRepo, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, false, recordID, "data.csv", "OLD")
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := localRepo.bundle(slideID)
+	got := localRepo.bundle(recordID)
 	if len(got.DataFiles) != 1 || got.DataFiles[0].Hash != strings.Repeat("b", 64) {
 		t.Fatalf("expected updated data file, got %+v", got.DataFiles)
 	}
 
 	// The old local file at data.csv path should be removed (via removeFileIfPresent
 	// in the update path - line 538).
-	dataPath, _ := localFS.ResolveDataFilePath(slideID, "data.csv")
+	dataPath, _ := localFS.ResolveDataFilePath(recordID, "data.csv")
 	if _, err := os.Stat(dataPath); !os.IsNotExist(err) {
 		t.Fatalf("expected data file path to be cleaned up, stat error = %v", err)
 	}
@@ -2260,11 +2260,11 @@ func TestWriteReaderToPathErrorOnRename(t *testing.T) {
 func TestSyncReturnsLockReleaseError(t *testing.T) {
 	// Set up a sync that succeeds, but whose lock.Release() fails.
 	// This covers the deferred lock-release error path in Sync (service.go:85).
-	slideID := "20260308-locktest"
+	recordID := "20260308-locktest"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	bundle := SlideBundle{
-		Slide: repository.Slide{
-			ID:          slideID,
+	bundle := RecordBundle{
+		Record: repository.Record{
+			ID:          recordID,
 			Date:        "2026-03-08",
 			DayOrder:    "a0",
 			HTMLContent: strPtr("<html>local</html>"),
@@ -2273,7 +2273,7 @@ func TestSyncReturnsLockReleaseError(t *testing.T) {
 		},
 	}
 
-	localRepo := newMemoryRepo([]SlideBundle{bundle})
+	localRepo := newMemoryRepo([]RecordBundle{bundle})
 	cloudRepo := newMemoryRepo(nil)
 	baseDir := t.TempDir()
 	localFS, err := filesystem.NewClient(baseDir)
@@ -2345,21 +2345,21 @@ func (r *errReader) Read(_ []byte) (int, error) {
 
 func TestDownloadFileWriteError(t *testing.T) {
 	// Create service with a localFS that resolves to a path under a file.
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "chart.png", S3Key: "figures/" + slideID + "/chart.png",
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "chart.png", S3Key: "figures/" + recordID + "/chart.png",
 		}},
 	}
 
-	service, _, _, _, objects, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
-	objects.objects["figures/"+slideID+"/chart.png"] = "CONTENT"
+	service, _, _, _, objects, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
+	objects.objects["figures/"+recordID+"/chart.png"] = "CONTENT"
 
 	// Replace localFS with one that returns a path under a non-directory.
 	tmpFile := filepath.Join(t.TempDir(), "not-a-dir")
@@ -2396,103 +2396,103 @@ func (f *fixedPathLocalFiles) ResolveDataFilePath(_ string, _ string) (string, e
 // --- applyDataFilesToCloud: metadata-only create/update when local binary is absent ---
 
 func TestSyncPushCreatesCloudDataFileMetadataWithoutLocalBinary(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, cloudRepo, _, objects, _ := newTestService(t, []SlideBundle{localBundle}, nil)
+	service, _, cloudRepo, _, objects, _ := newTestService(t, []RecordBundle{localBundle}, nil)
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := cloudRepo.bundle(slideID)
+	got := cloudRepo.bundle(recordID)
 	if len(got.DataFiles) != 1 || got.DataFiles[0].Filename != "data.csv" {
 		t.Fatalf("cloud data files = %+v, want metadata row for data.csv", got.DataFiles)
 	}
-	if _, ok := objects.objects["data/"+slideID+"/data.csv"]; ok {
+	if _, ok := objects.objects["data/"+recordID+"/data.csv"]; ok {
 		t.Fatal("expected missing local data file to skip object upload")
 	}
 }
 
 func TestSyncPushUpdatesCloudDataFileMetadataWithoutLocalBinaryWhenS3KeyIsUnchanged(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 20, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 20, RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, cloudRepo, _, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, cloudRepo, _, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
 
-	got := cloudRepo.bundle(slideID)
+	got := cloudRepo.bundle(recordID)
 	if len(got.DataFiles) != 1 || got.DataFiles[0].Hash != strings.Repeat("b", 64) || got.DataFiles[0].Size != 10 {
 		t.Fatalf("cloud data files = %+v, want updated metadata with unchanged s3_key", got.DataFiles)
 	}
-	if _, ok := objects.objects["data/"+slideID+"/data.csv"]; ok {
+	if _, ok := objects.objects["data/"+recordID+"/data.csv"]; ok {
 		t.Fatal("expected missing local data file to skip object upload")
 	}
 }
 
 func TestSyncPushErrorsWhenMissingLocalBinaryWouldChangeDataFileS3Key(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 20, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v1.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 20, RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v1.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	err := service.Sync(context.Background())
 	if err == nil {
 		t.Fatal("expected error when metadata-only push would change data file s3_key")
@@ -2505,23 +2505,23 @@ func TestSyncPushErrorsWhenMissingLocalBinaryWouldChangeDataFileS3Key(t *testing
 // --- applyDataFilesToCloud: upload error on data file create ---
 
 func TestSyncPushErrorsOnDataFileCreateUploadFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
 	// Write the local data file so ResolveDataFilePath succeeds, but upload fails.
-	service, _, _, localFS, objects, _ := newTestService(t, []SlideBundle{localBundle}, nil)
-	writeLocalAsset(t, localFS, false, slideID, "data.csv", "DATA")
+	service, _, _, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, nil)
+	writeLocalAsset(t, localFS, false, recordID, "data.csv", "DATA")
 	objects.uploadErr = fmt.Errorf("data upload denied")
 
 	err := service.Sync(context.Background())
@@ -2536,34 +2536,34 @@ func TestSyncPushErrorsOnDataFileCreateUploadFailure(t *testing.T) {
 // --- applyDataFilesToCloud: upload error on data file update ---
 
 func TestSyncPushErrorsOnDataFileUpdateUploadFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 20, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v1.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 20, RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v1.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, localFS, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, false, slideID, "data.csv", "DATA")
+	service, _, _, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, false, recordID, "data.csv", "DATA")
 	objects.uploadErr = fmt.Errorf("data update upload denied")
 
 	err := service.Sync(context.Background())
@@ -2578,38 +2578,38 @@ func TestSyncPushErrorsOnDataFileUpdateUploadFailure(t *testing.T) {
 // --- applyDataFilesToCloud: delete old S3 object error on data file update ---
 
 func TestSyncPushErrorsOnDataFileUpdateDeleteOldS3Failure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 20, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v1.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 20, RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v1.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, false, slideID, "data.csv", "DATA")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, false, recordID, "data.csv", "DATA")
 	// Use a custom object store that fails on Delete but succeeds on Upload.
 	objects := service.cloudObjects.(*mockObjectStore)
 	// We can't set deleteErr because figure deletes also use it.
-	// Instead, let the upload succeed, the UpdateSlideDataFile succeed, then delete fails.
+	// Instead, let the upload succeed, the UpdateRecordDataFile succeed, then delete fails.
 	// We need per-operation error injection. Let's use a counting approach.
 	countingObjects := &countingObjectStore{
 		inner:          objects,
@@ -2630,29 +2630,29 @@ func TestSyncPushErrorsOnDataFileUpdateDeleteOldS3Failure(t *testing.T) {
 // --- applyDataFilesToCloud: delete object error on data file delete ---
 
 func TestSyncPushErrorsOnDataFileDeleteObjectFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 20, SlideID: slideID, Filename: "old.csv", S3Key: "data/" + slideID + "/old.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 20, RecordID: recordID, Filename: "old.csv", S3Key: "data/" + recordID + "/old.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, _, objects, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	objects.deleteErr = fmt.Errorf("s3 delete object denied")
 
 	err := service.Sync(context.Background())
@@ -2667,32 +2667,32 @@ func TestSyncPushErrorsOnDataFileDeleteObjectFailure(t *testing.T) {
 // --- applyFiguresToCloud: delete old S3 key error on figure update ---
 
 func TestSyncPushErrorsOnFigureUpdateDeleteOldS3Failure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v2.png",
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot-v2.png",
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{{
-			ID: 10, SlideID: slideID, Filename: "plot.png", S3Key: "figures/" + slideID + "/plot-v1.png",
+		Figures: []repository.RecordFigure{{
+			ID: 10, RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot-v1.png",
 		}},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, true, slideID, "plot.png", "FIG")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, true, recordID, "plot.png", "FIG")
 	// Use counting object store to allow uploads but fail on delete.
 	objects := service.cloudObjects.(*mockObjectStore)
 	countingObjects := &countingObjectStore{
@@ -2714,21 +2714,21 @@ func TestSyncPushErrorsOnFigureUpdateDeleteOldS3Failure(t *testing.T) {
 // --- applyDataFilesToCloud: resolve data path error on create ---
 
 func TestSyncPushErrorsOnDataFileCreateResolvePathFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
 	service.localFS = &errLocalFiles{dataFileErr: fmt.Errorf("resolve create data path failed")}
 
 	err := service.Sync(context.Background())
@@ -2743,33 +2743,33 @@ func TestSyncPushErrorsOnDataFileCreateResolvePathFailure(t *testing.T) {
 // --- applyDataFilesToCloud: resolve data path error on update ---
 
 func TestSyncPushErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 20, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v1.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 20, RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v1.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	service.localFS = &errLocalFiles{dataFileErr: fmt.Errorf("resolve update data path failed")}
 
 	err := service.Sync(context.Background())
@@ -2784,28 +2784,28 @@ func TestSyncPushErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 // --- applyFiguresToLocal: ResolveFigurePath error on delete ---
 
 func TestSyncPullErrorsOnFigureDeleteResolvePathFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{
-			{ID: 1, SlideID: slideID, Filename: "delete-me.png", S3Key: "figures/" + slideID + "/delete-me.png"},
+		Figures: []repository.RecordFigure{
+			{ID: 1, RecordID: recordID, Filename: "delete-me.png", S3Key: "figures/" + recordID + "/delete-me.png"},
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	// Use a localFS that returns error for all figure resolutions.
 	// But we need the download step in applyFiguresToLocal to succeed (no desired figures, so no download needed).
 	// Then the delete loop calls ResolveFigurePath which should fail.
@@ -2823,21 +2823,21 @@ func TestSyncPullErrorsOnFigureDeleteResolvePathFailure(t *testing.T) {
 // --- applyDataFilesToLocal: ResolveDataFilePath error on create ---
 
 func TestSyncPullErrorsOnDataFileCreateResolvePathFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 	// Use countingLocalFiles to succeed on initial operations but fail on data file resolve for create.
 	service.localFS = &countingLocalFiles{
 		dataFileErrAfter: 0, // fail on first ResolveDataFilePath call
@@ -2856,33 +2856,33 @@ func TestSyncPullErrorsOnDataFileCreateResolvePathFailure(t *testing.T) {
 // --- applyDataFilesToLocal: ResolveDataFilePath error on update ---
 
 func TestSyncPullErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 1, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 1, RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	service.localFS = &countingLocalFiles{
 		dataFileErrAfter: 0,
 		dataFileErr:      fmt.Errorf("resolve update local data path failed"),
@@ -2900,29 +2900,29 @@ func TestSyncPullErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 // --- applyDataFilesToLocal: ResolveDataFilePath error on delete ---
 
 func TestSyncPullErrorsOnDataFileDeleteResolvePathFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			ID: 1, SlideID: slideID, Filename: "delete-me.csv", S3Key: "data/" + slideID + "/delete-me.csv",
+		DataFiles: []repository.RecordDataFile{{
+			ID: 1, RecordID: recordID, Filename: "delete-me.csv", S3Key: "data/" + recordID + "/delete-me.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	service.localFS = &countingLocalFiles{
 		dataFileErrAfter: 0,
 		dataFileErr:      fmt.Errorf("resolve delete local data path failed"),
@@ -2940,18 +2940,18 @@ func TestSyncPullErrorsOnDataFileDeleteResolvePathFailure(t *testing.T) {
 // --- Pull: local wins skip when local has a pre-existing later edit ---
 
 func TestSyncPullSkipsWhenLocalHasLaterPreExistingEdit(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	lastSyncTime := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 	localUpdatedAt := time.Date(2026, 3, 8, 11, 59, 0, 0, time.UTC) // just before lastSync
 	cloudUpdatedAt := time.Date(2026, 3, 8, 13, 0, 0, 0, time.UTC)  // after lastSync
 
-	// Local slide was updated before lastSync (won't be in push list).
+	// Local record was updated before lastSync (won't be in push list).
 	// But its UpdatedAt is LATER than cloud's — wait, that would mean push would process it.
-	// Actually, the local slide is NOT in the push list because its UpdatedAt is before lastSync.
-	// The FilterSlidesUpdatedSince check uses inclusive comparison (>= threshold).
+	// Actually, the local record is NOT in the push list because its UpdatedAt is before lastSync.
+	// The FilterRecordsUpdatedSince check uses inclusive comparison (>= threshold).
 	// So localUpdatedAt (11:59) < lastSync (12:00) means it IS filtered out.
 	//
-	// Cloud slide updated after lastSync (in pull list).
+	// Cloud record updated after lastSync (in pull list).
 	// But local's latest action time must be after cloud's for local to win.
 	// Local has UpdatedAt=11:59 and no DeletedAt; Cloud has UpdatedAt=13:00.
 	// Cloud has a later timestamp, so cloud wins. That's not what we want.
@@ -2976,26 +2976,26 @@ func TestSyncPullSkipsWhenLocalHasLaterPreExistingEdit(t *testing.T) {
 	// During pull, ResolveBundle picks local as winner → continue/skip.
 	localDeletedAt := time.Date(2026, 3, 8, 14, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local stays</html>"),
 			CreatedAt:   localUpdatedAt, UpdatedAt: localUpdatedAt,
 			DeletedAt: &localDeletedAt,
 		},
 	}
-	// Cloud slide was updated after lastSync (will be in pull list).
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	// Cloud record was updated after lastSync (will be in pull list).
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud loses</html>"),
 			CreatedAt:   localUpdatedAt, UpdatedAt: cloudUpdatedAt,
 		},
 	}
 
 	// Set up with an existing lastSync so the sync window filters properly.
-	localRepo := newMemoryRepo([]SlideBundle{localBundle})
-	cloudRepo := newMemoryRepo([]SlideBundle{cloudBundle})
+	localRepo := newMemoryRepo([]RecordBundle{localBundle})
+	cloudRepo := newMemoryRepo([]RecordBundle{cloudBundle})
 
 	baseDir := t.TempDir()
 	localFS, err := filesystem.NewClient(baseDir)
@@ -3008,7 +3008,7 @@ func TestSyncPullSkipsWhenLocalHasLaterPreExistingEdit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewCursorStore() error = %v", err)
 	}
-	// Write a lastSync so only slides updated after it are considered.
+	// Write a lastSync so only records updated after it are considered.
 	if err := cursorStore.Write(lastSyncTime); err != nil {
 		t.Fatalf("cursorStore.Write() error = %v", err)
 	}
@@ -3028,32 +3028,32 @@ func TestSyncPullSkipsWhenLocalHasLaterPreExistingEdit(t *testing.T) {
 	}
 
 	// Local should NOT have been updated to cloud's content (local won).
-	got := localRepo.bundle(slideID)
-	if got.Slide.HTMLContent == nil || *got.Slide.HTMLContent != "<html>local stays</html>" {
-		t.Fatalf("local HTMLContent = %v, want %q (local should win)", got.Slide.HTMLContent, "<html>local stays</html>")
+	got := localRepo.bundle(recordID)
+	if got.Record.HTMLContent == nil || *got.Record.HTMLContent != "<html>local stays</html>" {
+		t.Fatalf("local HTMLContent = %v, want %q (local should win)", got.Record.HTMLContent, "<html>local stays</html>")
 	}
 }
 
 // --- PlanFigureReconciliation error in applyFiguresToLocal ---
 
 func TestSyncPullErrorsOnFigurePlanReconciliationWithInvalidDesired(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
 	// Use a valid filename but whitespace-only S3Key. The download step downloads from
 	// the whitespace key (which the mock has), and then PlanFigureReconciliation trims
 	// whitespace and rejects it.
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "bad.png", S3Key: "  ", // whitespace-only S3Key
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "bad.png", S3Key: "  ", // whitespace-only S3Key
 		}},
 	}
 
-	service, _, _, _, objects, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, _, objects, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 	objects.objects["  "] = "BAD-CONTENT"
 
 	err := service.Sync(context.Background())
@@ -3068,24 +3068,24 @@ func TestSyncPullErrorsOnFigurePlanReconciliationWithInvalidDesired(t *testing.T
 // --- PlanFigureReconciliation error in applyFiguresToCloud ---
 
 func TestSyncPushErrorsOnFigurePlanReconciliationWithInvalidDesired(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
 	// Use a valid filename but whitespace-only S3Key. The upload step uses the S3Key
 	// as the object key (which succeeds), but PlanFigureReconciliation trims whitespace
 	// and rejects it.
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		Figures: []repository.SlideFigure{{
-			SlideID: slideID, Filename: "bad.png", S3Key: "  ", // whitespace-only S3Key
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID, Filename: "bad.png", S3Key: "  ", // whitespace-only S3Key
 		}},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
-	writeLocalAsset(t, localFS, true, slideID, "bad.png", "FIG")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
+	writeLocalAsset(t, localFS, true, recordID, "bad.png", "FIG")
 
 	err := service.Sync(context.Background())
 	if err == nil {
@@ -3099,24 +3099,24 @@ func TestSyncPushErrorsOnFigurePlanReconciliationWithInvalidDesired(t *testing.T
 // --- PlanDataFileReconciliation error in applyDataFilesToLocal ---
 
 func TestSyncPullErrorsOnDataFilePlanReconciliationWithInvalidDesired(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
 	// Use valid filename and S3Key but whitespace-only hash. PlanDataFileReconciliation
 	// trims and rejects. Note: applyDataFilesToLocal calls PlanDataFileReconciliation
 	// before any file operations, so we don't need to set up any downloads.
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "bad.csv", S3Key: "data/" + slideID + "/bad.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "bad.csv", S3Key: "data/" + recordID + "/bad.csv",
 			Size: 5, Hash: "  ", // whitespace-only hash
 		}},
 	}
 
-	service, _, _, _, _, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, _, _, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 
 	err := service.Sync(context.Background())
 	if err == nil {
@@ -3130,24 +3130,24 @@ func TestSyncPullErrorsOnDataFilePlanReconciliationWithInvalidDesired(t *testing
 // --- PlanDataFileReconciliation error in applyDataFilesToCloud ---
 
 func TestSyncPushErrorsOnDataFilePlanReconciliationWithInvalidDesired(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
 	// Use a valid filename but whitespace-only hash. PlanDataFileReconciliation
 	// checks Filename, S3Key, and Hash — all must be non-blank after trim.
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "bad.csv", S3Key: "data/" + slideID + "/bad.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "bad.csv", S3Key: "data/" + recordID + "/bad.csv",
 			Size: 5, Hash: "  ", // whitespace-only hash
 		}},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, nil)
-	writeLocalAsset(t, localFS, false, slideID, "bad.csv", "DATA")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, nil)
+	writeLocalAsset(t, localFS, false, recordID, "bad.csv", "DATA")
 
 	err := service.Sync(context.Background())
 	if err == nil {
@@ -3158,27 +3158,27 @@ func TestSyncPushErrorsOnDataFilePlanReconciliationWithInvalidDesired(t *testing
 	}
 }
 
-// --- loadBundle: bundleForSlide error inside loadBundle on pull ---
+// --- loadBundle: bundleForRecord error inside loadBundle on pull ---
 
-func TestSyncPullErrorsOnLoadBundleBundleForSlideErrorInsideLoadBundle(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+func TestSyncPullErrorsOnLoadBundleBundleForRecordErrorInsideLoadBundle(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
 	lastSyncTime := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 	localUpdatedAt := time.Date(2026, 3, 8, 11, 0, 0, 0, time.UTC) // before lastSync
 	cloudUpdatedAt := time.Date(2026, 3, 8, 13, 0, 0, 0, time.UTC) // after lastSync
 
-	// Local slide exists but updated before lastSync (not in push list).
-	localRepo := newMemoryRepo([]SlideBundle{{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	// Local record exists but updated before lastSync (not in push list).
+	localRepo := newMemoryRepo([]RecordBundle{{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   localUpdatedAt, UpdatedAt: localUpdatedAt,
 		},
 	}})
 
-	// Cloud slide updated after lastSync (in pull list).
-	cloudRepo := newMemoryRepo([]SlideBundle{{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	// Cloud record updated after lastSync (in pull list).
+	cloudRepo := newMemoryRepo([]RecordBundle{{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   localUpdatedAt, UpdatedAt: cloudUpdatedAt,
 		},
@@ -3202,11 +3202,11 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideErrorInsideLoadBundle(t *testin
 		t.Fatalf("NewManager() error = %v", err)
 	}
 
-	// Inject error only in local repo's ListSlideFiguresBySlideID.
-	// Since local is not in push list, push phase won't call bundleForSlide on localRepo.
-	// During pull, loadBundle(localRepo, slideID) calls GetSlideByID (succeeds),
-	// then bundleForSlide which calls ListSlideFiguresBySlideID (fails).
-	localRepo.listFiguresBySlideIDErr = fmt.Errorf("local figures error in loadBundle")
+	// Inject error only in local repo's ListRecordFiguresByRecordID.
+	// Since local is not in push list, push phase won't call bundleForRecord on localRepo.
+	// During pull, loadBundle(localRepo, recordID) calls GetRecordByID (succeeds),
+	// then bundleForRecord which calls ListRecordFiguresByRecordID (fails).
+	localRepo.listFiguresByRecordIDErr = fmt.Errorf("local figures error in loadBundle")
 
 	service, err := NewService(localRepo, cloudRepo, localFS, newMockObjectStore(), session)
 	if err != nil {
@@ -3215,7 +3215,7 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideErrorInsideLoadBundle(t *testin
 
 	syncErr := service.Sync(context.Background())
 	if syncErr == nil {
-		t.Fatal("expected error from loadBundle bundleForSlide")
+		t.Fatal("expected error from loadBundle bundleForRecord")
 	}
 	if !strings.Contains(syncErr.Error(), "local figures error in loadBundle") {
 		t.Fatalf("error = %q, want to contain 'local figures error in loadBundle'", syncErr.Error())
@@ -3225,32 +3225,32 @@ func TestSyncPullErrorsOnLoadBundleBundleForSlideErrorInsideLoadBundle(t *testin
 // --- applyFiguresToLocal: removeFileIfPresent error in delete path ---
 
 func TestSyncPullErrorsOnFigureDeleteRemoveFileFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		Figures: []repository.SlideFigure{
-			{ID: 1, SlideID: slideID, Filename: "delete-me.png", S3Key: "figures/" + slideID + "/delete-me.png"},
+		Figures: []repository.RecordFigure{
+			{ID: 1, RecordID: recordID, Filename: "delete-me.png", S3Key: "figures/" + recordID + "/delete-me.png"},
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, true, slideID, "delete-me.png", "DELETE")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, true, recordID, "delete-me.png", "DELETE")
 
 	// Make the file's directory read-only so removal fails.
-	figPath, _ := localFS.ResolveFigurePath(slideID, "delete-me.png")
+	figPath, _ := localFS.ResolveFigurePath(recordID, "delete-me.png")
 	figDir := filepath.Dir(figPath)
 	if err := os.Chmod(figDir, 0o444); err != nil {
 		t.Fatalf("Chmod() error = %v", err)
@@ -3271,33 +3271,33 @@ func TestSyncPullErrorsOnFigureDeleteRemoveFileFailure(t *testing.T) {
 // --- applyDataFilesToLocal: removeFileIfPresent error in delete path ---
 
 func TestSyncPullErrorsOnDataFileDeleteRemoveFileFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{
-			{ID: 1, SlideID: slideID, Filename: "delete-me.csv", S3Key: "data/" + slideID + "/delete-me.csv",
+		DataFiles: []repository.RecordDataFile{
+			{ID: 1, RecordID: recordID, Filename: "delete-me.csv", S3Key: "data/" + recordID + "/delete-me.csv",
 				Size: 5, Hash: strings.Repeat("a", 64)},
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, false, slideID, "delete-me.csv", "DELETE")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, false, recordID, "delete-me.csv", "DELETE")
 
 	// Make the file's directory read-only so removal fails.
-	dataPath, _ := localFS.ResolveDataFilePath(slideID, "delete-me.csv")
+	dataPath, _ := localFS.ResolveDataFilePath(recordID, "delete-me.csv")
 	dataDir := filepath.Dir(dataPath)
 	if err := os.Chmod(dataDir, 0o444); err != nil {
 		t.Fatalf("Chmod() error = %v", err)
@@ -3318,37 +3318,37 @@ func TestSyncPullErrorsOnDataFileDeleteRemoveFileFailure(t *testing.T) {
 // --- applyDataFilesToLocal: removeFileIfPresent error on update ---
 
 func TestSyncPullErrorsOnDataFileUpdateRemoveFileFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	base := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 
-	localBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>local</html>"),
 			CreatedAt:   base, UpdatedAt: base,
 		},
-		DataFiles: []repository.SlideDataFile{
-			{ID: 1, SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{
+			{ID: 1, RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 				Size: 5, Hash: strings.Repeat("a", 64)},
 		},
 	}
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
-		DataFiles: []repository.SlideDataFile{
-			{SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data-v2.csv",
+		DataFiles: []repository.RecordDataFile{
+			{RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
 				Size: 10, Hash: strings.Repeat("b", 64)},
 		},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, []SlideBundle{localBundle}, []SlideBundle{cloudBundle})
-	writeLocalAsset(t, localFS, false, slideID, "data.csv", "OLD")
+	service, _, _, localFS, _, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
+	writeLocalAsset(t, localFS, false, recordID, "data.csv", "OLD")
 
 	// Make the file's directory read-only so removal fails.
-	dataPath, _ := localFS.ResolveDataFilePath(slideID, "data.csv")
+	dataPath, _ := localFS.ResolveDataFilePath(recordID, "data.csv")
 	dataDir := filepath.Dir(dataPath)
 	if err := os.Chmod(dataDir, 0o444); err != nil {
 		t.Fatalf("Chmod() error = %v", err)
@@ -3369,24 +3369,24 @@ func TestSyncPullErrorsOnDataFileUpdateRemoveFileFailure(t *testing.T) {
 // --- applyDataFilesToLocal: removeFileIfPresent error on create ---
 
 func TestSyncPullErrorsOnDataFileCreateRemoveFileFailure(t *testing.T) {
-	slideID := "20260308-a1b2c3d4"
+	recordID := "20260308-a1b2c3d4"
 	now := time.Date(2026, 3, 8, 15, 0, 0, 0, time.UTC)
-	cloudBundle := SlideBundle{
-		Slide: repository.Slide{
-			ID: slideID, Date: "2026-03-08", DayOrder: "a0",
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID: recordID, Date: "2026-03-08", DayOrder: "a0",
 			HTMLContent: strPtr("<html>cloud</html>"),
 			CreatedAt:   now, UpdatedAt: now,
 		},
-		DataFiles: []repository.SlideDataFile{{
-			SlideID: slideID, Filename: "data.csv", S3Key: "data/" + slideID + "/data.csv",
+		DataFiles: []repository.RecordDataFile{{
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
 
-	service, _, _, localFS, _, _ := newTestService(t, nil, []SlideBundle{cloudBundle})
+	service, _, _, localFS, _, _ := newTestService(t, nil, []RecordBundle{cloudBundle})
 	// Pre-create a file at the data path and make its directory read-only.
-	writeLocalAsset(t, localFS, false, slideID, "data.csv", "EXISTING")
-	dataPath, _ := localFS.ResolveDataFilePath(slideID, "data.csv")
+	writeLocalAsset(t, localFS, false, recordID, "data.csv", "EXISTING")
+	dataPath, _ := localFS.ResolveDataFilePath(recordID, "data.csv")
 	dataDir := filepath.Dir(dataPath)
 	if err := os.Chmod(dataDir, 0o444); err != nil {
 		t.Fatalf("Chmod() error = %v", err)
@@ -3441,16 +3441,16 @@ type countingLocalFiles struct {
 	dataFileErr      error
 }
 
-func (c *countingLocalFiles) ResolveFigurePath(slideID string, filename string) (string, error) {
-	return filepath.Join("/tmp/counting", slideID, "figures", filename), nil
+func (c *countingLocalFiles) ResolveFigurePath(recordID string, filename string) (string, error) {
+	return filepath.Join("/tmp/counting", recordID, "figures", filename), nil
 }
 
-func (c *countingLocalFiles) ResolveDataFilePath(slideID string, filename string) (string, error) {
+func (c *countingLocalFiles) ResolveDataFilePath(recordID string, filename string) (string, error) {
 	if c.dataFileErr != nil && c.dataFileCount >= c.dataFileErrAfter {
 		return "", c.dataFileErr
 	}
 	c.dataFileCount++
-	return filepath.Join("/tmp/counting", slideID, "data", filename), nil
+	return filepath.Join("/tmp/counting", recordID, "data", filename), nil
 }
 
 // --- errLocalFiles for testing LocalFiles error paths ---
@@ -3478,12 +3478,12 @@ func (e *errLocalFiles) ResolveDataFilePath(_ string, _ string) (string, error) 
 
 type stubLocalFiles struct{}
 
-func (s *stubLocalFiles) ResolveFigurePath(slideID string, filename string) (string, error) {
-	return filepath.Join("/tmp/stub", slideID, "figures", filename), nil
+func (s *stubLocalFiles) ResolveFigurePath(recordID string, filename string) (string, error) {
+	return filepath.Join("/tmp/stub", recordID, "figures", filename), nil
 }
 
-func (s *stubLocalFiles) ResolveDataFilePath(slideID string, filename string) (string, error) {
-	return filepath.Join("/tmp/stub", slideID, "data", filename), nil
+func (s *stubLocalFiles) ResolveDataFilePath(recordID string, filename string) (string, error) {
+	return filepath.Join("/tmp/stub", recordID, "data", filename), nil
 }
 
 // completeErrSessionWrapper wraps a real session and injects a Complete error.
@@ -3519,57 +3519,57 @@ func (e *errSessionManager) Complete(_ syncengine.SyncWindow) error {
 }
 
 type memoryRepo struct {
-	slides         map[string]repository.Slide
+	records         map[string]repository.Record
 	projects       map[string]repository.Project
 	devices        map[string]repository.Device
-	figuresBySlide map[string]map[string]repository.SlideFigure
-	dataBySlide    map[string]map[string]repository.SlideDataFile
+	figuresByRecord map[string]map[string]repository.RecordFigure
+	dataByRecord    map[string]map[string]repository.RecordDataFile
 	nextFigureID   int64
 	nextDataID     int64
 	syncVersion    repository.SyncVersion
 
 	// Error injection fields.
-	listSlidesErr             error
+	listRecordsErr             error
 	getSyncVersionErr         error
-	getSlideByIDErr           error
-	listFiguresBySlideIDErr   error
-	listDataFilesBySlideIDErr error
-	createSlideFigureErr      error
-	updateSlideFigureErr      error
-	deleteSlideFigureErr      error
-	createSlideDataFileErr    error
-	updateSlideDataFileErr    error
-	deleteSlideDataFileErr    error
-	updateSlideErr            error
-	createSlideErr            error
+	getRecordByIDErr           error
+	listFiguresByRecordIDErr   error
+	listDataFilesByRecordIDErr error
+	createRecordFigureErr      error
+	updateRecordFigureErr      error
+	deleteRecordFigureErr      error
+	createRecordDataFileErr    error
+	updateRecordDataFileErr    error
+	deleteRecordDataFileErr    error
+	updateRecordErr            error
+	createRecordErr            error
 }
 
-func newMemoryRepo(bundles []SlideBundle) *memoryRepo {
+func newMemoryRepo(bundles []RecordBundle) *memoryRepo {
 	repo := &memoryRepo{
-		slides:         make(map[string]repository.Slide),
+		records:         make(map[string]repository.Record),
 		projects:       make(map[string]repository.Project),
 		devices:        make(map[string]repository.Device),
-		figuresBySlide: make(map[string]map[string]repository.SlideFigure),
-		dataBySlide:    make(map[string]map[string]repository.SlideDataFile),
+		figuresByRecord: make(map[string]map[string]repository.RecordFigure),
+		dataByRecord:    make(map[string]map[string]repository.RecordDataFile),
 		nextFigureID:   1,
 		nextDataID:     1,
 		syncVersion:    repository.SyncVersion{ID: 1, Version: 1},
 	}
 	for _, bundle := range bundles {
-		if bundle.Slide.ProjectID == "" {
-			bundle.Slide.ProjectID = "sync/default-project"
+		if bundle.Record.ProjectID == "" {
+			bundle.Record.ProjectID = "sync/default-project"
 		}
-		if bundle.Slide.SourceDeviceID == "" {
-			bundle.Slide.SourceDeviceID = "sync-device"
+		if bundle.Record.SourceDeviceID == "" {
+			bundle.Record.SourceDeviceID = "sync-device"
 		}
-		if _, ok := repo.projects[bundle.Slide.ProjectID]; !ok {
-			repo.projects[bundle.Slide.ProjectID] = repository.Project{ID: bundle.Slide.ProjectID, CreatedAt: bundle.Slide.CreatedAt, UpdatedAt: bundle.Slide.UpdatedAt}
+		if _, ok := repo.projects[bundle.Record.ProjectID]; !ok {
+			repo.projects[bundle.Record.ProjectID] = repository.Project{ID: bundle.Record.ProjectID, CreatedAt: bundle.Record.CreatedAt, UpdatedAt: bundle.Record.UpdatedAt}
 		}
-		if _, ok := repo.devices[bundle.Slide.SourceDeviceID]; !ok {
-			repo.devices[bundle.Slide.SourceDeviceID] = repository.Device{ID: bundle.Slide.SourceDeviceID, CreatedAt: bundle.Slide.CreatedAt, UpdatedAt: bundle.Slide.UpdatedAt}
+		if _, ok := repo.devices[bundle.Record.SourceDeviceID]; !ok {
+			repo.devices[bundle.Record.SourceDeviceID] = repository.Device{ID: bundle.Record.SourceDeviceID, CreatedAt: bundle.Record.CreatedAt, UpdatedAt: bundle.Record.UpdatedAt}
 		}
-		repo.slides[bundle.Slide.ID] = bundle.Slide
-		repo.figuresBySlide[bundle.Slide.ID] = make(map[string]repository.SlideFigure)
+		repo.records[bundle.Record.ID] = bundle.Record
+		repo.figuresByRecord[bundle.Record.ID] = make(map[string]repository.RecordFigure)
 		for _, figure := range bundle.Figures {
 			if figure.ID == 0 {
 				figure.ID = repo.nextFigureID
@@ -3577,9 +3577,9 @@ func newMemoryRepo(bundles []SlideBundle) *memoryRepo {
 			if figure.ID >= repo.nextFigureID {
 				repo.nextFigureID = figure.ID + 1
 			}
-			repo.figuresBySlide[bundle.Slide.ID][figure.Filename] = figure
+			repo.figuresByRecord[bundle.Record.ID][figure.Filename] = figure
 		}
-		repo.dataBySlide[bundle.Slide.ID] = make(map[string]repository.SlideDataFile)
+		repo.dataByRecord[bundle.Record.ID] = make(map[string]repository.RecordDataFile)
 		for _, dataFile := range bundle.DataFiles {
 			if dataFile.ID == 0 {
 				dataFile.ID = repo.nextDataID
@@ -3587,20 +3587,20 @@ func newMemoryRepo(bundles []SlideBundle) *memoryRepo {
 			if dataFile.ID >= repo.nextDataID {
 				repo.nextDataID = dataFile.ID + 1
 			}
-			repo.dataBySlide[bundle.Slide.ID][dataFile.Filename] = dataFile
+			repo.dataByRecord[bundle.Record.ID][dataFile.Filename] = dataFile
 		}
 	}
 	return repo
 }
 
-func (m *memoryRepo) CreateSlide(_ context.Context, input repository.CreateSlideInput) (repository.Slide, error) {
-	if m.createSlideErr != nil {
-		return repository.Slide{}, m.createSlideErr
+func (m *memoryRepo) CreateRecord(_ context.Context, input repository.CreateRecordInput) (repository.Record, error) {
+	if m.createRecordErr != nil {
+		return repository.Record{}, m.createRecordErr
 	}
-	if _, exists := m.slides[input.ID]; exists {
-		return repository.Slide{}, repository.ErrConflict
+	if _, exists := m.records[input.ID]; exists {
+		return repository.Record{}, repository.ErrConflict
 	}
-	slide := repository.Slide{
+	record := repository.Record{
 		ID:             input.ID,
 		Date:           input.Date,
 		DayOrder:       input.DayOrder,
@@ -3615,64 +3615,64 @@ func (m *memoryRepo) CreateSlide(_ context.Context, input repository.CreateSlide
 		UpdatedAt:      derefTime(input.UpdatedAt),
 		DeletedAt:      cloneTimePtr(input.DeletedAt),
 	}
-	m.slides[input.ID] = slide
-	if _, ok := m.figuresBySlide[input.ID]; !ok {
-		m.figuresBySlide[input.ID] = make(map[string]repository.SlideFigure)
+	m.records[input.ID] = record
+	if _, ok := m.figuresByRecord[input.ID]; !ok {
+		m.figuresByRecord[input.ID] = make(map[string]repository.RecordFigure)
 	}
-	if _, ok := m.dataBySlide[input.ID]; !ok {
-		m.dataBySlide[input.ID] = make(map[string]repository.SlideDataFile)
+	if _, ok := m.dataByRecord[input.ID]; !ok {
+		m.dataByRecord[input.ID] = make(map[string]repository.RecordDataFile)
 	}
-	return slide, nil
+	return record, nil
 }
 
-func (m *memoryRepo) GetSlideByID(_ context.Context, id string) (repository.Slide, error) {
-	if m.getSlideByIDErr != nil {
-		return repository.Slide{}, m.getSlideByIDErr
+func (m *memoryRepo) GetRecordByID(_ context.Context, id string) (repository.Record, error) {
+	if m.getRecordByIDErr != nil {
+		return repository.Record{}, m.getRecordByIDErr
 	}
-	slide, ok := m.slides[id]
+	record, ok := m.records[id]
 	if !ok {
-		return repository.Slide{}, repository.ErrNotFound
+		return repository.Record{}, repository.ErrNotFound
 	}
-	return slide, nil
+	return record, nil
 }
 
-func (m *memoryRepo) UpdateSlide(_ context.Context, input repository.UpdateSlideInput) (repository.Slide, error) {
-	if m.updateSlideErr != nil {
-		return repository.Slide{}, m.updateSlideErr
+func (m *memoryRepo) UpdateRecord(_ context.Context, input repository.UpdateRecordInput) (repository.Record, error) {
+	if m.updateRecordErr != nil {
+		return repository.Record{}, m.updateRecordErr
 	}
-	slide, ok := m.slides[input.ID]
+	record, ok := m.records[input.ID]
 	if !ok {
-		return repository.Slide{}, repository.ErrNotFound
+		return repository.Record{}, repository.ErrNotFound
 	}
-	slide.Date = input.Date
-	slide.DayOrder = input.DayOrder
-	slide.HTMLContent = input.HTMLContent
-	slide.Notes = cloneStringPtr(input.Notes)
-	slide.ProjectID = input.ProjectID
-	slide.SourceDeviceID = input.SourceDeviceID
-	slide.SourceRef = cloneStringPtr(input.SourceRef)
-	slide.GitRemoteURL = cloneStringPtr(input.GitRemoteURL)
-	slide.GitHash = cloneStringPtr(input.GitHash)
-	slide.UpdatedAt = derefTime(input.UpdatedAt)
-	slide.DeletedAt = cloneTimePtr(input.DeletedAt)
-	m.slides[input.ID] = slide
-	return slide, nil
+	record.Date = input.Date
+	record.DayOrder = input.DayOrder
+	record.HTMLContent = input.HTMLContent
+	record.Notes = cloneStringPtr(input.Notes)
+	record.ProjectID = input.ProjectID
+	record.SourceDeviceID = input.SourceDeviceID
+	record.SourceRef = cloneStringPtr(input.SourceRef)
+	record.GitRemoteURL = cloneStringPtr(input.GitRemoteURL)
+	record.GitHash = cloneStringPtr(input.GitHash)
+	record.UpdatedAt = derefTime(input.UpdatedAt)
+	record.DeletedAt = cloneTimePtr(input.DeletedAt)
+	m.records[input.ID] = record
+	return record, nil
 }
 
-func (m *memoryRepo) ListSlides(_ context.Context, filter repository.ListSlidesFilter) ([]repository.Slide, error) {
-	if m.listSlidesErr != nil {
-		return nil, m.listSlidesErr
+func (m *memoryRepo) ListRecords(_ context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error) {
+	if m.listRecordsErr != nil {
+		return nil, m.listRecordsErr
 	}
-	slides := sortMemorySlides(m.slides)
-	result := make([]repository.Slide, 0, len(slides))
-	for _, slide := range slides {
+	records := sortMemoryRecords(m.records)
+	result := make([]repository.Record, 0, len(records))
+	for _, record := range records {
 		switch {
-		case filter.OnlyDeleted && slide.DeletedAt == nil:
+		case filter.OnlyDeleted && record.DeletedAt == nil:
 			continue
-		case !filter.IncludeDeleted && !filter.OnlyDeleted && slide.DeletedAt != nil:
+		case !filter.IncludeDeleted && !filter.OnlyDeleted && record.DeletedAt != nil:
 			continue
 		}
-		result = append(result, slide)
+		result = append(result, record)
 	}
 	if filter.Limit > 0 && len(result) > filter.Limit {
 		result = result[:filter.Limit]
@@ -3680,30 +3680,30 @@ func (m *memoryRepo) ListSlides(_ context.Context, filter repository.ListSlidesF
 	return result, nil
 }
 
-func (m *memoryRepo) CreateSlideFigure(_ context.Context, input repository.CreateSlideFigureInput) (repository.SlideFigure, error) {
-	if m.createSlideFigureErr != nil {
-		return repository.SlideFigure{}, m.createSlideFigureErr
+func (m *memoryRepo) CreateRecordFigure(_ context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
+	if m.createRecordFigureErr != nil {
+		return repository.RecordFigure{}, m.createRecordFigureErr
 	}
-	figure := repository.SlideFigure{
+	figure := repository.RecordFigure{
 		ID:       m.nextFigureID,
-		SlideID:  input.SlideID,
+		RecordID:  input.RecordID,
 		Filename: input.Filename,
 		S3Key:    input.S3Key,
 		AltText:  cloneStringPtr(input.AltText),
 	}
 	m.nextFigureID++
-	if _, ok := m.figuresBySlide[input.SlideID]; !ok {
-		m.figuresBySlide[input.SlideID] = make(map[string]repository.SlideFigure)
+	if _, ok := m.figuresByRecord[input.RecordID]; !ok {
+		m.figuresByRecord[input.RecordID] = make(map[string]repository.RecordFigure)
 	}
-	m.figuresBySlide[input.SlideID][input.Filename] = figure
+	m.figuresByRecord[input.RecordID][input.Filename] = figure
 	return figure, nil
 }
 
-func (m *memoryRepo) UpdateSlideFigure(_ context.Context, input repository.UpdateSlideFigureInput) (repository.SlideFigure, error) {
-	if m.updateSlideFigureErr != nil {
-		return repository.SlideFigure{}, m.updateSlideFigureErr
+func (m *memoryRepo) UpdateRecordFigure(_ context.Context, input repository.UpdateRecordFigureInput) (repository.RecordFigure, error) {
+	if m.updateRecordFigureErr != nil {
+		return repository.RecordFigure{}, m.updateRecordFigureErr
 	}
-	for slideID, figures := range m.figuresBySlide {
+	for recordID, figures := range m.figuresByRecord {
 		for filename, figure := range figures {
 			if figure.ID != input.ID {
 				continue
@@ -3712,30 +3712,30 @@ func (m *memoryRepo) UpdateSlideFigure(_ context.Context, input repository.Updat
 			figure.Filename = input.Filename
 			figure.S3Key = input.S3Key
 			figure.AltText = cloneStringPtr(input.AltText)
-			m.figuresBySlide[slideID][figure.Filename] = figure
+			m.figuresByRecord[recordID][figure.Filename] = figure
 			return figure, nil
 		}
 	}
-	return repository.SlideFigure{}, repository.ErrNotFound
+	return repository.RecordFigure{}, repository.ErrNotFound
 }
 
-func (m *memoryRepo) GetSlideFigureByID(_ context.Context, id int64) (repository.SlideFigure, error) {
-	for _, figures := range m.figuresBySlide {
+func (m *memoryRepo) GetRecordFigureByID(_ context.Context, id int64) (repository.RecordFigure, error) {
+	for _, figures := range m.figuresByRecord {
 		for _, figure := range figures {
 			if figure.ID == id {
 				return figure, nil
 			}
 		}
 	}
-	return repository.SlideFigure{}, repository.ErrNotFound
+	return repository.RecordFigure{}, repository.ErrNotFound
 }
 
-func (m *memoryRepo) ListSlideFiguresBySlideID(_ context.Context, slideID string) ([]repository.SlideFigure, error) {
-	if m.listFiguresBySlideIDErr != nil {
-		return nil, m.listFiguresBySlideIDErr
+func (m *memoryRepo) ListRecordFiguresByRecordID(_ context.Context, recordID string) ([]repository.RecordFigure, error) {
+	if m.listFiguresByRecordIDErr != nil {
+		return nil, m.listFiguresByRecordIDErr
 	}
-	figures := make([]repository.SlideFigure, 0, len(m.figuresBySlide[slideID]))
-	for _, figure := range m.figuresBySlide[slideID] {
+	figures := make([]repository.RecordFigure, 0, len(m.figuresByRecord[recordID]))
+	for _, figure := range m.figuresByRecord[recordID] {
 		figures = append(figures, figure)
 	}
 	sort.Slice(figures, func(i, j int) bool {
@@ -3744,29 +3744,29 @@ func (m *memoryRepo) ListSlideFiguresBySlideID(_ context.Context, slideID string
 	return figures, nil
 }
 
-func (m *memoryRepo) DeleteSlideFigure(_ context.Context, id int64) error {
-	if m.deleteSlideFigureErr != nil {
-		return m.deleteSlideFigureErr
+func (m *memoryRepo) DeleteRecordFigure(_ context.Context, id int64) error {
+	if m.deleteRecordFigureErr != nil {
+		return m.deleteRecordFigureErr
 	}
-	for slideID, figures := range m.figuresBySlide {
+	for recordID, figures := range m.figuresByRecord {
 		for filename, figure := range figures {
 			if figure.ID != id {
 				continue
 			}
-			delete(m.figuresBySlide[slideID], filename)
+			delete(m.figuresByRecord[recordID], filename)
 			return nil
 		}
 	}
 	return repository.ErrNotFound
 }
 
-func (m *memoryRepo) CreateSlideDataFile(_ context.Context, input repository.CreateSlideDataFileInput) (repository.SlideDataFile, error) {
-	if m.createSlideDataFileErr != nil {
-		return repository.SlideDataFile{}, m.createSlideDataFileErr
+func (m *memoryRepo) CreateRecordDataFile(_ context.Context, input repository.CreateRecordDataFileInput) (repository.RecordDataFile, error) {
+	if m.createRecordDataFileErr != nil {
+		return repository.RecordDataFile{}, m.createRecordDataFileErr
 	}
-	dataFile := repository.SlideDataFile{
+	dataFile := repository.RecordDataFile{
 		ID:          m.nextDataID,
-		SlideID:     input.SlideID,
+		RecordID:     input.RecordID,
 		Filename:    input.Filename,
 		S3Key:       input.S3Key,
 		Size:        input.Size,
@@ -3774,18 +3774,18 @@ func (m *memoryRepo) CreateSlideDataFile(_ context.Context, input repository.Cre
 		Description: cloneStringPtr(input.Description),
 	}
 	m.nextDataID++
-	if _, ok := m.dataBySlide[input.SlideID]; !ok {
-		m.dataBySlide[input.SlideID] = make(map[string]repository.SlideDataFile)
+	if _, ok := m.dataByRecord[input.RecordID]; !ok {
+		m.dataByRecord[input.RecordID] = make(map[string]repository.RecordDataFile)
 	}
-	m.dataBySlide[input.SlideID][input.Filename] = dataFile
+	m.dataByRecord[input.RecordID][input.Filename] = dataFile
 	return dataFile, nil
 }
 
-func (m *memoryRepo) UpdateSlideDataFile(_ context.Context, input repository.UpdateSlideDataFileInput) (repository.SlideDataFile, error) {
-	if m.updateSlideDataFileErr != nil {
-		return repository.SlideDataFile{}, m.updateSlideDataFileErr
+func (m *memoryRepo) UpdateRecordDataFile(_ context.Context, input repository.UpdateRecordDataFileInput) (repository.RecordDataFile, error) {
+	if m.updateRecordDataFileErr != nil {
+		return repository.RecordDataFile{}, m.updateRecordDataFileErr
 	}
-	for slideID, dataFiles := range m.dataBySlide {
+	for recordID, dataFiles := range m.dataByRecord {
 		for filename, dataFile := range dataFiles {
 			if dataFile.ID != input.ID {
 				continue
@@ -3800,30 +3800,30 @@ func (m *memoryRepo) UpdateSlideDataFile(_ context.Context, input repository.Upd
 				dataFile.Hash = *input.Hash
 			}
 			dataFile.Description = cloneStringPtr(input.Description)
-			m.dataBySlide[slideID][dataFile.Filename] = dataFile
+			m.dataByRecord[recordID][dataFile.Filename] = dataFile
 			return dataFile, nil
 		}
 	}
-	return repository.SlideDataFile{}, repository.ErrNotFound
+	return repository.RecordDataFile{}, repository.ErrNotFound
 }
 
-func (m *memoryRepo) GetSlideDataFileByID(_ context.Context, id int64) (repository.SlideDataFile, error) {
-	for _, dataFiles := range m.dataBySlide {
+func (m *memoryRepo) GetRecordDataFileByID(_ context.Context, id int64) (repository.RecordDataFile, error) {
+	for _, dataFiles := range m.dataByRecord {
 		for _, dataFile := range dataFiles {
 			if dataFile.ID == id {
 				return dataFile, nil
 			}
 		}
 	}
-	return repository.SlideDataFile{}, repository.ErrNotFound
+	return repository.RecordDataFile{}, repository.ErrNotFound
 }
 
-func (m *memoryRepo) ListSlideDataFilesBySlideID(_ context.Context, slideID string) ([]repository.SlideDataFile, error) {
-	if m.listDataFilesBySlideIDErr != nil {
-		return nil, m.listDataFilesBySlideIDErr
+func (m *memoryRepo) ListRecordDataFilesByRecordID(_ context.Context, recordID string) ([]repository.RecordDataFile, error) {
+	if m.listDataFilesByRecordIDErr != nil {
+		return nil, m.listDataFilesByRecordIDErr
 	}
-	dataFiles := make([]repository.SlideDataFile, 0, len(m.dataBySlide[slideID]))
-	for _, dataFile := range m.dataBySlide[slideID] {
+	dataFiles := make([]repository.RecordDataFile, 0, len(m.dataByRecord[recordID]))
+	for _, dataFile := range m.dataByRecord[recordID] {
 		dataFiles = append(dataFiles, dataFile)
 	}
 	sort.Slice(dataFiles, func(i, j int) bool {
@@ -3832,25 +3832,25 @@ func (m *memoryRepo) ListSlideDataFilesBySlideID(_ context.Context, slideID stri
 	return dataFiles, nil
 }
 
-func (m *memoryRepo) DeleteSlideDataFile(_ context.Context, id int64) error {
-	if m.deleteSlideDataFileErr != nil {
-		return m.deleteSlideDataFileErr
+func (m *memoryRepo) DeleteRecordDataFile(_ context.Context, id int64) error {
+	if m.deleteRecordDataFileErr != nil {
+		return m.deleteRecordDataFileErr
 	}
-	for slideID, dataFiles := range m.dataBySlide {
+	for recordID, dataFiles := range m.dataByRecord {
 		for filename, dataFile := range dataFiles {
 			if dataFile.ID != id {
 				continue
 			}
-			delete(m.dataBySlide[slideID], filename)
+			delete(m.dataByRecord[recordID], filename)
 			return nil
 		}
 	}
 	return repository.ErrNotFound
 }
 
-func (m *memoryRepo) SoftDeleteSlide(_ context.Context, id string) error { return nil }
-func (m *memoryRepo) RestoreSlide(_ context.Context, id string) error    { return nil }
-func (m *memoryRepo) DeleteSlide(_ context.Context, id string) error     { return nil }
+func (m *memoryRepo) SoftDeleteRecord(_ context.Context, id string) error { return nil }
+func (m *memoryRepo) RestoreRecord(_ context.Context, id string) error    { return nil }
+func (m *memoryRepo) DeleteRecord(_ context.Context, id string) error     { return nil }
 func (m *memoryRepo) CreateTemplate(_ context.Context, input repository.CreateTemplateInput) (repository.Template, error) {
 	return repository.Template{}, nil
 }
@@ -3968,18 +3968,18 @@ func (m *memoryRepo) UpsertDeviceForImport(_ context.Context, device repository.
 	m.devices[device.ID] = device
 	return true, nil
 }
-func (m *memoryRepo) CountActiveSlides(_ context.Context) (int, error)       { return 0, nil }
-func (m *memoryRepo) CountTrashedSlides(_ context.Context) (int, error)      { return 0, nil }
-func (m *memoryRepo) PurgeDeletedSlides(_ context.Context) ([]string, error) { return nil, nil }
+func (m *memoryRepo) CountActiveRecords(_ context.Context) (int, error)       { return 0, nil }
+func (m *memoryRepo) CountTrashedRecords(_ context.Context) (int, error)      { return 0, nil }
+func (m *memoryRepo) PurgeDeletedRecords(_ context.Context) ([]string, error) { return nil, nil }
 
-func (m *memoryRepo) bundle(slideID string) SlideBundle {
-	slide, ok := m.slides[slideID]
+func (m *memoryRepo) bundle(recordID string) RecordBundle {
+	record, ok := m.records[recordID]
 	if !ok {
-		return SlideBundle{}
+		return RecordBundle{}
 	}
-	figures, _ := m.ListSlideFiguresBySlideID(context.Background(), slideID)
-	dataFiles, _ := m.ListSlideDataFilesBySlideID(context.Background(), slideID)
-	return SlideBundle{Slide: slide, Figures: figures, DataFiles: dataFiles}
+	figures, _ := m.ListRecordFiguresByRecordID(context.Background(), recordID)
+	dataFiles, _ := m.ListRecordDataFilesByRecordID(context.Background(), recordID)
+	return RecordBundle{Record: record, Figures: figures, DataFiles: dataFiles}
 }
 
 type mockObjectStore struct {
@@ -4036,8 +4036,8 @@ func (m *mockObjectStore) UpdateVersion(_ context.Context, version int64, _ stri
 
 func newTestService(
 	t *testing.T,
-	localBundles []SlideBundle,
-	cloudBundles []SlideBundle,
+	localBundles []RecordBundle,
+	cloudBundles []RecordBundle,
 ) (*Service, *memoryRepo, *memoryRepo, *filesystem.Client, *mockObjectStore, *syncengine.CursorStore) {
 	t.Helper()
 
@@ -4073,7 +4073,7 @@ func writeLocalAsset(
 	t *testing.T,
 	localFS *filesystem.Client,
 	isFigure bool,
-	slideID string,
+	recordID string,
 	filename string,
 	content string,
 ) {
@@ -4084,9 +4084,9 @@ func writeLocalAsset(
 		err  error
 	)
 	if isFigure {
-		path, err = localFS.ResolveFigurePath(slideID, filename)
+		path, err = localFS.ResolveFigurePath(recordID, filename)
 	} else {
-		path, err = localFS.ResolveDataFilePath(slideID, filename)
+		path, err = localFS.ResolveDataFilePath(recordID, filename)
 	}
 	if err != nil {
 		t.Fatalf("resolve local asset path: %v", err)
@@ -4103,7 +4103,7 @@ func readLocalAsset(
 	t *testing.T,
 	localFS *filesystem.Client,
 	isFigure bool,
-	slideID string,
+	recordID string,
 	filename string,
 ) string {
 	t.Helper()
@@ -4113,9 +4113,9 @@ func readLocalAsset(
 		err  error
 	)
 	if isFigure {
-		path, err = localFS.ResolveFigurePath(slideID, filename)
+		path, err = localFS.ResolveFigurePath(recordID, filename)
 	} else {
-		path, err = localFS.ResolveDataFilePath(slideID, filename)
+		path, err = localFS.ResolveDataFilePath(recordID, filename)
 	}
 	if err != nil {
 		t.Fatalf("resolve local asset path: %v", err)
@@ -4127,47 +4127,47 @@ func readLocalAsset(
 	return string(bytes)
 }
 
-func assertBundleEqual(t *testing.T, got SlideBundle, want SlideBundle) {
+func assertBundleEqual(t *testing.T, got RecordBundle, want RecordBundle) {
 	t.Helper()
 	if canonicalBundle(got) != canonicalBundle(want) {
 		t.Fatalf("bundle mismatch\n got: %+v\nwant: %+v", canonicalBundle(got), canonicalBundle(want))
 	}
 }
 
-func canonicalBundle(bundle SlideBundle) string {
-	canonicalFigures := append([]repository.SlideFigure(nil), bundle.Figures...)
+func canonicalBundle(bundle RecordBundle) string {
+	canonicalFigures := append([]repository.RecordFigure(nil), bundle.Figures...)
 	sort.Slice(canonicalFigures, func(i, j int) bool {
 		return canonicalFigures[i].Filename < canonicalFigures[j].Filename
 	})
-	canonicalDataFiles := append([]repository.SlideDataFile(nil), bundle.DataFiles...)
+	canonicalDataFiles := append([]repository.RecordDataFile(nil), bundle.DataFiles...)
 	sort.Slice(canonicalDataFiles, func(i, j int) bool {
 		return canonicalDataFiles[i].Filename < canonicalDataFiles[j].Filename
 	})
 
 	parts := []string{
-		bundle.Slide.ID,
-		bundle.Slide.Date,
-		bundle.Slide.DayOrder,
-		nullableStringValue(bundle.Slide.HTMLContent),
-		bundle.Slide.CreatedAt.UTC().Format(time.RFC3339Nano),
-		bundle.Slide.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		bundle.Record.ID,
+		bundle.Record.Date,
+		bundle.Record.DayOrder,
+		nullableStringValue(bundle.Record.HTMLContent),
+		bundle.Record.CreatedAt.UTC().Format(time.RFC3339Nano),
+		bundle.Record.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
-	if bundle.Slide.DeletedAt != nil {
-		parts = append(parts, bundle.Slide.DeletedAt.UTC().Format(time.RFC3339Nano))
+	if bundle.Record.DeletedAt != nil {
+		parts = append(parts, bundle.Record.DeletedAt.UTC().Format(time.RFC3339Nano))
 	}
 	for _, figure := range canonicalFigures {
-		parts = append(parts, fmt.Sprintf("fig:%s:%s:%s", figure.SlideID, figure.Filename, figure.S3Key))
+		parts = append(parts, fmt.Sprintf("fig:%s:%s:%s", figure.RecordID, figure.Filename, figure.S3Key))
 	}
 	for _, dataFile := range canonicalDataFiles {
-		parts = append(parts, fmt.Sprintf("data:%s:%s:%s:%d:%s", dataFile.SlideID, dataFile.Filename, dataFile.S3Key, dataFile.Size, dataFile.Hash))
+		parts = append(parts, fmt.Sprintf("data:%s:%s:%s:%d:%s", dataFile.RecordID, dataFile.Filename, dataFile.S3Key, dataFile.Size, dataFile.Hash))
 	}
 	return strings.Join(parts, "|")
 }
 
-func sortMemorySlides(slides map[string]repository.Slide) []repository.Slide {
-	result := make([]repository.Slide, 0, len(slides))
-	for _, slide := range slides {
-		result = append(result, slide)
+func sortMemoryRecords(records map[string]repository.Record) []repository.Record {
+	result := make([]repository.Record, 0, len(records))
+	for _, record := range records {
+		result = append(result, record)
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Date != result[j].Date {

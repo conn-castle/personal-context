@@ -47,12 +47,12 @@ export function badRequest(message: string): NextResponse<ErrorResponseBody> {
 }
 
 /**
- * Returns a 400 INVALID_ID response for malformed slide IDs.
+ * Returns a 400 INVALID_ID response for malformed record IDs.
  *
- * @param id - The invalid slide ID.
+ * @param id - The invalid record ID.
  */
 export function invalidId(id: string): NextResponse<ErrorResponseBody> {
-  return apiError(400, "INVALID_ID", `Invalid slide ID format: ${id}`);
+  return apiError(400, "INVALID_ID", `Invalid record ID format: ${id}`);
 }
 
 /**

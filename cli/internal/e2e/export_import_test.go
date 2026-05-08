@@ -20,7 +20,7 @@ const (
 	largeNotesBytes = 50 * 1024
 )
 
-type slideDetailsJSON struct {
+type recordDetailsJSON struct {
 	ID           string              `json:"id"`
 	Date         string              `json:"date"`
 	DayOrder     string              `json:"day_order"`
@@ -32,17 +32,17 @@ type slideDetailsJSON struct {
 	CreatedAt    string              `json:"created_at"`
 	UpdatedAt    string              `json:"updated_at"`
 	DeletedAt    *string             `json:"deleted_at"`
-	Figures      []slideFigureJSON   `json:"figures"`
-	DataFiles    []slideDataFileJSON `json:"data_files"`
+	Figures      []recordFigureJSON   `json:"figures"`
+	DataFiles    []recordDataFileJSON `json:"data_files"`
 }
 
-type slideFigureJSON struct {
+type recordFigureJSON struct {
 	Filename string  `json:"filename"`
 	S3Key    string  `json:"s3_key"`
 	AltText  *string `json:"alt_text"`
 }
 
-type slideDataFileJSON struct {
+type recordDataFileJSON struct {
 	Filename    string  `json:"filename"`
 	S3Key       string  `json:"s3_key"`
 	Size        int64   `json:"size"`
@@ -50,7 +50,7 @@ type slideDataFileJSON struct {
 	Description *string `json:"description"`
 }
 
-type slideExportJSON struct {
+type recordExportJSON struct {
 	FormatVersion  int                 `json:"format_version"`
 	ID             string              `json:"id"`
 	Date           string              `json:"date"`
@@ -60,25 +60,25 @@ type slideExportJSON struct {
 	GitRemoteURL   *string             `json:"git_remote_url,omitempty"`
 	GitHash        *string             `json:"git_hash,omitempty"`
 	HasNotes       bool                `json:"has_notes"`
-	Figures        []slideFigureJSON   `json:"figures"`
-	DataFiles      []slideDataFileJSON `json:"data_files"`
+	Figures        []recordFigureJSON   `json:"figures"`
+	DataFiles      []recordDataFileJSON `json:"data_files"`
 	CreatedAt      string              `json:"created_at"`
 	UpdatedAt      string              `json:"updated_at"`
 }
 
-type manualExportSlide struct {
-	Metadata slideExportJSON
+type manualExportRecord struct {
+	Metadata recordExportJSON
 	HTML     string
 	Notes    *string
 	Figures  map[string][]byte
 }
 
-func TestExportWritesDeterministicGitTreeAndSkipsDeletedSlides(t *testing.T) {
+func TestExportWritesDeterministicGitTreeAndSkipsDeletedRecords(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
 	minimalID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", createInputFolder(t, inputFolderOpts{
-		HTMLContent: "<html><body><p>Minimal export slide</p></body></html>",
+		HTMLContent: "<html><body><p>Minimal export record</p></body></html>",
 	})))
 
 	largeHTML := buildLargeHTML()
@@ -112,7 +112,7 @@ func TestExportWritesDeterministicGitTreeAndSkipsDeletedSlides(t *testing.T) {
 	})))
 
 	deletedID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", createInputFolder(t, inputFolderOpts{
-		HTMLContent: "<html><body>deleted export slide</body></html>",
+		HTMLContent: "<html><body>deleted export record</body></html>",
 	})))
 	runPCSuccess(t, homeDir, "delete", deletedID)
 
@@ -121,50 +121,50 @@ func TestExportWritesDeterministicGitTreeAndSkipsDeletedSlides(t *testing.T) {
 
 	assertTemplateExports(t, firstExportDir)
 
-	minimalMetadata := readSlideExportMetadata(t, firstExportDir, minimalID)
+	minimalMetadata := readRecordExportMetadata(t, firstExportDir, minimalID)
 	if minimalMetadata.FormatVersion != 1 {
 		t.Fatalf("minimal export format_version = %d, want 1", minimalMetadata.FormatVersion)
 	}
 	if minimalMetadata.HasNotes {
-		t.Fatal("minimal slide unexpectedly exported with notes")
+		t.Fatal("minimal record unexpectedly exported with notes")
 	}
 	if len(minimalMetadata.Figures) != 0 {
-		t.Fatalf("minimal slide exported %d figures, want 0", len(minimalMetadata.Figures))
+		t.Fatalf("minimal record exported %d figures, want 0", len(minimalMetadata.Figures))
 	}
 	if len(minimalMetadata.DataFiles) != 0 {
-		t.Fatalf("minimal slide exported %d data files, want 0", len(minimalMetadata.DataFiles))
+		t.Fatalf("minimal record exported %d data files, want 0", len(minimalMetadata.DataFiles))
 	}
-	if _, err := os.Stat(filepath.Join(firstExportDir, "slides", minimalID, "notes.md")); !os.IsNotExist(err) {
-		t.Fatalf("minimal slide notes.md should be absent, stat err = %v", err)
+	if _, err := os.Stat(filepath.Join(firstExportDir, "records", minimalID, "notes.md")); !os.IsNotExist(err) {
+		t.Fatalf("minimal record notes.md should be absent, stat err = %v", err)
 	}
 
-	largeMetadataOut := readSlideExportMetadata(t, firstExportDir, largeID)
+	largeMetadataOut := readRecordExportMetadata(t, firstExportDir, largeID)
 	if !largeMetadataOut.HasNotes {
-		t.Fatal("large slide notes were not exported")
+		t.Fatal("large record notes were not exported")
 	}
 	if largeMetadataOut.ProjectID == nil || *largeMetadataOut.ProjectID != "phase7/export" {
-		t.Fatalf("large slide project_id = %#v, want phase7/export", largeMetadataOut.ProjectID)
+		t.Fatalf("large record project_id = %#v, want phase7/export", largeMetadataOut.ProjectID)
 	}
 	if largeMetadataOut.GitRemoteURL == nil || *largeMetadataOut.GitRemoteURL != "https://github.com/org/repo" {
-		t.Fatalf("large slide git_remote_url = %#v", largeMetadataOut.GitRemoteURL)
+		t.Fatalf("large record git_remote_url = %#v", largeMetadataOut.GitRemoteURL)
 	}
 	if largeMetadataOut.GitHash == nil || *largeMetadataOut.GitHash != strings.Repeat("a", 40) {
-		t.Fatalf("large slide git_hash = %#v", largeMetadataOut.GitHash)
+		t.Fatalf("large record git_hash = %#v", largeMetadataOut.GitHash)
 	}
 	if len(largeMetadataOut.Figures) != 20 {
-		t.Fatalf("large slide exported %d figures, want 20", len(largeMetadataOut.Figures))
+		t.Fatalf("large record exported %d figures, want 20", len(largeMetadataOut.Figures))
 	}
 	if len(largeMetadataOut.DataFiles) != 1 {
-		t.Fatalf("large slide exported %d data file refs, want 1", len(largeMetadataOut.DataFiles))
+		t.Fatalf("large record exported %d data file refs, want 1", len(largeMetadataOut.DataFiles))
 	}
-	exportedHTML, err := os.ReadFile(filepath.Join(firstExportDir, "slides", largeID, "slide.html"))
+	exportedHTML, err := os.ReadFile(filepath.Join(firstExportDir, "records", largeID, "record.html"))
 	if err != nil {
-		t.Fatalf("read exported slide.html: %v", err)
+		t.Fatalf("read exported record.html: %v", err)
 	}
 	if len(exportedHTML) < largeHTMLBytes {
-		t.Fatalf("exported slide.html length = %d, want at least %d", len(exportedHTML), largeHTMLBytes)
+		t.Fatalf("exported record.html length = %d, want at least %d", len(exportedHTML), largeHTMLBytes)
 	}
-	exportedNotes, err := os.ReadFile(filepath.Join(firstExportDir, "slides", largeID, "notes.md"))
+	exportedNotes, err := os.ReadFile(filepath.Join(firstExportDir, "records", largeID, "notes.md"))
 	if err != nil {
 		t.Fatalf("read exported notes.md: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestExportWritesDeterministicGitTreeAndSkipsDeletedSlides(t *testing.T) {
 		t.Fatalf("exported notes length = %d, want at least %d", len(exportedNotes), largeNotesBytes)
 	}
 	for name, expected := range specialFigures {
-		got, err := os.ReadFile(filepath.Join(firstExportDir, "slides", largeID, "figures", name))
+		got, err := os.ReadFile(filepath.Join(firstExportDir, "records", largeID, "figures", name))
 		if err != nil {
 			t.Fatalf("read exported figure %q: %v", name, err)
 		}
@@ -180,24 +180,24 @@ func TestExportWritesDeterministicGitTreeAndSkipsDeletedSlides(t *testing.T) {
 			t.Fatalf("figure %q content mismatch", name)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(firstExportDir, "slides", largeID, "data")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(firstExportDir, "records", largeID, "data")); !os.IsNotExist(err) {
 		t.Fatalf("export should not write data binaries into git tree, stat err = %v", err)
 	}
 
-	if _, err := os.Stat(filepath.Join(firstExportDir, "slides", deletedID)); !os.IsNotExist(err) {
-		t.Fatalf("soft-deleted slide %s should be excluded from export", deletedID)
+	if _, err := os.Stat(filepath.Join(firstExportDir, "records", deletedID)); !os.IsNotExist(err) {
+		t.Fatalf("soft-deleted record %s should be excluded from export", deletedID)
 	}
 
-	sameDateAMetadata := readSlideExportMetadata(t, firstExportDir, sameDateA)
-	sameDateBMetadata := readSlideExportMetadata(t, firstExportDir, sameDateB)
+	sameDateAMetadata := readRecordExportMetadata(t, firstExportDir, sameDateA)
+	sameDateBMetadata := readRecordExportMetadata(t, firstExportDir, sameDateB)
 	if sameDateAMetadata.Date != sameDate || sameDateBMetadata.Date != sameDate {
 		t.Fatalf("same-date export dates = %q and %q, want both %q", sameDateAMetadata.Date, sameDateBMetadata.Date, sameDate)
 	}
 	if sameDateAMetadata.DayOrder == sameDateBMetadata.DayOrder {
-		t.Fatalf("same-date slides exported identical day_order %q", sameDateAMetadata.DayOrder)
+		t.Fatalf("same-date records exported identical day_order %q", sameDateAMetadata.DayOrder)
 	}
 	if strings.HasPrefix(sameDateAMetadata.CreatedAt, sameDate) || strings.HasPrefix(sameDateBMetadata.CreatedAt, sameDate) {
-		t.Fatalf("created_at should remain distinct from logical slide date, got %q and %q", sameDateAMetadata.CreatedAt, sameDateBMetadata.CreatedAt)
+		t.Fatalf("created_at should remain distinct from logical record date, got %q and %q", sameDateAMetadata.CreatedAt, sameDateBMetadata.CreatedAt)
 	}
 
 	secondExportDir := t.TempDir()
@@ -214,16 +214,16 @@ func TestExportHandlesEmptyDatabase(t *testing.T) {
 
 	assertTemplateExports(t, exportDir)
 
-	slideEntries, err := os.ReadDir(filepath.Join(exportDir, "slides"))
+	recordEntries, err := os.ReadDir(filepath.Join(exportDir, "records"))
 	if err != nil {
-		t.Fatalf("read exported slides dir: %v", err)
+		t.Fatalf("read exported records dir: %v", err)
 	}
-	if len(slideEntries) != 0 {
-		names := make([]string, 0, len(slideEntries))
-		for _, entry := range slideEntries {
+	if len(recordEntries) != 0 {
+		names := make([]string, 0, len(recordEntries))
+		for _, entry := range recordEntries {
 			names = append(names, entry.Name())
 		}
-		t.Fatalf("empty export wrote unexpected slide directories: %v", names)
+		t.Fatalf("empty export wrote unexpected record directories: %v", names)
 	}
 }
 
@@ -251,35 +251,35 @@ func TestImportUsesUpdatedAtMergeRulesAndReplacesChildRows(t *testing.T) {
 		DataFiles:    map[string][]byte{"old-data.csv": []byte("before,data\n1,1\n")},
 	})))
 
-	sameSlideBefore := getLocalSlideJSON(t, homeDir, sameID)
-	olderSlideBefore := getLocalSlideJSON(t, homeDir, olderID)
-	newerSlideBefore := getLocalSlideJSON(t, homeDir, newerID)
+	sameRecordBefore := getLocalRecordJSON(t, homeDir, sameID)
+	olderRecordBefore := getLocalRecordJSON(t, homeDir, olderID)
+	newerRecordBefore := getLocalRecordJSON(t, homeDir, newerID)
 
 	exportDir := t.TempDir()
 	writeSeededTemplates(t, openTestDB(t, homeDir), exportDir)
 
-	olderTime := mustParseTimestamp(t, olderSlideBefore.UpdatedAt).Add(-1 * time.Minute).Format(time.RFC3339)
-	newerTime := mustParseTimestamp(t, newerSlideBefore.UpdatedAt).Add(1 * time.Minute).Format(time.RFC3339)
+	olderTime := mustParseTimestamp(t, olderRecordBefore.UpdatedAt).Add(-1 * time.Minute).Format(time.RFC3339)
+	newerTime := mustParseTimestamp(t, newerRecordBefore.UpdatedAt).Add(1 * time.Minute).Format(time.RFC3339)
 
-	writeManualExportSlide(t, exportDir, manualExportSlide{
-		Metadata: slideExportJSON{
+	writeManualExportRecord(t, exportDir, manualExportRecord{
+		Metadata: recordExportJSON{
 			FormatVersion: 1,
 			ID:            sameID,
-			Date:          sameSlideBefore.Date,
-			DayOrder:      sameSlideBefore.DayOrder,
+			Date:          sameRecordBefore.Date,
+			DayOrder:      sameRecordBefore.DayOrder,
 			HasNotes:      true,
-			Figures: []slideFigureJSON{{
+			Figures: []recordFigureJSON{{
 				Filename: "same-from-import.png",
 				S3Key:    fmt.Sprintf("figures/%s/%s", sameID, "same-from-import.png"),
 			}},
-			DataFiles: []slideDataFileJSON{{
+			DataFiles: []recordDataFileJSON{{
 				Filename: "same-from-import.csv",
 				S3Key:    fmt.Sprintf("data/%s/%s", sameID, "same-from-import.csv"),
 				Size:     19,
 				Hash:     hashString("same-from-import"),
 			}},
-			CreatedAt: sameSlideBefore.CreatedAt,
-			UpdatedAt: sameSlideBefore.UpdatedAt,
+			CreatedAt: sameRecordBefore.CreatedAt,
+			UpdatedAt: sameRecordBefore.UpdatedAt,
 		},
 		HTML:  "<html><body>same-updated-at import</body></html>",
 		Notes: strPtr("same-import-notes"),
@@ -287,24 +287,24 @@ func TestImportUsesUpdatedAtMergeRulesAndReplacesChildRows(t *testing.T) {
 			"same-from-import.png": []byte("same-import-figure"),
 		},
 	})
-	writeManualExportSlide(t, exportDir, manualExportSlide{
-		Metadata: slideExportJSON{
+	writeManualExportRecord(t, exportDir, manualExportRecord{
+		Metadata: recordExportJSON{
 			FormatVersion: 1,
 			ID:            olderID,
-			Date:          olderSlideBefore.Date,
-			DayOrder:      olderSlideBefore.DayOrder,
+			Date:          olderRecordBefore.Date,
+			DayOrder:      olderRecordBefore.DayOrder,
 			HasNotes:      true,
-			Figures: []slideFigureJSON{{
+			Figures: []recordFigureJSON{{
 				Filename: "older-from-import.png",
 				S3Key:    fmt.Sprintf("figures/%s/%s", olderID, "older-from-import.png"),
 			}},
-			DataFiles: []slideDataFileJSON{{
+			DataFiles: []recordDataFileJSON{{
 				Filename: "older-from-import.csv",
 				S3Key:    fmt.Sprintf("data/%s/%s", olderID, "older-from-import.csv"),
 				Size:     20,
 				Hash:     hashString("older-from-import"),
 			}},
-			CreatedAt: olderSlideBefore.CreatedAt,
+			CreatedAt: olderRecordBefore.CreatedAt,
 			UpdatedAt: olderTime,
 		},
 		HTML:  "<html><body>older import</body></html>",
@@ -313,27 +313,27 @@ func TestImportUsesUpdatedAtMergeRulesAndReplacesChildRows(t *testing.T) {
 			"older-from-import.png": []byte("older-import-figure"),
 		},
 	})
-	writeManualExportSlide(t, exportDir, manualExportSlide{
-		Metadata: slideExportJSON{
+	writeManualExportRecord(t, exportDir, manualExportRecord{
+		Metadata: recordExportJSON{
 			FormatVersion: 1,
 			ID:            newerID,
-			Date:          newerSlideBefore.Date,
-			DayOrder:      newerSlideBefore.DayOrder,
+			Date:          newerRecordBefore.Date,
+			DayOrder:      newerRecordBefore.DayOrder,
 			ProjectID:     strPtr("phase7/local-after"),
 			GitRemoteURL:  strPtr("https://github.com/org/after"),
 			GitHash:       strPtr("cccccccccccccccccccccccccccccccccccccccc"),
 			HasNotes:      true,
-			Figures: []slideFigureJSON{{
+			Figures: []recordFigureJSON{{
 				Filename: "fresh.png",
 				S3Key:    fmt.Sprintf("figures/%s/%s", newerID, "fresh.png"),
 			}},
-			DataFiles: []slideDataFileJSON{{
+			DataFiles: []recordDataFileJSON{{
 				Filename: "fresh.csv",
 				S3Key:    fmt.Sprintf("data/%s/%s", newerID, "fresh.csv"),
 				Size:     15,
 				Hash:     hashString("fresh,data\n"),
 			}},
-			CreatedAt: newerSlideBefore.CreatedAt,
+			CreatedAt: newerRecordBefore.CreatedAt,
 			UpdatedAt: newerTime,
 		},
 		HTML:  "<html><body>newer import</body></html>",
@@ -345,48 +345,48 @@ func TestImportUsesUpdatedAtMergeRulesAndReplacesChildRows(t *testing.T) {
 
 	runPCSuccess(t, homeDir, "import", exportDir)
 
-	sameSlideAfter := getLocalSlideJSON(t, homeDir, sameID)
-	if sameSlideAfter.HTMLContent != sameSlideBefore.HTMLContent {
-		t.Fatalf("same-updated-at slide should be unchanged, got %q", sameSlideAfter.HTMLContent)
+	sameRecordAfter := getLocalRecordJSON(t, homeDir, sameID)
+	if sameRecordAfter.HTMLContent != sameRecordBefore.HTMLContent {
+		t.Fatalf("same-updated-at record should be unchanged, got %q", sameRecordAfter.HTMLContent)
 	}
-	if sameSlideAfter.Notes == nil || *sameSlideAfter.Notes != "same-local-notes" {
-		t.Fatalf("same-updated-at notes = %#v, want local value", sameSlideAfter.Notes)
+	if sameRecordAfter.Notes == nil || *sameRecordAfter.Notes != "same-local-notes" {
+		t.Fatalf("same-updated-at notes = %#v, want local value", sameRecordAfter.Notes)
 	}
-	if fileNamesFromFigures(sameSlideAfter.Figures)[0] != "same.png" {
-		t.Fatalf("same-updated-at figures = %v, want original", fileNamesFromFigures(sameSlideAfter.Figures))
-	}
-
-	olderSlideAfter := getLocalSlideJSON(t, homeDir, olderID)
-	if olderSlideAfter.HTMLContent != olderSlideBefore.HTMLContent {
-		t.Fatalf("older import should be skipped, got %q", olderSlideAfter.HTMLContent)
-	}
-	if olderSlideAfter.Notes == nil || *olderSlideAfter.Notes != "older-local-notes" {
-		t.Fatalf("older import notes = %#v, want local value", olderSlideAfter.Notes)
-	}
-	if fileNamesFromFigures(olderSlideAfter.Figures)[0] != "older.png" {
-		t.Fatalf("older import figures = %v, want original", fileNamesFromFigures(olderSlideAfter.Figures))
+	if fileNamesFromFigures(sameRecordAfter.Figures)[0] != "same.png" {
+		t.Fatalf("same-updated-at figures = %v, want original", fileNamesFromFigures(sameRecordAfter.Figures))
 	}
 
-	newerSlideAfter := getLocalSlideJSON(t, homeDir, newerID)
-	if newerSlideAfter.HTMLContent != "<html><body>newer import</body></html>" {
-		t.Fatalf("newer import html_content = %q", newerSlideAfter.HTMLContent)
+	olderRecordAfter := getLocalRecordJSON(t, homeDir, olderID)
+	if olderRecordAfter.HTMLContent != olderRecordBefore.HTMLContent {
+		t.Fatalf("older import should be skipped, got %q", olderRecordAfter.HTMLContent)
 	}
-	if newerSlideAfter.Notes == nil || *newerSlideAfter.Notes != "newer-import-notes" {
-		t.Fatalf("newer import notes = %#v", newerSlideAfter.Notes)
+	if olderRecordAfter.Notes == nil || *olderRecordAfter.Notes != "older-local-notes" {
+		t.Fatalf("older import notes = %#v, want local value", olderRecordAfter.Notes)
 	}
-	if newerSlideAfter.ProjectID == nil || *newerSlideAfter.ProjectID != "phase7/local-after" {
-		t.Fatalf("newer import project_id = %#v", newerSlideAfter.ProjectID)
+	if fileNamesFromFigures(olderRecordAfter.Figures)[0] != "older.png" {
+		t.Fatalf("older import figures = %v, want original", fileNamesFromFigures(olderRecordAfter.Figures))
 	}
-	if newerSlideAfter.GitRemoteURL == nil || *newerSlideAfter.GitRemoteURL != "https://github.com/org/after" {
-		t.Fatalf("newer import git_remote_url = %#v", newerSlideAfter.GitRemoteURL)
+
+	newerRecordAfter := getLocalRecordJSON(t, homeDir, newerID)
+	if newerRecordAfter.HTMLContent != "<html><body>newer import</body></html>" {
+		t.Fatalf("newer import html_content = %q", newerRecordAfter.HTMLContent)
 	}
-	if newerSlideAfter.GitHash == nil || *newerSlideAfter.GitHash != strings.Repeat("c", 40) {
-		t.Fatalf("newer import git_hash = %#v", newerSlideAfter.GitHash)
+	if newerRecordAfter.Notes == nil || *newerRecordAfter.Notes != "newer-import-notes" {
+		t.Fatalf("newer import notes = %#v", newerRecordAfter.Notes)
 	}
-	if got := fileNamesFromFigures(newerSlideAfter.Figures); !slices.Equal(got, []string{"fresh.png"}) {
+	if newerRecordAfter.ProjectID == nil || *newerRecordAfter.ProjectID != "phase7/local-after" {
+		t.Fatalf("newer import project_id = %#v", newerRecordAfter.ProjectID)
+	}
+	if newerRecordAfter.GitRemoteURL == nil || *newerRecordAfter.GitRemoteURL != "https://github.com/org/after" {
+		t.Fatalf("newer import git_remote_url = %#v", newerRecordAfter.GitRemoteURL)
+	}
+	if newerRecordAfter.GitHash == nil || *newerRecordAfter.GitHash != strings.Repeat("c", 40) {
+		t.Fatalf("newer import git_hash = %#v", newerRecordAfter.GitHash)
+	}
+	if got := fileNamesFromFigures(newerRecordAfter.Figures); !slices.Equal(got, []string{"fresh.png"}) {
 		t.Fatalf("newer import figures = %v, want [fresh.png]", got)
 	}
-	if got := fileNamesFromDataFiles(newerSlideAfter.DataFiles); !slices.Equal(got, []string{"fresh.csv"}) {
+	if got := fileNamesFromDataFiles(newerRecordAfter.DataFiles); !slices.Equal(got, []string{"fresh.csv"}) {
 		t.Fatalf("newer import data_files = %v, want [fresh.csv]", got)
 	}
 	freshFigurePath := filepath.Join(homeDir, "personal-context", "figures", newerID, "fresh.png")
@@ -407,14 +407,14 @@ func TestImportRejectsGitLFSPointerFiles(t *testing.T) {
 	exportDir := t.TempDir()
 	writeSeededTemplates(t, openTestDB(t, homeDir), exportDir)
 
-	writeManualExportSlide(t, exportDir, manualExportSlide{
-		Metadata: slideExportJSON{
+	writeManualExportRecord(t, exportDir, manualExportRecord{
+		Metadata: recordExportJSON{
 			FormatVersion: 1,
 			ID:            "20200501-deadbeef",
 			Date:          "2020-05-01",
 			DayOrder:      "a",
 			HasNotes:      false,
-			Figures: []slideFigureJSON{{
+			Figures: []recordFigureJSON{{
 				Filename: "pointer.png",
 				S3Key:    "figures/20200501-deadbeef/pointer.png",
 			}},
@@ -434,8 +434,8 @@ func TestImportRejectsGitLFSPointerFiles(t *testing.T) {
 	}
 
 	db := openTestDB(t, homeDir)
-	if got := queryRowCount(t, db, "slides"); got != 0 {
-		t.Fatalf("LFS pointer import should not create slides, found %d rows", got)
+	if got := queryRowCount(t, db, "records"); got != 0 {
+		t.Fatalf("LFS pointer import should not create records, found %d rows", got)
 	}
 }
 
@@ -444,14 +444,14 @@ func TestRestoreDBCreatesRecoverableBackupBeforeReplacingLocalState(t *testing.T
 	runPCSuccess(t, homeDir, "setup")
 
 	originalID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", createInputFolder(t, inputFolderOpts{
-		HTMLContent: "<html><body>original restore-db slide</body></html>",
+		HTMLContent: "<html><body>original restore-db record</body></html>",
 		Notes:       "original-restore-notes",
 	})))
 
 	exportDir := t.TempDir()
 	writeSeededTemplates(t, openTestDB(t, homeDir), exportDir)
-	writeManualExportSlide(t, exportDir, manualExportSlide{
-		Metadata: slideExportJSON{
+	writeManualExportRecord(t, exportDir, manualExportRecord{
+		Metadata: recordExportJSON{
 			FormatVersion: 1,
 			ID:            "20200502-feedface",
 			Date:          "2020-05-02",
@@ -462,7 +462,7 @@ func TestRestoreDBCreatesRecoverableBackupBeforeReplacingLocalState(t *testing.T
 			CreatedAt:     "2020-05-02T12:00:00Z",
 			UpdatedAt:     "2020-05-02T12:00:00Z",
 		},
-		HTML:  "<html><body>replacement restore-db slide</body></html>",
+		HTML:  "<html><body>replacement restore-db record</body></html>",
 		Notes: strPtr("replacement-restore-notes"),
 	})
 
@@ -471,11 +471,11 @@ func TestRestoreDBCreatesRecoverableBackupBeforeReplacingLocalState(t *testing.T
 
 	stderr := runPCFailure(t, homeDir, "show", originalID)
 	if !strings.Contains(stderr, "not found") {
-		t.Fatalf("original slide should be absent after restore-db, got %q", stderr)
+		t.Fatalf("original record should be absent after restore-db, got %q", stderr)
 	}
-	replacement := getLocalSlideJSON(t, homeDir, "20200502-feedface")
-	if replacement.HTMLContent != "<html><body>replacement restore-db slide</body></html>" {
-		t.Fatalf("replacement slide html_content = %q", replacement.HTMLContent)
+	replacement := getLocalRecordJSON(t, homeDir, "20200502-feedface")
+	if replacement.HTMLContent != "<html><body>replacement restore-db record</body></html>" {
+		t.Fatalf("replacement record html_content = %q", replacement.HTMLContent)
 	}
 
 	backupPath := parseReportedBackupPath(t, stdout)
@@ -499,13 +499,13 @@ func TestRestoreDBCreatesRecoverableBackupBeforeReplacingLocalState(t *testing.T
 		}
 	}
 
-	restoredOriginal := getLocalSlideJSON(t, homeDir, originalID)
-	if restoredOriginal.HTMLContent != "<html><body>original restore-db slide</body></html>" {
+	restoredOriginal := getLocalRecordJSON(t, homeDir, originalID)
+	if restoredOriginal.HTMLContent != "<html><body>original restore-db record</body></html>" {
 		t.Fatalf("restored backup html_content = %q", restoredOriginal.HTMLContent)
 	}
 	stderr = runPCFailure(t, homeDir, "show", "20200502-feedface")
 	if !strings.Contains(stderr, "not found") {
-		t.Fatalf("replacement slide should be absent after backup restore, got %q", stderr)
+		t.Fatalf("replacement record should be absent after backup restore, got %q", stderr)
 	}
 }
 
@@ -528,27 +528,27 @@ func TestVerifyRoundTripLocal(t *testing.T) {
 	runPCSuccess(t, homeDir, "verify")
 }
 
-func getLocalSlideJSON(t *testing.T, homeDir string, slideID string) slideDetailsJSON {
+func getLocalRecordJSON(t *testing.T, homeDir string, recordID string) recordDetailsJSON {
 	t.Helper()
 
-	stdout := runPCSuccess(t, homeDir, "show", "--format", "json", slideID)
-	var result slideDetailsJSON
+	stdout := runPCSuccess(t, homeDir, "show", "--format", "json", recordID)
+	var result recordDetailsJSON
 	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
-		t.Fatalf("parse show json for %s: %v\nraw: %s", slideID, err, stdout)
+		t.Fatalf("parse show json for %s: %v\nraw: %s", recordID, err, stdout)
 	}
 	return result
 }
 
-func readSlideExportMetadata(t *testing.T, exportDir string, slideID string) slideExportJSON {
+func readRecordExportMetadata(t *testing.T, exportDir string, recordID string) recordExportJSON {
 	t.Helper()
 
-	path := filepath.Join(exportDir, "slides", slideID, "metadata.json")
+	path := filepath.Join(exportDir, "records", recordID, "metadata.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read metadata %s: %v", path, err)
 	}
 
-	var result slideExportJSON
+	var result recordExportJSON
 	if err := json.Unmarshal(raw, &result); err != nil {
 		t.Fatalf("parse metadata %s: %v\nraw: %s", path, err, string(raw))
 	}
@@ -620,7 +620,7 @@ func snapshotDirectory(t *testing.T, root string) map[string]string {
 
 func buildLargeHTML() string {
 	var b strings.Builder
-	b.WriteString("<html><body><h1>Large export slide</h1>\n")
+	b.WriteString("<html><body><h1>Large export record</h1>\n")
 	b.WriteString("<p>Unicode payload: 日本語, café, naïve, 🚀.</p>\n")
 	b.WriteString(`<img src="figures/my figure 01.png">` + "\n")
 	b.WriteString(`<img src="figures/data-chart_v2.png">` + "\n")
@@ -681,48 +681,48 @@ func writeSeededTemplates(t *testing.T, db *sql.DB, exportDir string) {
 		t.Fatal("expected seeded templates to exist")
 	}
 
-	slidesDir := filepath.Join(exportDir, "slides")
-	if err := os.MkdirAll(slidesDir, 0o755); err != nil {
-		t.Fatalf("mkdir slides: %v", err)
+	recordsDir := filepath.Join(exportDir, "records")
+	if err := os.MkdirAll(recordsDir, 0o755); err != nil {
+		t.Fatalf("mkdir records: %v", err)
 	}
 	ensureManualRegistryEntry(t, exportDir, "projects.json", "test/default-project")
 	ensureManualRegistryEntry(t, exportDir, "devices.json", "test-device")
 }
 
-func writeManualExportSlide(t *testing.T, exportDir string, slide manualExportSlide) {
+func writeManualExportRecord(t *testing.T, exportDir string, record manualExportRecord) {
 	t.Helper()
 
-	slideDir := filepath.Join(exportDir, "slides", slide.Metadata.ID)
-	if err := os.MkdirAll(filepath.Join(slideDir, "figures"), 0o755); err != nil {
-		t.Fatalf("mkdir slide export dir: %v", err)
+	recordDir := filepath.Join(exportDir, "records", record.Metadata.ID)
+	if err := os.MkdirAll(filepath.Join(recordDir, "figures"), 0o755); err != nil {
+		t.Fatalf("mkdir record export dir: %v", err)
 	}
-	if slide.Metadata.ProjectID == nil || *slide.Metadata.ProjectID == "" {
+	if record.Metadata.ProjectID == nil || *record.Metadata.ProjectID == "" {
 		defaultProject := "test/default-project"
-		slide.Metadata.ProjectID = &defaultProject
+		record.Metadata.ProjectID = &defaultProject
 	}
-	if slide.Metadata.SourceDeviceID == "" {
-		slide.Metadata.SourceDeviceID = "test-device"
+	if record.Metadata.SourceDeviceID == "" {
+		record.Metadata.SourceDeviceID = "test-device"
 	}
-	ensureManualRegistryEntry(t, exportDir, "projects.json", *slide.Metadata.ProjectID)
-	ensureManualRegistryEntry(t, exportDir, "devices.json", slide.Metadata.SourceDeviceID)
-	metadataBytes, err := json.MarshalIndent(slide.Metadata, "", "  ")
+	ensureManualRegistryEntry(t, exportDir, "projects.json", *record.Metadata.ProjectID)
+	ensureManualRegistryEntry(t, exportDir, "devices.json", record.Metadata.SourceDeviceID)
+	metadataBytes, err := json.MarshalIndent(record.Metadata, "", "  ")
 	if err != nil {
-		t.Fatalf("marshal metadata for %s: %v", slide.Metadata.ID, err)
+		t.Fatalf("marshal metadata for %s: %v", record.Metadata.ID, err)
 	}
-	if err := os.WriteFile(filepath.Join(slideDir, "metadata.json"), metadataBytes, 0o644); err != nil {
-		t.Fatalf("write metadata for %s: %v", slide.Metadata.ID, err)
+	if err := os.WriteFile(filepath.Join(recordDir, "metadata.json"), metadataBytes, 0o644); err != nil {
+		t.Fatalf("write metadata for %s: %v", record.Metadata.ID, err)
 	}
-	if err := os.WriteFile(filepath.Join(slideDir, "slide.html"), []byte(slide.HTML), 0o644); err != nil {
-		t.Fatalf("write slide.html for %s: %v", slide.Metadata.ID, err)
+	if err := os.WriteFile(filepath.Join(recordDir, "record.html"), []byte(record.HTML), 0o644); err != nil {
+		t.Fatalf("write record.html for %s: %v", record.Metadata.ID, err)
 	}
-	if slide.Notes != nil {
-		if err := os.WriteFile(filepath.Join(slideDir, "notes.md"), []byte(*slide.Notes), 0o644); err != nil {
-			t.Fatalf("write notes.md for %s: %v", slide.Metadata.ID, err)
+	if record.Notes != nil {
+		if err := os.WriteFile(filepath.Join(recordDir, "notes.md"), []byte(*record.Notes), 0o644); err != nil {
+			t.Fatalf("write notes.md for %s: %v", record.Metadata.ID, err)
 		}
 	}
-	for name, content := range slide.Figures {
-		if err := os.WriteFile(filepath.Join(slideDir, "figures", name), content, 0o644); err != nil {
-			t.Fatalf("write figure %s for %s: %v", name, slide.Metadata.ID, err)
+	for name, content := range record.Figures {
+		if err := os.WriteFile(filepath.Join(recordDir, "figures", name), content, 0o644); err != nil {
+			t.Fatalf("write figure %s for %s: %v", name, record.Metadata.ID, err)
 		}
 	}
 }
@@ -785,7 +785,7 @@ func mustParseTimestamp(t *testing.T, raw string) time.Time {
 	return time.Time{}
 }
 
-func fileNamesFromFigures(figures []slideFigureJSON) []string {
+func fileNamesFromFigures(figures []recordFigureJSON) []string {
 	names := make([]string, 0, len(figures))
 	for _, figure := range figures {
 		names = append(names, figure.Filename)
@@ -794,7 +794,7 @@ func fileNamesFromFigures(figures []slideFigureJSON) []string {
 	return names
 }
 
-func fileNamesFromDataFiles(dataFiles []slideDataFileJSON) []string {
+func fileNamesFromDataFiles(dataFiles []recordDataFileJSON) []string {
 	names := make([]string, 0, len(dataFiles))
 	for _, dataFile := range dataFiles {
 		names = append(names, dataFile.Filename)

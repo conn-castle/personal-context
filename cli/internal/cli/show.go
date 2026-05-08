@@ -16,7 +16,7 @@ func newShowCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "show <id>",
-		Short: "Display slide details",
+		Short: "Display record details",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runShow(cmd.Context(), stdout, stderr, args[0], formatFlag)
@@ -28,8 +28,8 @@ func newShowCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-// slideJSON is the JSON representation for pc show --format json.
-type slideJSON struct {
+// recordJSON is the JSON representation for pc show --format json.
+type recordJSON struct {
 	ID             string         `json:"id"`
 	Date           string         `json:"date"`
 	DayOrder       string         `json:"day_order"`
@@ -73,54 +73,54 @@ func runShow(ctx context.Context, stdout io.Writer, _ io.Writer, id string, form
 	}
 	defer func() { _ = stack.Close() }()
 
-	slide, err := stack.Repo.GetSlideByID(ctx, id)
+	record, err := stack.Repo.GetRecordByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return fmt.Errorf("slide %q not found", id)
+			return fmt.Errorf("record %q not found", id)
 		}
-		return fmt.Errorf("get slide: %w", err)
+		return fmt.Errorf("get record: %w", err)
 	}
 
-	figures, err := stack.Repo.ListSlideFiguresBySlideID(ctx, id)
+	figures, err := stack.Repo.ListRecordFiguresByRecordID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("list figures: %w", err)
 	}
 
-	dataFiles, err := stack.Repo.ListSlideDataFilesBySlideID(ctx, id)
+	dataFiles, err := stack.Repo.ListRecordDataFilesByRecordID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("list data files: %w", err)
 	}
 
 	switch format {
 	case "json":
-		return showJSON(stdout, slide, figures, dataFiles)
+		return showJSON(stdout, record, figures, dataFiles)
 	case "text":
-		return showText(stdout, slide, figures, dataFiles)
+		return showText(stdout, record, figures, dataFiles)
 	default:
 		return fmt.Errorf("unknown format %q: expected text or json", format)
 	}
 }
 
-func showJSON(w io.Writer, slide repository.Slide, figures []repository.SlideFigure, dataFiles []repository.SlideDataFile) error {
-	out := slideJSON{
-		ID:             slide.ID,
-		Date:           slide.Date,
-		DayOrder:       slide.DayOrder,
-		HTMLContent:    slide.HTMLContent,
-		Notes:          slide.Notes,
-		ProjectID:      slide.ProjectID,
-		SourceDeviceID: slide.SourceDeviceID,
-		SourceRef:      slide.SourceRef,
-		GitRemoteURL:   slide.GitRemoteURL,
-		GitHash:        slide.GitHash,
-		CreatedAt:      slide.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
-		UpdatedAt:      slide.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+func showJSON(w io.Writer, record repository.Record, figures []repository.RecordFigure, dataFiles []repository.RecordDataFile) error {
+	out := recordJSON{
+		ID:             record.ID,
+		Date:           record.Date,
+		DayOrder:       record.DayOrder,
+		HTMLContent:    record.HTMLContent,
+		Notes:          record.Notes,
+		ProjectID:      record.ProjectID,
+		SourceDeviceID: record.SourceDeviceID,
+		SourceRef:      record.SourceRef,
+		GitRemoteURL:   record.GitRemoteURL,
+		GitHash:        record.GitHash,
+		CreatedAt:      record.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		UpdatedAt:      record.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
 		Figures:        make([]figureJSON, 0, len(figures)),
 		DataFiles:      make([]dataFileJSON, 0, len(dataFiles)),
 	}
 
-	if slide.DeletedAt != nil {
-		s := slide.DeletedAt.UTC().Format("2006-01-02T15:04:05.000Z")
+	if record.DeletedAt != nil {
+		s := record.DeletedAt.UTC().Format("2006-01-02T15:04:05.000Z")
 		out.DeletedAt = &s
 	}
 
@@ -147,33 +147,33 @@ func showJSON(w io.Writer, slide repository.Slide, figures []repository.SlideFig
 	return enc.Encode(out)
 }
 
-func showText(w io.Writer, slide repository.Slide, figures []repository.SlideFigure, dataFiles []repository.SlideDataFile) error {
-	_, _ = fmt.Fprintf(w, "ID:         %s\n", slide.ID)
-	_, _ = fmt.Fprintf(w, "Date:       %s\n", slide.Date)
-	_, _ = fmt.Fprintf(w, "DayOrder:   %s\n", slide.DayOrder)
+func showText(w io.Writer, record repository.Record, figures []repository.RecordFigure, dataFiles []repository.RecordDataFile) error {
+	_, _ = fmt.Fprintf(w, "ID:         %s\n", record.ID)
+	_, _ = fmt.Fprintf(w, "Date:       %s\n", record.Date)
+	_, _ = fmt.Fprintf(w, "DayOrder:   %s\n", record.DayOrder)
 
-	_, _ = fmt.Fprintf(w, "Project:    %s\n", slide.ProjectID)
-	_, _ = fmt.Fprintf(w, "Device:     %s\n", slide.SourceDeviceID)
-	if slide.SourceRef != nil {
-		_, _ = fmt.Fprintf(w, "Source Ref: %s\n", *slide.SourceRef)
+	_, _ = fmt.Fprintf(w, "Project:    %s\n", record.ProjectID)
+	_, _ = fmt.Fprintf(w, "Device:     %s\n", record.SourceDeviceID)
+	if record.SourceRef != nil {
+		_, _ = fmt.Fprintf(w, "Source Ref: %s\n", *record.SourceRef)
 	}
 
-	if slide.DeletedAt != nil {
-		_, _ = fmt.Fprintf(w, "Status:     deleted (%s)\n", slide.DeletedAt.UTC().Format("2006-01-02T15:04:05Z"))
+	if record.DeletedAt != nil {
+		_, _ = fmt.Fprintf(w, "Status:     deleted (%s)\n", record.DeletedAt.UTC().Format("2006-01-02T15:04:05Z"))
 	}
 
-	_, _ = fmt.Fprintf(w, "Created:    %s\n", slide.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"))
-	_, _ = fmt.Fprintf(w, "Updated:    %s\n", slide.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"))
+	_, _ = fmt.Fprintf(w, "Created:    %s\n", record.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"))
+	_, _ = fmt.Fprintf(w, "Updated:    %s\n", record.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"))
 
-	if slide.GitRemoteURL != nil {
-		_, _ = fmt.Fprintf(w, "Git Remote: %s\n", *slide.GitRemoteURL)
+	if record.GitRemoteURL != nil {
+		_, _ = fmt.Fprintf(w, "Git Remote: %s\n", *record.GitRemoteURL)
 	}
-	if slide.GitHash != nil {
-		_, _ = fmt.Fprintf(w, "Git Hash:   %s\n", *slide.GitHash)
+	if record.GitHash != nil {
+		_, _ = fmt.Fprintf(w, "Git Hash:   %s\n", *record.GitHash)
 	}
 
-	if slide.Notes != nil {
-		_, _ = fmt.Fprintf(w, "Notes:      %s\n", truncate(*slide.Notes, 80))
+	if record.Notes != nil {
+		_, _ = fmt.Fprintf(w, "Notes:      %s\n", truncate(*record.Notes, 80))
 	} else {
 		_, _ = fmt.Fprintln(w, "Notes:      (none)")
 	}

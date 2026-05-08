@@ -56,19 +56,19 @@ vi.mock("@/lib/auth-helpers", () => ({
 
 import { GET as infoGET } from "@/app/api/info/route";
 import { GET as statsGET } from "@/app/api/stats/route";
-import { DELETE as trashDELETE } from "@/app/api/slides/trash/route";
-import { GET as slidesGET } from "@/app/api/slides/route";
+import { DELETE as trashDELETE } from "@/app/api/records/trash/route";
+import { GET as recordsGET } from "@/app/api/records/route";
 import {
-  GET as slideGET,
-  PATCH as slidePATCH,
-  DELETE as slideDELETE,
-} from "@/app/api/slides/[id]/route";
-import { POST as restorePOST } from "@/app/api/slides/[id]/restore/route";
-import { PATCH as orderPATCH } from "@/app/api/slides/[id]/order/route";
+  GET as recordGET,
+  PATCH as recordPATCH,
+  DELETE as recordDELETE,
+} from "@/app/api/records/[id]/route";
+import { POST as restorePOST } from "@/app/api/records/[id]/restore/route";
+import { PATCH as orderPATCH } from "@/app/api/records/[id]/order/route";
 import { GET as syncVersionGET } from "@/app/api/sync/version/route";
 import { GET as syncChangesGET } from "@/app/api/sync/changes/route";
 import { GET as projectsGET } from "@/app/api/projects/route";
-import { GET as filesGET } from "@/app/api/files/[slideId]/[...path]/route";
+import { GET as filesGET } from "@/app/api/files/[recordId]/[...path]/route";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -114,17 +114,17 @@ function assertExactShape(body: Record<string, unknown>, contract: Contract): vo
 }
 
 /**
- * Returns route context with a single `id` param, as expected by slides/[id] routes.
+ * Returns route context with a single `id` param, as expected by records/[id] routes.
  */
-function slideCtx(id: string) {
+function recordCtx(id: string) {
   return { params: Promise.resolve({ id }) };
 }
 
-const SLIDE_ID = "20260310-aaaaaaaa";
+const RECORD_ID = "20260310-aaaaaaaa";
 
-// Canonical slide row returned by DB mocks.
-const SLIDE_ROW = {
-  id: SLIDE_ID,
+// Canonical record row returned by DB mocks.
+const RECORD_ROW = {
+  id: RECORD_ID,
   date: "2026-03-10",
   day_order: "a0",
   html_content: null,
@@ -175,7 +175,7 @@ describe("Contract: GET /api/stats", () => {
     mockSql.mockReset();
   });
 
-  it("response shape matches { total_slides: number, total_projects: number, trashed_slides: number }", async () => {
+  it("response shape matches { total_records: number, total_projects: number, trashed_records: number }", async () => {
     mockSql
       .mockResolvedValueOnce([{ count: 10 }])
       .mockResolvedValueOnce([{ count: 3 }])
@@ -188,19 +188,19 @@ describe("Contract: GET /api/stats", () => {
     const body = (await res.json()) as Record<string, unknown>;
 
     assertExactShape(body, {
-      total_slides: "number",
+      total_records: "number",
       total_projects: "number",
-      trashed_slides: "number",
+      trashed_records: "number",
     });
   });
 });
 
 // ---------------------------------------------------------------------------
-// Contract: DELETE /api/slides/trash
+// Contract: DELETE /api/records/trash
 // Go parity: TestHandlePurgeTrash, TestHandlePurgeTrash_Empty in server_test.go
 // ---------------------------------------------------------------------------
 
-describe("Contract: DELETE /api/slides/trash", () => {
+describe("Contract: DELETE /api/records/trash", () => {
   beforeEach(() => {
     mockSql.mockReset();
     mockTransaction.mockReset();
@@ -225,7 +225,7 @@ describe("Contract: DELETE /api/slides/trash", () => {
     // Sync version query (outside transaction)
     mockSql.mockResolvedValueOnce([SYNC_VERSION_ROW]);
 
-    const req = new NextRequest("http://localhost/api/slides/trash", {
+    const req = new NextRequest("http://localhost/api/records/trash", {
       method: "DELETE",
     });
     const res = await trashDELETE(req);
@@ -241,19 +241,19 @@ describe("Contract: DELETE /api/slides/trash", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Contract: GET /api/slides
-// Go parity: TestListSlides_Empty, TestListSlides_SortOrder, TestListSlides_Pagination
+// Contract: GET /api/records
+// Go parity: TestListRecords_Empty, TestListRecords_SortOrder, TestListRecords_Pagination
 //            in server_test.go
 // ---------------------------------------------------------------------------
 
-describe("Contract: GET /api/slides", () => {
+describe("Contract: GET /api/records", () => {
   beforeEach(() => {
     mockSql.mockReset();
   });
 
-  it("response shape matches { items: SlideSummary[], next_cursor: string|null }", async () => {
+  it("response shape matches { items: RecordSummary[], next_cursor: string|null }", async () => {
     const summaryRow = {
-      id: SLIDE_ID,
+      id: RECORD_ID,
       date: "2026-03-10",
       day_order: "a0",
       html_content: "<p>test</p>",
@@ -268,8 +268,8 @@ describe("Contract: GET /api/slides", () => {
     // mockSql is used with a dynamic call signature; return one row
     mockSql.mockResolvedValueOnce([summaryRow]);
 
-    const req = new NextRequest("http://localhost/api/slides");
-    const res = await slidesGET(req);
+    const req = new NextRequest("http://localhost/api/records");
+    const res = await recordsGET(req);
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
@@ -282,7 +282,7 @@ describe("Contract: GET /api/slides", () => {
 
     expect(Array.isArray(body.items)).toBe(true);
 
-    // Verify each item in the array conforms to the SlideSummary contract
+    // Verify each item in the array conforms to the RecordSummary contract
     const items = body.items as Record<string, unknown>[];
     for (const item of items) {
       assertExactShape(item, {
@@ -303,33 +303,33 @@ describe("Contract: GET /api/slides", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Contract: GET /api/slides/[id]
-// Go parity: TestGetSlide_Valid in server_test.go
+// Contract: GET /api/records/[id]
+// Go parity: TestGetRecord_Valid in server_test.go
 // ---------------------------------------------------------------------------
 
-describe("Contract: GET /api/slides/[id]", () => {
+describe("Contract: GET /api/records/[id]", () => {
   beforeEach(() => {
     mockSql.mockReset();
   });
 
-  it("response shape matches { slide: SlideDetail }", async () => {
+  it("response shape matches { record: RecordDetail }", async () => {
     mockSql
-      .mockResolvedValueOnce([SLIDE_ROW]) // slide row
+      .mockResolvedValueOnce([RECORD_ROW]) // record row
       .mockResolvedValueOnce([]) // figures
       .mockResolvedValueOnce([]); // data files
 
-    const req = new NextRequest(`http://localhost/api/slides/${SLIDE_ID}`);
-    const res = await slideGET(req, slideCtx(SLIDE_ID));
+    const req = new NextRequest(`http://localhost/api/records/${RECORD_ID}`);
+    const res = await recordGET(req, recordCtx(RECORD_ID));
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
 
     assertExactShape(body, {
-      slide: "object",
+      record: "object",
     });
 
-    const slide = body.slide as Record<string, unknown>;
-    assertExactShape(slide, {
+    const record = body.record as Record<string, unknown>;
+    assertExactShape(record, {
       id: "string",
       date: "string",
       day_order: "string",
@@ -347,50 +347,50 @@ describe("Contract: GET /api/slides/[id]", () => {
       data_files: "object", // array
     });
 
-    expect(Array.isArray(slide.figures)).toBe(true);
-    expect(Array.isArray(slide.data_files)).toBe(true);
+    expect(Array.isArray(record.figures)).toBe(true);
+    expect(Array.isArray(record.data_files)).toBe(true);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Contract: PATCH /api/slides/[id]
-// Go parity: TestPatchSlide_UpdateProjectID in server_test.go
+// Contract: PATCH /api/records/[id]
+// Go parity: TestPatchRecord_UpdateProjectID in server_test.go
 // ---------------------------------------------------------------------------
 
-describe("Contract: PATCH /api/slides/[id]", () => {
+describe("Contract: PATCH /api/records/[id]", () => {
   beforeEach(() => {
     mockSql.mockReset();
     mockBumpS3Version.mockReset();
     mockBumpS3Version.mockResolvedValue(undefined);
   });
 
-  it("response shape matches { slide: SlideDetail, sync_version: number }", async () => {
+  it("response shape matches { record: RecordDetail, sync_version: number }", async () => {
     mockSql
-      .mockResolvedValueOnce([{ ...SLIDE_ROW, project_id: "proj-a" }]) // UPDATE RETURNING *
+      .mockResolvedValueOnce([{ ...RECORD_ROW, project_id: "proj-a" }]) // UPDATE RETURNING *
       .mockResolvedValueOnce([SYNC_VERSION_ROW]) // SELECT version
       .mockResolvedValueOnce([]) // figures
       .mockResolvedValueOnce([]); // data_files
 
     const req = new NextRequest(
-      `http://localhost/api/slides/${SLIDE_ID}`,
+      `http://localhost/api/records/${RECORD_ID}`,
       {
         method: "PATCH",
         body: JSON.stringify({ project_id: "proj-a" }),
         headers: { "content-type": "application/json" },
       }
     );
-    const res = await slidePATCH(req, slideCtx(SLIDE_ID));
+    const res = await recordPATCH(req, recordCtx(RECORD_ID));
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
 
     assertExactShape(body, {
-      slide: "object",
+      record: "object",
       sync_version: "number",
     });
 
-    const slide = body.slide as Record<string, unknown>;
-    assertExactShape(slide, {
+    const record = body.record as Record<string, unknown>;
+    assertExactShape(record, {
       id: "string",
       date: "string",
       day_order: "string",
@@ -411,11 +411,11 @@ describe("Contract: PATCH /api/slides/[id]", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Contract: DELETE /api/slides/[id]  (soft delete)
-// Go parity: TestDeleteSlide_Success in server_test.go
+// Contract: DELETE /api/records/[id]  (soft delete)
+// Go parity: TestDeleteRecord_Success in server_test.go
 // ---------------------------------------------------------------------------
 
-describe("Contract: DELETE /api/slides/[id]", () => {
+describe("Contract: DELETE /api/records/[id]", () => {
   beforeEach(() => {
     mockSql.mockReset();
     mockBumpS3Version.mockReset();
@@ -426,7 +426,7 @@ describe("Contract: DELETE /api/slides/[id]", () => {
     mockSql
       .mockResolvedValueOnce([
         {
-          id: SLIDE_ID,
+          id: RECORD_ID,
           deleted_at: "2026-03-10T13:00:00.000Z",
           updated_at: "2026-03-10T13:00:00.000Z",
         },
@@ -434,10 +434,10 @@ describe("Contract: DELETE /api/slides/[id]", () => {
       .mockResolvedValueOnce([SYNC_VERSION_ROW]); // sync version
 
     const req = new NextRequest(
-      `http://localhost/api/slides/${SLIDE_ID}`,
+      `http://localhost/api/records/${RECORD_ID}`,
       { method: "DELETE" }
     );
-    const res = await slideDELETE(req, slideCtx(SLIDE_ID));
+    const res = await recordDELETE(req, recordCtx(RECORD_ID));
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
@@ -452,11 +452,11 @@ describe("Contract: DELETE /api/slides/[id]", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Contract: POST /api/slides/[id]/restore
-// Go parity: TestRestoreSlide_Success in server_test.go
+// Contract: POST /api/records/[id]/restore
+// Go parity: TestRestoreRecord_Success in server_test.go
 // ---------------------------------------------------------------------------
 
-describe("Contract: POST /api/slides/[id]/restore", () => {
+describe("Contract: POST /api/records/[id]/restore", () => {
   beforeEach(() => {
     mockSql.mockReset();
     mockBumpS3Version.mockReset();
@@ -467,7 +467,7 @@ describe("Contract: POST /api/slides/[id]/restore", () => {
     mockSql
       .mockResolvedValueOnce([
         {
-          id: SLIDE_ID,
+          id: RECORD_ID,
           deleted_at: null,
           updated_at: "2026-03-10T14:00:00.000Z",
         },
@@ -475,10 +475,10 @@ describe("Contract: POST /api/slides/[id]/restore", () => {
       .mockResolvedValueOnce([SYNC_VERSION_ROW]); // sync version
 
     const req = new NextRequest(
-      `http://localhost/api/slides/${SLIDE_ID}/restore`,
+      `http://localhost/api/records/${RECORD_ID}/restore`,
       { method: "POST" }
     );
-    const res = await restorePOST(req, slideCtx(SLIDE_ID));
+    const res = await restorePOST(req, recordCtx(RECORD_ID));
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
@@ -493,11 +493,11 @@ describe("Contract: POST /api/slides/[id]/restore", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Contract: PATCH /api/slides/[id]/order
-// Go parity: TestReorderSlide_Last in server_test.go
+// Contract: PATCH /api/records/[id]/order
+// Go parity: TestReorderRecord_Last in server_test.go
 // ---------------------------------------------------------------------------
 
-describe("Contract: PATCH /api/slides/[id]/order", () => {
+describe("Contract: PATCH /api/records/[id]/order", () => {
   beforeEach(() => {
     mockSql.mockReset();
     mockBumpS3Version.mockReset();
@@ -507,12 +507,12 @@ describe("Contract: PATCH /api/slides/[id]/order", () => {
   it("response shape matches { id: string, date: string, day_order: string, updated_at: string, sync_version: number }", async () => {
     mockSql
       .mockResolvedValueOnce([
-        { id: SLIDE_ID, date: "2026-03-10", day_order: "a0" },
-      ]) // SELECT current slide
+        { id: RECORD_ID, date: "2026-03-10", day_order: "a0" },
+      ]) // SELECT current record
       .mockResolvedValueOnce([]) // SELECT siblings
       .mockResolvedValueOnce([
         {
-          id: SLIDE_ID,
+          id: RECORD_ID,
           date: "2026-03-10",
           day_order: "a1",
           updated_at: "2026-03-10T15:00:00.000Z",
@@ -521,14 +521,14 @@ describe("Contract: PATCH /api/slides/[id]/order", () => {
       .mockResolvedValueOnce([SYNC_VERSION_ROW]); // sync version
 
     const req = new NextRequest(
-      `http://localhost/api/slides/${SLIDE_ID}/order`,
+      `http://localhost/api/records/${RECORD_ID}/order`,
       {
         method: "PATCH",
         body: JSON.stringify({ position: { kind: "last" } }),
         headers: { "content-type": "application/json" },
       }
     );
-    const res = await orderPATCH(req, slideCtx(SLIDE_ID));
+    const res = await orderPATCH(req, recordCtx(RECORD_ID));
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as Record<string, unknown>;
@@ -574,7 +574,7 @@ describe("Contract: GET /api/sync/version", () => {
 
 // ---------------------------------------------------------------------------
 // Contract: GET /api/sync/changes
-// Go parity: TestSyncChanges_ReturnsChangedSlides in server_test.go
+// Go parity: TestSyncChanges_ReturnsChangedRecords in server_test.go
 // ---------------------------------------------------------------------------
 
 describe("Contract: GET /api/sync/changes", () => {
@@ -582,9 +582,9 @@ describe("Contract: GET /api/sync/changes", () => {
     mockSql.mockReset();
   });
 
-  it("response shape matches { items: SlideSummary[], server_now: string }", async () => {
+  it("response shape matches { items: RecordSummary[], server_now: string }", async () => {
     const summaryRow = {
-      id: SLIDE_ID,
+      id: RECORD_ID,
       date: "2026-03-10",
       day_order: "a0",
       html_content: "<p>test</p>",
@@ -673,11 +673,11 @@ describe("Contract: GET /api/projects", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Contract: GET /api/files/[slideId]/[...path]
+// Contract: GET /api/files/[recordId]/[...path]
 // Go parity: TestGetFile_FigureFound, TestGetFile_DataFileFound in server_test.go
 // ---------------------------------------------------------------------------
 
-describe("Contract: GET /api/files/[slideId]/[...path]", () => {
+describe("Contract: GET /api/files/[recordId]/[...path]", () => {
   beforeEach(() => {
     mockSql.mockReset();
     mockGetPresignedUrl.mockReset();
@@ -692,11 +692,11 @@ describe("Contract: GET /api/files/[slideId]/[...path]", () => {
     });
 
     const req = new NextRequest(
-      `http://localhost/api/files/${SLIDE_ID}/figures/fig.png`
+      `http://localhost/api/files/${RECORD_ID}/figures/fig.png`
     );
     const ctx = {
       params: Promise.resolve({
-        slideId: SLIDE_ID,
+        recordId: RECORD_ID,
         path: ["figures", "fig.png"],
       }),
     };

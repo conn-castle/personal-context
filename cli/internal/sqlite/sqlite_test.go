@@ -85,17 +85,17 @@ func TestApplyMigrationsIsIdempotentAndCreatesExpectedSchema(t *testing.T) {
 		t.Fatalf("second ApplySchema() error = %v", err)
 	}
 
-	assertTableExists(t, connection.DB(), "slides")
-	assertTableExists(t, connection.DB(), "slide_figures")
-	assertTableExists(t, connection.DB(), "slide_data_files")
+	assertTableExists(t, connection.DB(), "records")
+	assertTableExists(t, connection.DB(), "record_figures")
+	assertTableExists(t, connection.DB(), "record_data_files")
 	assertTableExists(t, connection.DB(), "templates")
 	assertTableExists(t, connection.DB(), "sync_version")
 	assertTableExists(t, connection.DB(), "schema_migrations")
 
-	assertUniqueIndexOnSlideAndFilename(t, connection.DB(), "slide_figures")
-	assertUniqueIndexOnSlideAndFilename(t, connection.DB(), "slide_data_files")
+	assertUniqueIndexOnRecordAndFilename(t, connection.DB(), "record_figures")
+	assertUniqueIndexOnRecordAndFilename(t, connection.DB(), "record_data_files")
 
-	assertTriggerExists(t, connection.DB(), "slides_sync_bump_after_insert")
+	assertTriggerExists(t, connection.DB(), "records_sync_bump_after_insert")
 	assertTriggerExists(t, connection.DB(), "templates_auto_update_updated_at")
 
 	var syncVersionCount int
@@ -310,12 +310,12 @@ func TestMigrationTriggersUpdateUpdatedAtAndSyncVersion(t *testing.T) {
 	if _, err := connection.DB().Exec(`INSERT INTO devices(id) VALUES(?);`, "sqlite-device"); err != nil {
 		t.Fatalf("insert device: %v", err)
 	}
-	if _, err := connection.DB().Exec(`INSERT INTO slides(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`, "20260305-abcddcba", "2026-03-05", "n", "<h1>a</h1>", "sqlite/project", "sqlite-device"); err != nil {
-		t.Fatalf("insert slide: %v", err)
+	if _, err := connection.DB().Exec(`INSERT INTO records(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`, "20260305-abcddcba", "2026-03-05", "n", "<h1>a</h1>", "sqlite/project", "sqlite-device"); err != nil {
+		t.Fatalf("insert record: %v", err)
 	}
 
 	var beforeUpdatedAt string
-	if err := connection.DB().QueryRow(`SELECT updated_at FROM slides WHERE id = ?;`, "20260305-abcddcba").Scan(&beforeUpdatedAt); err != nil {
+	if err := connection.DB().QueryRow(`SELECT updated_at FROM records WHERE id = ?;`, "20260305-abcddcba").Scan(&beforeUpdatedAt); err != nil {
 		t.Fatalf("select updated_at before: %v", err)
 	}
 	var beforeVersion int64
@@ -325,19 +325,19 @@ func TestMigrationTriggersUpdateUpdatedAtAndSyncVersion(t *testing.T) {
 
 	// Backdate updated_at to ensure the trigger produces a distinguishable timestamp.
 	pastTime := time.Now().UTC().Add(-time.Hour).Format("2006-01-02T15:04:05.000Z")
-	if _, err := connection.DB().Exec(`UPDATE slides SET updated_at = ? WHERE id = ?;`, pastTime, "20260305-abcddcba"); err != nil {
+	if _, err := connection.DB().Exec(`UPDATE records SET updated_at = ? WHERE id = ?;`, pastTime, "20260305-abcddcba"); err != nil {
 		t.Fatalf("backdate updated_at: %v", err)
 	}
 	// Re-read beforeUpdatedAt after backdating, since that's our new baseline.
-	if err := connection.DB().QueryRow(`SELECT updated_at FROM slides WHERE id = ?;`, "20260305-abcddcba").Scan(&beforeUpdatedAt); err != nil {
+	if err := connection.DB().QueryRow(`SELECT updated_at FROM records WHERE id = ?;`, "20260305-abcddcba").Scan(&beforeUpdatedAt); err != nil {
 		t.Fatalf("select updated_at after backdate: %v", err)
 	}
-	if _, err := connection.DB().Exec(`UPDATE slides SET html_content = ? WHERE id = ?;`, "<h1>b</h1>", "20260305-abcddcba"); err != nil {
-		t.Fatalf("update slide: %v", err)
+	if _, err := connection.DB().Exec(`UPDATE records SET html_content = ? WHERE id = ?;`, "<h1>b</h1>", "20260305-abcddcba"); err != nil {
+		t.Fatalf("update record: %v", err)
 	}
 
 	var afterUpdatedAt string
-	if err := connection.DB().QueryRow(`SELECT updated_at FROM slides WHERE id = ?;`, "20260305-abcddcba").Scan(&afterUpdatedAt); err != nil {
+	if err := connection.DB().QueryRow(`SELECT updated_at FROM records WHERE id = ?;`, "20260305-abcddcba").Scan(&afterUpdatedAt); err != nil {
 		t.Fatalf("select updated_at after: %v", err)
 	}
 	if beforeUpdatedAt == afterUpdatedAt {
@@ -372,7 +372,7 @@ func TestMigrationEnforcesStrictIDAndHashConstraints(t *testing.T) {
 	}
 
 	if _, err := connection.DB().Exec(
-		`INSERT INTO slides(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO records(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`,
 		"20260305-zzzzzzzz",
 		"2026-03-05",
 		"n",
@@ -380,11 +380,11 @@ func TestMigrationEnforcesStrictIDAndHashConstraints(t *testing.T) {
 		"sqlite/project",
 		"sqlite-device",
 	); err == nil {
-		t.Fatal("expected invalid slide id to violate CHECK constraint")
+		t.Fatal("expected invalid record id to violate CHECK constraint")
 	}
 
 	if _, err := connection.DB().Exec(
-		`INSERT INTO slides(id, date, day_order, html_content, project_id, source_device_id, git_hash) VALUES(?, ?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO records(id, date, day_order, html_content, project_id, source_device_id, git_hash) VALUES(?, ?, ?, ?, ?, ?, ?);`,
 		"20260305-a1b2c3d4",
 		"2026-03-05",
 		"n",
@@ -397,7 +397,7 @@ func TestMigrationEnforcesStrictIDAndHashConstraints(t *testing.T) {
 	}
 
 	if _, err := connection.DB().Exec(
-		`INSERT INTO slides(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO records(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`,
 		"20260305-c1c2c3c4",
 		"March 5",
 		"n",
@@ -409,19 +409,19 @@ func TestMigrationEnforcesStrictIDAndHashConstraints(t *testing.T) {
 	}
 
 	if _, err := connection.DB().Exec(
-		`INSERT INTO slides(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`,
+		`INSERT INTO records(id, date, day_order, html_content, project_id, source_device_id) VALUES(?, ?, ?, ?, ?, ?);`,
 		"20260305-b1b2c3d4",
 		"2026-03-05",
 		"n",
-		"<h1>good slide</h1>",
+		"<h1>good record</h1>",
 		"sqlite/project",
 		"sqlite-device",
 	); err != nil {
-		t.Fatalf("insert valid slide failed: %v", err)
+		t.Fatalf("insert valid record failed: %v", err)
 	}
 
 	if _, err := connection.DB().Exec(
-		`INSERT INTO slide_data_files(slide_id, filename, s3_key, size, hash) VALUES(?, ?, ?, ?, ?);`,
+		`INSERT INTO record_data_files(record_id, filename, s3_key, size, hash) VALUES(?, ?, ?, ?, ?);`,
 		"20260305-b1b2c3d4",
 		"metrics.csv",
 		"data/20260305-b1b2c3d4/metrics.csv",
@@ -1011,8 +1011,8 @@ func TestSchemaSQL(t *testing.T) {
 	if len(content) == 0 {
 		t.Fatal("SchemaSQL() returned empty content")
 	}
-	if !strings.Contains(string(content), "CREATE TABLE IF NOT EXISTS slides") {
-		t.Fatal("SchemaSQL() missing slides table definition")
+	if !strings.Contains(string(content), "CREATE TABLE IF NOT EXISTS records") {
+		t.Fatal("SchemaSQL() missing records table definition")
 	}
 }
 
@@ -1041,9 +1041,9 @@ func TestApplySchemaIsIdempotent(t *testing.T) {
 		t.Fatalf("second ApplySchema() error = %v", err)
 	}
 
-	assertTableExists(t, conn.DB(), "slides")
-	assertTableExists(t, conn.DB(), "slide_figures")
-	assertTableExists(t, conn.DB(), "slide_data_files")
+	assertTableExists(t, conn.DB(), "records")
+	assertTableExists(t, conn.DB(), "record_figures")
+	assertTableExists(t, conn.DB(), "record_data_files")
 	assertTableExists(t, conn.DB(), "templates")
 	assertTableExists(t, conn.DB(), "sync_version")
 	assertTableExists(t, conn.DB(), "schema_migrations")
@@ -1270,7 +1270,7 @@ func TestApplySchemaRejectsNilConnection(t *testing.T) {
 	}
 }
 
-func assertUniqueIndexOnSlideAndFilename(t *testing.T, db *sql.DB, tableName string) {
+func assertUniqueIndexOnRecordAndFilename(t *testing.T, db *sql.DB, tableName string) {
 	t.Helper()
 
 	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`, tableName)
@@ -1313,10 +1313,10 @@ func assertUniqueIndexOnSlideAndFilename(t *testing.T, db *sql.DB, tableName str
 			columns = append(columns, name)
 		}
 		_ = infoRows.Close()
-		if len(columns) == 2 && columns[0] == "slide_id" && columns[1] == "filename" {
+		if len(columns) == 2 && columns[0] == "record_id" && columns[1] == "filename" {
 			return
 		}
 	}
 
-	t.Fatalf("expected unique constraint index on (slide_id, filename) for table %q", tableName)
+	t.Fatalf("expected unique constraint index on (record_id, filename) for table %q", tableName)
 }

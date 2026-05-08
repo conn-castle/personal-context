@@ -79,30 +79,30 @@ func newFetchCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	var opts fetchOptions
 
 	cmd := &cobra.Command{
-		Use:   "fetch [slide_id]",
+		Use:   "fetch [record_id]",
 		Short: "Download data files from cloud S3",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var slideID string
+			var recordID string
 			if len(args) == 1 {
-				slideID = args[0]
+				recordID = args[0]
 			}
-			return runFetch(cmd.Context(), stdout, stderr, slideID, opts)
+			return runFetch(cmd.Context(), stdout, stderr, recordID, opts)
 		},
 	}
 
-	cmd.Flags().StringVar(&opts.Project, "project", "", "Download data files for all slides in a project")
-	cmd.Flags().StringVar(&opts.Recent, "recent", "", "Download data files for recent slides (e.g. 3d, 2w, 1m, 1y)")
+	cmd.Flags().StringVar(&opts.Project, "project", "", "Download data files for all records in a project")
+	cmd.Flags().StringVar(&opts.Recent, "recent", "", "Download data files for recent records (e.g. 3d, 2w, 1m, 1y)")
 	cmd.Flags().StringVar(&opts.Output, "output", "", "Write downloads to this directory instead of the default data path")
 
 	return cmd
 }
 
 // runFetch downloads data files from cloud S3 to local disk.
-func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, slideID string, opts fetchOptions) error {
+func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, recordID string, opts fetchOptions) error {
 	// Validate exactly one mode selector.
 	modeCount := 0
-	if slideID != "" {
+	if recordID != "" {
 		modeCount++
 	}
 	if opts.Project != "" {
@@ -112,10 +112,10 @@ func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, slideID string
 		modeCount++
 	}
 	if modeCount == 0 {
-		return fmt.Errorf("specify a slide ID, --project, or --recent")
+		return fmt.Errorf("specify a record ID, --project, or --recent")
 	}
 	if modeCount > 1 {
-		return fmt.Errorf("slide ID, --project, and --recent are mutually exclusive")
+		return fmt.Errorf("record ID, --project, and --recent are mutually exclusive")
 	}
 
 	homeDir, err := resolveHomeDir()
@@ -138,11 +138,11 @@ func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, slideID string
 		outputBase = filepath.Join(basePath(homeDir), "data")
 	}
 
-	// Resolve slide IDs and their data files.
-	var dataFiles []repository.SlideDataFile
+	// Resolve record IDs and their data files.
+	var dataFiles []repository.RecordDataFile
 	switch {
-	case slideID != "":
-		dataFiles, err = fetchSlideDataFiles(ctx, cloud.Repo, slideID)
+	case recordID != "":
+		dataFiles, err = fetchRecordDataFiles(ctx, cloud.Repo, recordID)
 	case opts.Project != "":
 		dataFiles, err = fetchProjectDataFiles(ctx, cloud.Repo, opts.Project)
 	case opts.Recent != "":
@@ -161,12 +161,12 @@ func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, slideID string
 	downloaded := 0
 	for _, df := range dataFiles {
 		// Sanitize path components to prevent directory traversal from cloud metadata.
-		slideDir := filepath.Base(df.SlideID)
+		recordDir := filepath.Base(df.RecordID)
 		fileName := filepath.Base(df.Filename)
-		if slideDir == "." || slideDir == ".." || fileName == "." || fileName == ".." {
-			return fmt.Errorf("invalid path component in slide %s file %s", df.SlideID, df.Filename)
+		if recordDir == "." || recordDir == ".." || fileName == "." || fileName == ".." {
+			return fmt.Errorf("invalid path component in record %s file %s", df.RecordID, df.Filename)
 		}
-		destPath := filepath.Join(outputBase, slideDir, fileName)
+		destPath := filepath.Join(outputBase, recordDir, fileName)
 		if err := downloadS3FileFn(ctx, cloud.S3, df.S3Key, destPath); err != nil {
 			return fmt.Errorf("download %s: %w", df.S3Key, err)
 		}
@@ -177,59 +177,59 @@ func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, slideID string
 	return nil
 }
 
-// fetchSlideDataFiles retrieves data files for a single slide.
-func fetchSlideDataFiles(ctx context.Context, repo repository.Repository, slideID string) ([]repository.SlideDataFile, error) {
-	_, err := repo.GetSlideByID(ctx, slideID)
+// fetchRecordDataFiles retrieves data files for a single record.
+func fetchRecordDataFiles(ctx context.Context, repo repository.Repository, recordID string) ([]repository.RecordDataFile, error) {
+	_, err := repo.GetRecordByID(ctx, recordID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return nil, fmt.Errorf("slide %q not found", slideID)
+			return nil, fmt.Errorf("record %q not found", recordID)
 		}
-		return nil, fmt.Errorf("get slide: %w", err)
+		return nil, fmt.Errorf("get record: %w", err)
 	}
 
-	files, err := repo.ListSlideDataFilesBySlideID(ctx, slideID)
+	files, err := repo.ListRecordDataFilesByRecordID(ctx, recordID)
 	if err != nil {
 		return nil, fmt.Errorf("list data files: %w", err)
 	}
 	return files, nil
 }
 
-// fetchProjectDataFiles retrieves data files for all slides in a project.
-func fetchProjectDataFiles(ctx context.Context, repo repository.Repository, projectID string) ([]repository.SlideDataFile, error) {
-	slides, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+// fetchProjectDataFiles retrieves data files for all records in a project.
+func fetchProjectDataFiles(ctx context.Context, repo repository.Repository, projectID string) ([]repository.RecordDataFile, error) {
+	records, err := repo.ListRecords(ctx, repository.ListRecordsFilter{
 		ProjectID: &projectID,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list project slides: %w", err)
+		return nil, fmt.Errorf("list project records: %w", err)
 	}
 
-	return collectDataFiles(ctx, repo, slides)
+	return collectDataFiles(ctx, repo, records)
 }
 
-// fetchRecentDataFiles retrieves data files for slides within a time window.
-func fetchRecentDataFiles(ctx context.Context, repo repository.Repository, window string) ([]repository.SlideDataFile, error) {
+// fetchRecentDataFiles retrieves data files for records within a time window.
+func fetchRecentDataFiles(ctx context.Context, repo repository.Repository, window string) ([]repository.RecordDataFile, error) {
 	dateFrom, err := parseRecentWindow(window)
 	if err != nil {
 		return nil, err
 	}
 
-	slides, err := repo.ListSlides(ctx, repository.ListSlidesFilter{
+	records, err := repo.ListRecords(ctx, repository.ListRecordsFilter{
 		DateFrom: &dateFrom,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("list recent slides: %w", err)
+		return nil, fmt.Errorf("list recent records: %w", err)
 	}
 
-	return collectDataFiles(ctx, repo, slides)
+	return collectDataFiles(ctx, repo, records)
 }
 
-// collectDataFiles gathers all data files for a list of slides.
-func collectDataFiles(ctx context.Context, repo repository.Repository, slides []repository.Slide) ([]repository.SlideDataFile, error) {
-	var all []repository.SlideDataFile
-	for _, s := range slides {
-		files, err := repo.ListSlideDataFilesBySlideID(ctx, s.ID)
+// collectDataFiles gathers all data files for a list of records.
+func collectDataFiles(ctx context.Context, repo repository.Repository, records []repository.Record) ([]repository.RecordDataFile, error) {
+	var all []repository.RecordDataFile
+	for _, s := range records {
+		files, err := repo.ListRecordDataFilesByRecordID(ctx, s.ID)
 		if err != nil {
-			return nil, fmt.Errorf("list data files for slide %s: %w", s.ID, err)
+			return nil, fmt.Errorf("list data files for record %s: %w", s.ID, err)
 		}
 		all = append(all, files...)
 	}

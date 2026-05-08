@@ -33,16 +33,16 @@ vi.mock("@/lib/auth-helpers", () => ({
 
 import { proxyToLocal } from "@/lib/local-proxy";
 import { GET as projectsGET } from "@/app/api/projects/route";
-import { GET as slidesGET } from "@/app/api/slides/route";
-import { GET as slideGET, PATCH as slidePATCH, DELETE as slideDELETE } from "@/app/api/slides/[id]/route";
-import { PATCH as orderPATCH } from "@/app/api/slides/[id]/order/route";
-import { POST as restorePOST } from "@/app/api/slides/[id]/restore/route";
+import { GET as recordsGET } from "@/app/api/records/route";
+import { GET as recordGET, PATCH as recordPATCH, DELETE as recordDELETE } from "@/app/api/records/[id]/route";
+import { PATCH as orderPATCH } from "@/app/api/records/[id]/order/route";
+import { POST as restorePOST } from "@/app/api/records/[id]/restore/route";
 import { GET as syncVersionGET } from "@/app/api/sync/version/route";
 import { GET as syncChangesGET } from "@/app/api/sync/changes/route";
-import { GET as filesGET } from "@/app/api/files/[slideId]/[...path]/route";
+import { GET as filesGET } from "@/app/api/files/[recordId]/[...path]/route";
 import { GET as infoGET } from "@/app/api/info/route";
 import { GET as statsGET } from "@/app/api/stats/route";
-import { DELETE as trashDELETE } from "@/app/api/slides/trash/route";
+import { DELETE as trashDELETE } from "@/app/api/records/trash/route";
 
 const mockProxy = proxyToLocal as ReturnType<typeof vi.fn>;
 
@@ -58,44 +58,44 @@ describe("API routes — local proxy guard", () => {
     expect(res.status).toBe(200);
   });
 
-  it("GET /api/slides proxies in local mode", async () => {
-    const req = new NextRequest("http://localhost/api/slides");
-    const res = await slidesGET(req);
+  it("GET /api/records proxies in local mode", async () => {
+    const req = new NextRequest("http://localhost/api/records");
+    const res = await recordsGET(req);
     expect(mockProxy).toHaveBeenCalledWith(req);
     expect(res.status).toBe(200);
   });
 
-  it("GET /api/slides/[id] proxies in local mode", async () => {
-    const req = new NextRequest("http://localhost/api/slides/20260310-aaaaaaaa");
+  it("GET /api/records/[id] proxies in local mode", async () => {
+    const req = new NextRequest("http://localhost/api/records/20260310-aaaaaaaa");
     const ctx = { params: Promise.resolve({ id: "20260310-aaaaaaaa" }) };
-    const res = await slideGET(req, ctx);
+    const res = await recordGET(req, ctx);
     expect(mockProxy).toHaveBeenCalledWith(req);
     expect(res.status).toBe(200);
   });
 
-  it("PATCH /api/slides/[id] proxies in local mode", async () => {
-    const req = new NextRequest("http://localhost/api/slides/20260310-aaaaaaaa", {
+  it("PATCH /api/records/[id] proxies in local mode", async () => {
+    const req = new NextRequest("http://localhost/api/records/20260310-aaaaaaaa", {
       method: "PATCH",
       body: JSON.stringify({ project_id: "test" }),
     });
     const ctx = { params: Promise.resolve({ id: "20260310-aaaaaaaa" }) };
-    const res = await slidePATCH(req, ctx);
+    const res = await recordPATCH(req, ctx);
     expect(mockProxy).toHaveBeenCalledWith(req);
     expect(res.status).toBe(200);
   });
 
-  it("DELETE /api/slides/[id] proxies in local mode", async () => {
-    const req = new NextRequest("http://localhost/api/slides/20260310-aaaaaaaa", {
+  it("DELETE /api/records/[id] proxies in local mode", async () => {
+    const req = new NextRequest("http://localhost/api/records/20260310-aaaaaaaa", {
       method: "DELETE",
     });
     const ctx = { params: Promise.resolve({ id: "20260310-aaaaaaaa" }) };
-    const res = await slideDELETE(req, ctx);
+    const res = await recordDELETE(req, ctx);
     expect(mockProxy).toHaveBeenCalledWith(req);
     expect(res.status).toBe(200);
   });
 
-  it("PATCH /api/slides/[id]/order proxies in local mode", async () => {
-    const req = new NextRequest("http://localhost/api/slides/20260310-aaaaaaaa/order", {
+  it("PATCH /api/records/[id]/order proxies in local mode", async () => {
+    const req = new NextRequest("http://localhost/api/records/20260310-aaaaaaaa/order", {
       method: "PATCH",
       body: JSON.stringify({ position: { kind: "last" } }),
     });
@@ -105,8 +105,8 @@ describe("API routes — local proxy guard", () => {
     expect(res.status).toBe(200);
   });
 
-  it("POST /api/slides/[id]/restore proxies in local mode", async () => {
-    const req = new NextRequest("http://localhost/api/slides/20260310-aaaaaaaa/restore", {
+  it("POST /api/records/[id]/restore proxies in local mode", async () => {
+    const req = new NextRequest("http://localhost/api/records/20260310-aaaaaaaa/restore", {
       method: "POST",
     });
     const ctx = { params: Promise.resolve({ id: "20260310-aaaaaaaa" }) };
@@ -129,11 +129,11 @@ describe("API routes — local proxy guard", () => {
     expect(res.status).toBe(200);
   });
 
-  it("GET /api/files/[slideId]/[...path] proxies in local mode", async () => {
+  it("GET /api/files/[recordId]/[...path] proxies in local mode", async () => {
     const req = new NextRequest("http://localhost/api/files/20260310-aaaaaaaa/figures/fig.png");
     const ctx = {
       params: Promise.resolve({
-        slideId: "20260310-aaaaaaaa",
+        recordId: "20260310-aaaaaaaa",
         path: ["figures", "fig.png"],
       }),
     };
@@ -156,8 +156,8 @@ describe("API routes — local proxy guard", () => {
     expect(res.status).toBe(200);
   });
 
-  it("DELETE /api/slides/trash proxies in local mode", async () => {
-    const req = new NextRequest("http://localhost/api/slides/trash", {
+  it("DELETE /api/records/trash proxies in local mode", async () => {
+    const req = new NextRequest("http://localhost/api/records/trash", {
       method: "DELETE",
     });
     const res = await trashDELETE(req);

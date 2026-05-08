@@ -37,38 +37,38 @@ func NewClient(basePath string) (*Client, error) {
 }
 
 // ResolveFigurePath returns the absolute path for a figure file.
-// Args: slideID identifies the slide; filename identifies the file.
-// Returns: absolute path under {base}/figures/{slideID}/{filename}.
-func (c *Client) ResolveFigurePath(slideID string, filename string) (string, error) {
-	return c.resolvePath("figures", slideID, filename)
+// Args: recordID identifies the record; filename identifies the file.
+// Returns: absolute path under {base}/figures/{recordID}/{filename}.
+func (c *Client) ResolveFigurePath(recordID string, filename string) (string, error) {
+	return c.resolvePath("figures", recordID, filename)
 }
 
 // ResolveDataFilePath returns the absolute path for a data file.
-// Args: slideID identifies the slide; filename identifies the file.
-// Returns: absolute path under {base}/data/{slideID}/{filename}.
-func (c *Client) ResolveDataFilePath(slideID string, filename string) (string, error) {
-	return c.resolvePath("data", slideID, filename)
+// Args: recordID identifies the record; filename identifies the file.
+// Returns: absolute path under {base}/data/{recordID}/{filename}.
+func (c *Client) ResolveDataFilePath(recordID string, filename string) (string, error) {
+	return c.resolvePath("data", recordID, filename)
 }
 
-// CopyFigure copies a source file into the figures directory for a slide.
-// Args: slideID identifies destination slide; sourcePath is the source file path.
+// CopyFigure copies a source file into the figures directory for a record.
+// Args: recordID identifies destination record; sourcePath is the source file path.
 // Returns: destination metadata including canonical relative key.
-func (c *Client) CopyFigure(slideID string, sourcePath string) (StoredFile, error) {
-	return c.copyInto("figures", slideID, sourcePath)
+func (c *Client) CopyFigure(recordID string, sourcePath string) (StoredFile, error) {
+	return c.copyInto("figures", recordID, sourcePath)
 }
 
-// CopyDataFile copies a source file into the data directory for a slide.
-// Args: slideID identifies destination slide; sourcePath is the source file path.
+// CopyDataFile copies a source file into the data directory for a record.
+// Args: recordID identifies destination record; sourcePath is the source file path.
 // Returns: destination metadata including canonical relative key.
-func (c *Client) CopyDataFile(slideID string, sourcePath string) (StoredFile, error) {
-	return c.copyInto("data", slideID, sourcePath)
+func (c *Client) CopyDataFile(recordID string, sourcePath string) (StoredFile, error) {
+	return c.copyInto("data", recordID, sourcePath)
 }
 
-// DeleteFigure removes a figure file for a slide.
-// Args: slideID identifies slide; filename identifies file.
+// DeleteFigure removes a figure file for a record.
+// Args: recordID identifies record; filename identifies file.
 // Returns: nil on success or a descriptive filesystem error.
-func (c *Client) DeleteFigure(slideID string, filename string) error {
-	path, err := c.ResolveFigurePath(slideID, filename)
+func (c *Client) DeleteFigure(recordID string, filename string) error {
+	path, err := c.ResolveFigurePath(recordID, filename)
 	if err != nil {
 		return err
 	}
@@ -78,11 +78,11 @@ func (c *Client) DeleteFigure(slideID string, filename string) error {
 	return nil
 }
 
-// DeleteDataFile removes a data file for a slide.
-// Args: slideID identifies slide; filename identifies file.
+// DeleteDataFile removes a data file for a record.
+// Args: recordID identifies record; filename identifies file.
 // Returns: nil on success or a descriptive filesystem error.
-func (c *Client) DeleteDataFile(slideID string, filename string) error {
-	path, err := c.ResolveDataFilePath(slideID, filename)
+func (c *Client) DeleteDataFile(recordID string, filename string) error {
+	path, err := c.ResolveDataFilePath(recordID, filename)
 	if err != nil {
 		return err
 	}
@@ -101,10 +101,10 @@ func (c *Client) BasePath() string {
 	return c.basePath
 }
 
-// ListSlideIDsOnDisk returns slide IDs that have figure or data directories on disk.
+// ListRecordIDsOnDisk returns record IDs that have figure or data directories on disk.
 // Args: none.
-// Returns: figure slide IDs, data slide IDs, and any error.
-func (c *Client) ListSlideIDsOnDisk() (figures []string, data []string, err error) {
+// Returns: figure record IDs, data record IDs, and any error.
+func (c *Client) ListRecordIDsOnDisk() (figures []string, data []string, err error) {
 	if c == nil {
 		return nil, nil, fmt.Errorf("filesystem client is required")
 	}
@@ -119,20 +119,20 @@ func (c *Client) ListSlideIDsOnDisk() (figures []string, data []string, err erro
 	return figures, data, nil
 }
 
-// DeleteSlideDir removes the entire figure and data directories for a slide.
-// Args: slideID identifies the slide.
+// DeleteRecordDir removes the entire figure and data directories for a record.
+// Args: recordID identifies the record.
 // Returns: nil on success; tolerates missing directories.
-func (c *Client) DeleteSlideDir(slideID string) error {
+func (c *Client) DeleteRecordDir(recordID string) error {
 	if c == nil {
 		return fmt.Errorf("filesystem client is required")
 	}
-	if err := validatePathSegment("slide id", slideID); err != nil {
+	if err := validatePathSegment("record id", recordID); err != nil {
 		return err
 	}
 	for _, prefix := range []string{"figures", "data"} {
-		dir := filepath.Join(c.basePath, prefix, slideID)
+		dir := filepath.Join(c.basePath, prefix, recordID)
 		if err := os.RemoveAll(dir); err != nil {
-			return fmt.Errorf("remove %s/%s: %w", prefix, slideID, err)
+			return fmt.Errorf("remove %s/%s: %w", prefix, recordID, err)
 		}
 	}
 	return nil
@@ -155,7 +155,7 @@ func listSubdirs(dir string) ([]string, error) {
 	return result, nil
 }
 
-func (c *Client) copyInto(prefix string, slideID string, sourcePath string) (StoredFile, error) {
+func (c *Client) copyInto(prefix string, recordID string, sourcePath string) (StoredFile, error) {
 	if strings.TrimSpace(sourcePath) == "" {
 		return StoredFile{}, fmt.Errorf("source path is required")
 	}
@@ -169,7 +169,7 @@ func (c *Client) copyInto(prefix string, slideID string, sourcePath string) (Sto
 	}
 
 	filename := filepath.Base(sourcePath)
-	targetPath, err := c.resolvePath(prefix, slideID, filename)
+	targetPath, err := c.resolvePath(prefix, recordID, filename)
 	if err != nil {
 		return StoredFile{}, err
 	}
@@ -216,24 +216,24 @@ func (c *Client) copyInto(prefix string, slideID string, sourcePath string) (Sto
 
 	return StoredFile{
 		Filename: filename,
-		S3Key:    filepath.ToSlash(filepath.Join(prefix, slideID, filename)),
+		S3Key:    filepath.ToSlash(filepath.Join(prefix, recordID, filename)),
 		Path:     targetPath,
 		Size:     writtenBytes,
 	}, nil
 }
 
-func (c *Client) resolvePath(prefix string, slideID string, filename string) (string, error) {
+func (c *Client) resolvePath(prefix string, recordID string, filename string) (string, error) {
 	if c == nil {
 		return "", fmt.Errorf("filesystem client is required")
 	}
-	if err := validatePathSegment("slide id", slideID); err != nil {
+	if err := validatePathSegment("record id", recordID); err != nil {
 		return "", err
 	}
 	if err := validatePathSegment("filename", filename); err != nil {
 		return "", err
 	}
 
-	return filepath.Join(c.basePath, prefix, slideID, filename), nil
+	return filepath.Join(c.basePath, prefix, recordID, filename), nil
 }
 
 func validatePathSegment(field string, value string) error {

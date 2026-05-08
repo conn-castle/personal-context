@@ -13,14 +13,14 @@ Usage: ./scripts/verify_local_demo.sh [options]
 Runs a generalized local demo flow using the real `pc` binary:
 - setup
 - project set
-- add 10 numbered slides
-- delete 5 slides
+- add 10 numbered records
+- delete 5 records
 - restore 1 of them
-- move 1 remaining slide
+- move 1 remaining record
 - verify search, trash, show, project list, and doctor output
 
-Then prepares a human-viewable HTML summary page plus persisted slide previews for
-the first and last active slides, and optionally opens the summary in a browser.
+Then prepares a human-viewable HTML summary page plus persisted record previews for
+the first and last active records, and optionally opens the summary in a browser.
 
 Options:
   --no-open                Do not open the summary page in a browser.
@@ -92,11 +92,11 @@ pc_bin="${artifacts_root}/pc"
 render_helper="${artifacts_root}/render_local_demo.go"
 active_list_file="${artifacts_root}/active.tsv"
 deleted_list_file="${artifacts_root}/deleted.tsv"
-first_slide_json="${artifacts_root}/first-slide.json"
-last_slide_json="${artifacts_root}/last-slide.json"
+first_record_json="${artifacts_root}/first-record.json"
+last_record_json="${artifacts_root}/last-record.json"
 summary_file="${preview_dir}/index.html"
-first_slide_file="${preview_dir}/first-slide.html"
-last_slide_file="${preview_dir}/last-slide.html"
+first_record_file="${preview_dir}/first-record.html"
+last_record_file="${preview_dir}/last-record.html"
 
 mkdir -p "${inputs_root}" "${preview_dir}"
 
@@ -146,21 +146,21 @@ open_summary() {
 	"${open_cmd}" "${target}" >/dev/null 2>&1 || fail "failed to open summary file in browser with ${open_cmd}"
 }
 
-write_slide_input() {
+write_record_input() {
 	local index="$1"
-	local dir="${inputs_root}/slide-${index}"
+	local dir="${inputs_root}/record-${index}"
 	local title
 	local body
 	local notes
 
-	title="$(printf 'Slide %02d' "${index}")"
+	title="$(printf 'Record %02d' "${index}")"
 	body="<p>Local demo content for ${title}.</p><p>Sequence number: ${index}.</p>"
 	notes="Notes for ${title}."
 
 	case "${index}" in
 		1)
-			body="<p>This demo created 10 slides, deleted slides 06-10, restored Slide 08, and moved Slide 04 after Slide 02.</p><p>Use the summary page to confirm the final order and trash membership.</p>"
-			notes="Narrative slide for the local demo."
+			body="<p>This demo created 10 records, deleted records 06-10, restored Record 08, and moved Record 04 after Record 02.</p><p>Use the summary page to confirm the final order and trash membership.</p>"
+			notes="Narrative record for the local demo."
 			;;
 		8)
 			body="<p>Expected final active order: 01, 02, 04, 03, 05, 08.</p><p>Expected trash: 06, 07, 09, 10.</p>"
@@ -168,12 +168,12 @@ write_slide_input() {
 			;;
 		6|7|9|10)
 			body="<p>${title} is expected to remain in trash at the end of the demo.</p><p>Sequence number: ${index}.</p>"
-			notes="This slide should remain deleted after the demo completes."
+			notes="This record should remain deleted after the demo completes."
 			;;
 	esac
 
 	mkdir -p "${dir}"
-	cat >"${dir}/slide.html" <<HTML
+	cat >"${dir}/record.html" <<HTML
 <html>
   <body>
     <h1>${title}</h1>
@@ -187,8 +187,8 @@ ${notes}
 NOTES
 }
 
-declare -A slide_ids
-declare -A slide_titles
+declare -A record_ids
+declare -A record_titles
 date_value="2025-04-01"
 project_id="demo/local"
 device_id="demo-device"
@@ -200,37 +200,37 @@ run_pc device register "${device_id}" >/dev/null
 run_pc project add "${project_id}" >/dev/null
 
 for i in {1..10}; do
-	write_slide_input "${i}"
-	title="$(printf 'Slide %02d' "${i}")"
-	slide_titles["${i}"]="${title}"
-	id="$(run_pc add --date "${date_value}" --project "${project_id}" --device "${device_id}" "${inputs_root}/slide-${i}" | trim_crlf)"
-	[[ "${id}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected slide ID format from add ${i}: ${id}"
-	slide_ids["${i}"]="${id}"
+	write_record_input "${i}"
+	title="$(printf 'Record %02d' "${i}")"
+	record_titles["${i}"]="${title}"
+	id="$(run_pc add --date "${date_value}" --project "${project_id}" --device "${device_id}" "${inputs_root}/record-${i}" | trim_crlf)"
+	[[ "${id}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected record ID format from add ${i}: ${id}"
+	record_ids["${i}"]="${id}"
 done
 
 for i in 6 7 8 9 10; do
-	delete_out="$(run_pc delete "${slide_ids[${i}]}")"
-	[[ "${delete_out}" == *"deleted"* ]] || fail "delete output did not include success message for slide ${i}"
+	delete_out="$(run_pc delete "${record_ids[${i}]}")"
+	[[ "${delete_out}" == *"deleted"* ]] || fail "delete output did not include success message for record ${i}"
 done
 
-restore_out="$(run_pc restore "${slide_ids[8]}")"
-[[ "${restore_out}" == *"restored"* ]] || fail "restore output did not include success message for slide 8"
+restore_out="$(run_pc restore "${record_ids[8]}")"
+[[ "${restore_out}" == *"restored"* ]] || fail "restore output did not include success message for record 8"
 
-move_out="$(run_pc move "${slide_ids[4]}" --after "${slide_ids[2]}")"
-[[ "${move_out}" == *"moved"* ]] || fail "move output did not include success message for slide 4"
+move_out="$(run_pc move "${record_ids[4]}" --after "${record_ids[2]}")"
+[[ "${move_out}" == *"moved"* ]] || fail "move output did not include success message for record 4"
 
-active_ids_raw="$(run_pc search --format ids "Slide")"
+active_ids_raw="$(run_pc search --format ids "Record")"
 mapfile -t active_ids < <(printf '%s\n' "${active_ids_raw}" | sed '/^$/d')
 expected_active=(
-	"${slide_ids[1]}"
-	"${slide_ids[2]}"
-	"${slide_ids[4]}"
-	"${slide_ids[3]}"
-	"${slide_ids[5]}"
-	"${slide_ids[8]}"
+	"${record_ids[1]}"
+	"${record_ids[2]}"
+	"${record_ids[4]}"
+	"${record_ids[3]}"
+	"${record_ids[5]}"
+	"${record_ids[8]}"
 )
 
-[[ "${#active_ids[@]}" -eq "${#expected_active[@]}" ]] || fail "expected ${#expected_active[@]} active slides, got ${#active_ids[@]}"
+[[ "${#active_ids[@]}" -eq "${#expected_active[@]}" ]] || fail "expected ${#expected_active[@]} active records, got ${#active_ids[@]}"
 for idx in "${!expected_active[@]}"; do
 	[[ "${active_ids[${idx}]}" == "${expected_active[${idx}]}" ]] || fail "active order mismatch at position $((idx + 1)): expected ${expected_active[${idx}]}, got ${active_ids[${idx}]}"
 done
@@ -238,25 +238,25 @@ done
 trash_out="$(run_pc trash)"
 mapfile -t deleted_ids < <(grep -Eo '[0-9]{8}-[a-f0-9]{8}' <<<"${trash_out}")
 expected_deleted=(
-	"${slide_ids[6]}"
-	"${slide_ids[7]}"
-	"${slide_ids[9]}"
-	"${slide_ids[10]}"
+	"${record_ids[6]}"
+	"${record_ids[7]}"
+	"${record_ids[9]}"
+	"${record_ids[10]}"
 )
 
-[[ "${#deleted_ids[@]}" -eq "${#expected_deleted[@]}" ]] || fail "expected ${#expected_deleted[@]} deleted slides in trash, got ${#deleted_ids[@]}"
+[[ "${#deleted_ids[@]}" -eq "${#expected_deleted[@]}" ]] || fail "expected ${#expected_deleted[@]} deleted records in trash, got ${#deleted_ids[@]}"
 for idx in "${!expected_deleted[@]}"; do
 	[[ "${deleted_ids[${idx}]}" == "${expected_deleted[${idx}]}" ]] || fail "trash order mismatch at position $((idx + 1)): expected ${expected_deleted[${idx}]}, got ${deleted_ids[${idx}]}"
 done
 
-contains_line "${slide_ids[8]}" "${active_ids[@]}" || fail "restored slide 8 was not returned in active search results"
-if contains_line "${slide_ids[8]}" "${deleted_ids[@]}"; then
-	fail "restored slide 8 still appeared in trash output"
+contains_line "${record_ids[8]}" "${active_ids[@]}" || fail "restored record 8 was not returned in active search results"
+if contains_line "${record_ids[8]}" "${deleted_ids[@]}"; then
+	fail "restored record 8 still appeared in trash output"
 fi
 
-restored_json="$(run_pc show --format json "${slide_ids[8]}")"
-[[ "${restored_json}" == *'"deleted_at": null'* ]] || fail "restored slide 8 still has non-null deleted_at"
-[[ "${restored_json}" == *'Expected final active order: 01, 02, 04, 03, 05, 08.'* ]] || fail "restored slide 8 JSON did not contain expected persisted HTML"
+restored_json="$(run_pc show --format json "${record_ids[8]}")"
+[[ "${restored_json}" == *'"deleted_at": null'* ]] || fail "restored record 8 still has non-null deleted_at"
+[[ "${restored_json}" == *'Expected final active order: 01, 02, 04, 03, 05, 08.'* ]] || fail "restored record 8 JSON did not contain expected persisted HTML"
 
 project_out="$(run_pc project list)"
 [[ "${project_out}" == *"${project_id}"* ]] || fail "project list did not include ${project_id}"
@@ -264,17 +264,17 @@ project_out="$(run_pc project list)"
 doctor_out="$(run_pc doctor)"
 [[ "${doctor_out}" == *"All checks passed."* ]] || fail "doctor output did not report success"
 
-run_pc show --format json "${slide_ids[1]}" >"${first_slide_json}"
-run_pc show --format json "${slide_ids[8]}" >"${last_slide_json}"
+run_pc show --format json "${record_ids[1]}" >"${first_record_json}"
+run_pc show --format json "${record_ids[8]}" >"${last_record_json}"
 
 : >"${active_list_file}"
 for i in 1 2 4 3 5 8; do
-	printf '%02d\t%s\t%s\n' "${i}" "${slide_ids[${i}]}" "${slide_titles[${i}]}" >>"${active_list_file}"
+	printf '%02d\t%s\t%s\n' "${i}" "${record_ids[${i}]}" "${record_titles[${i}]}" >>"${active_list_file}"
 done
 
 : >"${deleted_list_file}"
 for i in 6 7 9 10; do
-	printf '%02d\t%s\t%s\n' "${i}" "${slide_ids[${i}]}" "${slide_titles[${i}]}" >>"${deleted_list_file}"
+	printf '%02d\t%s\t%s\n' "${i}" "${record_ids[${i}]}" "${record_titles[${i}]}" >>"${deleted_list_file}"
 done
 
 cat >"${render_helper}" <<'EOF'
@@ -290,7 +290,7 @@ import (
 	"strings"
 )
 
-type slideJSON struct {
+type recordJSON struct {
 	ID          string  `json:"id"`
 	HTMLContent string  `json:"html_content"`
 	Notes       *string `json:"notes"`
@@ -320,22 +320,22 @@ func main() {
 	var activeListPath string
 	var deletedListPath string
 
-	flag.StringVar(&firstJSONPath, "first-json", "", "Path to the first active slide JSON file")
-	flag.StringVar(&lastJSONPath, "last-json", "", "Path to the last active slide JSON file")
-	flag.StringVar(&firstHTMLPath, "first-html", "", "Path to write the first active slide HTML")
-	flag.StringVar(&lastHTMLPath, "last-html", "", "Path to write the last active slide HTML")
+	flag.StringVar(&firstJSONPath, "first-json", "", "Path to the first active record JSON file")
+	flag.StringVar(&lastJSONPath, "last-json", "", "Path to the last active record JSON file")
+	flag.StringVar(&firstHTMLPath, "first-html", "", "Path to write the first active record HTML")
+	flag.StringVar(&lastHTMLPath, "last-html", "", "Path to write the last active record HTML")
 	flag.StringVar(&summaryPath, "summary", "", "Path to write the summary HTML")
-	flag.StringVar(&activeListPath, "active-list", "", "Path to active slide TSV")
-	flag.StringVar(&deletedListPath, "deleted-list", "", "Path to deleted slide TSV")
+	flag.StringVar(&activeListPath, "active-list", "", "Path to active record TSV")
+	flag.StringVar(&deletedListPath, "deleted-list", "", "Path to deleted record TSV")
 	flag.Parse()
 
-	firstSlide := readSlide(firstJSONPath)
-	lastSlide := readSlide(lastJSONPath)
+	firstRecord := readRecord(firstJSONPath)
+	lastRecord := readRecord(lastJSONPath)
 	active := readList(activeListPath)
 	deleted := readList(deletedListPath)
 
-	writeFile(firstHTMLPath, firstSlide.HTMLContent)
-	writeFile(lastHTMLPath, lastSlide.HTMLContent)
+	writeFile(firstHTMLPath, firstRecord.HTMLContent)
+	writeFile(lastHTMLPath, lastRecord.HTMLContent)
 
 	if len(active) == 0 {
 		panic("active list must not be empty")
@@ -345,9 +345,9 @@ func main() {
 		Active:     active,
 		Deleted:    deleted,
 		FirstTitle: active[0].Title,
-		FirstNotes: deref(firstSlide.Notes),
+		FirstNotes: deref(firstRecord.Notes),
 		LastTitle:  active[len(active)-1].Title,
-		LastNotes:  deref(lastSlide.Notes),
+		LastNotes:  deref(lastRecord.Notes),
 	}
 
 	tmpl := template.Must(template.New("summary").Parse(`<!doctype html>
@@ -451,30 +451,30 @@ func main() {
     <main>
       <h1>Local Demo Summary</h1>
       <p>This artifact was generated from persisted local state after a scripted CLI workflow.</p>
-      <p>Actions performed: create 10 slides, delete slides 06-10, restore Slide 08, move Slide 04 after Slide 02.</p>
+      <p>Actions performed: create 10 records, delete records 06-10, restore Record 08, move Record 04 after Record 02.</p>
 
       <section class="stats" aria-label="Summary stats">
         <div class="stat">
-          <strong>Active slides</strong>
+          <strong>Active records</strong>
           <div>{{len .Active}}</div>
         </div>
         <div class="stat">
-          <strong>Deleted slides</strong>
+          <strong>Deleted records</strong>
           <div>{{len .Deleted}}</div>
         </div>
         <div class="stat">
-          <strong>First active slide</strong>
+          <strong>First active record</strong>
           <div>{{.FirstTitle}}</div>
         </div>
         <div class="stat">
-          <strong>Last active slide</strong>
+          <strong>Last active record</strong>
           <div>{{.LastTitle}}</div>
         </div>
       </section>
 
       <section class="tables">
         <div>
-          <h2>Active Slides</h2>
+          <h2>Active Records</h2>
           <table id="active-order">
             <thead>
               <tr>
@@ -521,12 +521,12 @@ func main() {
         <article class="preview-card">
           <h2>{{.FirstTitle}}</h2>
           <p>{{.FirstNotes}}</p>
-          <iframe id="first-slide-frame" title="First active slide preview" src="./first-slide.html"></iframe>
+          <iframe id="first-record-frame" title="First active record preview" src="./first-record.html"></iframe>
         </article>
         <article class="preview-card">
           <h2>{{.LastTitle}}</h2>
           <p>{{.LastNotes}}</p>
-          <iframe id="last-slide-frame" title="Last active slide preview" src="./last-slide.html"></iframe>
+          <iframe id="last-record-frame" title="Last active record preview" src="./last-record.html"></iframe>
         </article>
       </section>
     </main>
@@ -544,16 +544,16 @@ func main() {
 	}
 }
 
-func readSlide(path string) slideJSON {
+func readRecord(path string) recordJSON {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		panic(err)
 	}
-	var slide slideJSON
-	if err := json.Unmarshal(data, &slide); err != nil {
+	var record recordJSON
+	if err := json.Unmarshal(data, &record); err != nil {
 		panic(err)
 	}
-	return slide
+	return record
 }
 
 func readList(path string) []listEntry {
@@ -606,18 +606,18 @@ EOF
 (
 	cd "${cli_dir}"
 	go run "${render_helper}" \
-		--first-json "${first_slide_json}" \
-		--last-json "${last_slide_json}" \
-		--first-html "${first_slide_file}" \
-		--last-html "${last_slide_file}" \
+		--first-json "${first_record_json}" \
+		--last-json "${last_record_json}" \
+		--first-html "${first_record_file}" \
+		--last-html "${last_record_file}" \
 		--summary "${summary_file}" \
 		--active-list "${active_list_file}" \
 		--deleted-list "${deleted_list_file}"
 )
 
 [[ -f "${summary_file}" ]] || fail "summary file was not created"
-[[ -f "${first_slide_file}" ]] || fail "first slide preview file was not created"
-[[ -f "${last_slide_file}" ]] || fail "last slide preview file was not created"
+[[ -f "${first_record_file}" ]] || fail "first record preview file was not created"
+[[ -f "${last_record_file}" ]] || fail "last record preview file was not created"
 
 if [[ "${open_preview}" -eq 1 ]]; then
 	open_summary "${summary_file}"
@@ -628,8 +628,8 @@ Local demo verification passed.
 Artifacts root: ${artifacts_root}
 PC_HOME: ${pc_home}
 Summary file: ${summary_file}
-First slide file: ${first_slide_file}
-Last slide file: ${last_slide_file}
+First record file: ${first_record_file}
+Last record file: ${last_record_file}
 Browser opened: $([[ "${open_preview}" -eq 1 ]] && echo yes || echo no)
 Cleanup command: rm -rf "${artifacts_root}"
 SUMMARY

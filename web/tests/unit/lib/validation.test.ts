@@ -1,16 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
-  isValidSlideId,
+  isValidRecordId,
   isValidGitHash,
   isValidDate,
   isValidISOTimestamp,
   parseQueryInt,
   isValidFilename,
   normalizeNotes,
-  validateSlideUpdateInput,
+  validateRecordUpdateInput,
 } from "@/lib/validation";
 
-describe("isValidSlideId", () => {
+describe("isValidRecordId", () => {
   it.each([
     ["20250304-a3f2b7e1", true],
     ["20261231-00000000", true],
@@ -19,10 +19,10 @@ describe("isValidSlideId", () => {
     ["2025030-a3f2b7e1", false],
     ["20250304-a3f2b7e", false],
     ["", false],
-    ["not-a-slide-id", false],
+    ["not-a-record-id", false],
     ["20250304_a3f2b7e1", false],
-  ])("isValidSlideId(%s) => %s", (input, expected) => {
-    expect(isValidSlideId(input)).toBe(expected);
+  ])("isValidRecordId(%s) => %s", (input, expected) => {
+    expect(isValidRecordId(input)).toBe(expected);
   });
 });
 
@@ -143,58 +143,58 @@ describe("normalizeNotes", () => {
   });
 });
 
-describe("validateSlideUpdateInput", () => {
+describe("validateRecordUpdateInput", () => {
   it("rejects empty body", () => {
-    const result = validateSlideUpdateInput({});
+    const result = validateRecordUpdateInput({});
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.error).toContain("at least one field");
   });
 
   it("rejects unknown fields", () => {
-    const result = validateSlideUpdateInput({ unknown: "value" });
+    const result = validateRecordUpdateInput({ unknown: "value" });
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.error).toContain("unknown");
   });
 
   it("accepts valid project_id update", () => {
-    const result = validateSlideUpdateInput({ project_id: "org/project" });
+    const result = validateRecordUpdateInput({ project_id: "org/project" });
     expect(result.valid).toBe(true);
   });
 
   it("rejects null project_id", () => {
-    const result = validateSlideUpdateInput({ project_id: null });
+    const result = validateRecordUpdateInput({ project_id: null });
     expect(result.valid).toBe(false);
   });
 
   it("rejects empty string project_id", () => {
     const body: Record<string, unknown> = { project_id: "" };
-    const result = validateSlideUpdateInput(body);
+    const result = validateRecordUpdateInput(body);
     expect(result.valid).toBe(false);
     expect(body.project_id).toBe("");
   });
 
   it("rejects non-string project_id", () => {
-    const result = validateSlideUpdateInput({
+    const result = validateRecordUpdateInput({
       project_id: 123 as unknown as string,
     });
     expect(result.valid).toBe(false);
   });
 
   it("rejects project_id with leading or trailing whitespace", () => {
-    const trailing = validateSlideUpdateInput({ project_id: "org/proj " });
+    const trailing = validateRecordUpdateInput({ project_id: "org/proj " });
     expect(trailing.valid).toBe(false);
     if (!trailing.valid) expect(trailing.error).toContain("whitespace");
 
-    const leading = validateSlideUpdateInput({ project_id: " org/proj" });
+    const leading = validateRecordUpdateInput({ project_id: " org/proj" });
     expect(leading.valid).toBe(false);
 
-    const whitespaceOnly = validateSlideUpdateInput({ project_id: "   " });
+    const whitespaceOnly = validateRecordUpdateInput({ project_id: "   " });
     expect(whitespaceOnly.valid).toBe(false);
   });
 
   it("normalizes empty string notes to null in returned data", () => {
     const body: Record<string, unknown> = { notes: "" };
-    const result = validateSlideUpdateInput(body);
+    const result = validateRecordUpdateInput(body);
     expect(result.valid).toBe(true);
     if (result.valid) {
       expect(result.data.notes).toBeNull();
@@ -204,7 +204,7 @@ describe("validateSlideUpdateInput", () => {
   });
 
   it("accepts valid notes update", () => {
-    const result = validateSlideUpdateInput({ notes: "some notes" });
+    const result = validateRecordUpdateInput({ notes: "some notes" });
     expect(result.valid).toBe(true);
     if (result.valid) {
       expect(result.data.notes).toBe("some notes");
@@ -212,7 +212,7 @@ describe("validateSlideUpdateInput", () => {
   });
 
   it("accepts null notes", () => {
-    const result = validateSlideUpdateInput({ notes: null });
+    const result = validateRecordUpdateInput({ notes: null });
     expect(result.valid).toBe(true);
     if (result.valid) {
       expect(result.data.notes).toBeNull();
@@ -220,58 +220,58 @@ describe("validateSlideUpdateInput", () => {
   });
 
   it("rejects non-string notes", () => {
-    const result = validateSlideUpdateInput({
+    const result = validateRecordUpdateInput({
       notes: 123 as unknown as string,
     });
     expect(result.valid).toBe(false);
   });
 
   it("accepts valid git_hash", () => {
-    const result = validateSlideUpdateInput({ git_hash: "a".repeat(40) });
+    const result = validateRecordUpdateInput({ git_hash: "a".repeat(40) });
     expect(result.valid).toBe(true);
   });
 
   it("rejects invalid git_hash", () => {
-    const result = validateSlideUpdateInput({ git_hash: "short" });
+    const result = validateRecordUpdateInput({ git_hash: "short" });
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.error).toContain("40-character hex");
   });
 
   it("accepts null git_hash", () => {
-    const result = validateSlideUpdateInput({ git_hash: null });
+    const result = validateRecordUpdateInput({ git_hash: null });
     expect(result.valid).toBe(true);
   });
 
   it("accepts valid git_remote_url with https://", () => {
-    const result = validateSlideUpdateInput({
+    const result = validateRecordUpdateInput({
       git_remote_url: "https://github.com/org/repo",
     });
     expect(result.valid).toBe(true);
   });
 
   it("accepts valid git_remote_url with http://", () => {
-    const result = validateSlideUpdateInput({
+    const result = validateRecordUpdateInput({
       git_remote_url: "http://github.com/org/repo",
     });
     expect(result.valid).toBe(true);
   });
 
   it("accepts valid git_remote_url with git://", () => {
-    const result = validateSlideUpdateInput({
+    const result = validateRecordUpdateInput({
       git_remote_url: "git://github.com/org/repo.git",
     });
     expect(result.valid).toBe(true);
   });
 
   it("accepts valid git_remote_url with ssh://", () => {
-    const result = validateSlideUpdateInput({
+    const result = validateRecordUpdateInput({
       git_remote_url: "ssh://git@github.com/org/repo.git",
     });
     expect(result.valid).toBe(true);
   });
 
   it("rejects git_remote_url with disallowed scheme", () => {
-    const result = validateSlideUpdateInput({
+    const result = validateRecordUpdateInput({
       git_remote_url: "javascript:alert(1)",
     });
     expect(result.valid).toBe(false);
@@ -279,7 +279,7 @@ describe("validateSlideUpdateInput", () => {
   });
 
   it("rejects git_remote_url with ftp:// scheme", () => {
-    const result = validateSlideUpdateInput({
+    const result = validateRecordUpdateInput({
       git_remote_url: "ftp://example.com/repo",
     });
     expect(result.valid).toBe(false);
@@ -287,18 +287,18 @@ describe("validateSlideUpdateInput", () => {
   });
 
   it("rejects empty string git_remote_url", () => {
-    const result = validateSlideUpdateInput({ git_remote_url: "" });
+    const result = validateRecordUpdateInput({ git_remote_url: "" });
     expect(result.valid).toBe(false);
   });
 
   it("accepts null git_remote_url", () => {
-    const result = validateSlideUpdateInput({ git_remote_url: null });
+    const result = validateRecordUpdateInput({ git_remote_url: null });
     expect(result.valid).toBe(true);
   });
 
   it("accepts multiple valid fields together and returns normalized data", () => {
     const gitHash = "a".repeat(40);
-    const result = validateSlideUpdateInput({
+    const result = validateRecordUpdateInput({
       project_id: "org/proj",
       notes: "note",
       git_remote_url: "https://github.com/org/repo",
@@ -316,7 +316,7 @@ describe("validateSlideUpdateInput", () => {
   });
 
   it("rejects when one field is invalid among valid ones", () => {
-    const result = validateSlideUpdateInput({
+    const result = validateRecordUpdateInput({
       project_id: "org/proj",
       git_hash: "invalid",
     });

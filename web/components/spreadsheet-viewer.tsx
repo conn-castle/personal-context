@@ -12,18 +12,18 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { SlideNavigation } from "@/components/slide-navigation";
-import { SlideViewer } from "@/components/slide-viewer";
-import { SlideDetails } from "@/components/slide-details";
+import { RecordNavigation } from "@/components/record-navigation";
+import { RecordViewer } from "@/components/record-viewer";
+import { RecordDetails } from "@/components/record-details";
 import { CollapsedDetailsStrip } from "@/components/collapsed-details-strip";
-import { SlideMetadataBar } from "@/components/slide-metadata-bar";
+import { RecordMetadataBar } from "@/components/record-metadata-bar";
 import { ProjectPicker } from "@/components/project-picker";
-import { SlideDatePicker } from "@/components/slide-date-picker";
+import { RecordDatePicker } from "@/components/record-date-picker";
 import { SettingsOverlay } from "@/components/settings-overlay";
-import { useSlides } from "@/hooks/use-slides";
+import { useRecords } from "@/hooks/use-records";
 import { useSyncManager } from "@/hooks/use-sync-manager";
 import { useLocalStorage } from "@/hooks/use-local-storage";
-import type { ViewMode, PanelVisibility, SlideSummary } from "@/lib/types";
+import type { ViewMode, PanelVisibility, RecordSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import {
   PanelLeftClose,
@@ -42,68 +42,68 @@ import {
 import { useTheme } from "next-themes";
 
 /**
- * Returns the selected slide index or -1 when the selection is absent.
+ * Returns the selected record index or -1 when the selection is absent.
  *
- * @param slides - The current filtered slide list.
- * @param selectedSlideId - The currently selected slide ID.
- * @returns The zero-based index in `slides`, or -1 when not found.
+ * @param records - The current filtered record list.
+ * @param selectedRecordId - The currently selected record ID.
+ * @returns The zero-based index in `records`, or -1 when not found.
  */
-function getSelectedSlideIndex(
-  slides: SlideSummary[],
-  selectedSlideId: string | undefined
+function getSelectedRecordIndex(
+  records: RecordSummary[],
+  selectedRecordId: string | undefined
 ): number {
-  if (!selectedSlideId) {
+  if (!selectedRecordId) {
     return -1;
   }
-  return slides.findIndex((slide) => slide.id === selectedSlideId);
+  return records.findIndex((record) => record.id === selectedRecordId);
 }
 
 /**
- * Finds the exact-date slide or the nearest slide by date when no exact match exists.
+ * Finds the exact-date record or the nearest record by date when no exact match exists.
  *
- * @param slides - The current filtered slide list.
+ * @param records - The current filtered record list.
  * @param targetDate - The requested calendar date.
- * @returns The best slide to jump to, if one exists.
+ * @returns The best record to jump to, if one exists.
  */
-function findNearestSlideByDate(
-  slides: SlideSummary[],
+function findNearestRecordByDate(
+  records: RecordSummary[],
   targetDate: Date
-): SlideSummary | undefined {
+): RecordSummary | undefined {
   const targetDateStr = targetDate.toISOString().split("T")[0];
-  const exactMatch = slides.find((slide) => slide.date === targetDateStr);
+  const exactMatch = records.find((record) => record.date === targetDateStr);
   if (exactMatch) {
     return exactMatch;
   }
 
-  const [nearestSlide] = [...slides].sort((left, right) => {
+  const [nearestRecord] = [...records].sort((left, right) => {
     const leftDiff = Math.abs(new Date(left.date).getTime() - targetDate.getTime());
     const rightDiff = Math.abs(new Date(right.date).getTime() - targetDate.getTime());
     return leftDiff - rightDiff;
   });
-  return nearestSlide;
+  return nearestRecord;
 }
 
 export function SpreadsheetViewer() {
   const {
-    slides,
-    selectedSlide,
+    records,
+    selectedRecord,
     projects,
     error,
     hasMore,
-    fetchSlides,
+    fetchRecords,
     fetchMore,
-    selectSlide,
-    updateSlide,
-    deleteSlide,
-    restoreSlide,
+    selectRecord,
+    updateRecord,
+    deleteRecord,
+    restoreRecord,
     fetchProjects,
-    refreshSlides,
-  } = useSlides();
+    refreshRecords,
+  } = useRecords();
 
   const handleSyncData = useCallback(() => {
-    void refreshSlides();
+    void refreshRecords();
     void fetchProjects();
-  }, [refreshSlides, fetchProjects]);
+  }, [refreshRecords, fetchProjects]);
 
   const { markMutation, version, lastSyncAt } =
     useSyncManager({
@@ -120,8 +120,8 @@ export function SpreadsheetViewer() {
       details: true,
       metadata: true,
     });
-  const [lastSelectedSlideId, setLastSelectedSlideId, lastSelectedSlideLoaded] =
-    useLocalStorage<string | null>("lastSelectedSlideId", null);
+  const [lastSelectedRecordId, setLastSelectedRecordId, lastSelectedRecordLoaded] =
+    useLocalStorage<string | null>("lastSelectedRecordId", null);
   const [detailsActiveTab, setDetailsActiveTab] = useState("notes");
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -140,7 +140,7 @@ export function SpreadsheetViewer() {
     void fetchProjects();
   }, [fetchProjects]);
 
-  // Fetch slides on mount and when project filter changes
+  // Fetch records on mount and when project filter changes
   useEffect(() => {
     if (!selectedProjectsLoaded) {
       return;
@@ -148,71 +148,71 @@ export function SpreadsheetViewer() {
 
     const projectFilter =
       selectedProjects.length === 1 ? selectedProjects[0] : undefined;
-    void fetchSlides({ project: projectFilter });
-  }, [selectedProjects, selectedProjectsLoaded, fetchSlides]);
+    void fetchRecords({ project: projectFilter });
+  }, [selectedProjects, selectedProjectsLoaded, fetchRecords]);
 
   // Client-side multi-project filtering (for multi-select beyond API support)
-  const filteredSlides = useMemo(() => {
+  const filteredRecords = useMemo(() => {
     if (
       selectedProjects.length === 0 ||
       selectedProjects.length === projects.length
     ) {
-      return slides;
+      return records;
     }
-    return slides.filter(
-      (slide) =>
-        slide.project_id && selectedProjects.includes(slide.project_id)
+    return records.filter(
+      (record) =>
+        record.project_id && selectedProjects.includes(record.project_id)
     );
-  }, [slides, selectedProjects, projects.length]);
+  }, [records, selectedProjects, projects.length]);
 
-  const selectAndRememberSlide = useCallback(
+  const selectAndRememberRecord = useCallback(
     (id: string) => {
-      setLastSelectedSlideId(id);
-      return selectSlide(id);
+      setLastSelectedRecordId(id);
+      return selectRecord(id);
     },
-    [selectSlide, setLastSelectedSlideId]
+    [selectRecord, setLastSelectedRecordId]
   );
 
-  const selectSlideAtIndex = useCallback(
+  const selectRecordAtIndex = useCallback(
     (index: number) => {
-      const target = filteredSlides[index];
+      const target = filteredRecords[index];
       if (target) {
-        void selectAndRememberSlide(target.id);
+        void selectAndRememberRecord(target.id);
       }
     },
-    [filteredSlides, selectAndRememberSlide]
+    [filteredRecords, selectAndRememberRecord]
   );
 
-  const selectRelativeSlide = useCallback(
+  const selectRelativeRecord = useCallback(
     (offset: -1 | 1) => {
       const nextIndex =
-        getSelectedSlideIndex(filteredSlides, selectedSlide?.id) + offset;
-      selectSlideAtIndex(nextIndex);
+        getSelectedRecordIndex(filteredRecords, selectedRecord?.id) + offset;
+      selectRecordAtIndex(nextIndex);
     },
-    [filteredSlides, selectSlideAtIndex, selectedSlide?.id]
+    [filteredRecords, selectRecordAtIndex, selectedRecord?.id]
   );
 
-  // Auto-select: prefer last-selected slide, fall back to most recent
+  // Auto-select: prefer last-selected record, fall back to most recent
   useEffect(() => {
-    if (!selectedProjectsLoaded || !lastSelectedSlideLoaded) {
+    if (!selectedProjectsLoaded || !lastSelectedRecordLoaded) {
       return;
     }
 
-    if (filteredSlides.length > 0 && !selectedSlide) {
+    if (filteredRecords.length > 0 && !selectedRecord) {
       const target =
-        lastSelectedSlideId &&
-        filteredSlides.find((s) => s.id === lastSelectedSlideId)
-          ? lastSelectedSlideId
-          : filteredSlides[0].id;
-      void selectAndRememberSlide(target);
+        lastSelectedRecordId &&
+        filteredRecords.find((s) => s.id === lastSelectedRecordId)
+          ? lastSelectedRecordId
+          : filteredRecords[0].id;
+      void selectAndRememberRecord(target);
     }
   }, [
-    filteredSlides,
-    lastSelectedSlideId,
-    lastSelectedSlideLoaded,
+    filteredRecords,
+    lastSelectedRecordId,
+    lastSelectedRecordLoaded,
     selectedProjectsLoaded,
-    selectedSlide,
-    selectAndRememberSlide,
+    selectedRecord,
+    selectAndRememberRecord,
   ]);
 
   // Keyboard navigation
@@ -229,12 +229,12 @@ export function SpreadsheetViewer() {
         case "ArrowLeft":
         case "ArrowUp":
           e.preventDefault();
-          selectRelativeSlide(-1);
+          selectRelativeRecord(-1);
           break;
         case "ArrowRight":
         case "ArrowDown":
           e.preventDefault();
-          selectRelativeSlide(1);
+          selectRelativeRecord(1);
           break;
         case "[":
           e.preventDefault();
@@ -253,7 +253,7 @@ export function SpreadsheetViewer() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectRelativeSlide, togglePanel]);
+  }, [selectRelativeRecord, togglePanel]);
 
   const toggleNavigation = useCallback(() => {
     togglePanel("navigation");
@@ -273,63 +273,63 @@ export function SpreadsheetViewer() {
   }, [togglePanel]);
 
   const goToPrevious = useCallback(() => {
-    selectRelativeSlide(-1);
-  }, [selectRelativeSlide]);
+    selectRelativeRecord(-1);
+  }, [selectRelativeRecord]);
 
   const goToNext = useCallback(() => {
-    selectRelativeSlide(1);
-  }, [selectRelativeSlide]);
+    selectRelativeRecord(1);
+  }, [selectRelativeRecord]);
 
   const goToDate = useCallback(
     (date: Date) => {
-      const target = findNearestSlideByDate(filteredSlides, date);
+      const target = findNearestRecordByDate(filteredRecords, date);
       if (target) {
-        void selectAndRememberSlide(target.id);
+        void selectAndRememberRecord(target.id);
       }
     },
-    [filteredSlides, selectAndRememberSlide]
+    [filteredRecords, selectAndRememberRecord]
   );
 
-  const handleSelectSlide = useCallback(
-    (slide: SlideSummary) => {
-      void selectAndRememberSlide(slide.id);
+  const handleSelectRecord = useCallback(
+    (record: RecordSummary) => {
+      void selectAndRememberRecord(record.id);
     },
-    [selectAndRememberSlide]
+    [selectAndRememberRecord]
   );
 
-  const handleUpdateSlide = useCallback(
+  const handleUpdateRecord = useCallback(
     async (id: string, body: Record<string, unknown>) => {
-      const didUpdate = await updateSlide(id, body);
+      const didUpdate = await updateRecord(id, body);
       if (didUpdate) {
         markMutation();
       }
     },
-    [updateSlide, markMutation]
+    [updateRecord, markMutation]
   );
 
-  const handleDeleteSlide = useCallback(
+  const handleDeleteRecord = useCallback(
     async (id: string) => {
-      const didDelete = await deleteSlide(id);
+      const didDelete = await deleteRecord(id);
       if (didDelete) {
         markMutation();
       }
     },
-    [deleteSlide, markMutation]
+    [deleteRecord, markMutation]
   );
 
-  const handleRestoreSlide = useCallback(
+  const handleRestoreRecord = useCallback(
     async (id: string) => {
-      const didRestore = await restoreSlide(id);
+      const didRestore = await restoreRecord(id);
       if (didRestore) {
         markMutation();
       }
     },
-    [restoreSlide, markMutation]
+    [restoreRecord, markMutation]
   );
 
-  const currentIndex = getSelectedSlideIndex(filteredSlides, selectedSlide?.id);
+  const currentIndex = getSelectedRecordIndex(filteredRecords, selectedRecord?.id);
   const hasPrevious = currentIndex > 0;
-  const hasNext = currentIndex < filteredSlides.length - 1;
+  const hasNext = currentIndex < filteredRecords.length - 1;
 
   return (
     <>
@@ -364,9 +364,9 @@ export function SpreadsheetViewer() {
             />
 
             <span className="text-xs text-muted-foreground">
-              {filteredSlides.length === slides.length
-                ? `${filteredSlides.length} slides`
-                : `${filteredSlides.length} of ${slides.length} slides`}
+              {filteredRecords.length === records.length
+                ? `${filteredRecords.length} records`
+                : `${filteredRecords.length} of ${records.length} records`}
             </span>
           </div>
 
@@ -384,7 +384,7 @@ export function SpreadsheetViewer() {
                     <ChevronLeft className="w-4 h-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Previous slide (&larr;)</TooltipContent>
+                <TooltipContent>Previous record (&larr;)</TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -397,11 +397,11 @@ export function SpreadsheetViewer() {
                     <ChevronRight className="w-4 h-4" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent>Next slide (&rarr;)</TooltipContent>
+                <TooltipContent>Next record (&rarr;)</TooltipContent>
               </Tooltip>
 
-              <SlideDatePicker
-                slides={filteredSlides}
+              <RecordDatePicker
+                records={filteredRecords}
                 onSelectDate={goToDate}
               />
             </div>
@@ -524,7 +524,7 @@ export function SpreadsheetViewer() {
                         &rarr;
                       </kbd>
                     </div>
-                    <span>Navigate slides</span>
+                    <span>Navigate records</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <kbd className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 bg-background text-foreground border border-background/20 rounded text-[10px] font-mono font-medium shadow-sm">
@@ -582,10 +582,10 @@ export function SpreadsheetViewer() {
                   maxSize="50%"
                   className="min-w-0"
                 >
-                  <SlideNavigation
-                    slides={filteredSlides}
-                    selectedSlideId={selectedSlide?.id ?? null}
-                    onSelectSlide={handleSelectSlide}
+                  <RecordNavigation
+                    records={filteredRecords}
+                    selectedRecordId={selectedRecord?.id ?? null}
+                    onSelectRecord={handleSelectRecord}
                     viewMode={viewMode}
                     onViewModeChange={setViewMode}
                     hasMore={hasMore}
@@ -596,7 +596,7 @@ export function SpreadsheetViewer() {
               </>
             )}
 
-            {/* Main slide viewer with metadata bar */}
+            {/* Main record viewer with metadata bar */}
             <ResizablePanel
               id="viewer-panel"
               defaultSize={
@@ -612,15 +612,15 @@ export function SpreadsheetViewer() {
             >
               <div className="h-full flex flex-col">
                 {panelVisibility.metadata && (
-                  <SlideMetadataBar
-                    slide={selectedSlide}
-                    onDelete={handleDeleteSlide}
-                    onRestore={handleRestoreSlide}
-                    isEmpty={filteredSlides.length === 0}
+                  <RecordMetadataBar
+                    record={selectedRecord}
+                    onDelete={handleDeleteRecord}
+                    onRestore={handleRestoreRecord}
+                    isEmpty={filteredRecords.length === 0}
                   />
                 )}
                 <div className="flex-1 min-h-0">
-                  <SlideViewer slide={selectedSlide} isEmpty={filteredSlides.length === 0} />
+                  <RecordViewer record={selectedRecord} isEmpty={filteredRecords.length === 0} />
                 </div>
               </div>
             </ResizablePanel>
@@ -635,18 +635,18 @@ export function SpreadsheetViewer() {
                   minSize="20%"
                   maxSize="45%"
                 >
-                  <SlideDetails
-                    slide={selectedSlide}
+                  <RecordDetails
+                    record={selectedRecord}
                     activeTab={detailsActiveTab}
                     onTabChange={setDetailsActiveTab}
-                    onUpdateSlide={handleUpdateSlide}
-                    isEmpty={filteredSlides.length === 0}
+                    onUpdateRecord={handleUpdateRecord}
+                    isEmpty={filteredRecords.length === 0}
                   />
                 </ResizablePanel>
               </>
             ) : (
               <CollapsedDetailsStrip
-                slide={selectedSlide}
+                record={selectedRecord}
                 onOpenTab={openDetailsToTab}
               />
             )}

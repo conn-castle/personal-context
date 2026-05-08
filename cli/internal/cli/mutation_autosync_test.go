@@ -18,8 +18,8 @@ func TestRunAddAutoSyncWarningDoesNotPolluteStdout(t *testing.T) {
 		t.Fatalf("runProjectAdd() error = %v", err)
 	}
 	inputDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(inputDir, "slide.html"), []byte("<h1>slide</h1>"), 0o644); err != nil {
-		t.Fatalf("WriteFile(slide.html) error = %v", err)
+	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte("<h1>record</h1>"), 0o644); err != nil {
+		t.Fatalf("WriteFile(record.html) error = %v", err)
 	}
 
 	original := runAutoSyncFn
@@ -44,7 +44,7 @@ func TestRunAddAutoSyncWarningDoesNotPolluteStdout(t *testing.T) {
 		t.Fatalf("stdout should not contain warning text, got %q", stdout.String())
 	}
 	if strings.TrimSpace(stdout.String()) == "" {
-		t.Fatalf("expected stdout to contain the new slide id, got %q", stdout.String())
+		t.Fatalf("expected stdout to contain the new record id, got %q", stdout.String())
 	}
 	if stderr.String() != "warning: auto-sync failed: boom\n" {
 		t.Fatalf("stderr = %q", stderr.String())
@@ -64,7 +64,7 @@ func TestRunDeleteCallsAutoSyncAfterLocalSuccess(t *testing.T) {
 	if _, err := stack.Repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "test/project"}); err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
-	if _, err := stack.Repo.CreateSlide(ctx, repository.CreateSlideInput{
+	if _, err := stack.Repo.CreateRecord(ctx, repository.CreateRecordInput{
 		ID:             "20260308-a1b2c3d4",
 		Date:           "2026-03-08",
 		DayOrder:       "a",
@@ -72,7 +72,7 @@ func TestRunDeleteCallsAutoSyncAfterLocalSuccess(t *testing.T) {
 		ProjectID:      "test/project",
 		SourceDeviceID: "test-device",
 	}); err != nil {
-		t.Fatalf("CreateSlide() error = %v", err)
+		t.Fatalf("CreateRecord() error = %v", err)
 	}
 
 	original := runAutoSyncFn
@@ -93,7 +93,7 @@ func TestRunDeleteCallsAutoSyncAfterLocalSuccess(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("expected auto-sync to run once, got %d", calls)
 	}
-	if stdout.String() != "Slide 20260308-a1b2c3d4 deleted\n" {
+	if stdout.String() != "Record 20260308-a1b2c3d4 deleted\n" {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 	if stderr.String() != "warning: auto-sync failed: boom\n" {
