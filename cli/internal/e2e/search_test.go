@@ -128,16 +128,20 @@ func TestSearchFormatJSON(t *testing.T) {
 
 	searchOut := runPCSuccess(t, homeDir, "search", "--format", "json", "json output")
 
-	var results []map[string]interface{}
-	if err := json.Unmarshal([]byte(searchOut), &results); err != nil {
+	var page struct {
+		Items      []map[string]interface{} `json:"items"`
+		Total      int                      `json:"total"`
+		NextCursor *string                  `json:"next_cursor"`
+	}
+	if err := json.Unmarshal([]byte(searchOut), &page); err != nil {
 		t.Fatalf("failed to parse JSON: %v\noutput: %s", err, searchOut)
 	}
 
-	if len(results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(results))
+	if page.Total != 1 || len(page.Items) != 1 || page.NextCursor != nil {
+		t.Fatalf("expected 1-result envelope, got %+v", page)
 	}
 
-	r := results[0]
+	r := page.Items[0]
 	if r["id"] != recordID {
 		t.Fatalf("expected id=%s, got %v", recordID, r["id"])
 	}
@@ -149,6 +153,18 @@ func TestSearchFormatJSON(t *testing.T) {
 	}
 	if _, ok := r["day_order"]; !ok {
 		t.Fatal("expected day_order in JSON output")
+	}
+	if _, ok := r["source_device_id"]; !ok {
+		t.Fatal("expected source_device_id in JSON output")
+	}
+	if _, ok := r["created_at"]; !ok {
+		t.Fatal("expected created_at in JSON output")
+	}
+	if _, ok := r["updated_at"]; !ok {
+		t.Fatal("expected updated_at in JSON output")
+	}
+	if r["has_html"] != true {
+		t.Fatalf("expected has_html=true, got %v", r["has_html"])
 	}
 	if r["deleted_at"] != nil {
 		t.Fatalf("expected deleted_at to be null, got %v", r["deleted_at"])

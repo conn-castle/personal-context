@@ -128,16 +128,48 @@ func (r *Repository) ListRecords(ctx context.Context, filter repository.ListReco
 		return nil, repository.ErrInvalidArgument
 	}
 
+	whereSQL, args, paramIdx, err := r.listRecordsPredicateSQL(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	query := `SELECT id, user_id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM records ` + whereSQL + ` ORDER BY date, day_order, id`
+	if filter.Limit > 0 {
+		query += fmt.Sprintf(` LIMIT $%d`, paramIdx)
+		args = append(args, filter.Limit)
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, mapPgError(err)
+	}
+	defer rows.Close()
+
+	records := make([]repository.Record, 0)
+	for rows.Next() {
+		record, err := scanRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapPgError(err)
+	}
+	return records, nil
+}
+
+func (r *Repository) listRecordsPredicateSQL(filter repository.ListRecordsFilter) (string, []any, int, error) {
 	trimmedQuery := ""
 	if filter.Query != nil {
 		trimmedQuery = strings.TrimSpace(*filter.Query)
 		if trimmedQuery == "" {
-			return nil, repository.ErrInvalidArgument
+			return "", nil, 0, repository.ErrInvalidArgument
 		}
 	}
 
 	builder := strings.Builder{}
-	builder.WriteString(`SELECT id, user_id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM records WHERE user_id = $1`)
+	builder.WriteString(`WHERE user_id = $1`)
 	args := []any{r.userID}
 	paramIdx := 2
 
@@ -161,6 +193,12 @@ func (r *Repository) ListRecords(ctx context.Context, filter repository.ListReco
 		args = append(args, *filter.DateTo)
 		paramIdx++
 	}
+	if filter.HasHTML {
+		builder.WriteString(` AND html_content IS NOT NULL`)
+	}
+	if filter.HasData {
+		builder.WriteString(` AND EXISTS (SELECT 1 FROM record_data_files AS rdf WHERE rdf.record_id = records.id)`)
+	}
 	if filter.UpdatedAfter != nil {
 		fmt.Fprintf(&builder, ` AND updated_at >= $%d`, paramIdx)
 		args = append(args, filter.UpdatedAfter.UTC())
@@ -178,30 +216,75 @@ func (r *Repository) ListRecords(ctx context.Context, filter repository.ListReco
 		args = append(args, q, q, q, q, q)
 		paramIdx += 5
 	}
-	builder.WriteString(` ORDER BY date, day_order, id`)
-	if filter.Limit > 0 {
-		fmt.Fprintf(&builder, ` LIMIT $%d`, paramIdx)
-		args = append(args, filter.Limit)
+	return builder.String(), args, paramIdx, nil
+}
+
+// CountRecords returns the number of records matching non-pagination filters.
+func (r *Repository) CountRecords(ctx context.Context, filter repository.ListRecordsFilter) (int, error) {
+	whereSQL, args, _, err := r.listRecordsPredicateSQL(filter)
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	err = r.pool.QueryRow(ctx, `SELECT COUNT(*) FROM records `+whereSQL, args...).Scan(&count)
+	if err != nil {
+		return 0, mapPgError(err)
+	}
+	return count, nil
+}
+
+// CountRecordChildren returns child-row counts keyed by record ID.
+//
+// Uses `ANY($2::text[])` to bind record IDs as a single array parameter so the
+// query stays within Postgres's per-statement bind limit (~65k) regardless of
+// caller batch size; pgx encodes a Go []string directly to text[].
+func (r *Repository) CountRecordChildren(ctx context.Context, recordIDs []string) (map[string]repository.ChildCounts, error) {
+	counts := make(map[string]repository.ChildCounts)
+	if len(recordIDs) == 0 {
+		return counts, nil
+	}
+	ids := make([]string, 0, len(recordIDs))
+	for _, id := range recordIDs {
+		if strings.TrimSpace(id) == "" {
+			return nil, repository.ErrInvalidArgument
+		}
+		ids = append(ids, id)
 	}
 
-	rows, err := r.pool.Query(ctx, builder.String(), args...)
+	setFigures := func(c *repository.ChildCounts, n int) { c.Figures = n }
+	setDataFiles := func(c *repository.ChildCounts, n int) { c.DataFiles = n }
+	figureQuery := `SELECT f.record_id, COUNT(*) FROM record_figures AS f INNER JOIN records AS s ON s.id = f.record_id WHERE s.user_id = $1 AND f.record_id = ANY($2::text[]) GROUP BY f.record_id`
+	if err := r.mergeChildCounts(ctx, counts, setFigures, figureQuery, r.userID, ids); err != nil {
+		return nil, err
+	}
+	dataQuery := `SELECT d.record_id, COUNT(*) FROM record_data_files AS d INNER JOIN records AS s ON s.id = d.record_id WHERE s.user_id = $1 AND d.record_id = ANY($2::text[]) GROUP BY d.record_id`
+	if err := r.mergeChildCounts(ctx, counts, setDataFiles, dataQuery, r.userID, ids); err != nil {
+		return nil, err
+	}
+	return counts, nil
+}
+
+func (r *Repository) mergeChildCounts(ctx context.Context, counts map[string]repository.ChildCounts, set func(*repository.ChildCounts, int), query string, args ...any) error {
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
-		return nil, mapPgError(err)
+		return mapPgError(err)
 	}
 	defer rows.Close()
 
-	records := make([]repository.Record, 0)
 	for rows.Next() {
-		record, err := scanRecord(rows)
-		if err != nil {
-			return nil, err
+		var recordID string
+		var count int
+		if err := rows.Scan(&recordID, &count); err != nil {
+			return mapPgError(err)
 		}
-		records = append(records, record)
+		childCounts := counts[recordID]
+		set(&childCounts, count)
+		counts[recordID] = childCounts
 	}
 	if err := rows.Err(); err != nil {
-		return nil, mapPgError(err)
+		return mapPgError(err)
 	}
-	return records, nil
+	return nil
 }
 
 // SoftDeleteRecord sets deleted_at when not already set.

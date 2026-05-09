@@ -123,16 +123,48 @@ func (r *Repository) ListRecords(ctx context.Context, filter repository.ListReco
 		return nil, repository.ErrInvalidArgument
 	}
 
+	whereSQL, args, err := listRecordsPredicateSQL(filter)
+	if err != nil {
+		return nil, err
+	}
+
+	query := `SELECT id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM records ` + whereSQL + ` ORDER BY date, day_order, id`
+	if filter.Limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, filter.Limit)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, mapSQLiteError(err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	records := make([]repository.Record, 0)
+	for rows.Next() {
+		record, err := scanRecordRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, mapSQLiteError(err)
+	}
+	return records, nil
+}
+
+func listRecordsPredicateSQL(filter repository.ListRecordsFilter) (string, []any, error) {
 	trimmedQuery := ""
 	if filter.Query != nil {
 		trimmedQuery = strings.TrimSpace(*filter.Query)
 		if trimmedQuery == "" {
-			return nil, repository.ErrInvalidArgument
+			return "", nil, repository.ErrInvalidArgument
 		}
 	}
 
 	builder := strings.Builder{}
-	builder.WriteString(`SELECT id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM records WHERE 1=1`)
+	builder.WriteString(`WHERE 1=1`)
 	args := make([]any, 0, 4)
 
 	if filter.OnlyDeleted {
@@ -152,6 +184,12 @@ func (r *Repository) ListRecords(ctx context.Context, filter repository.ListReco
 		builder.WriteString(` AND date <= ?`)
 		args = append(args, *filter.DateTo)
 	}
+	if filter.HasHTML {
+		builder.WriteString(` AND html_content IS NOT NULL`)
+	}
+	if filter.HasData {
+		builder.WriteString(` AND EXISTS (SELECT 1 FROM record_data_files AS rdf WHERE rdf.record_id = records.id)`)
+	}
 	if filter.UpdatedAfter != nil {
 		builder.WriteString(` AND updated_at >= ?`)
 		args = append(args, filter.UpdatedAfter.UTC().Format("2006-01-02T15:04:05.000Z"))
@@ -166,30 +204,90 @@ func (r *Repository) ListRecords(ctx context.Context, filter repository.ListReco
 		builder.WriteString(` AND (html_content LIKE ? ESCAPE '\' OR notes LIKE ? ESCAPE '\' OR project_id LIKE ? ESCAPE '\' OR source_device_id LIKE ? ESCAPE '\' OR source_ref LIKE ? ESCAPE '\')`)
 		args = append(args, q, q, q, q, q)
 	}
-	builder.WriteString(` ORDER BY date, day_order, id`)
-	if filter.Limit > 0 {
-		builder.WriteString(` LIMIT ?`)
-		args = append(args, filter.Limit)
+	return builder.String(), args, nil
+}
+
+// CountRecords returns the number of records matching non-pagination filters.
+func (r *Repository) CountRecords(ctx context.Context, filter repository.ListRecordsFilter) (int, error) {
+	whereSQL, args, err := listRecordsPredicateSQL(filter)
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM records `+whereSQL, args...).Scan(&count)
+	if err != nil {
+		return 0, mapSQLiteError(err)
+	}
+	return count, nil
+}
+
+// sqliteCountChildrenChunkSize bounds the number of host parameters per
+// CountRecordChildren batch. SQLite's default cap is 32766, so 500 leaves
+// generous headroom while keeping each round-trip cheap.
+const sqliteCountChildrenChunkSize = 500
+
+// CountRecordChildren returns child-row counts keyed by record ID. Inputs
+// larger than sqliteCountChildrenChunkSize are split into multiple bound
+// queries so the SQLite host-parameter cap is never reached.
+func (r *Repository) CountRecordChildren(ctx context.Context, recordIDs []string) (map[string]repository.ChildCounts, error) {
+	counts := make(map[string]repository.ChildCounts)
+	if len(recordIDs) == 0 {
+		return counts, nil
+	}
+	ids := make([]string, 0, len(recordIDs))
+	for _, id := range recordIDs {
+		if strings.TrimSpace(id) == "" {
+			return nil, repository.ErrInvalidArgument
+		}
+		ids = append(ids, id)
 	}
 
-	rows, err := r.db.QueryContext(ctx, builder.String(), args...)
+	setFigures := func(c *repository.ChildCounts, n int) { c.Figures = n }
+	setDataFiles := func(c *repository.ChildCounts, n int) { c.DataFiles = n }
+	for start := 0; start < len(ids); start += sqliteCountChildrenChunkSize {
+		end := start + sqliteCountChildrenChunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		args := make([]any, 0, len(chunk))
+		placeholders := make([]string, 0, len(chunk))
+		for _, id := range chunk {
+			args = append(args, id)
+			placeholders = append(placeholders, "?")
+		}
+		inClause := strings.Join(placeholders, ",")
+		if err := r.mergeChildCounts(ctx, counts, setFigures, `SELECT record_id, COUNT(*) FROM record_figures WHERE record_id IN (`+inClause+`) GROUP BY record_id`, args...); err != nil {
+			return nil, err
+		}
+		if err := r.mergeChildCounts(ctx, counts, setDataFiles, `SELECT record_id, COUNT(*) FROM record_data_files WHERE record_id IN (`+inClause+`) GROUP BY record_id`, args...); err != nil {
+			return nil, err
+		}
+	}
+	return counts, nil
+}
+
+func (r *Repository) mergeChildCounts(ctx context.Context, counts map[string]repository.ChildCounts, set func(*repository.ChildCounts, int), query string, args ...any) error {
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, mapSQLiteError(err)
+		return mapSQLiteError(err)
 	}
 	defer func() { _ = rows.Close() }()
 
-	records := make([]repository.Record, 0)
 	for rows.Next() {
-		record, err := scanRecordRows(rows)
-		if err != nil {
-			return nil, err
+		var recordID string
+		var count int
+		if err := rows.Scan(&recordID, &count); err != nil {
+			return mapSQLiteError(err)
 		}
-		records = append(records, record)
+		childCounts := counts[recordID]
+		set(&childCounts, count)
+		counts[recordID] = childCounts
 	}
 	if err := rows.Err(); err != nil {
-		return nil, mapSQLiteError(err)
+		return mapSQLiteError(err)
 	}
-	return records, nil
+	return nil
 }
 
 // SoftDeleteRecord sets deleted_at when not already set.
@@ -1033,7 +1131,7 @@ func upsertDeviceForImport(ctx context.Context, r *Repository, device repository
 
 type figureRow struct {
 	ID        int64
-	RecordID   string
+	RecordID  string
 	Filename  string
 	S3Key     string
 	AltText   sql.NullString
@@ -1047,7 +1145,7 @@ func (r figureRow) toModel() (repository.RecordFigure, error) {
 	}
 	return repository.RecordFigure{
 		ID:        r.ID,
-		RecordID:   r.RecordID,
+		RecordID:  r.RecordID,
 		Filename:  r.Filename,
 		S3Key:     r.S3Key,
 		AltText:   nullableStringPtr(r.AltText),
@@ -1073,7 +1171,7 @@ func scanFigureRows(rows *sql.Rows) (repository.RecordFigure, error) {
 
 type dataFileRow struct {
 	ID          int64
-	RecordID     string
+	RecordID    string
 	Filename    string
 	S3Key       string
 	Size        int64
@@ -1089,7 +1187,7 @@ func (r dataFileRow) toModel() (repository.RecordDataFile, error) {
 	}
 	return repository.RecordDataFile{
 		ID:          r.ID,
-		RecordID:     r.RecordID,
+		RecordID:    r.RecordID,
 		Filename:    r.Filename,
 		S3Key:       r.S3Key,
 		Size:        r.Size,

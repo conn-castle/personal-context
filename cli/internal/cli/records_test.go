@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/filesystem"
+	"github.com/conn-castle/personal-context/cli/internal/listpage"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
@@ -30,12 +31,15 @@ func TestListCommandFiltersAndPaginatesRecords(t *testing.T) {
 		t.Fatalf("list first page: %v", err)
 	}
 
-	var firstPage recordListJSON
+	var firstPage listpage.Response[recordListItem]
 	if err := json.Unmarshal(stdout.Bytes(), &firstPage); err != nil {
 		t.Fatalf("parse first page json: %v\n%s", err, stdout.String())
 	}
 	if len(firstPage.Items) != 1 || firstPage.Items[0].ID != newerID {
 		t.Fatalf("expected newest alpha record %s, got %+v", newerID, firstPage.Items)
+	}
+	if firstPage.Total != 2 {
+		t.Fatalf("expected total=2, got %d", firstPage.Total)
 	}
 	if firstPage.NextCursor == nil || *firstPage.NextCursor == "" {
 		t.Fatalf("expected next cursor, got %+v", firstPage.NextCursor)
@@ -48,12 +52,15 @@ func TestListCommandFiltersAndPaginatesRecords(t *testing.T) {
 		t.Fatalf("list second page: %v", err)
 	}
 
-	var secondPage recordListJSON
+	var secondPage listpage.Response[recordListItem]
 	if err := json.Unmarshal(stdout.Bytes(), &secondPage); err != nil {
 		t.Fatalf("parse second page json: %v\n%s", err, stdout.String())
 	}
 	if len(secondPage.Items) != 1 || secondPage.Items[0].ID != olderID {
 		t.Fatalf("expected older alpha record %s, got %+v", olderID, secondPage.Items)
+	}
+	if secondPage.Total != 2 {
+		t.Fatalf("expected cursor page total=2, got %d", secondPage.Total)
 	}
 	if secondPage.NextCursor != nil {
 		t.Fatalf("expected no next cursor on second page, got %q", *secondPage.NextCursor)
@@ -142,7 +149,7 @@ func TestListCommandTableIDsDeletedAndEmptyOutput(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list deleted json: %v", err)
 	}
-	var deletedPage recordListJSON
+	var deletedPage listpage.Response[recordListItem]
 	if err := json.Unmarshal(stdout.Bytes(), &deletedPage); err != nil {
 		t.Fatalf("parse deleted json: %v\n%s", err, stdout.String())
 	}
@@ -158,6 +165,56 @@ func TestListCommandTableIDsDeletedAndEmptyOutput(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "No matching records found.") {
 		t.Fatalf("expected empty table message, got %q", stdout.String())
+	}
+}
+
+func TestListCommandContentFiltersJSONTotals(t *testing.T) {
+	setupEnv(t)
+	dataOldID := addRecordWithContent(t, "<html>data old</html>", "", `{"project_id":"alpha/project"}`, nil, map[string][]byte{"old.csv": []byte("old")}, "--date", "2026-01-01")
+	addRecordWithoutHTML(t, "alpha/project", "2026-01-02")
+	addRecordWithContent(t, "<html>html only</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-03")
+	dataNewID := addRecordWithContent(t, "<html>data new</html>", "", `{"project_id":"alpha/project"}`, nil, map[string][]byte{"new.csv": []byte("new")}, "--date", "2026-01-04")
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"list", "--has-data", "--limit", "1", "--format", "json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("list has-data json: %v", err)
+	}
+	var dataPage listpage.Response[recordListItem]
+	if err := json.Unmarshal(stdout.Bytes(), &dataPage); err != nil {
+		t.Fatalf("parse has-data json: %v\n%s", err, stdout.String())
+	}
+	if dataPage.Total != 2 || len(dataPage.Items) != 1 || dataPage.Items[0].ID != dataNewID || dataPage.NextCursor == nil {
+		t.Fatalf("unexpected has-data page: %+v", dataPage)
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"list", "--has-data", "--limit", "1", "--cursor", *dataPage.NextCursor, "--format", "json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("list has-data cursor json: %v", err)
+	}
+	var secondDataPage listpage.Response[recordListItem]
+	if err := json.Unmarshal(stdout.Bytes(), &secondDataPage); err != nil {
+		t.Fatalf("parse has-data cursor json: %v\n%s", err, stdout.String())
+	}
+	if secondDataPage.Total != 2 || len(secondDataPage.Items) != 1 || secondDataPage.Items[0].ID != dataOldID || secondDataPage.NextCursor != nil {
+		t.Fatalf("unexpected has-data cursor page: %+v", secondDataPage)
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"list", "--has-html", "--all", "--format", "json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("list has-html json: %v", err)
+	}
+	var htmlPage listpage.Response[recordListItem]
+	if err := json.Unmarshal(stdout.Bytes(), &htmlPage); err != nil {
+		t.Fatalf("parse has-html json: %v\n%s", err, stdout.String())
+	}
+	if htmlPage.Total != 3 || len(htmlPage.Items) != 3 {
+		t.Fatalf("unexpected has-html page: %+v", htmlPage)
 	}
 }
 
@@ -453,23 +510,9 @@ func TestRecordDiscoveryRepositoryErrorPaths(t *testing.T) {
 	record := repository.Record{ID: "20260101-aaaabbbb", Date: "2026-01-01", DayOrder: "a0"}
 	figureErr := errors.New("figure lookup failed")
 	dataErr := errors.New("data lookup failed")
-
-	if _, err := buildRecordListItem(ctx, &mockRepo{
-		listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
-			return nil, figureErr
-		},
-	}, record); err == nil || !strings.Contains(err.Error(), "figure lookup failed") {
-		t.Fatalf("buildRecordListItem figure error = %v", err)
-	}
-	if _, err := buildRecordListItem(ctx, &mockRepo{
-		listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
-			return nil, nil
-		},
-		listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
-			return nil, dataErr
-		},
-	}, record); err == nil || !strings.Contains(err.Error(), "data lookup failed") {
-		t.Fatalf("buildRecordListItem data error = %v", err)
+	item := buildRecordListItem(record, repository.ChildCounts{Figures: 2, DataFiles: 3})
+	if item.FigureCount != 2 || item.DataFileCount != 3 {
+		t.Fatalf("counts = (%d, %d), want (2, 3)", item.FigureCount, item.DataFileCount)
 	}
 
 	fsClient, err := filesystem.NewClient(t.TempDir())
@@ -718,7 +761,7 @@ func TestRecordMatchesFilterCoversAllBranches(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		record  repository.Record
+		record repository.Record
 		filter repository.ListRecordsFilter
 		want   bool
 	}{

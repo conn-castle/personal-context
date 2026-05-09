@@ -39,7 +39,7 @@ type Device struct {
 // RecordFigure is a row from the record_figures table.
 type RecordFigure struct {
 	ID        int64
-	RecordID   string
+	RecordID  string
 	Filename  string
 	S3Key     string
 	AltText   *string
@@ -49,13 +49,19 @@ type RecordFigure struct {
 // RecordDataFile is a row from the record_data_files table.
 type RecordDataFile struct {
 	ID          int64
-	RecordID     string
+	RecordID    string
 	Filename    string
 	S3Key       string
 	Size        int64
 	Hash        string
 	Description *string
 	CreatedAt   time.Time
+}
+
+// ChildCounts contains aggregate child-row counts for one record.
+type ChildCounts struct {
+	Figures   int
+	DataFiles int
 }
 
 // Template is a row from the templates table.
@@ -128,11 +134,13 @@ type ListRecordsFilter struct {
 	Query          *string
 	UpdatedAfter   *time.Time
 	UpdatedBefore  *time.Time
+	HasHTML        bool
+	HasData        bool
 }
 
 // CreateRecordFigureInput contains required and optional fields for figure inserts.
 type CreateRecordFigureInput struct {
-	RecordID  string
+	RecordID string
 	Filename string
 	S3Key    string
 	AltText  *string
@@ -148,7 +156,7 @@ type UpdateRecordFigureInput struct {
 
 // CreateRecordDataFileInput contains required and optional fields for data-file inserts.
 type CreateRecordDataFileInput struct {
-	RecordID     string
+	RecordID    string
 	Filename    string
 	S3Key       string
 	Size        int64

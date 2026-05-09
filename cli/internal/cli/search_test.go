@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/conn-castle/personal-context/cli/internal/listpage"
 )
 
 func TestSearchTableNoResults(t *testing.T) {
@@ -94,7 +96,14 @@ func TestSearchIDsFormatEmpty(t *testing.T) {
 
 func TestSearchJSONFormat(t *testing.T) {
 	setupEnv(t)
-	addRecordWithContent(t, "<html>json search test</html>", "json notes", `{"project_id":"proj-search"}`, nil, nil)
+	addRecordWithContent(
+		t,
+		"<html>json search test</html>",
+		"json notes",
+		`{"project_id":"proj-search"}`,
+		map[string][]byte{"plot.png": []byte("figure")},
+		map[string][]byte{"metrics.json": []byte(`{"ok":true}`)},
+	)
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
@@ -103,15 +112,31 @@ func TestSearchJSONFormat(t *testing.T) {
 		t.Fatalf("search json: %v", err)
 	}
 
-	var results []searchResultJSON
-	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
+	var page listpage.Response[searchResultJSON]
+	if err := json.Unmarshal(stdout.Bytes(), &page); err != nil {
 		t.Fatalf("parse json: %v\noutput: %s", err, stdout.String())
 	}
-	if len(results) == 0 {
+	if page.Total != 1 {
+		t.Fatalf("expected total=1, got %d", page.Total)
+	}
+	if page.NextCursor != nil {
+		t.Fatalf("expected null next_cursor, got %q", *page.NextCursor)
+	}
+	if len(page.Items) == 0 {
 		t.Fatal("expected at least one result")
 	}
-	if results[0].ProjectID != "proj-search" {
-		t.Fatalf("expected project_id=proj-search, got %v", results[0].ProjectID)
+	got := page.Items[0]
+	if got.ProjectID != "proj-search" {
+		t.Fatalf("expected project_id=proj-search, got %v", got.ProjectID)
+	}
+	if got.ID == "" || got.Date == "" || got.DayOrder == "" || got.SourceDeviceID == "" || got.CreatedAt == "" || got.UpdatedAt == "" {
+		t.Fatalf("expected identity/provenance/timestamps to be populated, got %+v", got)
+	}
+	if got.DeletedAt != nil || got.SourceRef != nil || got.GitRemoteURL != nil || got.GitHash != nil {
+		t.Fatalf("expected nullable fields to be null by default, got %+v", got)
+	}
+	if !got.HasHTML || !got.HasNotes || got.FigureCount != 1 || got.DataFileCount != 1 {
+		t.Fatalf("expected enriched fields from record and children, got %+v", got)
 	}
 }
 
@@ -125,12 +150,12 @@ func TestSearchJSONFormatEmpty(t *testing.T) {
 		t.Fatalf("search json: %v", err)
 	}
 
-	var results []searchResultJSON
-	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
+	var page listpage.Response[searchResultJSON]
+	if err := json.Unmarshal(stdout.Bytes(), &page); err != nil {
 		t.Fatalf("parse json: %v", err)
 	}
-	if len(results) != 0 {
-		t.Fatalf("expected empty results, got %d", len(results))
+	if page.Total != 0 || len(page.Items) != 0 || page.NextCursor != nil {
+		t.Fatalf("expected empty envelope, got %+v", page)
 	}
 }
 
@@ -152,13 +177,13 @@ func TestSearchJSONWithDeletedAt(t *testing.T) {
 		t.Fatalf("search json: %v", err)
 	}
 
-	var results []searchResultJSON
-	if err := json.Unmarshal(stdout.Bytes(), &results); err != nil {
+	var page listpage.Response[searchResultJSON]
+	if err := json.Unmarshal(stdout.Bytes(), &page); err != nil {
 		t.Fatalf("parse json: %v\noutput: %s", err, stdout.String())
 	}
 
 	found := false
-	for _, r := range results {
+	for _, r := range page.Items {
 		if r.ID == id {
 			found = true
 			if r.DeletedAt == nil {
@@ -248,6 +273,70 @@ func TestSearchWithLimit(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	if len(lines) != 1 {
 		t.Fatalf("expected 1 result with --limit 1, got %d: %q", len(lines), stdout.String())
+	}
+}
+
+func TestSearchDefaultLimitTruncatesIDsToStderr(t *testing.T) {
+	setupEnv(t)
+	for i := range 51 {
+		addRecordWithContent(t, "<html>default limit needle</html>", "", "", nil, nil, "--date", "2026-05-08")
+		_ = i
+	}
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
+	cmd.SetArgs([]string{"search", "needle", "--format", "ids"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("search default limit: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != defaultSearchLimit {
+		t.Fatalf("expected %d ids, got %d", defaultSearchLimit, len(lines))
+	}
+	if !strings.Contains(stderr.String(), "Showing 50 of 51 results (use --limit 0 to see all)") {
+		t.Fatalf("expected truncation message on stderr, got %q", stderr.String())
+	}
+}
+
+func TestSearchLimitZeroIsUnlimited(t *testing.T) {
+	setupEnv(t)
+	for range 51 {
+		addRecordWithContent(t, "<html>unlimited needle</html>", "", "", nil, nil, "--date", "2026-05-08")
+	}
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
+	cmd.SetArgs([]string{"search", "unlimited", "--format", "ids", "--limit", "0"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("search unlimited: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 51 {
+		t.Fatalf("expected 51 ids, got %d", len(lines))
+	}
+	if stderr.String() != "" {
+		t.Fatalf("expected no stderr truncation message, got %q", stderr.String())
+	}
+}
+
+func TestSearchTableTruncationFooter(t *testing.T) {
+	setupEnv(t)
+	addRecordWithContent(t, "<html>table footer one</html>", "", "", nil, nil)
+	addRecordWithContent(t, "<html>table footer two</html>", "", "", nil, nil)
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"search", "footer", "--limit", "1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("search table footer: %v", err)
+	}
+
+	if !strings.Contains(stdout.String(), "Showing 1 of 2 results (use --limit 0 to see all)") {
+		t.Fatalf("expected truncation footer on stdout, got %q", stdout.String())
 	}
 }
 

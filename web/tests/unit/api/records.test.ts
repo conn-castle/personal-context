@@ -32,12 +32,16 @@ describe("GET /api/records", () => {
     ...overrides,
   });
 
+  const mockRecordQuery = (records: Record<string, unknown>[], total = records.length) => {
+    mockSql.mockResolvedValueOnce([{ total }]).mockResolvedValueOnce(records);
+  };
+
   it("returns records with default limit", async () => {
     const records = [
       makeRecordSummary({ id: "20250304-a3f2b7e1" }),
       makeRecordSummary({ id: "20250303-b4c5d6e7" }),
     ];
-    mockSql.mockResolvedValue(records);
+    mockRecordQuery(records);
 
     const req = new NextRequest("http://localhost/api/records");
     const res = await GET(req);
@@ -66,7 +70,7 @@ describe("GET /api/records", () => {
         day_order: "a0",
       }),
     ];
-    mockSql.mockResolvedValue(records);
+    mockRecordQuery(records, 3);
 
     const req = new NextRequest("http://localhost/api/records?limit=2");
     const res = await GET(req);
@@ -98,7 +102,7 @@ describe("GET /api/records", () => {
         day_order: "a1",
       }),
     ];
-    mockSql.mockResolvedValue(records);
+    mockRecordQuery(records);
 
     const req = new NextRequest("http://localhost/api/records?limit=2");
     const res = await GET(req);
@@ -117,9 +121,9 @@ describe("GET /api/records", () => {
         id: "20250304-a3f2b7e1",
       })
     );
-    mockSql.mockResolvedValue([
+    mockRecordQuery([
       makeRecordSummary({ id: "20250303-b4c5d6e7", date: "2025-03-03" }),
-    ]);
+    ], 2);
 
     const req = new NextRequest(
       `http://localhost/api/records?cursor=${cursor}`
@@ -129,12 +133,13 @@ describe("GET /api/records", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.items).toHaveLength(1);
+    expect(body.total).toBe(2);
     // Verify the query used parameterized form with cursor values
-    expect(mockSql).toHaveBeenCalledTimes(1);
+    expect(mockSql).toHaveBeenCalledTimes(2);
   });
 
   it("filters by project", async () => {
-    mockSql.mockResolvedValue([
+    mockRecordQuery([
       makeRecordSummary({ project_id: "org/alpha" }),
     ]);
 
@@ -150,7 +155,7 @@ describe("GET /api/records", () => {
   });
 
   it("returns nullable HTML and source metadata", async () => {
-    mockSql.mockResolvedValue([
+    mockRecordQuery([
       makeRecordSummary({
         html_content: null,
         project_id: "org/alpha",
@@ -171,7 +176,7 @@ describe("GET /api/records", () => {
   });
 
   it("filters deleted records when deleted=true", async () => {
-    mockSql.mockResolvedValue([
+    mockRecordQuery([
       makeRecordSummary({ deleted_at: "2025-03-04T10:00:00.000Z" }),
     ]);
 
@@ -185,7 +190,7 @@ describe("GET /api/records", () => {
   });
 
   it("filters by updated_after with >= comparison", async () => {
-    mockSql.mockResolvedValue([
+    mockRecordQuery([
       makeRecordSummary({
         updated_at: "2025-03-04T10:00:00.000Z",
       }),
@@ -202,7 +207,7 @@ describe("GET /api/records", () => {
   });
 
   it("returns empty results", async () => {
-    mockSql.mockResolvedValue([]);
+    mockRecordQuery([]);
 
     const req = new NextRequest("http://localhost/api/records");
     const res = await GET(req);
@@ -210,6 +215,7 @@ describe("GET /api/records", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.items).toEqual([]);
+    expect(body.total).toBe(0);
     expect(body.next_cursor).toBeNull();
   });
 
@@ -250,19 +256,19 @@ describe("GET /api/records", () => {
   });
 
   it("uses default limit of 20 and clamps to max 100", async () => {
-    mockSql.mockResolvedValue([]);
+    mockRecordQuery([]);
 
     // Default limit
     const req1 = new NextRequest("http://localhost/api/records");
     await GET(req1);
-    expect(mockSql).toHaveBeenCalledTimes(1);
+    expect(mockSql).toHaveBeenCalledTimes(2);
 
     // Verify limit is clamped when > 100
     mockSql.mockReset();
-    mockSql.mockResolvedValue([]);
+    mockRecordQuery([]);
     const req2 = new NextRequest("http://localhost/api/records?limit=200");
     await GET(req2);
-    expect(mockSql).toHaveBeenCalledTimes(1);
+    expect(mockSql).toHaveBeenCalledTimes(2);
   });
 
   it("returns correct sort order", async () => {
@@ -283,7 +289,7 @@ describe("GET /api/records", () => {
         day_order: "a0",
       }),
     ];
-    mockSql.mockResolvedValue(records);
+    mockRecordQuery(records);
 
     const req = new NextRequest("http://localhost/api/records");
     const res = await GET(req);

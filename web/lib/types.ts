@@ -73,6 +73,7 @@ export type RecordListParams = {
 /** Paginated response wrapper. */
 export type PaginatedResponse<T> = {
   items: T[];
+  total: number;
   next_cursor: string | null;
 };
 

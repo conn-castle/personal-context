@@ -83,7 +83,7 @@ describe("useRecords", () => {
     it("passes deleted filter param", async () => {
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ items: [], next_cursor: null }),
+        json: () => Promise.resolve({ items: [], total: 0, next_cursor: null }),
       });
       globalThis.fetch = fetchMock;
 
@@ -101,7 +101,7 @@ describe("useRecords", () => {
     it("sends no query string with no params", async () => {
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ items: [], next_cursor: null }),
+        json: () => Promise.resolve({ items: [], total: 0, next_cursor: null }),
       });
       globalThis.fetch = fetchMock;
 
@@ -118,7 +118,7 @@ describe("useRecords", () => {
   describe("fetchRecords", () => {
     it("fetches records and sets state", async () => {
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: null },
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -137,6 +137,7 @@ describe("useRecords", () => {
       globalThis.fetch = mockFetch({
         "/api/records": {
           items: [mockRecord],
+          total: 2,
           next_cursor: "abc123",
         },
       });
@@ -153,7 +154,7 @@ describe("useRecords", () => {
     it("passes project filter param", async () => {
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ items: [], next_cursor: null }),
+        json: () => Promise.resolve({ items: [], total: 0, next_cursor: null }),
       });
       globalThis.fetch = fetchMock;
 
@@ -228,7 +229,7 @@ describe("useRecords", () => {
 
       // First fetch returns one record with cursor
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: "cursor1" },
+        "/api/records": { items: [mockRecord], total: 2, next_cursor: "cursor1" },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -239,7 +240,7 @@ describe("useRecords", () => {
 
       // Set up second page
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [record2], next_cursor: null },
+        "/api/records": { items: [record2], total: 2, next_cursor: null },
       });
 
       await act(async () => {
@@ -253,7 +254,7 @@ describe("useRecords", () => {
     it("sets error on fetch failure", async () => {
       // First fetch to set cursor
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: "cursor1" },
+        "/api/records": { items: [mockRecord], total: 2, next_cursor: "cursor1" },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -277,7 +278,7 @@ describe("useRecords", () => {
 
     it("uses fallback message for non-Error thrown value", async () => {
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: "cursor1" },
+        "/api/records": { items: [mockRecord], total: 2, next_cursor: "cursor1" },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -297,7 +298,7 @@ describe("useRecords", () => {
 
     it("ignores duplicate fetchMore calls while a page request is already in flight", async () => {
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: "cursor1" },
+        "/api/records": { items: [mockRecord], total: 2, next_cursor: "cursor1" },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -311,6 +312,7 @@ describe("useRecords", () => {
             ok: boolean;
             json: () => Promise<{
               items: RecordSummary[];
+              total: number;
               next_cursor: null;
             }>;
           }) => void)
@@ -337,6 +339,7 @@ describe("useRecords", () => {
           json: () =>
             Promise.resolve({
               items: [{ ...mockRecord, id: "20260308-11111111" }],
+              total: 2,
               next_cursor: null,
             }),
         });
@@ -402,7 +405,7 @@ describe("useRecords", () => {
 
       // First load records + select
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: null },
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -449,7 +452,7 @@ describe("useRecords", () => {
 
       // Load records and select a different record
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: null },
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -522,7 +525,7 @@ describe("useRecords", () => {
   describe("deleteRecord", () => {
     it("optimistically removes record from list", async () => {
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: null },
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -553,7 +556,7 @@ describe("useRecords", () => {
 
     it("does not clear selectedRecord when deleting a different record", async () => {
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: null },
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -593,7 +596,7 @@ describe("useRecords", () => {
 
     it("re-fetches on failure to restore accurate state", async () => {
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: null },
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -615,7 +618,7 @@ describe("useRecords", () => {
         return Promise.resolve({
           ok: true,
           json: () =>
-            Promise.resolve({ items: [mockRecord], next_cursor: null }),
+            Promise.resolve({ items: [mockRecord], total: 1, next_cursor: null }),
         });
       });
 
@@ -637,7 +640,7 @@ describe("useRecords", () => {
       };
 
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [deletedRecord], next_cursor: null },
+        "/api/records": { items: [deletedRecord], total: 1, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -671,7 +674,7 @@ describe("useRecords", () => {
       };
 
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [deletedRecord], next_cursor: null },
+        "/api/records": { items: [deletedRecord], total: 1, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -716,7 +719,7 @@ describe("useRecords", () => {
       };
 
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [deletedRecord], next_cursor: null },
+        "/api/records": { items: [deletedRecord], total: 1, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -735,7 +738,7 @@ describe("useRecords", () => {
         return Promise.resolve({
           ok: true,
           json: () =>
-            Promise.resolve({ items: [deletedRecord], next_cursor: null }),
+            Promise.resolve({ items: [deletedRecord], total: 1, next_cursor: null }),
         });
       });
 
@@ -751,7 +754,7 @@ describe("useRecords", () => {
   describe("reorderRecord", () => {
     it("updates record date and day_order in list", async () => {
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: null },
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -789,7 +792,7 @@ describe("useRecords", () => {
       const recordC = { ...mockRecord, id: "20260308-cccccccc", date: "2026-03-08", day_order: "a0" };
 
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [recordA, recordB, recordC], next_cursor: null },
+        "/api/records": { items: [recordA, recordB, recordC], total: 3, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -900,7 +903,7 @@ describe("useRecords", () => {
     it("re-fetches with the same params", async () => {
       // Initial fetch with project filter
       globalThis.fetch = mockFetch({
-        "/api/records": { items: [mockRecord], next_cursor: null },
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
       });
 
       const { result } = renderHook(() => useRecords());
@@ -913,7 +916,7 @@ describe("useRecords", () => {
       const fetchMock = vi.fn().mockResolvedValue({
         ok: true,
         json: () =>
-          Promise.resolve({ items: [mockRecord], next_cursor: null }),
+          Promise.resolve({ items: [mockRecord], total: 1, next_cursor: null }),
       });
       globalThis.fetch = fetchMock;
 

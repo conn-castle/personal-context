@@ -178,6 +178,7 @@ async function setupMockApi(
       body: JSON.stringify(
         overrides?.records ?? {
           items: [RECORD_A, RECORD_B, RECORD_C],
+          total: 3,
           next_cursor: null,
         }
       ),
@@ -195,6 +196,7 @@ async function setupMockApi(
       body: JSON.stringify(
         overrides?.records ?? {
           items: [RECORD_A, RECORD_B, RECORD_C],
+          total: 3,
           next_cursor: null,
         }
       ),
@@ -541,7 +543,7 @@ test.describe("UI snapshots and console health @visual", () => {
     page,
   }) => {
     await setupMockApi(page, {
-      records: { items: [], next_cursor: null },
+      records: { items: [], total: 0, next_cursor: null },
       projects: { projects: [] },
     });
     await page.goto("/");

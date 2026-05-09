@@ -63,12 +63,16 @@ func TestFullLocalWorkflow(t *testing.T) {
 
 	// 7. pc search --format json "Record" -- should find all 3
 	stdout = runPCSuccess(t, homeDir, "search", "--format", "json", "Record")
-	var results []map[string]interface{}
-	if err := json.Unmarshal([]byte(stdout), &results); err != nil {
+	var searchPage struct {
+		Items      []map[string]interface{} `json:"items"`
+		Total      int                      `json:"total"`
+		NextCursor *string                  `json:"next_cursor"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &searchPage); err != nil {
 		t.Fatalf("parse search json: %v", err)
 	}
-	if len(results) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(results))
+	if searchPage.Total != 3 || len(searchPage.Items) != 3 || searchPage.NextCursor != nil {
+		t.Fatalf("expected 3-result search envelope, got %+v", searchPage)
 	}
 
 	// 8. pc search --project "other/proj" "Record" -- should find only record2

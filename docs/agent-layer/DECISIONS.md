@@ -231,3 +231,8 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: License Personal Context under PolyForm Noncommercial 1.0.0 (`PolyForm-Noncommercial-1.0.0`) and describe the Homebrew formula as `Personal structured vault for searchable knowledge, data, files, and records`.
     Reason: The repo is public for Homebrew releases, but the owner wants to retain commercial rights and prevent third-party commercial use without separate permission.
     Tradeoffs: This is source-available, not open source by OSI criteria; some package ecosystems and commercial users may reject or require legal review before use.
+
+- Decision 2026-05-08 e8f9g0: List/search JSON uses paginated envelope
+    Decision: Go list/search JSON responses use `cli/internal/listpage.Response` with `{items,total,next_cursor}`; the Next.js record-list route mirrors the same shape via `PaginatedResponse<T>`.
+    Reason: CLI, local `pc serve`, and cloud record-list consumers need consistent full filtered totals before cursor/limit are applied.
+    Tradeoffs: `pc search --format json` is a breaking shape change from a bare array, but it exposes totals and keeps list/search pagination contracts aligned.

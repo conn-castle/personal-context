@@ -292,8 +292,8 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted reco
 - `pc gc` — hard-delete trash > 30 days (cloud-first if configured: deletes from Neon before local to prevent sync re-creation, warns if cloud unreachable, removes local figure/data files, runs auto-sync)
 
 ### Search & Registries
-- `pc search <query>` — LIKE/ILIKE on html_content, notes, project_id (not git fields)
-- `pc list` — bounded newest-first record summaries with cursor pagination, date/project/deleted filters, `--has-html`, `--has-data`, `--all`, and `--format table|ids|json`
+- `pc search <query>` — LIKE/ILIKE on `html_content`, `notes`, `project_id`, `source_device_id`, and `source_ref`; default `--limit` is 50, `--limit 0` is unlimited, table/ids output surfaces truncation, and JSON uses `{items,total,next_cursor}` with `next_cursor: null`
+- `pc list` — bounded newest-first record summaries with cursor pagination, date/project/deleted filters, `--has-html`, `--has-data`, `--all`, and `--format table|ids|json`; JSON returns `{items,total,next_cursor}`
 - `pc stats` — local record statistics with active/deleted counts, content/attachment counts, oldest/newest dates, and explicit size fields (`recorded_data_file_bytes`, `local_attachment_bytes`, `store_file_bytes`, `local_total_bytes`)
 - `pc files list` — local record attachment inventory with figure/data rows, recorded data-file size, local file size/path, and present/missing status
 - `pc project list|add|archive|restore` — manage registered projects
@@ -510,6 +510,7 @@ type RecordDetail = {
     ```ts
     {
       items: RecordSummary[];
+      total: number;
       next_cursor: string | null;
     }
     ```

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/fractionalindex"
+	"github.com/conn-castle/personal-context/cli/internal/listpage"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
@@ -337,19 +338,19 @@ type recordFile struct {
 }
 
 type recordDetail struct {
-	ID             string      `json:"id"`
-	Date           string      `json:"date"`
-	DayOrder       string      `json:"day_order"`
-	HTMLContent    *string     `json:"html_content"`
-	Notes          *string     `json:"notes"`
-	ProjectID      string      `json:"project_id"`
-	SourceDeviceID string      `json:"source_device_id"`
-	SourceRef      *string     `json:"source_ref"`
-	GitRemoteURL   *string     `json:"git_remote_url"`
-	GitHash        *string     `json:"git_hash"`
-	CreatedAt      string      `json:"created_at"`
-	UpdatedAt      string      `json:"updated_at"`
-	DeletedAt      *string     `json:"deleted_at"`
+	ID             string       `json:"id"`
+	Date           string       `json:"date"`
+	DayOrder       string       `json:"day_order"`
+	HTMLContent    *string      `json:"html_content"`
+	Notes          *string      `json:"notes"`
+	ProjectID      string       `json:"project_id"`
+	SourceDeviceID string       `json:"source_device_id"`
+	SourceRef      *string      `json:"source_ref"`
+	GitRemoteURL   *string      `json:"git_remote_url"`
+	GitHash        *string      `json:"git_hash"`
+	CreatedAt      string       `json:"created_at"`
+	UpdatedAt      string       `json:"updated_at"`
+	DeletedAt      *string      `json:"deleted_at"`
 	Figures        []recordFile `json:"figures"`
 	DataFiles      []recordFile `json:"data_files"`
 }
@@ -511,16 +512,7 @@ func validateReorderBody(body map[string]any, recordID string) (reorderInput, st
 	}, ""
 }
 
-func (s *Server) buildRecordSummary(ctx context.Context, record repository.Record) (recordSummary, error) {
-	figures, err := s.repo.ListRecordFiguresByRecordID(ctx, record.ID)
-	if err != nil {
-		return recordSummary{}, err
-	}
-	dataFiles, err := s.repo.ListRecordDataFilesByRecordID(ctx, record.ID)
-	if err != nil {
-		return recordSummary{}, err
-	}
-
+func buildRecordSummary(record repository.Record, childCounts repository.ChildCounts) recordSummary {
 	return recordSummary{
 		ID:             record.ID,
 		Date:           record.Date,
@@ -531,9 +523,9 @@ func (s *Server) buildRecordSummary(ctx context.Context, record repository.Recor
 		SourceRef:      record.SourceRef,
 		UpdatedAt:      formatTime(record.UpdatedAt),
 		DeletedAt:      formatTimePtr(record.DeletedAt),
-		FigureCount:    len(figures),
-		DataFileCount:  len(dataFiles),
-	}, nil
+		FigureCount:    childCounts.Figures,
+		DataFileCount:  childCounts.DataFiles,
+	}
 }
 
 func (s *Server) buildRecordFiles(ctx context.Context, recordID string) ([]recordFile, []recordFile, error) {
@@ -634,7 +626,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]int{
 		"total_records":   totalRecords,
-		"total_projects": len(projects),
+		"total_projects":  len(projects),
 		"trashed_records": trashedRecords,
 	})
 }
@@ -697,6 +689,12 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	total, err := s.repo.CountRecords(ctx, parsedQuery.filter)
+	if err != nil {
+		mapRepoError(w, err, "records")
+		return
+	}
+
 	// Fetch the full matching set, then sort and paginate in API order.
 	// The repository contract sorts ascending and applies LIMIT before returning,
 	// which would otherwise truncate the wrong end of the result set.
@@ -736,13 +734,14 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 		resultRecords = records[:parsedQuery.limit]
 	}
 
+	childCounts, err := s.repo.CountRecordChildren(ctx, serveRecordIDs(resultRecords))
+	if err != nil {
+		mapRepoError(w, err, "record files")
+		return
+	}
+
 	for _, record := range resultRecords {
-		item, err := s.buildRecordSummary(ctx, record)
-		if err != nil {
-			mapRepoError(w, err, "record files")
-			return
-		}
-		items = append(items, item)
+		items = append(items, buildRecordSummary(record, childCounts[record.ID]))
 	}
 
 	var nextCursor *string
@@ -752,11 +751,16 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 		nextCursor = &c
 	}
 
-	resp := map[string]any{
-		"items":       items,
-		"next_cursor": nextCursor,
-	}
+	resp := listpage.Response[recordSummary]{Items: items, Total: total, NextCursor: nextCursor}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func serveRecordIDs(records []repository.Record) []string {
+	ids := make([]string, 0, len(records))
+	for _, record := range records {
+		ids = append(ids, record.ID)
+	}
+	return ids
 }
 
 // sortRecordsForAPI sorts records in date DESC, day_order ASC, id ASC order.
@@ -954,7 +958,7 @@ func (s *Server) handlePatchRecord(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"record":        detail,
+		"record":       detail,
 		"sync_version": syncVersion.Version,
 	})
 }
@@ -1252,14 +1256,15 @@ func (s *Server) handleSyncChanges(w http.ResponseWriter, r *http.Request) {
 	// Sort for API: date DESC, day_order ASC, id ASC
 	sortRecordsForAPI(records)
 
+	childCounts, err := s.repo.CountRecordChildren(ctx, serveRecordIDs(records))
+	if err != nil {
+		mapRepoError(w, err, "record files")
+		return
+	}
+
 	items := make([]recordSummary, 0, len(records))
 	for _, record := range records {
-		item, err := s.buildRecordSummary(ctx, record)
-		if err != nil {
-			mapRepoError(w, err, "record files")
-			return
-		}
-		items = append(items, item)
+		items = append(items, buildRecordSummary(record, childCounts[record.ID]))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

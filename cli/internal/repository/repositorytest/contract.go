@@ -3,6 +3,7 @@ package repositorytest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -150,7 +151,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		})
 
 		figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: "plot.png",
 			S3Key:    "figures/20250306-1111aaaa/plot.png",
 		})
@@ -158,7 +159,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			t.Fatalf("CreateRecordFigure() error = %v", err)
 		}
 		_, err = repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: "plot.png",
 			S3Key:    "figures/20250306-1111aaaa/plot.png",
 		})
@@ -167,7 +168,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 
 		dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: "metrics.csv",
 			S3Key:    "data/20250306-1111aaaa/metrics.csv",
 			Size:     12,
@@ -177,7 +178,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			t.Fatalf("CreateRecordDataFile() error = %v", err)
 		}
 		_, err = repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: "metrics.csv",
 			S3Key:    "data/20250306-1111aaaa/metrics.csv",
 			Size:     12,
@@ -207,7 +208,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		})
 
 		figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: "before.png",
 			S3Key:    "figures/20250306-2222bbbb/before.png",
 			AltText:  strPtr("before"),
@@ -253,7 +254,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 
 		dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-			RecordID:     record.ID,
+			RecordID:    record.ID,
 			Filename:    "before.csv",
 			S3Key:       "data/20250306-2222bbbb/before.csv",
 			Size:        7,
@@ -516,7 +517,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		ctx := context.Background()
 
 		_, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-			RecordID:  "20250309-missing0",
+			RecordID: "20250309-missing0",
 			Filename: "orphan.png",
 			S3Key:    "figures/20250309-missing0/orphan.png",
 		})
@@ -531,7 +532,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			HTMLContent: strPtr("<h1>Cascade</h1>"),
 		})
 		figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: "f.png",
 			S3Key:    "figures/20250309-ca5cad01/f.png",
 		})
@@ -539,7 +540,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			t.Fatalf("CreateRecordFigure() error = %v", err)
 		}
 		dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: "d.csv",
 			S3Key:    "data/20250309-ca5cad01/d.csv",
 			Size:     4,
@@ -864,6 +865,258 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 	})
 
+	t.Run("CountRecords honors filters and ignores limit", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		now := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+		alpha := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
+			ID:             "20260508-a1a1a1a1",
+			Date:           "2026-05-08",
+			DayOrder:       "a",
+			HTMLContent:    strPtr("<p>alpha html</p>"),
+			Notes:          strPtr("alpha notes"),
+			ProjectID:      "count/alpha",
+			SourceDeviceID: "source-alpha-device",
+			SourceRef:      strPtr("source-alpha-ref"),
+			UpdatedAt:      &now,
+		})
+		beta := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
+			ID:             "20260509-b2b2b2b2",
+			Date:           "2026-05-09",
+			DayOrder:       "b",
+			ProjectID:      "count/beta",
+			SourceDeviceID: "source-beta-device",
+			UpdatedAt:      ptrTime(now.Add(time.Hour)),
+		})
+		deleted := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
+			ID:          "20260510-c3c3c3c3",
+			Date:        "2026-05-10",
+			DayOrder:    "c",
+			HTMLContent: strPtr("<p>deleted html</p>"),
+			ProjectID:   "count/alpha",
+			UpdatedAt:   ptrTime(now.Add(2 * time.Hour)),
+		})
+		if _, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+			RecordID: alpha.ID,
+			Filename: "alpha.json",
+			S3Key:    "data/alpha.json",
+			Size:     2,
+			Hash:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}); err != nil {
+			t.Fatalf("CreateRecordDataFile(alpha) error = %v", err)
+		}
+		if err := repo.SoftDeleteRecord(ctx, deleted.ID); err != nil {
+			t.Fatalf("SoftDeleteRecord() error = %v", err)
+		}
+
+		count, err := repo.CountRecords(ctx, repository.ListRecordsFilter{})
+		if err != nil {
+			t.Fatalf("CountRecords(default) error = %v", err)
+		}
+		if count != 2 {
+			t.Fatalf("default count = %d, want 2", count)
+		}
+
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{Limit: 1})
+		if err != nil {
+			t.Fatalf("CountRecords(limit ignored) error = %v", err)
+		}
+		if count != 2 {
+			t.Fatalf("limit-ignored count = %d, want 2", count)
+		}
+
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{ProjectID: strPtr("count/alpha")})
+		if err != nil {
+			t.Fatalf("CountRecords(project) error = %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("project count = %d, want 1", count)
+		}
+
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{DateFrom: strPtr("2026-05-09"), DateTo: strPtr("2026-05-09")})
+		if err != nil {
+			t.Fatalf("CountRecords(date) error = %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("date count = %d, want 1", count)
+		}
+
+		updatedAfter := now.Add(30 * time.Minute)
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{UpdatedAfter: &updatedAfter})
+		if err != nil {
+			t.Fatalf("CountRecords(updated_after) error = %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("updated_after count = %d, want 1", count)
+		}
+
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{IncludeDeleted: true})
+		if err != nil {
+			t.Fatalf("CountRecords(include deleted) error = %v", err)
+		}
+		if count != 3 {
+			t.Fatalf("include-deleted count = %d, want 3", count)
+		}
+
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{OnlyDeleted: true})
+		if err != nil {
+			t.Fatalf("CountRecords(only deleted) error = %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("only-deleted count = %d, want 1", count)
+		}
+
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{HasHTML: true})
+		if err != nil {
+			t.Fatalf("CountRecords(has html) error = %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("has-html count = %d, want 1", count)
+		}
+
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{HasData: true})
+		if err != nil {
+			t.Fatalf("CountRecords(has data) error = %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("has-data count = %d, want 1", count)
+		}
+
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{ProjectID: strPtr("count/missing")})
+		if err != nil {
+			t.Fatalf("CountRecords(empty) error = %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("empty count = %d, want 0", count)
+		}
+
+		sourceDeviceQuery := "source-alpha-device"
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{Query: &sourceDeviceQuery})
+		if err != nil {
+			t.Fatalf("CountRecords(source_device_id query) error = %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("source_device_id query count = %d, want 1", count)
+		}
+
+		sourceRefQuery := "source-alpha-ref"
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{Query: &sourceRefQuery})
+		if err != nil {
+			t.Fatalf("CountRecords(source_ref query) error = %v", err)
+		}
+		if count != 1 {
+			t.Fatalf("source_ref query count = %d, want 1", count)
+		}
+
+		_ = beta
+	})
+
+	t.Run("CountRecordChildren aggregates child rows", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		withChildren := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
+			ID:          "20260511-a1a1a1a1",
+			Date:        "2026-05-11",
+			DayOrder:    "a",
+			HTMLContent: strPtr("<p>with children</p>"),
+		})
+		zeroChildren := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
+			ID:          "20260511-b2b2b2b2",
+			Date:        "2026-05-11",
+			DayOrder:    "b",
+			HTMLContent: strPtr("<p>zero children</p>"),
+		})
+		for _, name := range []string{"one.png", "two.png"} {
+			if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+				RecordID: withChildren.ID,
+				Filename: name,
+				S3Key:    "figures/" + name,
+			}); err != nil {
+				t.Fatalf("CreateRecordFigure(%s) error = %v", name, err)
+			}
+		}
+		if _, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+			RecordID: withChildren.ID,
+			Filename: "metrics.json",
+			S3Key:    "data/metrics.json",
+			Size:     2,
+			Hash:     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		}); err != nil {
+			t.Fatalf("CreateRecordDataFile() error = %v", err)
+		}
+
+		counts, err := repo.CountRecordChildren(ctx, nil)
+		if err != nil {
+			t.Fatalf("CountRecordChildren(nil) error = %v", err)
+		}
+		if len(counts) != 0 {
+			t.Fatalf("nil input counts = %+v, want empty map", counts)
+		}
+
+		counts, err = repo.CountRecordChildren(ctx, []string{})
+		if err != nil {
+			t.Fatalf("CountRecordChildren(empty) error = %v", err)
+		}
+		if len(counts) != 0 {
+			t.Fatalf("empty input counts = %+v, want empty map", counts)
+		}
+
+		counts, err = repo.CountRecordChildren(ctx, []string{withChildren.ID, zeroChildren.ID, "20260511-missing"})
+		if err != nil {
+			t.Fatalf("CountRecordChildren(mixed) error = %v", err)
+		}
+		if counts[withChildren.ID].Figures != 2 || counts[withChildren.ID].DataFiles != 1 {
+			t.Fatalf("with-children counts = %+v, want figures=2 data_files=1", counts[withChildren.ID])
+		}
+		if counts[zeroChildren.ID] != (repository.ChildCounts{}) {
+			t.Fatalf("zero-child counts = %+v, want zero value", counts[zeroChildren.ID])
+		}
+		if counts["20260511-missing"] != (repository.ChildCounts{}) {
+			t.Fatalf("missing-id counts = %+v, want zero value", counts["20260511-missing"])
+		}
+	})
+
+	t.Run("CountRecordChildren handles large ID sets without exceeding parameter limits", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		// 1500 IDs spans multiple SQLite chunks (500/chunk) and exercises the
+		// Postgres array-binding path. Only the first record actually exists in
+		// the DB; the rest are "missing" sentinels that must round-trip safely.
+		populated := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
+			ID:          "20260512-aaaaaaaa",
+			Date:        "2026-05-12",
+			DayOrder:    "a",
+			HTMLContent: strPtr("<p>scaled</p>"),
+		})
+		if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID: populated.ID,
+			Filename: "scale.png",
+			S3Key:    "figures/scale.png",
+		}); err != nil {
+			t.Fatalf("CreateRecordFigure() error = %v", err)
+		}
+
+		ids := make([]string, 0, 1500)
+		ids = append(ids, populated.ID)
+		for i := 1; i < 1500; i++ {
+			ids = append(ids, fmt.Sprintf("20260512-%08x", i))
+		}
+
+		counts, err := repo.CountRecordChildren(ctx, ids)
+		if err != nil {
+			t.Fatalf("CountRecordChildren(large) error = %v", err)
+		}
+		if counts[populated.ID].Figures != 1 || counts[populated.ID].DataFiles != 0 {
+			t.Fatalf("large-input counts[%s] = %+v, want figures=1 data_files=0", populated.ID, counts[populated.ID])
+		}
+		if got := len(counts); got != 1 {
+			t.Fatalf("large-input total counts = %d, want 1 (only populated record has children)", got)
+		}
+	})
+
 	t.Run("CountActiveRecords and CountTrashedRecords", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
@@ -1124,6 +1377,10 @@ func assertExactOrder(t *testing.T, got []string, want []string) {
 }
 
 func strPtr(value string) *string {
+	return &value
+}
+
+func ptrTime(value time.Time) *time.Time {
 	return &value
 }
 

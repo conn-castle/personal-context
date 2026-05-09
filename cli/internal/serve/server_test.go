@@ -22,20 +22,21 @@ import (
 // --- Mock repository ---
 
 type mockRepo struct {
-	records     []repository.Record
+	records    []repository.Record
 	figures    map[string][]repository.RecordFigure
 	dataFiles  map[string][]repository.RecordDataFile
 	projectIDs []string
 	syncVer    repository.SyncVersion
 
 	// Error injection
-	listRecordsErr     error
-	getRecordErr       error
-	updateRecordErr    error
+	listRecordsErr    error
+	getRecordErr      error
+	updateRecordErr   error
 	softDeleteErr     error
 	restoreErr        error
-	deleteRecordErr    error
-	countRecordsErr    error
+	deleteRecordErr   error
+	countRecordsErr   error
+	countChildrenErr  error
 	purgeDeletedErr   error
 	listFiguresErr    error
 	listDataFilesErr  error
@@ -134,6 +135,12 @@ func (m *mockRepo) ListRecords(_ context.Context, filter repository.ListRecordsF
 		if filter.ProjectID != nil && s.ProjectID != *filter.ProjectID {
 			continue
 		}
+		if filter.HasHTML && s.HTMLContent == nil {
+			continue
+		}
+		if filter.HasData && len(m.dataFiles[s.ID]) == 0 {
+			continue
+		}
 		if filter.UpdatedAfter != nil && s.UpdatedAt.Before(*filter.UpdatedAfter) {
 			continue
 		}
@@ -155,6 +162,33 @@ func (m *mockRepo) ListRecords(_ context.Context, filter repository.ListRecordsF
 		result = result[:filter.Limit]
 	}
 	return result, nil
+}
+
+func (m *mockRepo) CountRecords(ctx context.Context, filter repository.ListRecordsFilter) (int, error) {
+	if m.countRecordsErr != nil {
+		return 0, m.countRecordsErr
+	}
+	filter.Limit = 0
+	records, err := m.ListRecords(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return len(records), nil
+}
+
+func (m *mockRepo) CountRecordChildren(_ context.Context, recordIDs []string) (map[string]repository.ChildCounts, error) {
+	if m.countChildrenErr != nil {
+		return nil, m.countChildrenErr
+	}
+	counts := make(map[string]repository.ChildCounts)
+	for _, id := range recordIDs {
+		figureCount := len(m.figures[id])
+		dataFileCount := len(m.dataFiles[id])
+		if figureCount > 0 || dataFileCount > 0 {
+			counts[id] = repository.ChildCounts{Figures: figureCount, DataFiles: dataFileCount}
+		}
+	}
+	return counts, nil
 }
 
 func (m *mockRepo) GetRecordByID(_ context.Context, id string) (repository.Record, error) {
@@ -419,21 +453,12 @@ func TestDecodeJSONObject_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestBuildRecordSummary_LookupErrors(t *testing.T) {
+func TestBuildRecordSummary_UsesPrecomputedCounts(t *testing.T) {
 	record := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 
-	repo := newMockRepo()
-	repo.listFiguresErr = fmt.Errorf("figures unavailable")
-	srv := &Server{repo: repo}
-	if _, err := srv.buildRecordSummary(context.Background(), record); err == nil {
-		t.Fatal("expected figure lookup error")
-	}
-
-	repo = newMockRepo()
-	repo.listDataFilesErr = fmt.Errorf("data files unavailable")
-	srv = &Server{repo: repo}
-	if _, err := srv.buildRecordSummary(context.Background(), record); err == nil {
-		t.Fatal("expected data file lookup error")
+	got := buildRecordSummary(record, repository.ChildCounts{Figures: 2, DataFiles: 3})
+	if got.FigureCount != 2 || got.DataFileCount != 3 {
+		t.Fatalf("counts = (%d, %d), want (2, 3)", got.FigureCount, got.DataFileCount)
 	}
 }
 
@@ -613,6 +638,9 @@ func TestListRecords_Empty(t *testing.T) {
 	if len(items) != 0 {
 		t.Fatalf("expected empty items, got %d", len(items))
 	}
+	if body["total"] != float64(0) {
+		t.Fatalf("expected total=0, got %v", body["total"])
+	}
 	if body["next_cursor"] != nil {
 		t.Fatalf("expected nil cursor, got %v", body["next_cursor"])
 	}
@@ -633,6 +661,9 @@ func TestListRecords_SortOrder(t *testing.T) {
 	items := body["items"].([]any)
 	if len(items) != 3 {
 		t.Fatalf("expected 3 items, got %d", len(items))
+	}
+	if body["total"] != float64(3) {
+		t.Fatalf("expected total=3, got %v", body["total"])
 	}
 	// Should be date DESC: 2026-03-10 records first, then 2026-03-08
 	first := items[0].(map[string]any)
@@ -711,6 +742,9 @@ func TestListRecords_Pagination(t *testing.T) {
 	if len(items) != 2 {
 		t.Fatalf("expected 2 items, got %d", len(items))
 	}
+	if body["total"] != float64(3) {
+		t.Fatalf("expected total=3, got %v", body["total"])
+	}
 	if body["next_cursor"] == nil {
 		t.Fatal("expected next_cursor")
 	}
@@ -722,6 +756,9 @@ func TestListRecords_Pagination(t *testing.T) {
 	items2 := body2["items"].([]any)
 	if len(items2) != 1 {
 		t.Fatalf("expected 1 item on page 2, got %d", len(items2))
+	}
+	if body2["total"] != float64(3) {
+		t.Fatalf("expected cursor page total=3, got %v", body2["total"])
 	}
 	if body2["next_cursor"] != nil {
 		t.Fatal("expected nil next_cursor on last page")
@@ -836,7 +873,7 @@ func TestListRecords_FigureAndDataFileCount(t *testing.T) {
 func TestListRecords_CountLookupErrorReturns500(t *testing.T) {
 	repo := newMockRepo()
 	repo.records = []repository.Record{testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")}
-	repo.listFiguresErr = fmt.Errorf("figures broken")
+	repo.countChildrenErr = fmt.Errorf("figures broken")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 
@@ -1766,7 +1803,7 @@ func TestSyncChanges_CountLookupErrorReturns500(t *testing.T) {
 	s := testRecord("20260310-aaaaaaaa", "2026-03-10", "a0")
 	s.UpdatedAt = now
 	repo.records = []repository.Record{s}
-	repo.listFiguresErr = fmt.Errorf("figures broken")
+	repo.countChildrenErr = fmt.Errorf("figures broken")
 	ts := setupTestServer(t, repo)
 	defer ts.Close()
 

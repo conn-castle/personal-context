@@ -12,6 +12,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/conn-castle/personal-context/cli/internal/listpage"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/spf13/cobra"
 )
@@ -50,11 +51,6 @@ type recordListItem struct {
 	HasNotes       bool    `json:"has_notes"`
 	FigureCount    int     `json:"figure_count"`
 	DataFileCount  int     `json:"data_file_count"`
-}
-
-type recordListJSON struct {
-	Items      []recordListItem `json:"items"`
-	NextCursor *string          `json:"next_cursor"`
 }
 
 type cliCursorPayload struct {
@@ -103,6 +99,8 @@ func runList(ctx context.Context, stdout io.Writer, stderr io.Writer, opts recor
 	if err != nil {
 		return err
 	}
+	filter.HasHTML = opts.HasHTML
+	filter.HasData = opts.HasData
 	cursor, err := decodeCLICursor(strings.TrimSpace(opts.Cursor))
 	if err != nil {
 		return err
@@ -113,6 +111,11 @@ func runList(ctx context.Context, stdout io.Writer, stderr io.Writer, opts recor
 		return err
 	}
 	defer func() { _ = stack.Close() }()
+
+	total, err := stack.Repo.CountRecords(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("count records: %w", err)
+	}
 
 	records, err := stack.Repo.ListRecords(ctx, filter)
 	if err != nil {
@@ -125,22 +128,19 @@ func runList(ctx context.Context, stdout io.Writer, stderr io.Writer, opts recor
 	if opts.All || len(records) < itemCap {
 		itemCap = len(records)
 	}
+	pageRecords := records
+	if !opts.All && len(pageRecords) > opts.Limit+1 {
+		pageRecords = pageRecords[:opts.Limit+1]
+	}
+
+	childCounts, err := stack.Repo.CountRecordChildren(ctx, recordIDs(pageRecords))
+	if err != nil {
+		return fmt.Errorf("count record children: %w", err)
+	}
+
 	items := make([]recordListItem, 0, itemCap)
-	for _, record := range records {
-		if !opts.All && len(items) > opts.Limit {
-			break
-		}
-		item, err := buildRecordListItem(ctx, stack.Repo, record)
-		if err != nil {
-			return err
-		}
-		if opts.HasHTML && !item.HasHTML {
-			continue
-		}
-		if opts.HasData && item.DataFileCount == 0 {
-			continue
-		}
-		items = append(items, item)
+	for _, record := range pageRecords {
+		items = append(items, buildRecordListItem(record, childCounts[record.ID]))
 	}
 
 	var nextCursor *string
@@ -164,7 +164,7 @@ func runList(ctx context.Context, stdout io.Writer, stderr io.Writer, opts recor
 		}
 		return nil
 	case "json":
-		return writeIndentedJSON(stdout, recordListJSON{Items: items, NextCursor: nextCursor})
+		return listpage.WriteJSON(stdout, listpage.Response[recordListItem]{Items: items, Total: total, NextCursor: nextCursor})
 	default:
 		return fmt.Errorf("unknown format %q: expected table, ids, or json", opts.Format)
 	}
@@ -499,16 +499,16 @@ func decodeCLICursor(raw string) (*cliCursorPayload, error) {
 	return &cursor, nil
 }
 
-func buildRecordListItem(ctx context.Context, repo repository.Repository, record repository.Record) (recordListItem, error) {
-	figures, err := repo.ListRecordFiguresByRecordID(ctx, record.ID)
-	if err != nil {
-		return recordListItem{}, fmt.Errorf("list figures for %s: %w", record.ID, err)
+func recordIDs(records []repository.Record) []string {
+	ids := make([]string, 0, len(records))
+	for _, record := range records {
+		ids = append(ids, record.ID)
 	}
-	dataFiles, err := repo.ListRecordDataFilesByRecordID(ctx, record.ID)
-	if err != nil {
-		return recordListItem{}, fmt.Errorf("list data files for %s: %w", record.ID, err)
-	}
-	item := recordListItem{
+	return ids
+}
+
+func buildRecordListItem(record repository.Record, childCounts repository.ChildCounts) recordListItem {
+	return recordListItem{
 		ID:             record.ID,
 		Date:           record.Date,
 		DayOrder:       record.DayOrder,
@@ -518,10 +518,9 @@ func buildRecordListItem(ctx context.Context, repo repository.Repository, record
 		DeletedAt:      formatCLITimePtr(record.DeletedAt),
 		HasHTML:        record.HTMLContent != nil,
 		HasNotes:       record.Notes != nil,
-		FigureCount:    len(figures),
-		DataFileCount:  len(dataFiles),
+		FigureCount:    childCounts.Figures,
+		DataFileCount:  childCounts.DataFiles,
 	}
-	return item, nil
 }
 
 func buildRecordStats(ctx context.Context, homeDir string, stack *localStack, records []repository.Record) (recordStatsJSON, error) {

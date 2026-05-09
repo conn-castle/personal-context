@@ -145,7 +145,7 @@ async function setupMockApi(page: Page) {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ items: [RECORD], next_cursor: null }),
+      body: JSON.stringify({ items: [RECORD], total: 1, next_cursor: null }),
     });
   });
 
@@ -157,7 +157,7 @@ async function setupMockApi(page: Page) {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ items: [RECORD], next_cursor: null }),
+      body: JSON.stringify({ items: [RECORD], total: 1, next_cursor: null }),
     });
   });
 

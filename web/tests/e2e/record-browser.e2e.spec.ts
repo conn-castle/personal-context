@@ -214,7 +214,7 @@ async function setupMockApi(page: Page, overrides?: {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify(
-          overrides?.records ?? { items: [DELETED_RECORD], next_cursor: null }
+          overrides?.records ?? { items: [DELETED_RECORD], total: 1, next_cursor: null }
         ),
       });
       return;
@@ -230,7 +230,7 @@ async function setupMockApi(page: Page, overrides?: {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ items: filtered, next_cursor: null }),
+        body: JSON.stringify({ items: filtered, total: filtered.length, next_cursor: null }),
       });
       return;
     }
@@ -239,7 +239,7 @@ async function setupMockApi(page: Page, overrides?: {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(
-        overrides?.records ?? { items: [RECORD_A, RECORD_B, RECORD_C], next_cursor: null }
+        overrides?.records ?? { items: [RECORD_A, RECORD_B, RECORD_C], total: 3, next_cursor: null }
       ),
     });
   });
@@ -255,7 +255,7 @@ async function setupMockApi(page: Page, overrides?: {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(
-        overrides?.records ?? { items: [RECORD_A, RECORD_B, RECORD_C], next_cursor: null }
+        overrides?.records ?? { items: [RECORD_A, RECORD_B, RECORD_C], total: 3, next_cursor: null }
       ),
     });
   });
@@ -603,7 +603,7 @@ test.describe("Record Browser", () => {
     page,
   }) => {
     await setupMockApi(page, {
-      records: { items: [], next_cursor: null },
+      records: { items: [], total: 0, next_cursor: null },
       projects: { projects: [] },
     });
     await page.goto("/");
@@ -653,10 +653,12 @@ test.describe("Record Browser", () => {
           cursor === "cursor1"
             ? {
                 items: [RECORD_C],
+                total: 3,
                 next_cursor: null,
               }
             : {
                 items: [RECORD_A, RECORD_B],
+                total: 3,
                 next_cursor: "cursor1",
               }
         ),

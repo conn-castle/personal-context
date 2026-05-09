@@ -91,34 +91,44 @@ export async function GET(
       }
     }
 
-    // Build dynamic query
-    const conditions: string[] = [];
-    const params: unknown[] = [];
+    // Build base filters separately so total ignores cursor and limit.
+    const baseConditions: string[] = [];
+    const baseParams: unknown[] = [];
     let paramIndex = 1;
 
     // user_id filter (always applied)
-    conditions.push(`s.user_id = $${paramIndex++}`);
-    params.push(user.id);
+    baseConditions.push(`s.user_id = $${paramIndex++}`);
+    baseParams.push(user.id);
 
     // deleted filter
     const showDeleted = deletedParam === "true";
     if (showDeleted) {
-      conditions.push("s.deleted_at IS NOT NULL");
+      baseConditions.push("s.deleted_at IS NOT NULL");
     } else {
-      conditions.push("s.deleted_at IS NULL");
+      baseConditions.push("s.deleted_at IS NULL");
     }
 
     // project filter
     if (project !== null) {
-      conditions.push(`s.project_id = $${paramIndex++}`);
-      params.push(project);
+      baseConditions.push(`s.project_id = $${paramIndex++}`);
+      baseParams.push(project);
     }
 
     // updated_after filter (>= per Decision t7u8v9)
     if (updatedAfter !== null) {
-      conditions.push(`s.updated_at >= $${paramIndex++}`);
-      params.push(updatedAfter);
+      baseConditions.push(`s.updated_at >= $${paramIndex++}`);
+      baseParams.push(updatedAfter);
     }
+
+    const baseWhereClause = `WHERE ${baseConditions.join(" AND ")}`;
+    const countRows = await sql(
+      `SELECT COUNT(*)::int AS total FROM records s ${baseWhereClause}`,
+      baseParams
+    );
+    const total = Number(countRows[0].total);
+
+    const conditions = [...baseConditions];
+    const params = [...baseParams];
 
     // cursor-based pagination (row-value comparison)
     // Sort is: date DESC, day_order ASC, id ASC
@@ -134,8 +144,7 @@ export async function GET(
       params.push(cursor.date, cursor.day_order, cursor.id);
     }
 
-    const whereClause =
-      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
 
     const pageSize = limit + 1;
 
@@ -185,7 +194,7 @@ export async function GET(
       });
     }
 
-    return NextResponse.json({ items, next_cursor: nextCursor });
+    return NextResponse.json({ items, total, next_cursor: nextCursor });
   } catch (error) {
     console.error("GET /api/records error:", error);
     return internalError("Failed to list records");

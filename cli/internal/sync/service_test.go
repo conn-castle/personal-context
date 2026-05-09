@@ -29,12 +29,12 @@ func TestServiceSyncPushesLocalBundleToCloud(t *testing.T) {
 			UpdatedAt:   now,
 		},
 		Figures: []repository.RecordFigure{{
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 		}},
 		DataFiles: []repository.RecordDataFile{{
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: "metrics.csv",
 			S3Key:    "data/20260308-a1b2c3d4/metrics.csv",
 			Size:     7,
@@ -84,12 +84,12 @@ func TestServiceSyncPullsCloudBundleToLocalWithoutDownloadingDataFiles(t *testin
 			UpdatedAt:   now,
 		},
 		Figures: []repository.RecordFigure{{
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: "chart.png",
 			S3Key:    "figures/20260308-deadbeef/chart.png",
 		}},
 		DataFiles: []repository.RecordDataFile{{
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: "report.csv",
 			S3Key:    "data/20260308-deadbeef/report.csv",
 			Size:     9,
@@ -135,7 +135,7 @@ func TestServiceSyncLeavesLastSyncUnchangedOnFailure(t *testing.T) {
 			UpdatedAt:   now,
 		},
 		Figures: []repository.RecordFigure{{
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: "missing.png",
 			S3Key:    "figures/20260308-feedface/missing.png",
 		}},
@@ -170,7 +170,7 @@ func TestServiceSyncPullsLaterCloudEditOverLocalChange(t *testing.T) {
 			UpdatedAt:   base.Add(1 * time.Minute),
 		},
 		Figures: []repository.RecordFigure{{
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-cafebabe/plot.png",
 		}},
@@ -185,7 +185,7 @@ func TestServiceSyncPullsLaterCloudEditOverLocalChange(t *testing.T) {
 			UpdatedAt:   base.Add(2 * time.Minute),
 		},
 		Figures: []repository.RecordFigure{{
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-cafebabe/plot.png",
 		}},
@@ -223,7 +223,7 @@ func TestServiceSyncPullsRenamedCloudFigureWithoutDeletingNewFile(t *testing.T) 
 		},
 		Figures: []repository.RecordFigure{{
 			ID:       1,
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: "old.png",
 			S3Key:    "figures/20260308-rename01/old.png",
 		}},
@@ -239,7 +239,7 @@ func TestServiceSyncPullsRenamedCloudFigureWithoutDeletingNewFile(t *testing.T) 
 		},
 		Figures: []repository.RecordFigure{{
 			ID:       1,
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: "new.png",
 			S3Key:    "figures/20260308-rename01/new.png",
 		}},
@@ -517,7 +517,7 @@ func TestSyncErrorsOnUploadFileOpenFailure(t *testing.T) {
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.RecordFigure{{
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: "missing.png",
 			S3Key:    "figures/20260308-a1b2c3d4/missing.png",
 		}},
@@ -544,7 +544,7 @@ func TestSyncErrorsOnDownloadFailure(t *testing.T) {
 			CreatedAt:   now, UpdatedAt: now,
 		},
 		Figures: []repository.RecordFigure{{
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: "chart.png",
 			S3Key:    "figures/20260308-a1b2c3d4/chart.png",
 		}},
@@ -3520,17 +3520,17 @@ func (e *errSessionManager) Complete(_ syncengine.SyncWindow) error {
 
 type memoryRepo struct {
 	records         map[string]repository.Record
-	projects       map[string]repository.Project
-	devices        map[string]repository.Device
+	projects        map[string]repository.Project
+	devices         map[string]repository.Device
 	figuresByRecord map[string]map[string]repository.RecordFigure
 	dataByRecord    map[string]map[string]repository.RecordDataFile
-	nextFigureID   int64
-	nextDataID     int64
-	syncVersion    repository.SyncVersion
+	nextFigureID    int64
+	nextDataID      int64
+	syncVersion     repository.SyncVersion
 
 	// Error injection fields.
 	listRecordsErr             error
-	getSyncVersionErr         error
+	getSyncVersionErr          error
 	getRecordByIDErr           error
 	listFiguresByRecordIDErr   error
 	listDataFilesByRecordIDErr error
@@ -3547,13 +3547,13 @@ type memoryRepo struct {
 func newMemoryRepo(bundles []RecordBundle) *memoryRepo {
 	repo := &memoryRepo{
 		records:         make(map[string]repository.Record),
-		projects:       make(map[string]repository.Project),
-		devices:        make(map[string]repository.Device),
+		projects:        make(map[string]repository.Project),
+		devices:         make(map[string]repository.Device),
 		figuresByRecord: make(map[string]map[string]repository.RecordFigure),
 		dataByRecord:    make(map[string]map[string]repository.RecordDataFile),
-		nextFigureID:   1,
-		nextDataID:     1,
-		syncVersion:    repository.SyncVersion{ID: 1, Version: 1},
+		nextFigureID:    1,
+		nextDataID:      1,
+		syncVersion:     repository.SyncVersion{ID: 1, Version: 1},
 	}
 	for _, bundle := range bundles {
 		if bundle.Record.ProjectID == "" {
@@ -3680,13 +3680,34 @@ func (m *memoryRepo) ListRecords(_ context.Context, filter repository.ListRecord
 	return result, nil
 }
 
+func (m *memoryRepo) CountRecords(ctx context.Context, filter repository.ListRecordsFilter) (int, error) {
+	filter.Limit = 0
+	records, err := m.ListRecords(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return len(records), nil
+}
+
+func (m *memoryRepo) CountRecordChildren(_ context.Context, recordIDs []string) (map[string]repository.ChildCounts, error) {
+	counts := make(map[string]repository.ChildCounts)
+	for _, id := range recordIDs {
+		figureCount := len(m.figuresByRecord[id])
+		dataFileCount := len(m.dataByRecord[id])
+		if figureCount > 0 || dataFileCount > 0 {
+			counts[id] = repository.ChildCounts{Figures: figureCount, DataFiles: dataFileCount}
+		}
+	}
+	return counts, nil
+}
+
 func (m *memoryRepo) CreateRecordFigure(_ context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
 	if m.createRecordFigureErr != nil {
 		return repository.RecordFigure{}, m.createRecordFigureErr
 	}
 	figure := repository.RecordFigure{
 		ID:       m.nextFigureID,
-		RecordID:  input.RecordID,
+		RecordID: input.RecordID,
 		Filename: input.Filename,
 		S3Key:    input.S3Key,
 		AltText:  cloneStringPtr(input.AltText),
@@ -3766,7 +3787,7 @@ func (m *memoryRepo) CreateRecordDataFile(_ context.Context, input repository.Cr
 	}
 	dataFile := repository.RecordDataFile{
 		ID:          m.nextDataID,
-		RecordID:     input.RecordID,
+		RecordID:    input.RecordID,
 		Filename:    input.Filename,
 		S3Key:       input.S3Key,
 		Size:        input.Size,
