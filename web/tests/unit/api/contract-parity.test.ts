@@ -251,7 +251,7 @@ describe("Contract: GET /api/records", () => {
     mockSql.mockReset();
   });
 
-  it("response shape matches { items: RecordSummary[], next_cursor: string|null }", async () => {
+  it("response shape matches { items: RecordSummary[], total: number, next_cursor: string|null }", async () => {
     const summaryRow = {
       id: RECORD_ID,
       date: "2026-03-10",
@@ -265,8 +265,8 @@ describe("Contract: GET /api/records", () => {
       figure_count: 0,
       data_file_count: 0,
     };
-    // mockSql is used with a dynamic call signature; return one row
-    mockSql.mockResolvedValueOnce([summaryRow]);
+    // mockSql is used with a dynamic call signature; return count then rows.
+    mockSql.mockResolvedValueOnce([{ total: 1 }]).mockResolvedValueOnce([summaryRow]);
 
     const req = new NextRequest("http://localhost/api/records");
     const res = await recordsGET(req);
@@ -277,6 +277,7 @@ describe("Contract: GET /api/records", () => {
     // Top-level shape
     assertExactShape(body, {
       items: "object", // array is typeof "object"
+      total: "number",
       next_cursor: "string|null",
     });
 

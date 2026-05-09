@@ -8,14 +8,14 @@ test("renders the home page with Personal Context heading @smoke", async ({
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ items: [], next_cursor: null }),
+      body: JSON.stringify({ items: [], total: 0, next_cursor: null }),
     });
   });
   await page.route("**/api/records?*", async (route: Route) => {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ items: [], next_cursor: null }),
+      body: JSON.stringify({ items: [], total: 0, next_cursor: null }),
     });
   });
   await page.route("**/api/projects", async (route: Route) => {

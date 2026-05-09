@@ -155,8 +155,8 @@ above with `--api-key`.
 - `pc delete <id>` — soft-delete a record
 - `pc restore <id>` — un-delete a record
 - `pc move <id>` — change date and/or position (`--date`, `--first`, `--last`, `--after`, `--before`)
-- `pc search <query>` — search records by content, notes, or project (`--format table|ids|json`, `--limit`, `--project`, `--deleted`)
-- `pc list` — list bounded record summaries newest-first (`--limit`, `--cursor`, `--from`, `--to`, `--project`, `--deleted`, `--has-html`, `--has-data`, `--all`, `--format table|ids|json`)
+- `pc search <query>` — search records by content, notes, project, source device, or source ref (`--format table|ids|json`, `--limit` defaults to 50, `--limit 0` is unlimited, table/ids show truncation, JSON returns `{items,total,next_cursor}`, `--project`, `--deleted`)
+- `pc list` — list bounded record summaries newest-first (`--limit`, `--cursor`, `--from`, `--to`, `--project`, `--deleted`, `--has-html`, `--has-data`, `--all`, `--format table|ids|json`; JSON returns `{items,total,next_cursor}`)
 - `pc stats` — show local record counts, attachment counts, date range, and explicit size components (`--from`, `--to`, `--project`, `--deleted`, `--format text|json`)
 - `pc files list` — inventory record attachments with local path/status (`--record`, `--from`, `--to`, `--project`, `--deleted`, `--format table|json`)
 - `pc trash` — list soft-deleted records

@@ -20,9 +20,11 @@ import (
 type mockRepo struct {
 	getTemplateByNameFn func(ctx context.Context, name string) (repository.Template, error)
 	createTemplateFn    func(ctx context.Context, input repository.CreateTemplateInput) (repository.Template, error)
-	createRecordFn       func(ctx context.Context, input repository.CreateRecordInput) (repository.Record, error)
-	getRecordByIDFn      func(ctx context.Context, id string) (repository.Record, error)
-	listRecordsFn        func(ctx context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error)
+	createRecordFn      func(ctx context.Context, input repository.CreateRecordInput) (repository.Record, error)
+	getRecordByIDFn     func(ctx context.Context, id string) (repository.Record, error)
+	listRecordsFn       func(ctx context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error)
+	countRecordsFn      func(ctx context.Context, filter repository.ListRecordsFilter) (int, error)
+	countChildrenFn     func(ctx context.Context, recordIDs []string) (map[string]repository.ChildCounts, error)
 	listFiguresFn       func(ctx context.Context, recordID string) ([]repository.RecordFigure, error)
 	createFigureFn      func(ctx context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error)
 	updateFigureFn      func(ctx context.Context, input repository.UpdateRecordFigureInput) (repository.RecordFigure, error)
@@ -74,6 +76,37 @@ func (m *mockRepo) ListRecords(ctx context.Context, filter repository.ListRecord
 		return m.listRecordsFn(ctx, filter)
 	}
 	return nil, nil
+}
+func (m *mockRepo) CountRecords(ctx context.Context, filter repository.ListRecordsFilter) (int, error) {
+	if m.countRecordsFn != nil {
+		return m.countRecordsFn(ctx, filter)
+	}
+	filter.Limit = 0
+	records, err := m.ListRecords(ctx, filter)
+	if err != nil {
+		return 0, err
+	}
+	return len(records), nil
+}
+func (m *mockRepo) CountRecordChildren(ctx context.Context, recordIDs []string) (map[string]repository.ChildCounts, error) {
+	if m.countChildrenFn != nil {
+		return m.countChildrenFn(ctx, recordIDs)
+	}
+	counts := make(map[string]repository.ChildCounts)
+	for _, id := range recordIDs {
+		figures, err := m.ListRecordFiguresByRecordID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		dataFiles, err := m.ListRecordDataFilesByRecordID(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if len(figures) > 0 || len(dataFiles) > 0 {
+			counts[id] = repository.ChildCounts{Figures: len(figures), DataFiles: len(dataFiles)}
+		}
+	}
+	return counts, nil
 }
 func (m *mockRepo) SoftDeleteRecord(context.Context, string) error { return nil }
 func (m *mockRepo) RestoreRecord(context.Context, string) error    { return nil }

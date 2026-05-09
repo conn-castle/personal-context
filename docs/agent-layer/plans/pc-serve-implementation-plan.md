@@ -84,7 +84,7 @@ Implement each endpoint in `cli/internal/serve/`. Each handler calls the existin
 - Parse query params: `limit`, `cursor`, `project`, `deleted`, `updated_after`.
 - Calls `repo.ListRecords()` with appropriate `ListRecordsFilter`.
 - Implement cursor-based pagination (same cursor format as web API — encode `(date, day_order, id)` tuple).
-- Response: `{"items": [...RecordSummary], "next_cursor": "..." | null}`.
+- Response: `{"items": [...RecordSummary], "total": 123, "next_cursor": "..." | null}`.
 - **Note**: Must include nullable `html_content`, `project_id`, `source_device_id`, `source_ref`, `figure_count`, and `data_file_count` in each RecordSummary. `figure_count` and `data_file_count` require additional queries or a list+count helper.
 
 **B3. `GET /api/records/:id`**

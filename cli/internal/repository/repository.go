@@ -13,6 +13,12 @@ type Repository interface {
 	GetRecordByID(ctx context.Context, id string) (Record, error)
 	UpdateRecord(ctx context.Context, input UpdateRecordInput) (Record, error)
 	ListRecords(ctx context.Context, filter ListRecordsFilter) ([]Record, error)
+	// CountRecords counts records matching non-pagination filters. It ignores
+	// ListRecordsFilter.Limit and any cursor applied by callers.
+	CountRecords(ctx context.Context, filter ListRecordsFilter) (int, error)
+	// CountRecordChildren returns child-row counts keyed by record ID. Nil or
+	// empty inputs return an empty map; records with no child rows may be absent.
+	CountRecordChildren(ctx context.Context, recordIDs []string) (map[string]ChildCounts, error)
 	SoftDeleteRecord(ctx context.Context, id string) error
 	RestoreRecord(ctx context.Context, id string) error
 	DeleteRecord(ctx context.Context, id string) error

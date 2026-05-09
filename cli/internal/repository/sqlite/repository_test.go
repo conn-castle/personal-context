@@ -181,7 +181,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 		t.Fatalf("expected ErrInvalidArgument for invalid figure create, got %v", err)
 	}
 	_, err = repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-		RecordID:  "20260305-missing00",
+		RecordID: "20260305-missing00",
 		Filename: "x.png",
 		S3Key:    "figures/20260305-missing00/x.png",
 	})
@@ -190,7 +190,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 	}
 
 	figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-		RecordID:  record.ID,
+		RecordID: record.ID,
 		Filename: "x.png",
 		S3Key:    "figures/20260305-11112222/x.png",
 	})
@@ -215,7 +215,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 		t.Fatalf("expected ErrInvalidArgument for invalid data file create, got %v", err)
 	}
 	_, err = repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-		RecordID:  record.ID,
+		RecordID: record.ID,
 		Filename: "x.csv",
 		S3Key:    "data/20260305-11112222/x.csv",
 		Size:     -1,
@@ -225,7 +225,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 		t.Fatalf("expected ErrInvalidArgument for negative file size, got %v", err)
 	}
 	dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-		RecordID:  record.ID,
+		RecordID: record.ID,
 		Filename: "x.csv",
 		S3Key:    "data/20260305-11112222/x.csv",
 		Size:     1,
@@ -295,7 +295,7 @@ func TestFigureAndDataFileNoOpUpdatesDoNotBumpSyncVersion(t *testing.T) {
 	})
 
 	figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-		RecordID:  record.ID,
+		RecordID: record.ID,
 		Filename: "plot.png",
 		S3Key:    "figures/20260305-dddd0002/plot.png",
 	})
@@ -304,7 +304,7 @@ func TestFigureAndDataFileNoOpUpdatesDoNotBumpSyncVersion(t *testing.T) {
 	}
 
 	dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-		RecordID:  record.ID,
+		RecordID: record.ID,
 		Filename: "data.csv",
 		S3Key:    "data/20260305-dddd0002/data.csv",
 		Size:     4,
@@ -816,7 +816,7 @@ func TestSQLiteListChildAndTemplateBranches(t *testing.T) {
 	})
 	alt := "Alt"
 	if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-		RecordID:  record.ID,
+		RecordID: record.ID,
 		Filename: "plot.png",
 		S3Key:    "figures/20260305-aaabbb03/plot.png",
 		AltText:  &alt,
@@ -832,7 +832,7 @@ func TestSQLiteListChildAndTemplateBranches(t *testing.T) {
 	}
 	description := "Data description"
 	if _, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-		RecordID:     record.ID,
+		RecordID:    record.ID,
 		Filename:    "data.csv",
 		S3Key:       "data/20260305-aaabbb03/data.csv",
 		Size:        12,
@@ -910,12 +910,17 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 			return err
 		}},
 		{name: "ListRecords", run: func() error { _, err := repo.ListRecords(ctx, repository.ListRecordsFilter{}); return err }},
+		{name: "CountRecords", run: func() error { _, err := repo.CountRecords(ctx, repository.ListRecordsFilter{}); return err }},
+		{name: "CountRecordChildren", run: func() error {
+			_, err := repo.CountRecordChildren(ctx, []string{"20260320-abcd1234"})
+			return err
+		}},
 		{name: "SoftDeleteRecord", run: func() error { return repo.SoftDeleteRecord(ctx, "20260320-abcd1234") }},
 		{name: "RestoreRecord", run: func() error { return repo.RestoreRecord(ctx, "20260320-abcd1234") }},
 		{name: "DeleteRecord", run: func() error { return repo.DeleteRecord(ctx, "20260320-abcd1234") }},
 		{name: "CreateRecordFigure", run: func() error {
 			_, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-				RecordID:  "20260320-abcd1234",
+				RecordID: "20260320-abcd1234",
 				Filename: "plot.png",
 				S3Key:    "figures/20260320-abcd1234/plot.png",
 			})
@@ -933,7 +938,7 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 		{name: "DeleteRecordFigure", run: func() error { return repo.DeleteRecordFigure(ctx, 1) }},
 		{name: "CreateRecordDataFile", run: func() error {
 			_, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-				RecordID:  "20260320-abcd1234",
+				RecordID: "20260320-abcd1234",
 				Filename: "data.csv",
 				S3Key:    "data/20260320-abcd1234/data.csv",
 				Size:     1,
