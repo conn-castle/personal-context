@@ -234,31 +234,31 @@ func (r *Repository) CountRecords(ctx context.Context, filter repository.ListRec
 }
 
 // CountRecordChildren returns child-row counts keyed by record ID.
+//
+// Uses `ANY($2::text[])` to bind record IDs as a single array parameter so the
+// query stays within Postgres's per-statement bind limit (~65k) regardless of
+// caller batch size; pgx encodes a Go []string directly to text[].
 func (r *Repository) CountRecordChildren(ctx context.Context, recordIDs []string) (map[string]repository.ChildCounts, error) {
 	counts := make(map[string]repository.ChildCounts)
 	if len(recordIDs) == 0 {
 		return counts, nil
 	}
-	args := make([]any, 0, len(recordIDs)+1)
-	args = append(args, r.userID)
-	placeholders := make([]string, 0, len(recordIDs))
-	for idx, id := range recordIDs {
+	ids := make([]string, 0, len(recordIDs))
+	for _, id := range recordIDs {
 		if strings.TrimSpace(id) == "" {
 			return nil, repository.ErrInvalidArgument
 		}
-		args = append(args, id)
-		placeholders = append(placeholders, fmt.Sprintf("$%d", idx+2))
+		ids = append(ids, id)
 	}
-	inClause := strings.Join(placeholders, ",")
 
 	setFigures := func(c *repository.ChildCounts, n int) { c.Figures = n }
 	setDataFiles := func(c *repository.ChildCounts, n int) { c.DataFiles = n }
-	figureQuery := `SELECT f.record_id, COUNT(*) FROM record_figures AS f INNER JOIN records AS s ON s.id = f.record_id WHERE s.user_id = $1 AND f.record_id IN (` + inClause + `) GROUP BY f.record_id`
-	if err := r.mergeChildCounts(ctx, counts, setFigures, figureQuery, args...); err != nil {
+	figureQuery := `SELECT f.record_id, COUNT(*) FROM record_figures AS f INNER JOIN records AS s ON s.id = f.record_id WHERE s.user_id = $1 AND f.record_id = ANY($2::text[]) GROUP BY f.record_id`
+	if err := r.mergeChildCounts(ctx, counts, setFigures, figureQuery, r.userID, ids); err != nil {
 		return nil, err
 	}
-	dataQuery := `SELECT d.record_id, COUNT(*) FROM record_data_files AS d INNER JOIN records AS s ON s.id = d.record_id WHERE s.user_id = $1 AND d.record_id IN (` + inClause + `) GROUP BY d.record_id`
-	if err := r.mergeChildCounts(ctx, counts, setDataFiles, dataQuery, args...); err != nil {
+	dataQuery := `SELECT d.record_id, COUNT(*) FROM record_data_files AS d INNER JOIN records AS s ON s.id = d.record_id WHERE s.user_id = $1 AND d.record_id = ANY($2::text[]) GROUP BY d.record_id`
+	if err := r.mergeChildCounts(ctx, counts, setDataFiles, dataQuery, r.userID, ids); err != nil {
 		return nil, err
 	}
 	return counts, nil

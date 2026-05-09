@@ -3,6 +3,7 @@ package repositorytest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -1074,6 +1075,45 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 		if counts["20260511-missing"] != (repository.ChildCounts{}) {
 			t.Fatalf("missing-id counts = %+v, want zero value", counts["20260511-missing"])
+		}
+	})
+
+	t.Run("CountRecordChildren handles large ID sets without exceeding parameter limits", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		// 1500 IDs spans multiple SQLite chunks (500/chunk) and exercises the
+		// Postgres array-binding path. Only the first record actually exists in
+		// the DB; the rest are "missing" sentinels that must round-trip safely.
+		populated := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
+			ID:          "20260512-aaaaaaaa",
+			Date:        "2026-05-12",
+			DayOrder:    "a",
+			HTMLContent: strPtr("<p>scaled</p>"),
+		})
+		if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID: populated.ID,
+			Filename: "scale.png",
+			S3Key:    "figures/scale.png",
+		}); err != nil {
+			t.Fatalf("CreateRecordFigure() error = %v", err)
+		}
+
+		ids := make([]string, 0, 1500)
+		ids = append(ids, populated.ID)
+		for i := 1; i < 1500; i++ {
+			ids = append(ids, fmt.Sprintf("20260512-%08x", i))
+		}
+
+		counts, err := repo.CountRecordChildren(ctx, ids)
+		if err != nil {
+			t.Fatalf("CountRecordChildren(large) error = %v", err)
+		}
+		if counts[populated.ID].Figures != 1 || counts[populated.ID].DataFiles != 0 {
+			t.Fatalf("large-input counts[%s] = %+v, want figures=1 data_files=0", populated.ID, counts[populated.ID])
+		}
+		if got := len(counts); got != 1 {
+			t.Fatalf("large-input total counts = %d, want 1 (only populated record has children)", got)
 		}
 	})
 

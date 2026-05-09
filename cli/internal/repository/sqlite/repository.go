@@ -221,29 +221,48 @@ func (r *Repository) CountRecords(ctx context.Context, filter repository.ListRec
 	return count, nil
 }
 
-// CountRecordChildren returns child-row counts keyed by record ID.
+// sqliteCountChildrenChunkSize bounds the number of host parameters per
+// CountRecordChildren batch. SQLite's default cap is 32766, so 500 leaves
+// generous headroom while keeping each round-trip cheap.
+const sqliteCountChildrenChunkSize = 500
+
+// CountRecordChildren returns child-row counts keyed by record ID. Inputs
+// larger than sqliteCountChildrenChunkSize are split into multiple bound
+// queries so the SQLite host-parameter cap is never reached.
 func (r *Repository) CountRecordChildren(ctx context.Context, recordIDs []string) (map[string]repository.ChildCounts, error) {
 	counts := make(map[string]repository.ChildCounts)
 	if len(recordIDs) == 0 {
 		return counts, nil
 	}
-	args := make([]any, 0, len(recordIDs))
-	placeholders := make([]string, 0, len(recordIDs))
+	ids := make([]string, 0, len(recordIDs))
 	for _, id := range recordIDs {
 		if strings.TrimSpace(id) == "" {
 			return nil, repository.ErrInvalidArgument
 		}
-		args = append(args, id)
-		placeholders = append(placeholders, "?")
+		ids = append(ids, id)
 	}
 
 	setFigures := func(c *repository.ChildCounts, n int) { c.Figures = n }
 	setDataFiles := func(c *repository.ChildCounts, n int) { c.DataFiles = n }
-	if err := r.mergeChildCounts(ctx, counts, setFigures, `SELECT record_id, COUNT(*) FROM record_figures WHERE record_id IN (`+strings.Join(placeholders, ",")+`) GROUP BY record_id`, args...); err != nil {
-		return nil, err
-	}
-	if err := r.mergeChildCounts(ctx, counts, setDataFiles, `SELECT record_id, COUNT(*) FROM record_data_files WHERE record_id IN (`+strings.Join(placeholders, ",")+`) GROUP BY record_id`, args...); err != nil {
-		return nil, err
+	for start := 0; start < len(ids); start += sqliteCountChildrenChunkSize {
+		end := start + sqliteCountChildrenChunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunk := ids[start:end]
+		args := make([]any, 0, len(chunk))
+		placeholders := make([]string, 0, len(chunk))
+		for _, id := range chunk {
+			args = append(args, id)
+			placeholders = append(placeholders, "?")
+		}
+		inClause := strings.Join(placeholders, ",")
+		if err := r.mergeChildCounts(ctx, counts, setFigures, `SELECT record_id, COUNT(*) FROM record_figures WHERE record_id IN (`+inClause+`) GROUP BY record_id`, args...); err != nil {
+			return nil, err
+		}
+		if err := r.mergeChildCounts(ctx, counts, setDataFiles, `SELECT record_id, COUNT(*) FROM record_data_files WHERE record_id IN (`+inClause+`) GROUP BY record_id`, args...); err != nil {
+			return nil, err
+		}
 	}
 	return counts, nil
 }
