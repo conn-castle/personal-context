@@ -63,6 +63,7 @@ func TestFetchSuccessPathFromRealCloudState(t *testing.T) {
 	// Sync should not download data-file bytes into the canonical local data path.
 	alpha1DefaultPath := filepath.Join(homeB, "personal-context", "data", alpha1ID, "dataset1.csv")
 	alpha2DefaultPath := filepath.Join(homeB, "personal-context", "data", alpha2ID, "results.json")
+	betaDefaultPath := filepath.Join(homeB, "personal-context", "data", betaID, "report.txt")
 	if _, err := os.Stat(alpha1DefaultPath); !os.IsNotExist(err) {
 		t.Fatalf("expected alpha1 default data path to be empty before fetch, stat err = %v", err)
 	}
@@ -115,13 +116,61 @@ func TestFetchSuccessPathFromRealCloudState(t *testing.T) {
 		t.Fatalf("expected fetch --output to leave canonical data path untouched for alpha2, stat err = %v", err)
 	}
 
-	// --- Phase 3: Verify no temp files remain ---
+	// --- Phase 3: Fetch all data files into the canonical local data path ---
+	fetchAllOut := runPCSuccessNoStderr(t, homeB, userHomeB, "fetch", "--all")
+	for _, want := range []string{
+		"Records scanned: 3\n",
+		"Files already present: 0\n",
+		"Files downloaded: 3\n",
+		"Missing/failed files: 0\n",
+	} {
+		if !strings.Contains(fetchAllOut, want) {
+			t.Fatalf("fetch --all output missing %q, got:\n%s", want, fetchAllOut)
+		}
+	}
+
+	for _, item := range []struct {
+		path string
+		want string
+	}{
+		{alpha1DefaultPath, "x,y\n1,2\n3,4\n"},
+		{alpha2DefaultPath, `{"accuracy": 0.95}`},
+		{betaDefaultPath, "Beta report content"},
+	} {
+		content, err := os.ReadFile(item.path)
+		if err != nil {
+			t.Fatalf("read canonical fetched file %s: %v", item.path, err)
+		}
+		if string(content) != item.want {
+			t.Fatalf("canonical file %s content = %q, want %q", item.path, string(content), item.want)
+		}
+	}
+
+	// --- Phase 4: Re-run all-mode fetch to verify idempotent skip behavior ---
+	fetchAllOut2 := runPCSuccessNoStderr(t, homeB, userHomeB, "fetch", "--all")
+	for _, want := range []string{
+		"Records scanned: 3\n",
+		"Files already present: 3\n",
+		"Files downloaded: 0\n",
+		"Bytes downloaded: 0\n",
+		"Missing/failed files: 0\n",
+	} {
+		if !strings.Contains(fetchAllOut2, want) {
+			t.Fatalf("second fetch --all output missing %q, got:\n%s", want, fetchAllOut2)
+		}
+	}
+
+	// --- Phase 5: Verify no temp files remain ---
 	tempFiles, _ := filepath.Glob(filepath.Join(customOutput, "*", ".pc-fetch-*.tmp"))
 	if len(tempFiles) > 0 {
 		t.Fatalf("temp files left behind: %v", tempFiles)
 	}
+	canonicalTempFiles, _ := filepath.Glob(filepath.Join(homeB, "personal-context", "data", "*", ".pc-fetch-*.tmp"))
+	if len(canonicalTempFiles) > 0 {
+		t.Fatalf("canonical temp files left behind: %v", canonicalTempFiles)
+	}
 
-	// --- Phase 4: Re-run fetch to verify idempotent overwrite ---
+	// --- Phase 6: Re-run project fetch to verify idempotent overwrite ---
 	fetchOut2 := runPCSuccessNoStderr(t, homeB, userHomeB,
 		"fetch", "--project", "alpha", "--output", customOutput)
 	if fetchOut2 != expectedFetchLine {

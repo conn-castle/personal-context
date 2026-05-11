@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/conn-castle/personal-context/cli/internal/filesystem"
+	"github.com/conn-castle/personal-context/cli/internal/recordio"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 	pcs3 "github.com/conn-castle/personal-context/cli/internal/s3client"
 	"github.com/spf13/cobra"
@@ -70,9 +72,18 @@ var downloadS3FileFn = func(ctx context.Context, s3Client *pcs3.Client, key stri
 
 // fetchOptions holds the flags for the fetch command.
 type fetchOptions struct {
+	All     bool
 	Project string
 	Recent  string
 	Output  string
+}
+
+type fetchAllStats struct {
+	RecordsScanned      int
+	FilesAlreadyPresent int
+	FilesDownloaded     int
+	BytesDownloaded     int64
+	FilesFailed         int
 }
 
 func newFetchCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
@@ -91,6 +102,7 @@ func newFetchCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().BoolVar(&opts.All, "all", false, "Download every cloud-backed data file for all non-deleted records into the canonical local data path")
 	cmd.Flags().StringVar(&opts.Project, "project", "", "Download data files for all records in a project")
 	cmd.Flags().StringVar(&opts.Recent, "recent", "", "Download data files for recent records (e.g. 3d, 2w, 1m, 1y)")
 	cmd.Flags().StringVar(&opts.Output, "output", "", "Write downloads to this directory instead of the default data path")
@@ -99,9 +111,12 @@ func newFetchCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 }
 
 // runFetch downloads data files from cloud S3 to local disk.
-func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, recordID string, opts fetchOptions) error {
+func runFetch(ctx context.Context, stdout io.Writer, stderr io.Writer, recordID string, opts fetchOptions) error {
 	// Validate exactly one mode selector.
 	modeCount := 0
+	if opts.All {
+		modeCount++
+	}
 	if recordID != "" {
 		modeCount++
 	}
@@ -112,10 +127,13 @@ func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, recordID strin
 		modeCount++
 	}
 	if modeCount == 0 {
-		return fmt.Errorf("specify a record ID, --project, or --recent")
+		return fmt.Errorf("specify a record ID, --all, --project, or --recent")
 	}
 	if modeCount > 1 {
-		return fmt.Errorf("record ID, --project, and --recent are mutually exclusive")
+		return fmt.Errorf("record ID, --all, --project, and --recent are mutually exclusive")
+	}
+	if opts.All && opts.Output != "" {
+		return fmt.Errorf("--all writes to the canonical local data path and cannot be combined with --output")
 	}
 
 	homeDir, err := resolveHomeDir()
@@ -131,6 +149,22 @@ func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, recordID strin
 		return fmt.Errorf("open cloud: %w", err)
 	}
 	defer func() { _ = cloud.Close() }()
+
+	if opts.All {
+		fsClient, err := newFilesystemClientFn(basePath(homeDir))
+		if err != nil {
+			return fmt.Errorf("create filesystem client: %w", err)
+		}
+		stats, failures, err := fetchAllDataFiles(ctx, cloud.Repo, cloud.S3, fsClient, stderr)
+		writeFetchAllSummary(stdout, stats)
+		if err != nil {
+			return err
+		}
+		if len(failures) > 0 {
+			return fmt.Errorf("fetch --all failed: %s", summarizeFetchAllFailures(failures))
+		}
+		return nil
+	}
 
 	// Determine the output base directory.
 	outputBase := opts.Output
@@ -174,6 +208,176 @@ func runFetch(ctx context.Context, stdout io.Writer, _ io.Writer, recordID strin
 	}
 
 	_, _ = fmt.Fprintf(stdout, "Downloaded %d file(s) to %s\n", downloaded, outputBase)
+	return nil
+}
+
+func fetchAllDataFiles(
+	ctx context.Context,
+	repo repository.Repository,
+	s3Client *pcs3.Client,
+	fsClient *filesystem.Client,
+	stderr io.Writer,
+) (fetchAllStats, []string, error) {
+	records, err := repo.ListRecords(ctx, repository.ListRecordsFilter{})
+	if err != nil {
+		return fetchAllStats{}, nil, fmt.Errorf("list non-deleted records: %w", err)
+	}
+
+	stats := fetchAllStats{RecordsScanned: len(records)}
+	failures := make([]string, 0)
+	for _, record := range records {
+		// Respond promptly to Ctrl+C / cancelled context across what can be a long
+		// per-record scan + download loop.
+		if err := ctx.Err(); err != nil {
+			return stats, failures, err
+		}
+		dataFiles, err := repo.ListRecordDataFilesByRecordID(ctx, record.ID)
+		if err != nil {
+			stats.FilesFailed++
+			failure := fmt.Sprintf("record %s: list data files: %v", record.ID, err)
+			failures = append(failures, failure)
+			_, _ = fmt.Fprintf(stderr, "Failed: %s\n", failure)
+			continue
+		}
+		for _, df := range dataFiles {
+			if err := validateFetchAllDataFile(df); err != nil {
+				stats.FilesFailed++
+				failure := fmt.Sprintf("%s/%s: %v", df.RecordID, df.Filename, err)
+				failures = append(failures, failure)
+				_, _ = fmt.Fprintf(stderr, "Failed: %s\n", failure)
+				continue
+			}
+
+			destPath, err := fsClient.ResolveDataFilePath(df.RecordID, df.Filename)
+			if err != nil {
+				stats.FilesFailed++
+				failure := fmt.Sprintf("%s/%s: %v", df.RecordID, df.Filename, err)
+				failures = append(failures, failure)
+				_, _ = fmt.Fprintf(stderr, "Failed: %s\n", failure)
+				continue
+			}
+
+			matches, err := localDataFileMatches(df, destPath)
+			if err != nil {
+				stats.FilesFailed++
+				failure := fmt.Sprintf("%s/%s: %v", df.RecordID, df.Filename, err)
+				failures = append(failures, failure)
+				_, _ = fmt.Fprintf(stderr, "Failed: %s\n", failure)
+				continue
+			}
+			if matches {
+				stats.FilesAlreadyPresent++
+				continue
+			}
+
+			if err := downloadS3FileFn(ctx, s3Client, df.S3Key, destPath); err != nil {
+				stats.FilesFailed++
+				failure := fmt.Sprintf("%s/%s: download %s: %v", df.RecordID, df.Filename, df.S3Key, err)
+				failures = append(failures, failure)
+				_, _ = fmt.Fprintf(stderr, "Failed: %s\n", failure)
+				continue
+			}
+			if err := verifyDataFile(df, destPath); err != nil {
+				// Verification failed after the atomic rename — the canonical path now
+				// holds known-bad bytes. Remove them so a future `pc fetch --all` (or
+				// any caller of the data path) does not observe a file that fails
+				// integrity checks.
+				if rmErr := os.Remove(destPath); rmErr != nil && !os.IsNotExist(rmErr) {
+					_, _ = fmt.Fprintf(stderr, "Failed: %s/%s: remove unverified file %s: %v\n", df.RecordID, df.Filename, destPath, rmErr)
+				}
+				stats.FilesFailed++
+				failure := fmt.Sprintf("%s/%s: verify downloaded file: %v", df.RecordID, df.Filename, err)
+				failures = append(failures, failure)
+				_, _ = fmt.Fprintf(stderr, "Failed: %s\n", failure)
+				continue
+			}
+			stats.FilesDownloaded++
+			stats.BytesDownloaded += df.Size
+		}
+	}
+	return stats, failures, nil
+}
+
+func writeFetchAllSummary(w io.Writer, stats fetchAllStats) {
+	_, _ = fmt.Fprintf(w, "Records scanned: %d\n", stats.RecordsScanned)
+	_, _ = fmt.Fprintf(w, "Files already present: %d\n", stats.FilesAlreadyPresent)
+	_, _ = fmt.Fprintf(w, "Files downloaded: %d\n", stats.FilesDownloaded)
+	_, _ = fmt.Fprintf(w, "Bytes downloaded: %d\n", stats.BytesDownloaded)
+	_, _ = fmt.Fprintf(w, "Missing/failed files: %d\n", stats.FilesFailed)
+}
+
+// fetchAllFailuresErrorPreview caps the number of failure entries inlined into the
+// terminal error returned by `pc fetch --all`. Each failure is also written to stderr
+// individually so operators can scan the full list there.
+const fetchAllFailuresErrorPreview = 5
+
+func summarizeFetchAllFailures(failures []string) string {
+	total := len(failures)
+	if total <= fetchAllFailuresErrorPreview {
+		return fmt.Sprintf("%d file(s) missing or failed: %s", total, strings.Join(failures, "; "))
+	}
+	preview := failures[:fetchAllFailuresErrorPreview]
+	return fmt.Sprintf("%d file(s) missing or failed (first %d: %s) … and %d more — see stderr", total, fetchAllFailuresErrorPreview, strings.Join(preview, "; "), total-fetchAllFailuresErrorPreview)
+}
+
+func validateFetchAllDataFile(df repository.RecordDataFile) error {
+	if strings.TrimSpace(df.RecordID) == "" {
+		return fmt.Errorf("record_id is required")
+	}
+	if strings.TrimSpace(df.Filename) == "" {
+		return fmt.Errorf("filename is required")
+	}
+	if strings.TrimSpace(df.S3Key) == "" {
+		return fmt.Errorf("s3_key is required")
+	}
+	if df.Size < 0 {
+		return fmt.Errorf("size must be non-negative")
+	}
+	if strings.TrimSpace(df.Hash) == "" {
+		return fmt.Errorf("hash is required")
+	}
+	return nil
+}
+
+func localDataFileMatches(df repository.RecordDataFile, path string) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat local file %s: %w", path, err)
+	}
+	if info.IsDir() {
+		return false, fmt.Errorf("local file path is a directory: %s", path)
+	}
+	if info.Size() != df.Size {
+		return false, nil
+	}
+	hash, err := recordio.HashFile(path)
+	if err != nil {
+		return false, err
+	}
+	return strings.EqualFold(hash, df.Hash), nil
+}
+
+func verifyDataFile(df repository.RecordDataFile, path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat downloaded file %s: %w", path, err)
+	}
+	if info.IsDir() {
+		return fmt.Errorf("downloaded path is a directory: %s", path)
+	}
+	if info.Size() != df.Size {
+		return fmt.Errorf("size mismatch for %s: got %d, want %d", path, info.Size(), df.Size)
+	}
+	hash, err := recordio.HashFile(path)
+	if err != nil {
+		return fmt.Errorf("hash downloaded file: %w", err)
+	}
+	if !strings.EqualFold(hash, df.Hash) {
+		return fmt.Errorf("hash mismatch for %s: got %s, want %s", path, hash, df.Hash)
+	}
 	return nil
 }
 

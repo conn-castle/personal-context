@@ -165,7 +165,7 @@ above with `--api-key`.
 - `pc device list|register|archive|restore` — manage the source-device registry
 - `pc doctor` — check system health (DB, orphans, missing files; cloud connectivity if configured)
 - `pc sync` — bidirectional sync between local SQLite and cloud Postgres/S3 (requires cloud configuration)
-- `pc fetch <record_id>` — download data files from cloud S3 (`--project`, `--recent 3d/2w/1m/1y`, `--output`)
+- `pc fetch` — download data files from cloud S3. Pick one of: `<record_id>` (single record), `--all` (every non-deleted cloud record), `--project <pid>` (one project), or `--recent 3d/2w/1m/1y` (relative time window). `--output` overrides the destination for record/project/recent modes; `--all` always writes to the canonical local data path and verifies size/hash.
 - `pc export --path <dir>` — write deterministic git snapshot state (`projects.json`, `devices.json`, `templates/`, `records/`); `--from-cloud` reads record rows and assets from Postgres/S3; `--project`, `--from`, and `--to` scope exported active records
 - `pc import <path>` — merge a git snapshot into local SQLite using `updated_at` rules (`same/older -> skip`, `newer -> replace`)
 - `pc restore-db <path>` — replace local SQLite state from a git snapshot and create an auto-backup snapshot first under `~/personal-context/.pc/backups/`
@@ -275,7 +275,7 @@ golangci-lint run ./...
 
 The three `-tags integration` commands require Docker because testcontainers-go starts Postgres and MinIO containers for the cloud data-layer packages.
 
-`go test -tags integration ./internal/cloude2e/ -v -timeout 420s` is the self-contained cloud CLI e2e suite: it drives the compiled `pc` binary through cloud onboarding, first sync plus doctor, two-home auto-sync conflict resolution, and `fetch --project --output` using testcontainers-backed Postgres and MinIO plus temp homes for isolated AWS credentials.
+`go test -tags integration ./internal/cloude2e/ -v -timeout 420s` is the self-contained cloud CLI e2e suite: it drives the compiled `pc` binary through cloud onboarding, first sync plus doctor, two-home auto-sync conflict resolution, and `fetch --project --output` / `fetch --all` using testcontainers-backed Postgres and MinIO plus temp homes for isolated AWS credentials.
 
 `./scripts/verify_phase3_manual.sh` runs the full Phase 3 local flow (`setup/add/show/edit/move/delete/restore`), creates a standalone record preview, and opens it in your default browser. Use `--no-open` for headless runs.
 

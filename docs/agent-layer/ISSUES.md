@@ -27,6 +27,12 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-05-10 f1a2l3p: `pc fetch --all` is sequential; large datasets pay full round-trip per file
+    Priority: Low. Area: cli/internal/cli/fetch.go
+    Description: `fetchAllDataFiles` iterates records and data files one at a time, so each S3 download blocks the next and each on-disk hash blocks subsequent work. For users with thousands of records, wall-clock time is dominated by sequential network latency and hashing even though the operations are independent. Implementing a bounded worker pool would require: thread-safe stats updates (currently plain ints/int64), deterministic-enough stderr/failure ordering for tests, a concurrency cap (flag, env, or CPU-based default), and a decision on whether cancellation drains or aborts in-flight downloads.
+    Next step: Prototype an `errgroup.Group` with a semaphore-bounded worker pool, add a `--concurrency` flag (default e.g. min(8, runtime.NumCPU())), and convert `fetchAllStats` to atomic counters. Verify with a benchmark and an updated cloud E2E that exercises >50 files.
+    Notes: Raised by gemini-code-assist on PR #20; deferred from that PR because parallelization is a perf optimization beyond the initial feature scope.
+
 - Issue 2026-05-07 m1g2r3a: Multi-file migration runner needed before first user-facing release
     Priority: High. Area: cli/internal/sqlite, cli/internal/repository/postgres, cli/internal/cli (setup)
     Description: `cli/internal/sqlite/schema.go` embeds the canonical schema via `singleFileFS` as a single `001_initial.sql` version, and `ApplyMigrationsFromFS` only runs unrecorded files — so every schema change after a user's first `pc setup` is invisible to their DB. Two pending deltas already depend on this: PR #14 added `records.source_device_id`/`source_ref` with NOT NULL FKs to new `projects`/`devices` tables, and PR #18 renamed tables `slides`/`slide_figures`/`slide_data_files` → `records`/`record_figures`/`record_data_files` (plus the `slide_id` → `record_id` child column). Repository code and `pc serve`/`pc sync` both bind to the new shape unconditionally, so a pre-PR DB would fail at first query. Not currently blocking because no user-facing release has shipped.

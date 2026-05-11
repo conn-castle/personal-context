@@ -537,8 +537,9 @@ pc verify</pre>
     </div>
     <div class="cmd">
       <h3>pc fetch</h3>
-      <p>Download data files from S3 on demand — by record, project, or time window.</p>
+      <p>Download data files from S3 on demand — all records, one record, project, or time window.</p>
       <pre>pc fetch &lt;record-id&gt;
+pc fetch --all
 pc fetch --project "ml/exp"
 pc fetch --recent 2w</pre>
     </div>
