@@ -76,9 +76,15 @@ func TestFormatUTCMillis(t *testing.T) {
 		want string
 	}{
 		{
-			name: "utc input rounds to millis",
+			name: "utc input truncates sub-millisecond precision",
 			in:   time.Date(2026, time.May, 10, 20, 1, 39, 123456789, time.UTC),
 			want: "2026-05-10T20:01:39.123Z",
+		},
+		{
+			name: "near-next-millisecond is truncated, not rounded",
+			// 999_999_999 ns truncates to .999 — round-to-nearest would carry to :40.000.
+			in:   time.Date(2026, time.May, 10, 20, 1, 39, 999999999, time.UTC),
+			want: "2026-05-10T20:01:39.999Z",
 		},
 		{
 			name: "non-utc input is converted to utc",

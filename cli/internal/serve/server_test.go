@@ -439,18 +439,50 @@ func TestDecodeJSONObject_RejectsNonObjectBodies(t *testing.T) {
 
 	for _, body := range tests {
 		req := httptest.NewRequest(http.MethodPatch, "/api/records/20260310-aaaaaaaa", strings.NewReader(body))
-		_, errMsg := decodeJSONObject(req)
-		if errMsg != "Request body must be a JSON object" {
-			t.Fatalf("body %q: expected object error, got %q", body, errMsg)
+		w := httptest.NewRecorder()
+		_, ok := decodeJSONObject(w, req)
+		if ok {
+			t.Fatalf("body %q: expected ok=false", body)
+		}
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("body %q: expected status %d, got %d", body, http.StatusBadRequest, w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "must be a JSON object") {
+			t.Fatalf("body %q: expected object error in response, got %q", body, w.Body.String())
 		}
 	}
 }
 
 func TestDecodeJSONObject_InvalidJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/records/20260310-aaaaaaaa", strings.NewReader("{bad-json"))
-	_, errMsg := decodeJSONObject(req)
-	if errMsg != "Invalid JSON body" {
-		t.Fatalf("expected invalid JSON error, got %q", errMsg)
+	w := httptest.NewRecorder()
+	_, ok := decodeJSONObject(w, req)
+	if ok {
+		t.Fatal("expected ok=false")
+	}
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Invalid JSON body") {
+		t.Fatalf("expected invalid JSON error in response, got %q", w.Body.String())
+	}
+}
+
+func TestDecodeJSONObject_BodyTooLarge(t *testing.T) {
+	// Build a body larger than maxRequestBodyBytes but still valid JSON.
+	oversized := strings.Repeat("a", maxRequestBodyBytes+16)
+	payload := `{"notes":"` + oversized + `"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/records/20260310-aaaaaaaa", strings.NewReader(payload))
+	w := httptest.NewRecorder()
+	_, ok := decodeJSONObject(w, req)
+	if ok {
+		t.Fatal("expected ok=false for oversized body")
+	}
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status %d, got %d", http.StatusRequestEntityTooLarge, w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "REQUEST_BODY_TOO_LARGE") {
+		t.Fatalf("expected REQUEST_BODY_TOO_LARGE code in response, got %q", w.Body.String())
 	}
 }
 
@@ -3012,7 +3044,7 @@ func TestDecodeJSON_NilBody(t *testing.T) {
 	// We must set it explicitly to nil.
 	req.Body = nil
 	var v any
-	err := decodeJSON(req, &v)
+	err := decodeJSON(httptest.NewRecorder(), req, &v)
 	if err == nil || !strings.Contains(err.Error(), "request body is empty") {
 		t.Fatalf("expected 'request body is empty' error, got %v", err)
 	}

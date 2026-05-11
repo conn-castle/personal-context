@@ -252,15 +252,19 @@ type missingAttachmentScanner struct {
 	resolvePath   func(recordID string, filename string) (string, error)
 }
 
-// scanMissingAttachments returns "recordID/filename" pairs for any rows
-// whose recorded attachment file is absent from disk. A nil scanner argument
-// is treated as a programming error.
+// scanMissingAttachments returns "recordID/filename" pairs for any rows whose
+// recorded attachment file is absent from disk or replaced by a directory.
+// Unset listFilenames/resolvePath fields are rejected with a descriptive error
+// so callers get a clear signal rather than a nil-function-call panic.
 func scanMissingAttachments(
 	ctx context.Context,
 	repo repository.Repository,
 	records []repository.Record,
 	scanner missingAttachmentScanner,
 ) ([]string, error) {
+	if scanner.listFilenames == nil || scanner.resolvePath == nil {
+		return nil, fmt.Errorf("scanMissingAttachments: scanner.listFilenames and scanner.resolvePath are required")
+	}
 	missing := make([]string, 0)
 	for _, record := range records {
 		filenames, err := scanner.listFilenames(ctx, repo, record.ID)
@@ -272,12 +276,16 @@ func scanMissingAttachments(
 			if err != nil {
 				return nil, fmt.Errorf("resolve %s path for %s/%s: %w", scanner.label, record.ID, filename, err)
 			}
-			if _, err := os.Stat(path); err != nil {
+			info, err := os.Stat(path)
+			if err != nil {
 				if os.IsNotExist(err) {
 					missing = append(missing, record.ID+"/"+filename)
 					continue
 				}
 				return nil, fmt.Errorf("stat %s path for %s/%s: %w", scanner.label, record.ID, filename, err)
+			}
+			if info.IsDir() {
+				missing = append(missing, record.ID+"/"+filename+" (is a directory)")
 			}
 		}
 	}

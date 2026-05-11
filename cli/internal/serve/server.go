@@ -124,14 +124,28 @@ func writeError(w http.ResponseWriter, status int, message string, code string) 
 // markdown plus metadata while protecting the server from accidental OOM.
 const maxRequestBodyBytes = 4 << 20
 
-func decodeJSON(r *http.Request, v any) error {
+// errRequestBodyTooLarge is returned by decodeJSON when the request body
+// exceeds maxRequestBodyBytes. Callers should translate this to HTTP 413.
+var errRequestBodyTooLarge = errors.New("request body too large")
+
+// decodeJSON parses a JSON request body into v with a maxRequestBodyBytes
+// cap. The ResponseWriter is passed to http.MaxBytesReader so the server
+// connection is closed cleanly when the cap is exceeded.
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	if r.Body == nil {
 		return fmt.Errorf("request body is empty")
 	}
 	defer func() { _ = r.Body.Close() }()
-	limited := http.MaxBytesReader(nil, r.Body, maxRequestBodyBytes)
-	decoder := json.NewDecoder(limited)
-	return decoder.Decode(v)
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(v); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return errRequestBodyTooLarge
+		}
+		return err
+	}
+	return nil
 }
 
 func mapRepoError(w http.ResponseWriter, err error, entity string) {
@@ -343,16 +357,24 @@ type recordDetail struct {
 	DataFiles      []recordFile `json:"data_files"`
 }
 
-func decodeJSONObject(r *http.Request) (map[string]any, string) {
+// decodeJSONObject parses a JSON object body. On error it writes the error
+// response and returns ok=false; callers should return immediately.
+func decodeJSONObject(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
 	var body any
-	if err := decodeJSON(r, &body); err != nil {
-		return nil, "Invalid JSON body"
+	if err := decodeJSON(w, r, &body); err != nil {
+		if errors.Is(err, errRequestBodyTooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("Request body exceeds %d byte limit", maxRequestBodyBytes), "REQUEST_BODY_TOO_LARGE")
+			return nil, false
+		}
+		writeError(w, http.StatusBadRequest, "Invalid JSON body", "BAD_REQUEST")
+		return nil, false
 	}
 	objectBody, ok := body.(map[string]any)
 	if !ok || objectBody == nil {
-		return nil, "Request body must be a JSON object"
+		writeError(w, http.StatusBadRequest, "Request body must be a JSON object", "BAD_REQUEST")
+		return nil, false
 	}
-	return objectBody, ""
+	return objectBody, true
 }
 
 func validatePatchBody(body map[string]any) (map[string]any, string) {
@@ -838,9 +860,8 @@ func (s *Server) handlePatchRecord(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	body, bodyErr := decodeJSONObject(r)
-	if bodyErr != "" {
-		writeError(w, http.StatusBadRequest, bodyErr, "BAD_REQUEST")
+	body, ok := decodeJSONObject(w, r)
+	if !ok {
 		return
 	}
 
@@ -1023,9 +1044,8 @@ func (s *Server) handleReorderRecord(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	body, bodyErr := decodeJSONObject(r)
-	if bodyErr != "" {
-		writeError(w, http.StatusBadRequest, bodyErr, "BAD_REQUEST")
+	body, ok := decodeJSONObject(w, r)
+	if !ok {
 		return
 	}
 
