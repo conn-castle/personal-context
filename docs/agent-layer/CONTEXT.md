@@ -317,6 +317,12 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted reco
 - `pc verify` — full round-trip data integrity tests (`pc verify` for local, `pc verify --from-cloud` for cloud-rooted verification)
 
 ### `pc fetch` modes and flags
+- All mode:
+  - `pc fetch --all`
+  - Scans every non-deleted cloud record and ensures each cloud-backed data file exists at `~/personal-context/data/{record_id}/`.
+  - Skips files whose local copy already matches the recorded size and SHA-256 hash; otherwise downloads from S3 and verifies the downloaded bytes against the same size and hash.
+  - Reports records scanned, already-present files, downloads, bytes downloaded, and missing/failed files. Per-failure detail is written to stderr; on failure, exits non-zero with a bounded preview of the first few errors.
+  - Cannot be combined with `--output`.
 - Record mode:
   - `pc fetch <record_id>`
   - Downloads all data files for one record into `~/personal-context/data/{record_id}/` by default.
@@ -328,7 +334,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted reco
   - Downloads data files for records inside a relative time window (`d`, `w`, `m`, `y` suffixes).
 - Output override:
   - `--output "./target-dir"`
-  - Writes downloads under the provided directory instead of the default data path.
+  - Writes record/project/recent downloads under the provided directory instead of the default data path.
 - Preconditions:
   - Cloud must be configured. If cloud is not configured, `pc fetch` fails loudly (no silent local fallback).
 

@@ -3,11 +3,15 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,13 +37,15 @@ func TestRunFetchNoModeSelector(t *testing.T) {
 
 func TestRunFetchMultipleModeSelectors(t *testing.T) {
 	tests := []struct {
-		name    string
+		name     string
 		recordID string
-		opts    fetchOptions
+		opts     fetchOptions
 	}{
 		{"record+project", "abc", fetchOptions{Project: "org/proj"}},
 		{"record+recent", "abc", fetchOptions{Recent: "3d"}},
+		{"record+all", "abc", fetchOptions{All: true}},
 		{"project+recent", "", fetchOptions{Project: "org/proj", Recent: "3d"}},
+		{"all+project", "", fetchOptions{All: true, Project: "org/proj"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -51,6 +57,19 @@ func TestRunFetchMultipleModeSelectors(t *testing.T) {
 				t.Fatalf("unexpected error = %v", err)
 			}
 		})
+	}
+}
+
+func TestRunFetchAllRejectsOutputOverride(t *testing.T) {
+	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "", fetchOptions{
+		All:    true,
+		Output: t.TempDir(),
+	})
+	if err == nil {
+		t.Fatal("expected error for --all with --output")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined with --output") {
+		t.Fatalf("unexpected error = %v", err)
 	}
 }
 
@@ -432,6 +451,467 @@ func TestRunFetchDefaultOutputPath(t *testing.T) {
 	}
 }
 
+// --- All mode ---
+
+func TestRunFetchAllDownloadsMissingAndSkipsVerifiedFiles(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	presentContent := "already local"
+	downloadContent := "download me"
+	presentHash := hashFetchTestData(presentContent)
+	downloadHash := hashFetchTestData(downloadContent)
+
+	presentPath := filepath.Join(homeDir, "personal-context", "data", "r1", "present.txt")
+	if err := os.MkdirAll(filepath.Dir(presentPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(presentPath, []byte(presentContent), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg := &fetchMockConfig{
+		recordsAll: []repository.Record{
+			{ID: "r1", Date: "2025-01-01"},
+			{ID: "r2", Date: "2025-01-02"},
+		},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"r1": {{ID: 1, RecordID: "r1", Filename: "present.txt", S3Key: "data/r1/present.txt", Size: int64(len(presentContent)), Hash: presentHash}},
+			"r2": {{ID: 2, RecordID: "r2", Filename: "missing.txt", S3Key: "data/r2/missing.txt", Size: int64(len(downloadContent)), Hash: downloadHash}},
+		},
+		s3Data: map[string]string{
+			"data/r1/present.txt": "should not download",
+			"data/r2/missing.txt": downloadContent,
+		},
+	}
+	mockCloudStackForFetch(t, cfg)
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	if err := runFetch(context.Background(), stdout, stderr, "", fetchOptions{All: true}); err != nil {
+		t.Fatalf("runFetch() error = %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	out := stdout.String()
+	for _, want := range []string{
+		"Records scanned: 2",
+		"Files already present: 1",
+		"Files downloaded: 1",
+		"Bytes downloaded: 11",
+		"Missing/failed files: 0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("stdout = %q, want %q", out, want)
+		}
+	}
+	if len(cfg.downloadedKeys) != 1 || cfg.downloadedKeys[0] != "data/r2/missing.txt" {
+		t.Fatalf("downloaded keys = %v, want only missing file", cfg.downloadedKeys)
+	}
+	got, err := os.ReadFile(filepath.Join(homeDir, "personal-context", "data", "r2", "missing.txt"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(got) != downloadContent {
+		t.Fatalf("downloaded content = %q, want %q", got, downloadContent)
+	}
+}
+
+func TestRunFetchAllRedownloadsCorruptLocalFile(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	cloudContent := "correct bytes"
+	canonicalPath := filepath.Join(homeDir, "personal-context", "data", "r1", "data.txt")
+	if err := os.MkdirAll(filepath.Dir(canonicalPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(canonicalPath, []byte("wrong"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg := &fetchMockConfig{
+		recordsAll: []repository.Record{{ID: "r1", Date: "2025-01-01"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"r1": {{ID: 1, RecordID: "r1", Filename: "data.txt", S3Key: "data/r1/data.txt", Size: int64(len(cloudContent)), Hash: hashFetchTestData(cloudContent)}},
+		},
+		s3Data: map[string]string{"data/r1/data.txt": cloudContent},
+	}
+	mockCloudStackForFetch(t, cfg)
+
+	stdout := &bytes.Buffer{}
+	if err := runFetch(context.Background(), stdout, &bytes.Buffer{}, "", fetchOptions{All: true}); err != nil {
+		t.Fatalf("runFetch() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Files downloaded: 1") {
+		t.Fatalf("stdout = %q, want one download", stdout.String())
+	}
+	got, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(got) != cloudContent {
+		t.Fatalf("content after fetch = %q, want %q", got, cloudContent)
+	}
+}
+
+func TestRunFetchAllReportsDownloadFailuresAfterSummary(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	cfg := &fetchMockConfig{
+		recordsAll: []repository.Record{{ID: "r1", Date: "2025-01-01"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"r1": {{ID: 1, RecordID: "r1", Filename: "missing.txt", S3Key: "data/r1/missing.txt", Size: 7, Hash: hashFetchTestData("missing")}},
+		},
+		s3Error: errors.New("not found"),
+	}
+	mockCloudStackForFetch(t, cfg)
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	err := runFetch(context.Background(), stdout, stderr, "", fetchOptions{All: true})
+	if err == nil {
+		t.Fatal("expected fetch --all failure")
+	}
+	if !strings.Contains(err.Error(), "fetch --all failed") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Missing/failed files: 1") {
+		t.Fatalf("stdout = %q, want failed count", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "Failed: r1/missing.txt") {
+		t.Fatalf("stderr = %q, want failed file detail", stderr.String())
+	}
+}
+
+func TestRunFetchAllReportsVerificationFailures(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	cfg := &fetchMockConfig{
+		recordsAll: []repository.Record{{ID: "r1", Date: "2025-01-01"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"r1": {{ID: 1, RecordID: "r1", Filename: "data.txt", S3Key: "data/r1/data.txt", Size: 5, Hash: hashFetchTestData("right")}},
+		},
+		s3Data: map[string]string{"data/r1/data.txt": "wrong"},
+	}
+	mockCloudStackForFetch(t, cfg)
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	err := runFetch(context.Background(), stdout, stderr, "", fetchOptions{All: true})
+	if err == nil {
+		t.Fatal("expected verification failure")
+	}
+	if !strings.Contains(err.Error(), "verify downloaded file") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Missing/failed files: 1") {
+		t.Fatalf("stdout = %q, want failed count", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "hash mismatch") {
+		t.Fatalf("stderr = %q, want hash mismatch detail", stderr.String())
+	}
+}
+
+func TestNewFetchCommandParsesAllFlag(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	mockCloudStackForFetch(t, &fetchMockConfig{
+		recordsAll: []repository.Record{{ID: "r1", Date: "2025-01-01"}},
+	})
+
+	stdout := &bytes.Buffer{}
+	cmd := newFetchCommand(stdout, &bytes.Buffer{})
+	cmd.SetArgs([]string{"--all"})
+
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("ExecuteContext() error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Records scanned: 1") {
+		t.Fatalf("stdout = %q, want all-mode summary", stdout.String())
+	}
+}
+
+func TestRunFetchAllListRecordsError(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	mockCloudStackForFetch(t, &fetchMockConfig{
+		listRecordsErr: errors.New("db unavailable"),
+	})
+
+	stdout := &bytes.Buffer{}
+	err := runFetch(context.Background(), stdout, &bytes.Buffer{}, "", fetchOptions{All: true})
+	if err == nil {
+		t.Fatal("expected list records error")
+	}
+	if !strings.Contains(err.Error(), "list non-deleted records") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Records scanned: 0") {
+		t.Fatalf("stdout = %q, want zero-record summary", stdout.String())
+	}
+}
+
+func TestRunFetchAllListDataFilesError(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	downloadContent := "good bytes"
+	cfg := &fetchMockConfig{
+		recordsAll: []repository.Record{
+			{ID: "r1", Date: "2025-01-01"},
+			{ID: "r2", Date: "2025-01-02"},
+		},
+		listDataFilesErrByRecord: map[string]error{
+			"r1": errors.New("data query failed"),
+		},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"r2": {{ID: 1, RecordID: "r2", Filename: "ok.txt", S3Key: "data/r2/ok.txt", Size: int64(len(downloadContent)), Hash: hashFetchTestData(downloadContent)}},
+		},
+		s3Data: map[string]string{"data/r2/ok.txt": downloadContent},
+	}
+	mockCloudStackForFetch(t, cfg)
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	err := runFetch(context.Background(), stdout, stderr, "", fetchOptions{All: true})
+	if err == nil {
+		t.Fatal("expected aggregated fetch --all failure")
+	}
+	if !strings.Contains(err.Error(), "fetch --all failed") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+	if !strings.Contains(stderr.String(), "Failed: record r1: list data files: data query failed") {
+		t.Fatalf("stderr = %q, want per-record listing failure detail", stderr.String())
+	}
+	for _, want := range []string{
+		"Records scanned: 2",
+		"Files downloaded: 1",
+		"Missing/failed files: 1",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("stdout = %q, want %q (loop should continue past failed record)", stdout.String(), want)
+		}
+	}
+	if len(cfg.downloadedKeys) != 1 || cfg.downloadedKeys[0] != "data/r2/ok.txt" {
+		t.Fatalf("downloaded keys = %v, want r2 file only", cfg.downloadedKeys)
+	}
+}
+
+func TestRunFetchAllReportsResolvePathFailures(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	cfg := &fetchMockConfig{
+		recordsAll: []repository.Record{{ID: "r1", Date: "2025-01-01"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"r1": {{ID: 1, RecordID: "r1", Filename: "../bad.txt", S3Key: "data/r1/bad.txt", Size: 3, Hash: hashFetchTestData("bad")}},
+		},
+		s3Data: map[string]string{"data/r1/bad.txt": "bad"},
+	}
+	mockCloudStackForFetch(t, cfg)
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	err := runFetch(context.Background(), stdout, stderr, "", fetchOptions{All: true})
+	if err == nil {
+		t.Fatal("expected resolve path failure")
+	}
+	if !strings.Contains(err.Error(), "fetch --all failed") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Missing/failed files: 1") {
+		t.Fatalf("stdout = %q, want failed count", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "must not include path separators") {
+		t.Fatalf("stderr = %q, want path validation detail", stderr.String())
+	}
+	if len(cfg.downloadedKeys) != 0 {
+		t.Fatalf("downloaded keys = %v, want no downloads", cfg.downloadedKeys)
+	}
+}
+
+func TestRunFetchAllReportsInvalidMetadataFailures(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	cfg := &fetchMockConfig{
+		recordsAll: []repository.Record{{ID: "r1", Date: "2025-01-01"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"r1": {{ID: 1, RecordID: "r1", Filename: "data.txt", S3Key: "data/r1/data.txt", Size: 3}},
+		},
+		s3Data: map[string]string{"data/r1/data.txt": "bad"},
+	}
+	mockCloudStackForFetch(t, cfg)
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	err := runFetch(context.Background(), stdout, stderr, "", fetchOptions{All: true})
+	if err == nil {
+		t.Fatal("expected invalid metadata failure")
+	}
+	if !strings.Contains(err.Error(), "fetch --all failed") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Missing/failed files: 1") {
+		t.Fatalf("stdout = %q, want failed count", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "hash is required") {
+		t.Fatalf("stderr = %q, want metadata detail", stderr.String())
+	}
+	if len(cfg.downloadedKeys) != 0 {
+		t.Fatalf("downloaded keys = %v, want no downloads", cfg.downloadedKeys)
+	}
+}
+
+func TestRunFetchAllReportsLocalDirectoryFailures(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	canonicalPath := filepath.Join(homeDir, "personal-context", "data", "r1", "data.txt")
+	if err := os.MkdirAll(canonicalPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	cfg := &fetchMockConfig{
+		recordsAll: []repository.Record{{ID: "r1", Date: "2025-01-01"}},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"r1": {{ID: 1, RecordID: "r1", Filename: "data.txt", S3Key: "data/r1/data.txt", Size: 4, Hash: hashFetchTestData("data")}},
+		},
+		s3Data: map[string]string{"data/r1/data.txt": "data"},
+	}
+	mockCloudStackForFetch(t, cfg)
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	err := runFetch(context.Background(), stdout, stderr, "", fetchOptions{All: true})
+	if err == nil {
+		t.Fatal("expected local directory failure")
+	}
+	if !strings.Contains(err.Error(), "fetch --all failed") {
+		t.Fatalf("unexpected error = %v", err)
+	}
+	if !strings.Contains(stderr.String(), "local file path is a directory") {
+		t.Fatalf("stderr = %q, want directory detail", stderr.String())
+	}
+	if len(cfg.downloadedKeys) != 0 {
+		t.Fatalf("downloaded keys = %v, want no downloads", cfg.downloadedKeys)
+	}
+}
+
+func TestValidateFetchAllDataFile(t *testing.T) {
+	valid := repository.RecordDataFile{
+		RecordID: "r1",
+		Filename: "data.txt",
+		S3Key:    "data/r1/data.txt",
+		Size:     1,
+		Hash:     hashFetchTestData("x"),
+	}
+	tests := []struct {
+		name string
+		file repository.RecordDataFile
+		want string
+	}{
+		{"valid", valid, ""},
+		{"record id", repository.RecordDataFile{Filename: valid.Filename, S3Key: valid.S3Key, Size: valid.Size, Hash: valid.Hash}, "record_id is required"},
+		{"filename", repository.RecordDataFile{RecordID: valid.RecordID, S3Key: valid.S3Key, Size: valid.Size, Hash: valid.Hash}, "filename is required"},
+		{"s3 key", repository.RecordDataFile{RecordID: valid.RecordID, Filename: valid.Filename, Size: valid.Size, Hash: valid.Hash}, "s3_key is required"},
+		{"size", repository.RecordDataFile{RecordID: valid.RecordID, Filename: valid.Filename, S3Key: valid.S3Key, Size: -1, Hash: valid.Hash}, "size must be non-negative"},
+		{"hash", repository.RecordDataFile{RecordID: valid.RecordID, Filename: valid.Filename, S3Key: valid.S3Key, Size: valid.Size}, "hash is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateFetchAllDataFile(tt.file)
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("validateFetchAllDataFile() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("validateFetchAllDataFile() error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLocalDataFileMatchesHashMismatchAndDirectory(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.txt")
+	if err := os.WriteFile(path, []byte("abc"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	matches, err := localDataFileMatches(repository.RecordDataFile{
+		Size: int64(len("abc")),
+		Hash: hashFetchTestData("def"),
+	}, path)
+	if err != nil {
+		t.Fatalf("localDataFileMatches() error = %v", err)
+	}
+	if matches {
+		t.Fatal("expected same-size hash mismatch to return false")
+	}
+
+	_, err = localDataFileMatches(repository.RecordDataFile{}, dir)
+	if err == nil || !strings.Contains(err.Error(), "local file path is a directory") {
+		t.Fatalf("localDataFileMatches() error = %v, want directory error", err)
+	}
+}
+
+func TestVerifyDataFileFailureBranches(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := verifyDataFile(repository.RecordDataFile{}, filepath.Join(dir, "missing.txt")); err == nil || !strings.Contains(err.Error(), "stat downloaded file") {
+		t.Fatalf("missing verify error = %v, want stat error", err)
+	}
+
+	if err := verifyDataFile(repository.RecordDataFile{}, dir); err == nil || !strings.Contains(err.Error(), "downloaded path is a directory") {
+		t.Fatalf("directory verify error = %v, want directory error", err)
+	}
+
+	path := filepath.Join(dir, "data.txt")
+	if err := os.WriteFile(path, []byte("abc"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := verifyDataFile(repository.RecordDataFile{Size: 4, Hash: hashFetchTestData("abc")}, path); err == nil || !strings.Contains(err.Error(), "size mismatch") {
+		t.Fatalf("size verify error = %v, want size mismatch", err)
+	}
+}
+
+func TestSummarizeFetchAllFailures(t *testing.T) {
+	// Under the preview cap: every failure is inlined, no truncation suffix.
+	short := []string{"r1/a: oops", "r1/b: oops"}
+	got := summarizeFetchAllFailures(short)
+	want := "2 file(s) missing or failed: r1/a: oops; r1/b: oops"
+	if got != want {
+		t.Fatalf("summarizeFetchAllFailures(short) = %q, want %q", got, want)
+	}
+
+	// Over the preview cap: only the first fetchAllFailuresErrorPreview are inlined,
+	// suffix names the remainder, full list expected on stderr.
+	long := make([]string, fetchAllFailuresErrorPreview+3)
+	for i := range long {
+		long[i] = fmt.Sprintf("r%d: oops", i)
+	}
+	got = summarizeFetchAllFailures(long)
+	if !strings.HasPrefix(got, fmt.Sprintf("%d file(s) missing or failed (first %d:", len(long), fetchAllFailuresErrorPreview)) {
+		t.Fatalf("summarizeFetchAllFailures(long) prefix wrong: %q", got)
+	}
+	if !strings.Contains(got, fmt.Sprintf("… and %d more — see stderr", len(long)-fetchAllFailuresErrorPreview)) {
+		t.Fatalf("summarizeFetchAllFailures(long) missing remainder suffix: %q", got)
+	}
+	if strings.Contains(got, "r"+strconv.Itoa(fetchAllFailuresErrorPreview)+":") {
+		t.Fatalf("summarizeFetchAllFailures(long) leaked an over-cap entry: %q", got)
+	}
+}
+
 // --- parseRecentWindow tests ---
 
 func TestParseRecentWindow(t *testing.T) {
@@ -626,15 +1106,18 @@ func TestRunFetchPathTraversalEmptyComponentRejected(t *testing.T) {
 
 // fetchMockConfig configures the mock cloud stack for fetch tests.
 type fetchMockConfig struct {
-	records           map[string]repository.Record           // keyed by record ID
+	records           map[string]repository.Record // keyed by record ID
+	recordsAll        []repository.Record
 	recordsByProject  map[string][]repository.Record         // keyed by project ID
 	recordsByDateFrom map[string][]repository.Record         // keyed by "*" (any date from)
-	dataFiles        map[string][]repository.RecordDataFile // keyed by record ID
-	s3Data           map[string]string                     // keyed by S3 key
-	s3Error          error
+	dataFiles         map[string][]repository.RecordDataFile // keyed by record ID
+	s3Data            map[string]string                      // keyed by S3 key
+	s3Error           error
 	getRecordErr      error
 	listRecordsErr    error
-	listDataFilesErr error
+	listDataFilesErr  error
+	listDataFilesErrByRecord map[string]error
+	downloadedKeys    []string
 }
 
 // mockCloudStackForFetch sets up openCloudStackFn and downloadS3FileFn for fetch tests.
@@ -663,6 +1146,7 @@ func mockCloudStackForFetch(t *testing.T, cfg *fetchMockConfig) {
 		if !ok {
 			return errors.New("not found: " + key)
 		}
+		cfg.downloadedKeys = append(cfg.downloadedKeys, key)
 		if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 			return err
 		}
@@ -719,12 +1203,20 @@ func (m *fetchMockRepo) ListRecords(_ context.Context, filter repository.ListRec
 	if filter.DateFrom != nil {
 		return m.cfg.recordsByDateFrom["*"], nil
 	}
-	return nil, nil
+	return m.cfg.recordsAll, nil
 }
 
 func (m *fetchMockRepo) ListRecordDataFilesByRecordID(_ context.Context, recordID string) ([]repository.RecordDataFile, error) {
+	if err, ok := m.cfg.listDataFilesErrByRecord[recordID]; ok {
+		return nil, err
+	}
 	if m.cfg.listDataFilesErr != nil {
 		return nil, m.cfg.listDataFilesErr
 	}
 	return m.cfg.dataFiles[recordID], nil
+}
+
+func hashFetchTestData(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
 }

@@ -93,7 +93,7 @@ go test -tags integration ./internal/cloude2e/ -v -timeout 420s
 ```
 Run from: `cli/`
 Prerequisites: Docker running (testcontainers-go spins up Postgres and MinIO containers).
-Notes: Uses `//go:build integration` tag. Tests cloud onboarding, first sync + doctor, two-home auto-sync conflict resolution, and `fetch --project --output` through the compiled `pc` binary. Schema-per-test and bucket-per-test isolation.
+Notes: Uses `//go:build integration` tag. Tests cloud onboarding, first sync + doctor, two-home auto-sync conflict resolution, and `fetch --project --output` / `fetch --all` through the compiled `pc` binary. Schema-per-test and bucket-per-test isolation.
 
 - Run Go linter
 ```bash
