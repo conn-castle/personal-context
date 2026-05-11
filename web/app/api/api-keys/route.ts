@@ -5,6 +5,11 @@ import { badRequest, internalError } from "@/lib/api-error";
 import type { ErrorResponseBody } from "@/lib/api-error";
 import { requireSessionUser } from "@/lib/auth-helpers";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
+import {
+  JsonBodyError,
+  jsonBodyErrorResponse,
+  readBoundedJson,
+} from "@/lib/bounded-json";
 
 interface ApiKeyListItem {
   id: string;
@@ -88,12 +93,15 @@ export async function POST(
   try {
     let body: Record<string, unknown>;
     try {
-      const parsed = (await req.json()) as unknown;
+      const parsed = await readBoundedJson(req);
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
         return badRequest("Request body must be a JSON object");
       }
       body = parsed as Record<string, unknown>;
-    } catch {
+    } catch (error) {
+      if (error instanceof JsonBodyError) {
+        return jsonBodyErrorResponse(error);
+      }
       return badRequest("Invalid JSON body");
     }
 

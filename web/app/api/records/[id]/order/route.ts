@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { bumpS3Version } from "@/lib/s3";
 import { invalidId, notFound, badRequest, internalError } from "@/lib/api-error";
+import {
+  JsonBodyError,
+  jsonBodyErrorResponse,
+  readBoundedJson,
+} from "@/lib/bounded-json";
 import { isValidRecordId, isValidDate } from "@/lib/validation";
 import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
 import { requireUser } from "@/lib/auth-helpers";
@@ -167,12 +172,15 @@ export async function PATCH(
 
     let body: Record<string, unknown>;
     try {
-      const parsed = await req.json();
+      const parsed = await readBoundedJson(req);
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
         return badRequest("Request body must be a JSON object");
       }
       body = parsed as Record<string, unknown>;
-    } catch {
+    } catch (error) {
+      if (error instanceof JsonBodyError) {
+        return jsonBodyErrorResponse(error);
+      }
       return badRequest("Invalid JSON body");
     }
 

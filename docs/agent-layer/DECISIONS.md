@@ -112,11 +112,6 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Reason: Standard HTML with relative paths. No custom protocol for agents to learn. Natural fit for git export structure.
     Tradeoffs: Requires per-context resolution logic; trivial (URL rewriting in iframe, validation in CLI).
 
-- Decision 2026-03-05 v2w3x4: Web workspace uses Vitest for unit coverage gates
-    Decision: Use Vitest (not Jest) as the canonical `web/` unit test runner and coverage gate (`pnpm test`, `pnpm test:coverage`).
-    Reason: Roadmap allowed Vitest/Jest. Vitest offered a lean scaffold path with fast run times and simple 95% threshold enforcement.
-    Tradeoffs: Next.js examples more commonly show Jest; contributors must follow the Vitest-specific config and scripts in this repo.
-
 - Decision 2026-03-05 w4x5y6: Custom migration runner with consolidated embedded schema
     Decision: Build a custom migration runner in `cli/internal/sqlite/` with a single canonical schema file (`sqlite_schema.sql`) embedded via `//go:embed`. The separate `cli/migrations/` package was removed in Phase 4.
     Reason: Simpler dependency graph, full control over SQLite-specific PRAGMA and connection hooks, no CGO requirement. Single schema file because there are no deployed users requiring multi-file migration history.
@@ -127,10 +122,10 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Reason: Covers 7 error paths (one per command) that cannot be reached via environment manipulation. Alternative (interface-based DI) would require threading a dependency through every command function for a single test concern.
     Tradeoffs: Unsafe with t.Parallel (tests must restore original via t.Cleanup). Acceptable since cli package tests are not parallel. See ISSUES.md b2c3d4.
 
-- Decision 2026-03-05 y5z6a7: Playwright browser e2e runs in local mode with mocked APIs
-    Decision: Playwright browser verification starts Next.js with `LOCAL_BACKEND_URL=http://127.0.0.1:9876` and uses `page.route()` interception for mocked API workflows.
-    Reason: Browser e2e should verify UI/browser wiring without cloud credentials or auth sessions; cloud behavior is covered by API/unit tests and CLI cloud integration tests.
-    Tradeoffs: Mocked browser e2e does not prove the hosted cloud auth flow end to end; cloud data behavior is covered below the browser layer.
+- Decision 2026-03-05 y5z6a7: Playwright browser e2e runs in local mode with page.route mocks
+    Decision: Playwright browser verification starts Next.js with `LOCAL_BACKEND_URL=http://127.0.0.1:9876` and uses `page.route()` interception instead of MSW or a real backend.
+    Reason: Browser e2e should verify UI/browser wiring without cloud credentials or auth sessions. Browser-level route interception keeps tests close to real rendering without adding MSW while cloud behavior remains covered by API/unit tests and CLI cloud integration tests.
+    Tradeoffs: Mocked browser e2e does not prove the hosted cloud auth flow end to end, and mocks remain per-test boilerplate; cloud data behavior is covered below the browser layer.
 
 - Decision 2026-03-07 a1b2c3: S3 client constructor accepts pre-configured *s3.Client
     Decision: `s3client.New()` accepts a pre-configured `*s3.Client` and bucket name (same DI pattern as Postgres repo accepting `*pgxpool.Pool`).
@@ -167,11 +162,6 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Reason: These are mostly thin wrappers over UI libraries. Blanket unit coverage produces brittle prop-assertion tests, but a few local state paths are still worth pinning with focused component tests.
     Tradeoffs: Coverage numbers appear lower than route/hook code; contributors must use judgment to add only high-signal component tests.
 
-- Decision 2026-03-09 t5u6v7: Playwright e2e uses page.route() API interception, not MSW
-    Decision: Playwright e2e tests mock the backend via `page.route()` API interception instead of MSW or a real backend.
-    Reason: Simplest approach — no extra dependencies, tests real frontend rendering while mocking network at the browser level.
-    Tradeoffs: Mocks are per-test boilerplate; MSW would centralize them but adds a dependency for little gain at current test count.
-
 - Decision 2026-03-09 u7v8w9: useSyncManager 4-layer polling instead of WebSocket
     Decision: `useSyncManager` uses 4-layer polling (manual, interaction, tab visibility, idle) instead of WebSocket for change detection.
     Reason: S3 `_version` file doesn't support push notifications. Polling is simpler and sufficient for low-frequency CLI-driven mutations.
@@ -181,16 +171,6 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Decision: In cloud mode, `sync_version` is keyed by `user_id` and S3 version objects live under `users/{user_id}/_version`; SQLite remains a local singleton. Shared template changes create or bump every existing user's `sync_version` row.
     Reason: Multi-user cloud mode needs each user's polling cursor to advance only for that user's record mutations while preserving the simple single-version polling model within each tenant. Templates are shared, so every existing user's cursor must advance when templates change, including users who have not yet made record mutations.
     Tradeoffs: Fresh cloud bootstrap must create users/auth tables before API keys can be generated, and all cloud callers must carry user scope into Postgres and S3. Template changes touch all users; a separate shared-resource cursor would scale better for frequent template edits but would require widening the client polling contract.
-
-- Decision 2026-03-09 x9y0z1: react-resizable-panels v4 sizes must use string percentages
-    Decision: All `defaultSize`, `minSize`, `maxSize` props in `spreadsheet-viewer.tsx` use string percentages (e.g., `"18%"`) not bare numbers.
-    Reason: react-resizable-panels v4 treats bare numbers as **pixels**, not percentages. `defaultSize={18}` = 18px, which renders panels as tiny slivers.
-    Tradeoffs: None — this is a correctness fix. v2 used numbers-as-percentages; v4 changed the API.
-
-- Decision 2026-03-09 z1a2b3: pnpm .npmrc hoists @radix-ui/* for unified radix-ui package
-    Decision: `web/.npmrc` contains `public-hoist-pattern[]=@radix-ui/*` to hoist transitive `@radix-ui/react-*` sub-packages from the unified `radix-ui` meta-package.
-    Reason: shadcn/ui components import from `@radix-ui/react-*` (individual packages), but only the unified `radix-ui` is in `package.json`. pnpm's strict mode doesn't hoist transitive deps by default.
-    Tradeoffs: Slightly looser isolation for @radix-ui packages; required for the app to build.
 
 - Decision 2026-03-09 a3b4c5: Visual regression baselines committed as darwin, Linux CI deferred
     Decision: Playwright visual regression baselines generated on macOS (darwin) and committed to git. `snapshotPathTemplate` removes platform from paths. Linux-based CI baselines deferred.

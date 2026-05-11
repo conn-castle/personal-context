@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 export type ErrorCode =
   | "NOT_FOUND"
   | "BAD_REQUEST"
+  | "REQUEST_BODY_TOO_LARGE"
   | "INTERNAL_ERROR"
   | "INVALID_ID"
   | "METHOD_NOT_ALLOWED";

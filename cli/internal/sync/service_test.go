@@ -122,6 +122,81 @@ func TestServiceSyncPullsCloudBundleToLocalWithoutDownloadingDataFiles(t *testin
 	}
 }
 
+func TestServiceSyncRepairsPartialPushWhenParentTimestampsEqual(t *testing.T) {
+	recordID := "20260308-a1b2c3d4"
+	now := time.Date(2026, 3, 8, 15, 4, 5, 987000000, time.UTC)
+	localBundle := RecordBundle{
+		Record: repository.Record{
+			ID:          recordID,
+			Date:        "2026-03-08",
+			DayOrder:    "a0",
+			HTMLContent: strPtr("<html>same</html>"),
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID,
+			Filename: "plot.png",
+			S3Key:    "figures/20260308-a1b2c3d4/plot.png",
+		}},
+	}
+	cloudBundle := RecordBundle{Record: localBundle.Record}
+
+	service, _, cloudRepo, localFS, objects, _ := newTestService(
+		t,
+		[]RecordBundle{localBundle},
+		[]RecordBundle{cloudBundle},
+	)
+	writeLocalAsset(t, localFS, true, recordID, "plot.png", "LOCAL-FIGURE")
+
+	if err := service.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	assertBundleEqual(t, cloudRepo.bundle(recordID), localBundle)
+	if got := objects.objects["figures/20260308-a1b2c3d4/plot.png"]; got != "LOCAL-FIGURE" {
+		t.Fatalf("uploaded figure = %q, want %q", got, "LOCAL-FIGURE")
+	}
+}
+
+func TestServiceSyncDoesNotPushIncompleteEqualParentBeforePullRepair(t *testing.T) {
+	recordID := "20260308-deadbeef"
+	now := time.Date(2026, 3, 8, 18, 30, 0, 123000000, time.UTC)
+	cloudBundle := RecordBundle{
+		Record: repository.Record{
+			ID:          recordID,
+			Date:        "2026-03-08",
+			DayOrder:    "a1",
+			HTMLContent: strPtr("<html>same</html>"),
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		Figures: []repository.RecordFigure{{
+			RecordID: recordID,
+			Filename: "chart.png",
+			S3Key:    "figures/20260308-deadbeef/chart.png",
+		}},
+	}
+	localBundle := RecordBundle{Record: cloudBundle.Record}
+
+	service, localRepo, cloudRepo, localFS, objects, _ := newTestService(
+		t,
+		[]RecordBundle{localBundle},
+		[]RecordBundle{cloudBundle},
+	)
+	objects.objects["figures/20260308-deadbeef/chart.png"] = "CLOUD-FIGURE"
+
+	if err := service.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	assertBundleEqual(t, cloudRepo.bundle(recordID), cloudBundle)
+	assertBundleEqual(t, localRepo.bundle(recordID), cloudBundle)
+	if got := readLocalAsset(t, localFS, true, recordID, "chart.png"); got != "CLOUD-FIGURE" {
+		t.Fatalf("downloaded figure = %q, want %q", got, "CLOUD-FIGURE")
+	}
+}
+
 func TestServiceSyncLeavesLastSyncUnchangedOnFailure(t *testing.T) {
 	recordID := "20260308-feedface"
 	now := time.Date(2026, 3, 8, 20, 0, 0, 0, time.UTC)

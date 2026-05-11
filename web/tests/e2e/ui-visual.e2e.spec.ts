@@ -523,8 +523,9 @@ test.describe("UI snapshots and console health @visual", () => {
     await expect(
       page.getByRole("heading", { name: "Settings" })
     ).toBeVisible();
-    await expect(page.getByText("Project Info")).toBeVisible();
-    await expect(page.getByText("General")).toBeVisible();
+    await expect(page.getByText("Sync & Connection")).toBeVisible();
+    await expect(page.getByText("Data Management")).toBeVisible();
+    await expect(page.getByText("About")).toBeVisible();
 
     await expect(page).toHaveScreenshot("09-settings-overlay.png", SNAPSHOT_OPTS);
 

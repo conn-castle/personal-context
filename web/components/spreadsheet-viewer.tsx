@@ -303,6 +303,7 @@ export function SpreadsheetViewer() {
       if (didUpdate) {
         markMutation();
       }
+      return didUpdate;
     },
     [updateRecord, markMutation]
   );

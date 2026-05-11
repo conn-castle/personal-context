@@ -12,6 +12,15 @@ vi.mock("@/lib/s3", () => ({
   getS3Version: vi.fn(),
 }));
 
+const { mockIsLocalMode, mockProxyToLocal } = vi.hoisted(() => ({
+  mockIsLocalMode: vi.fn(),
+  mockProxyToLocal: vi.fn(),
+}));
+vi.mock("@/lib/local-proxy", () => ({
+  isLocalMode: mockIsLocalMode,
+  proxyToLocal: mockProxyToLocal,
+}));
+
 vi.mock("fractional-indexing", () => ({
   generateKeyBetween: vi.fn(
     (a: string | null | undefined, b: string | null | undefined) => {
@@ -45,9 +54,31 @@ describe("PATCH /api/records/[id]/order", () => {
     mockSql.mockReset();
     mockBumpS3Version.mockReset();
     mockBumpS3Version.mockResolvedValue(undefined);
+    mockIsLocalMode.mockReset();
+    mockIsLocalMode.mockReturnValue(false);
+    mockProxyToLocal.mockReset();
   });
 
   const recordId = "20250304-a3f2b7e1";
+
+  it("proxies PATCH in local mode", async () => {
+    const proxied = new Response("proxied", { status: 202 });
+    mockIsLocalMode.mockReturnValueOnce(true);
+    mockProxyToLocal.mockResolvedValueOnce(proxied);
+
+    const req = new NextRequest(
+      `http://localhost/api/records/${recordId}/order`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ position: { kind: "first" } }),
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+    const res = await PATCH(req, makeContext(recordId));
+
+    expect(res).toBe(proxied);
+    expect(mockSql).not.toHaveBeenCalled();
+  });
 
   it("reorders to first position", async () => {
     // Read current record to get date
@@ -308,6 +339,26 @@ describe("PATCH /api/records/[id]/order", () => {
     const body = await res.json();
     expect(body.code).toBe("BAD_REQUEST");
     expect(body.error).toBe("Invalid JSON body");
+  });
+
+  it("returns 413 for over-limit JSON bodies", async () => {
+    const req = new NextRequest(
+      `http://localhost/api/records/${recordId}/order`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ position: { kind: "first" } }),
+        headers: {
+          "Content-Type": "application/json",
+          "content-length": String(4 * 1024 * 1024 + 1),
+        },
+      }
+    );
+    const res = await PATCH(req, makeContext(recordId));
+
+    expect(res.status).toBe(413);
+    const body = await res.json();
+    expect(body.code).toBe("REQUEST_BODY_TOO_LARGE");
+    expect(mockSql).not.toHaveBeenCalled();
   });
 
   it("returns 400 when the JSON body is not an object", async () => {

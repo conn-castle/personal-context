@@ -145,6 +145,9 @@ jobs:
       - name: Run Playwright Record Browser e2e
         run: pnpm test:e2e:record-browser
 
+      - name: Run Playwright markdown rendering e2e
+        run: pnpm test:e2e:markdown:ci
+
       - name: Run Playwright standalone CLI record e2e
         run: pnpm test:e2e:cli-record
 

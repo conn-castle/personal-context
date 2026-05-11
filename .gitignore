@@ -36,6 +36,13 @@ dist/
 
 # Phase 1 scaffolding ignores
 .env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+!.env.example
+!web/.env.example
 .pc/
 node_modules/
 .pnpm-store/

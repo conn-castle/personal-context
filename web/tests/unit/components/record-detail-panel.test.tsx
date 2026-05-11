@@ -6,6 +6,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 
 vi.mock("@/components/ui/tabs", () => ({
@@ -139,8 +140,8 @@ describe("RecordDetails", () => {
     ).toBeTruthy();
   });
 
-  it("allows editing and saving notes via onUpdateRecord", () => {
-    const onUpdateRecord = vi.fn();
+  it("allows editing and saving notes via onUpdateRecord", async () => {
+    const onUpdateRecord = vi.fn().mockResolvedValue(true);
     render(
       <RecordDetails record={record} onUpdateRecord={onUpdateRecord} />
     );
@@ -161,6 +162,31 @@ describe("RecordDetails", () => {
     expect(onUpdateRecord).toHaveBeenCalledWith("20260309-aabbccdd", {
       notes: "Updated notes",
     });
+    await waitFor(() => {
+      expect(screen.queryByRole("textbox")).toBeNull();
+    });
+  });
+
+  it("keeps draft notes visible when save fails", async () => {
+    const onUpdateRecord = vi.fn().mockResolvedValue(false);
+    render(
+      <RecordDetails record={record} onUpdateRecord={onUpdateRecord} />
+    );
+
+    fireEvent.click(screen.getByTitle("Edit notes"));
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Unsaved draft" },
+    });
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(onUpdateRecord).toHaveBeenCalledWith("20260309-aabbccdd", {
+        notes: "Unsaved draft",
+      });
+    });
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+      "Unsaved draft"
+    );
   });
 
   it("shows Add notes button when notes are empty", () => {

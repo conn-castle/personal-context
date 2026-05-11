@@ -137,12 +137,12 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 
 ### CLI (Local-First)
 - CLI always writes to local SQLite + local files.
-- If cloud configured: auto-sync after each mutation (`pc add`, `pc edit`, `pc delete`, `pc restore`, `pc move`). Failure is non-fatal (prints warning, exit code 0). Exception: `pc gc` orchestrates its own cloud-first-then-local deletion directly, not via auto-sync.
+- If cloud configured: auto-sync after each mutation (`pc add`, `pc edit`, `pc delete`, `pc restore`, `pc move`). Failure is non-fatal (prints warning, exit code 0). `pc gc` orchestrates cloud-first-then-local hard deletion, then runs auto-sync.
 - If no cloud: writes succeed locally, sync silently skipped.
 - `pc sync` (explicit): full bidirectional push-then-pull. Errors if no cloud configured.
 
 ### Bidirectional Sync Protocol
-1. Acquire file lock (`.pc/sync.lock`) to prevent concurrent sync.
+1. Acquire file lock (`.pc/sync.lock`) to prevent concurrent sync. Acquisition and stale recovery are serialized by an advisory guard at `.pc/sync.lock.guard`. The lock stores JSON metadata (`pid`, `hostname`, `started_at`); if a same-host lock points to a PID that no longer exists, the next sync replaces it while holding the guard. Unparseable or different-host locks remain blocking.
 2. Capture `last_sync_at` at sync **start** (not end).
 3. **Push**: local records where `updated_at >= last_sync_at` -> UPSERT into Neon + upload figures to S3. (No `deleted_at` check needed — trigger auto-bumps `updated_at`.)
 4. **Pull**: Neon records where `updated_at >= last_sync_at` -> UPSERT into local + download figures.
@@ -178,7 +178,8 @@ On version change: query Neon for records with `updated_at >= last_known_timesta
 │   ├── config.json           # Neon URL, S3 bucket/region, aws_profile name, api_key, optional s3_endpoint/s3_force_path_style (0600, no AWS keys). Stale active_project may exist but is ignored by write paths. Cloud mode detected by presence of neon_url + aws_profile.
 │   ├── pc.db                 # local SQLite
 │   ├── last_sync             # timestamp of last cloud sync
-│   └── sync.lock             # file lock for concurrent sync prevention
+│   ├── sync.lock             # JSON metadata file lock for concurrent sync prevention and stale same-host recovery
+│   └── sync.lock.guard       # advisory guard file used during lock acquisition/recovery
 ├── figures/{record_id}/{filename}
 └── data/{record_id}/{filename}  # sparse, on demand
 ```
@@ -375,7 +376,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted reco
 - Read-only chronological navigation (drag-and-drop reorder is still deferred)
 - View notes (full markdown via react-markdown + remark-gfm + mermaid), figures, and data files with sizes plus open/download actions
 - Edit notes from the detail panel
-- Soft delete + trash view with restore
+- Soft delete, restore handling for selected deleted records, and Settings trash counts/purge controls. A browseable trash/deleted-records view is still deferred in BACKLOG.md.
 - 4-layer sync polling via `useSyncManager()` hook
 
 ### Web UI Architecture
@@ -391,7 +392,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted reco
 - `record-date-picker.tsx` — calendar date picker (react-day-picker v9)
 - `record-thumbnail.tsx` — thumbnail card in navigation panel (uses `ScaledRecordFrame` for HTML preview, identical rendering to main viewer)
 - `asset-card.tsx` + `asset-preview-dialog.tsx` — file/figure cards with preview dialog
-- `settings-overlay.tsx` — settings dialog (placeholder, to be built out)
+- `settings-overlay.tsx` — settings dialog with sync/status details, data management, trash purge controls, and external links
 - `theme-provider.tsx` — wraps next-themes ThemeProvider
 - `markdown-renderer.tsx` — full markdown rendering via react-markdown + remark-gfm + mermaid diagram support
 - `scaled-record-frame.tsx` — 16:9 sandboxed iframe with `transform: scale()` (no figure URL resolution — renders htmlContent directly)
@@ -693,11 +694,11 @@ All database fields of active (non-deleted) records and figures lossless. Data f
 
 **Unit tests** — Pure functions, business logic, data transformations. Fast, no I/O.
 - Go: `go test` with table-driven tests. Foundation libraries (fractional indexing, record ID, timezone, config).
-- Next.js: Vitest or Jest. Utility functions, data transformation, sync state logic.
+- Next.js: Vitest. Utility functions, data transformation, sync state logic.
 
 **Integration tests** — Real databases, real filesystem, real S3 (or mocked S3 for CI).
 - Go: SQLite repository CRUD, Postgres repository CRUD, S3 client operations, migration runner.
-- Next.js: API route handlers against test Neon database.
+- Next.js: API route handlers with mocked Neon/S3/local proxy dependencies.
 
 **CLI e2e tests** — Run the actual `pc` binary as a subprocess.
 - Set up temp directories, run commands, verify stdout, exit codes, DB state, and filesystem state.
@@ -705,10 +706,10 @@ All database fields of active (non-deleted) records and figures lossless. Data f
 - Sync e2e: two SQLite databases + one Postgres, simulate multi-machine sync with conflict scenarios.
 - Export/import e2e: all 5 conversion paths with real data, round-trip verification.
 
-**Web UI e2e tests** — Playwright against real Next.js app + test database.
-- Full user workflows: browse records, filter by project, view details, edit, delete, restore, reorder.
-- Sync detection: CLI creates record -> web UI detects via sync manager -> record appears.
-- Error states: network failures, invalid data, empty states.
+**Web UI e2e tests** — Playwright against a real Next.js app with `page.route()` API interception.
+- Covered workflows: browse records, filter by project, view details, edit notes, notes/data-only rendering, sync badge, pagination, markdown rendering, visual states, and error states.
+- Deferred UI workflows: browseable trash/restore flow and drag-and-drop reorder remain in BACKLOG.md/ISSUES.md.
+- Full CLI + cloud + web round-trips remain Phase 11 work.
 
 **Full system e2e** — CLI + cloud + web UI together.
 - CLI creates record -> syncs to Neon -> web UI sees it -> web UI edits -> CLI syncs and sees the edit.

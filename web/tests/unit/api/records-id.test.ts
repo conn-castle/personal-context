@@ -87,9 +87,15 @@ describe("GET /api/records/[id]", () => {
     expect(body.record.source_ref).toBe("vault://record");
     expect(body.record.figures).toHaveLength(1);
     expect(body.record.figures[0].filename).toBe("chart.png");
+    expect(body.record.figures[0].size).toBeUndefined();
+    expect(body.record.figures[0].hash).toBeUndefined();
+    expect(body.record.figures[0].description).toBeUndefined();
     expect(body.record.data_files).toHaveLength(1);
     expect(body.record.data_files[0].filename).toBe("data.csv");
     expect(body.record.data_files[0].alt_text).toBeUndefined();
+    expect(mockSql.mock.calls[1]?.[0].join("")).not.toContain("f.size");
+    expect(mockSql.mock.calls[1]?.[0].join("")).not.toContain("f.hash");
+    expect(mockSql.mock.calls[1]?.[0].join("")).not.toContain("f.description");
     expect(mockSql.mock.calls[2]?.[0].join("")).not.toContain("alt_text");
   });
 
@@ -315,6 +321,26 @@ describe("PATCH /api/records/[id]", () => {
     const body = await res.json();
     expect(body.code).toBe("BAD_REQUEST");
     expect(body.error).toBe("Request body must be a JSON object");
+    expect(mockHandlePatchRecord).not.toHaveBeenCalled();
+  });
+
+  it("returns 413 for over-limit JSON bodies", async () => {
+    const req = new NextRequest(
+      "http://localhost/api/records/20260301-aabbccdd",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ notes: "updated" }),
+        headers: {
+          "Content-Type": "application/json",
+          "Content-Length": String(4 * 1024 * 1024 + 1),
+        },
+      }
+    );
+    const res = await PATCH(req, makeContext("20260301-aabbccdd"));
+
+    expect(res.status).toBe(413);
+    const body = await res.json();
+    expect(body.code).toBe("REQUEST_BODY_TOO_LARGE");
     expect(mockHandlePatchRecord).not.toHaveBeenCalled();
   });
 

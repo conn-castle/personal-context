@@ -31,13 +31,19 @@ export default function LoginForm() {
     setError("");
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
-
-    setLoading(false);
+    let result: Awaited<ReturnType<typeof signIn>>;
+    try {
+      result = await signIn("credentials", {
+        email,
+        password,
+        redirect: false,
+      });
+    } catch {
+      setError("Unable to sign in. Please try again.");
+      return;
+    } finally {
+      setLoading(false);
+    }
 
     if (result?.error) {
       setError("Invalid email or password.");

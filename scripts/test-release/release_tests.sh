@@ -1,7 +1,30 @@
 # Helper functions for scripts/test-release.sh.
 
+run_stale_dist_refusal_test() {
+  section "Stale Dist Refusal Test"
+
+  stale_dist="$tmp_dir/stale-dist"
+  mkdir -p "$stale_dist"
+  echo "old binary" > "$stale_dist/pc-linux-amd64"
+
+  if (
+    cd "$ROOT_DIR"
+    PC_VERSION="$expected_version" DIST_DIR="$stale_dist" ./scripts/build-release.sh
+  ) > "$tmp_dir/stale-dist.log" 2>&1; then
+    fail "build-release.sh should refuse existing release artifacts"
+  elif grep -q "DIST_DIR contains existing release artifacts" "$tmp_dir/stale-dist.log"; then
+    pass "build-release.sh refuses existing release artifacts"
+  else
+    fail "build-release.sh failed without explaining stale release artifacts"
+    cat "$tmp_dir/stale-dist.log"
+  fi
+}
+
 run_release_generation_test() {
   section "Release Generation Test"
+
+  rm -rf "$dist_dir"
+  mkdir -p "$dist_dir"
 
   mock_bin="$tmp_dir/mock-bin"
   mkdir -p "$mock_bin"

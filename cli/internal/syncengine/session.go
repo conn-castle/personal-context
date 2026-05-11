@@ -1,10 +1,14 @@
 package syncengine
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -15,14 +19,17 @@ const (
 	dirPermission    = 0o700
 )
 
-// osFileChmod, osFileWriteString, osFileSync, and osFileClose wrap the
-// corresponding *os.File methods so tests can inject I/O failures without
+// These wrappers let tests inject I/O and process-inspection failures without
 // modifying the filesystem. Production code never reassigns these variables.
 var (
 	osFileChmod       = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode) }
 	osFileWriteString = func(f *os.File, s string) (int, error) { return f.WriteString(s) }
 	osFileSync        = func(f *os.File) error { return f.Sync() }
 	osFileClose       = func(f *os.File) error { return f.Close() }
+	osHostname        = os.Hostname
+	jsonMarshalLock   = func(metadata lockFileMetadata) ([]byte, error) { return json.Marshal(metadata) }
+	syscallKill       = syscall.Kill
+	syscallFlock      = syscall.Flock
 )
 
 // SyncWindow captures the sync cursor observed at the beginning of a sync run.
@@ -48,6 +55,18 @@ type FileLock struct {
 	path     string
 	file     *os.File
 	released bool
+}
+
+type lockOperationGuard struct {
+	path     string
+	file     *os.File
+	released bool
+}
+
+type lockFileMetadata struct {
+	PID       int       `json:"pid"`
+	Hostname  string    `json:"hostname"`
+	StartedAt time.Time `json:"started_at"`
 }
 
 // NewCursorStore constructs a last-sync store rooted at the given .pc directory.
@@ -212,15 +231,99 @@ func AcquireFileLock(path string) (*FileLock, error) {
 		return nil, fmt.Errorf("create lock dir %s: %w", dir, err)
 	}
 
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, filePermission)
+	guard, err := acquireLockOperationGuard(path)
 	if err != nil {
-		if os.IsExist(err) {
-			return nil, ErrSyncLocked
-		}
+		return nil, err
+	}
+	defer func() { _ = guard.Release() }()
+
+	lock, err := createFileLock(path)
+	if err == nil {
+		return lock, nil
+	}
+	if !os.IsExist(err) {
 		return nil, fmt.Errorf("create sync lock %s: %w", path, err)
 	}
 
-	if _, err := osFileWriteString(file, "locked\n"); err != nil {
+	recovered, recoverErr := recoverStaleLock(path)
+	if recoverErr != nil {
+		return nil, recoverErr
+	}
+	if !recovered {
+		return nil, ErrSyncLocked
+	}
+
+	lock, err = createFileLock(path)
+	if err == nil {
+		return lock, nil
+	}
+	if os.IsExist(err) {
+		return nil, ErrSyncLocked
+	}
+	return nil, fmt.Errorf("create sync lock %s after stale recovery: %w", path, err)
+}
+
+func acquireLockOperationGuard(lockPath string) (*lockOperationGuard, error) {
+	guardPath := lockPath + ".guard"
+	file, err := os.OpenFile(guardPath, os.O_CREATE|os.O_RDWR, filePermission)
+	if err != nil {
+		return nil, fmt.Errorf("open sync lock guard %s: %w", guardPath, err)
+	}
+	if err := osFileChmod(file, filePermission); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("set sync lock guard permissions %s: %w", guardPath, err)
+	}
+	if err := syscallFlock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = file.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
+			return nil, ErrSyncLocked
+		}
+		return nil, fmt.Errorf("acquire sync lock guard %s: %w", guardPath, err)
+	}
+	return &lockOperationGuard{path: guardPath, file: file}, nil
+}
+
+func (g *lockOperationGuard) Release() error {
+	if g == nil || g.file == nil || strings.TrimSpace(g.path) == "" {
+		return fmt.Errorf("sync lock guard is required")
+	}
+	if g.released {
+		return fmt.Errorf("sync lock guard %s already released", g.path)
+	}
+	g.released = true
+
+	unlockErr := syscallFlock(int(g.file.Fd()), syscall.LOCK_UN)
+	closeErr := osFileClose(g.file)
+
+	if unlockErr != nil {
+		return fmt.Errorf("release sync lock guard %s: %w", g.path, unlockErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close sync lock guard %s: %w", g.path, closeErr)
+	}
+	return nil
+}
+
+func createFileLock(path string) (*FileLock, error) {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, filePermission)
+	if err != nil {
+		return nil, err
+	}
+
+	metadata, err := newLockFileMetadata()
+	if err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("build sync lock metadata: %w", err)
+	}
+	data, err := jsonMarshalLock(metadata)
+	if err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("marshal sync lock metadata: %w", err)
+	}
+
+	if _, err := osFileWriteString(file, string(data)+"\n"); err != nil {
 		_ = file.Close()
 		_ = os.Remove(path)
 		return nil, fmt.Errorf("write sync lock %s: %w", path, err)
@@ -232,6 +335,98 @@ func AcquireFileLock(path string) (*FileLock, error) {
 	}
 
 	return &FileLock{path: path, file: file}, nil
+}
+
+func newLockFileMetadata() (lockFileMetadata, error) {
+	hostname, err := osHostname()
+	if err != nil {
+		return lockFileMetadata{}, err
+	}
+	if strings.TrimSpace(hostname) == "" {
+		return lockFileMetadata{}, fmt.Errorf("hostname is empty")
+	}
+	return lockFileMetadata{
+		PID:       os.Getpid(),
+		Hostname:  hostname,
+		StartedAt: time.Now().UTC(),
+	}, nil
+}
+
+func recoverStaleLock(path string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, fmt.Errorf("read existing sync lock %s: %w", path, err)
+	}
+
+	metadata, ok := parseLockFileMetadata(data)
+	if !ok {
+		return false, nil
+	}
+
+	hostname, err := osHostname()
+	if err != nil {
+		return false, fmt.Errorf("read hostname for sync lock recovery: %w", err)
+	}
+	if metadata.Hostname != hostname {
+		return false, nil
+	}
+
+	alive, err := processExists(metadata.PID)
+	if err != nil {
+		return false, fmt.Errorf("inspect sync lock process %d: %w", metadata.PID, err)
+	}
+	if alive {
+		return false, nil
+	}
+
+	currentData, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, fmt.Errorf("re-read sync lock %s: %w", path, err)
+	}
+	if !bytes.Equal(data, currentData) {
+		return true, nil
+	}
+	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, fmt.Errorf("remove stale sync lock %s: %w", path, err)
+	}
+	return true, nil
+}
+
+func parseLockFileMetadata(data []byte) (lockFileMetadata, bool) {
+	var metadata lockFileMetadata
+	if err := json.Unmarshal(bytes.TrimSpace(data), &metadata); err != nil {
+		return lockFileMetadata{}, false
+	}
+	if metadata.PID <= 0 || strings.TrimSpace(metadata.Hostname) == "" || metadata.StartedAt.IsZero() {
+		return lockFileMetadata{}, false
+	}
+	return metadata, true
+}
+
+func processExists(pid int) (bool, error) {
+	if pid <= 0 {
+		return false, nil
+	}
+	err := syscallKill(pid, 0)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, syscall.ESRCH):
+		return false, nil
+	case errors.Is(err, syscall.EPERM):
+		return true, nil
+	default:
+		return false, err
+	}
 }
 
 // Release removes the sync lock file.

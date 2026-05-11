@@ -96,6 +96,116 @@ func TestResolveBundleExactEditTieReturnsNone(t *testing.T) {
 	}
 }
 
+func TestSourceBundleCannotRepairChildrenWhenParentPayloadDiffers(t *testing.T) {
+	base := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
+
+	source := newBundle("20260308-a1b2c3d4", base, nil)
+	source.Record.HTMLContent = strPtr("<h1>local</h1>")
+	source.Figures = []repository.RecordFigure{{
+		RecordID: "20260308-a1b2c3d4",
+		Filename: "local.png",
+		S3Key:    "figures/20260308-a1b2c3d4/local.png",
+	}}
+
+	target := newBundle("20260308-a1b2c3d4", base, nil)
+	target.Record.HTMLContent = strPtr("<h1>cloud</h1>")
+	target.Figures = []repository.RecordFigure{{
+		RecordID: "20260308-a1b2c3d4",
+		Filename: "cloud.png",
+		S3Key:    "figures/20260308-a1b2c3d4/cloud.png",
+	}}
+
+	if sourceBundleCanRepairTargetChildren(source, target) {
+		t.Fatal("sourceBundleCanRepairTargetChildren() = true, want false for parent payload conflict")
+	}
+}
+
+func TestSourceBundleCannotRepairChildrenWhenParentNullabilityDiffers(t *testing.T) {
+	base := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
+
+	source := newBundle("20260308-a1b2c3d4", base, nil)
+	source.Record.HTMLContent = strPtr("")
+	source.Figures = []repository.RecordFigure{{
+		RecordID: "20260308-a1b2c3d4",
+		Filename: "plot.png",
+		S3Key:    "figures/20260308-a1b2c3d4/plot.png",
+	}}
+
+	target := newBundle("20260308-a1b2c3d4", base, nil)
+	target.Record.HTMLContent = nil
+
+	if sourceBundleCanRepairTargetChildren(source, target) {
+		t.Fatal("sourceBundleCanRepairTargetChildren() = true, want false when parent nullability differs")
+	}
+}
+
+func TestSourceBundleCanRepairChildrenWhenParentPayloadMatches(t *testing.T) {
+	base := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
+
+	source := newBundle("20260308-a1b2c3d4", base, nil)
+	source.Record.HTMLContent = strPtr("<h1>same</h1>")
+	source.Figures = []repository.RecordFigure{{
+		RecordID: "20260308-a1b2c3d4",
+		Filename: "plot.png",
+		S3Key:    "figures/20260308-a1b2c3d4/plot.png",
+	}}
+
+	target := newBundle("20260308-a1b2c3d4", base, nil)
+	target.Record.HTMLContent = strPtr("<h1>same</h1>")
+
+	if !sourceBundleCanRepairTargetChildren(source, target) {
+		t.Fatal("sourceBundleCanRepairTargetChildren() = false, want true for matching parent payload with missing child")
+	}
+}
+
+func TestSourceBundleCannotRepairEqualCountDivergentFigures(t *testing.T) {
+	base := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
+
+	source := newBundle("20260308-a1b2c3d4", base, nil)
+	source.Figures = []repository.RecordFigure{{
+		RecordID: "20260308-a1b2c3d4",
+		Filename: "local.png",
+		S3Key:    "figures/20260308-a1b2c3d4/local.png",
+	}}
+
+	target := newBundle("20260308-a1b2c3d4", base, nil)
+	target.Figures = []repository.RecordFigure{{
+		RecordID: "20260308-a1b2c3d4",
+		Filename: "cloud.png",
+		S3Key:    "figures/20260308-a1b2c3d4/cloud.png",
+	}}
+
+	if sourceBundleCanRepairTargetChildren(source, target) {
+		t.Fatal("sourceBundleCanRepairTargetChildren() = true, want false for equal-count divergent figures")
+	}
+}
+
+func TestSourceBundleCannotRepairChangedDataFileMetadata(t *testing.T) {
+	base := time.Date(2026, time.March, 8, 12, 0, 0, 0, time.UTC)
+
+	source := newBundle("20260308-a1b2c3d4", base, nil)
+	source.DataFiles = []repository.RecordDataFile{{
+		RecordID: "20260308-a1b2c3d4",
+		Filename: "metrics.csv",
+		S3Key:    "data/20260308-a1b2c3d4/metrics.csv",
+		Size:     10,
+		Hash:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}}
+
+	target := newBundle("20260308-a1b2c3d4", base, nil)
+	target.DataFiles = []repository.RecordDataFile{{
+		RecordID: "20260308-a1b2c3d4",
+		Filename: "metrics.csv",
+		S3Key:    "data/20260308-a1b2c3d4/metrics.csv",
+		Size:     10,
+		Hash:     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}}
+
+	if sourceBundleCanRepairTargetChildren(source, target) {
+		t.Fatal("sourceBundleCanRepairTargetChildren() = true, want false for changed data-file metadata")
+	}
+}
+
 func TestResolveBundleRejectsMismatchedIDs(t *testing.T) {
 	_, _, err := ResolveBundle(
 		newBundle("20260308-a1b2c3d4", time.Now().UTC(), nil),
@@ -111,14 +221,14 @@ func TestPlanFigureReconciliationMatchesByFilename(t *testing.T) {
 		"20260308-a1b2c3d4",
 		[]repository.RecordFigure{{
 			ID:       1,
-			RecordID:  "20260308-a1b2c3d4",
+			RecordID: "20260308-a1b2c3d4",
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 			AltText:  strPtr("before"),
 		}},
 		[]repository.RecordFigure{{
 			ID:       99,
-			RecordID:  "20260308-a1b2c3d4",
+			RecordID: "20260308-a1b2c3d4",
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-a1b2c3d4/plot-v2.png",
 			AltText:  strPtr("after"),
@@ -146,7 +256,7 @@ func TestPlanFigureReconciliationDeletesMissingRows(t *testing.T) {
 		"20260308-a1b2c3d4",
 		[]repository.RecordFigure{{
 			ID:       1,
-			RecordID:  "20260308-a1b2c3d4",
+			RecordID: "20260308-a1b2c3d4",
 			Filename: "plot.png",
 			S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 		}},
@@ -165,7 +275,7 @@ func TestPlanDataFileReconciliationMatchesByFilename(t *testing.T) {
 		"20260308-a1b2c3d4",
 		[]repository.RecordDataFile{{
 			ID:          7,
-			RecordID:     "20260308-a1b2c3d4",
+			RecordID:    "20260308-a1b2c3d4",
 			Filename:    "metrics.csv",
 			S3Key:       "data/20260308-a1b2c3d4/metrics.csv",
 			Size:        10,
@@ -174,7 +284,7 @@ func TestPlanDataFileReconciliationMatchesByFilename(t *testing.T) {
 		}},
 		[]repository.RecordDataFile{{
 			ID:          42,
-			RecordID:     "20260308-a1b2c3d4",
+			RecordID:    "20260308-a1b2c3d4",
 			Filename:    "metrics.csv",
 			S3Key:       "data/20260308-a1b2c3d4/metrics-v2.csv",
 			Size:        12,
@@ -310,7 +420,7 @@ func TestPlanFigureReconciliationCreatesNewFigures(t *testing.T) {
 		"20260308-a1b2c3d4",
 		nil,
 		[]repository.RecordFigure{{
-			RecordID:  "20260308-a1b2c3d4",
+			RecordID: "20260308-a1b2c3d4",
 			Filename: "new.png",
 			S3Key:    "figures/20260308-a1b2c3d4/new.png",
 			AltText:  strPtr("a new figure"),
@@ -342,7 +452,7 @@ func TestPlanFigureReconciliationCreatesNewFigures(t *testing.T) {
 func TestPlanFigureReconciliationExactMatchNoChanges(t *testing.T) {
 	figures := []repository.RecordFigure{{
 		ID:       1,
-		RecordID:  "20260308-a1b2c3d4",
+		RecordID: "20260308-a1b2c3d4",
 		Filename: "plot.png",
 		S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 		AltText:  strPtr("same alt"),
@@ -365,7 +475,7 @@ func TestPlanFigureReconciliationExactMatchNoChanges(t *testing.T) {
 func TestPlanFigureReconciliationExactMatchNilAltText(t *testing.T) {
 	figures := []repository.RecordFigure{{
 		ID:       1,
-		RecordID:  "20260308-a1b2c3d4",
+		RecordID: "20260308-a1b2c3d4",
 		Filename: "plot.png",
 		S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 		AltText:  nil,
@@ -446,7 +556,7 @@ func TestPlanDataFileReconciliationDeletesMissingRows(t *testing.T) {
 		"20260308-a1b2c3d4",
 		[]repository.RecordDataFile{{
 			ID:       5,
-			RecordID:  "20260308-a1b2c3d4",
+			RecordID: "20260308-a1b2c3d4",
 			Filename: "old.csv",
 			S3Key:    "data/20260308-a1b2c3d4/old.csv",
 			Size:     10,
@@ -471,7 +581,7 @@ func TestPlanDataFileReconciliationDeletesMissingRows(t *testing.T) {
 func TestPlanDataFileReconciliationExactMatchNoChanges(t *testing.T) {
 	dataFiles := []repository.RecordDataFile{{
 		ID:          1,
-		RecordID:     "20260308-a1b2c3d4",
+		RecordID:    "20260308-a1b2c3d4",
 		Filename:    "metrics.csv",
 		S3Key:       "data/20260308-a1b2c3d4/metrics.csv",
 		Size:        10,
@@ -496,7 +606,7 @@ func TestPlanDataFileReconciliationExactMatchNoChanges(t *testing.T) {
 func TestPlanDataFileReconciliationExactMatchNilDescription(t *testing.T) {
 	dataFiles := []repository.RecordDataFile{{
 		ID:          1,
-		RecordID:     "20260308-a1b2c3d4",
+		RecordID:    "20260308-a1b2c3d4",
 		Filename:    "metrics.csv",
 		S3Key:       "data/20260308-a1b2c3d4/metrics.csv",
 		Size:        10,

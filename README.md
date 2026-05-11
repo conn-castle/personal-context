@@ -97,8 +97,8 @@ pnpm test:e2e:visual
 pnpm test:e2e:cli-demo
 
 # Or from the repo root (recommended):
-make check          # everything
-make test           # just tests
+make check          # pre-commit gate: schema, lint, typecheck, coverage, build
+make test           # CLI + web unit tests
 make web-e2e        # just Playwright
 
 # Repo-level schema contract

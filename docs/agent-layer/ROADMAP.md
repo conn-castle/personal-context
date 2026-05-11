@@ -51,42 +51,12 @@ Incomplete:
 
 <!-- PHASES START -->
 
-## Phase 1 ✅ — Project Scaffolding
-- Initialized runnable Go CLI scaffold in `cli/` with required dependency set, root command, schema contract checks, lint, and hard 95% coverage enforcement.
-- Initialized Next.js App Router + TypeScript scaffold in `web/` with `@neondatabase/serverless`, lint/test/coverage gates (95%), and DB-free Playwright smoke e2e configuration.
-- Added CI workflow (`.github/workflows/ci.yml`) covering schema contract checks, Go build/test/lint/coverage gates, and web lint/test/coverage/build/e2e checks.
-- Added repository-level schema contract guard script (`scripts/check_schema_contract.sh`) enforcing canonical `schema/` usage and preventing workspace-local schema duplicates.
-- Migrated `docs/requirements/` content into canonical sources (`schema/`, `docs/agent-layer/*`, `README.md`), documented migration evidence in `.agent-layer/tmp/phase1-requirements-migration-checklist.md`, and removed `docs/requirements/`.
-- Added nightly export workflow example (`docs/nightly-export-workflow.example.yml`) and rewrote root `README.md` with architecture, setup, command reference, web overview, and contributor workflow.
-
-## Phase 2 ✅ — Core Data Layer (Local)
-- Implemented foundation libraries with test-first coverage: record ID generation, fractional indexing, timezone utilities, config read/write + mode detection, and notes normalization.
-- Added SQLite local data layer end-to-end: connection factory (`foreign_keys=ON`, WAL), executable migrations for all 5 tables with sync/timestamp triggers, backend-agnostic repository contract, SQLite repository implementation, and integration tests.
-- Implemented local filesystem client for figures/data with path validation, copy/delete behavior, and error-case coverage.
-- Restored `go mod tidy -diff` in CI and added per-package coverage enforcement (`>=95%`) in CI and CLI workflow commands.
-
-## Phase 3 ✅ — Local CLI Foundation (Setup + CRUD)
-- Implemented all 7 local CLI commands: `pc setup`, `pc add`, `pc show`, `pc edit`, `pc delete`, `pc restore`, `pc move` — registered in root.go with Cobra.
-- E2e test suite (57 tests) runs compiled `pc` binary as subprocess: setup (4), add (11), show (5), edit (10), delete/restore (9), move (12), edge cases (6).
-- Extensive in-process unit tests for Go coverage: add_test.go, commands_test.go, coverage_test.go, error_paths_test.go — covering happy paths, error injection via `resolveHomeDirFn`, DB corruption, permission failures, and trigger errors.
-- Per-package coverage >=95% enforced (`internal/cli` at 95.3%). All tests pass, go vet clean.
-
-## Phase 4 ✅ — Local CLI Features (Search, Trash, Projects)
-- Implemented 5 new CLI commands: `pc search`, `pc trash`, `pc gc`, `pc project set/clear/list`, `pc doctor` — all registered in root.go.
-- Extended `ListRecordsFilter` with `OnlyDeleted` and `Query` fields; added `ListDistinctProjectIDs` to Repository interface; extended Config with `ActiveProject`.
-- Added filesystem methods: `BasePath`, `ListRecordIDsOnDisk`, `DeleteRecordDir` for gc and doctor operations.
-- Active project integration: `pc add` uses active project when no `--project` flag or metadata.json project_id.
-- E2e test suite expanded to 103 tests (from 57): search (14), trash (5), gc (9), project (12), doctor (5), workflow (1), plus existing tests.
-- Full local-only workflow e2e test (`TestFullLocalWorkflow`) exercises all commands end-to-end.
-- Consolidated SQLite schema: removed `cli/migrations/` package, embedded single canonical schema in `cli/internal/sqlite/sqlite_schema.sql`.
-- Per-package coverage >=95% enforced. All packages pass. Linter clean.
-
-## Phase 5 ✅ — Cloud Data Layer
-- Implemented Postgres repository (`cli/internal/repository/postgres/`) — full 24-method pgx-based Repository with positional params, ILIKE, RETURNING, native `time.Time`, `mapPgError`, `ensureRowsAffected`. Embedded DDL via `schema.go` + `ApplySchema()`. 17 contract suite + 5 Postgres-specific integration tests (testcontainers-go, schema-per-test isolation) + 9 unit tests. 95.2% coverage.
-- Implemented S3 client (`cli/internal/s3client/`) — `Upload`, `Download`, `Delete`, `Exists`, `HeadVersion`, `UpdateVersion` methods. DI constructor accepts pre-configured `*s3.Client` + bucket. Integration tests via testcontainers-go MinIO container (bucket-per-test isolation) + unit tests for error mapping. 98.6% coverage.
-- Implemented cloud config validation (`cli/internal/config/validate.go`) — `ValidateNeonURL`, `ValidateS3Bucket`, `ValidateS3Region`, `ValidateCloudConfig`. 48 table-driven test cases. 95.1% coverage.
-- Added CI schema equivalence guard (`scripts/check_schema_equivalence.sh`) — parses both schema files, compares tables, columns, indexes, and UNIQUE constraints. Added to CI workflow.
-- Dependencies added: `aws-sdk-go-v2` + credentials + service/s3 + smithy-go, `testcontainers-go/modules/minio`.
+## Archived phases (1–5)
+- Phase 1 — Project Scaffolding: Created the Go CLI and Next.js scaffolds, CI/schema guards, requirements migration, README, and nightly export example.
+- Phase 2 — Core Data Layer (Local): Built foundation libraries, SQLite repository/filesystem layers, migration application, and coverage gates.
+- Phase 3 — Local CLI Foundation (Setup + CRUD): Implemented setup/add/show/edit/delete/restore/move with subprocess e2e coverage and >95% package coverage.
+- Phase 4 — Local CLI Features (Search, Trash, Projects): Added search/trash/gc/project/doctor workflows, active project support, local workflow e2e coverage, and SQLite schema consolidation.
+- Phase 5 — Cloud Data Layer: Added Postgres repository, S3 client, cloud config validation, schema equivalence checks, and Docker-backed integration tests.
 
 ## Phase 6 ✅ — Sync Engine + Cloud CLI
 - Implemented bidirectional sync engine (`internal/sync/`) with push-then-pull conflict resolution (last-writer-wins, edit-wins-on-tie), child row matching by `(record_id, filename)`, and file-based sync lock (`.pc/sync.lock`).

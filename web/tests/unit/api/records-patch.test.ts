@@ -44,10 +44,7 @@ describe("PATCH /api/records/[id] (handlePatchRecord)", () => {
     {
       filename: "fig1.png",
       s3_key: "figures/20250304-a3f2b7e1/fig1.png",
-      size: 1234,
-      hash: "abc123",
       alt_text: null,
-      description: null,
     },
   ];
 
@@ -79,6 +76,9 @@ describe("PATCH /api/records/[id] (handlePatchRecord)", () => {
     const body = await res.json();
     expect(body.record.project_id).toBe("org/alpha");
     expect(body.record.source_device_id).toBe("device-a");
+    expect(body.record.figures[0].size).toBeUndefined();
+    expect(body.record.figures[0].hash).toBeUndefined();
+    expect(body.record.figures[0].description).toBeUndefined();
     expect(body.sync_version).toBe(5);
     expect(mockBumpS3Version).toHaveBeenCalledWith(5, "2025-03-04T10:00:00.000Z", "test-user-id");
   });
