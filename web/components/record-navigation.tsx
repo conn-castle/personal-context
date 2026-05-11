@@ -56,6 +56,8 @@ export function RecordNavigation({
               variant="ghost"
               size="icon-sm"
               onClick={() => onViewModeChange("strip")}
+              aria-label="Strip view"
+              aria-pressed={viewMode === "strip"}
               className={cn(
                 "h-7 w-7",
                 viewMode === "strip"
@@ -70,6 +72,8 @@ export function RecordNavigation({
               variant="ghost"
               size="icon-sm"
               onClick={() => onViewModeChange("grid")}
+              aria-label="Grid view"
+              aria-pressed={viewMode === "grid"}
               className={cn(
                 "h-7 w-7",
                 viewMode === "grid"

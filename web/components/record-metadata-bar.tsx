@@ -207,19 +207,22 @@ export function RecordMetadataBar({ record, onDelete, onRestore, isEmpty }: Reco
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem>
+            {/* Share/Download/Copy/Print are not yet implemented. Render as
+                disabled so users see them as in-progress rather than as
+                broken interactive items. Re-enable when handlers are wired. */}
+            <DropdownMenuItem disabled aria-disabled="true">
               <Share2 className="w-4 h-4" />
               Share record
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem disabled aria-disabled="true">
               <Download className="w-4 h-4" />
               Download record
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem disabled aria-disabled="true">
               <Copy className="w-4 h-4" />
               Copy link
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem disabled aria-disabled="true">
               <Printer className="w-4 h-4" />
               Print
             </DropdownMenuItem>

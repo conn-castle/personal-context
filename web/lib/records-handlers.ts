@@ -101,9 +101,21 @@ export async function handlePatchRecord(
       );
     }
 
-    // Fetch child rows for full detail
-    const figures = (await sql`SELECT filename, s3_key, size, hash, alt_text, description FROM record_figures WHERE record_id = ${id}`) as RecordFile[];
-    const dataFiles = (await sql`SELECT filename, s3_key, size, hash, description FROM record_data_files WHERE record_id = ${id}`) as RecordFile[];
+    // Fetch child rows for full detail. Defense-in-depth INNER JOIN on
+    // records so cross-tenant access stays impossible even if a refactor
+    // reorders these queries relative to the UPDATE ownership check above.
+    const figures = (await sql`
+      SELECT f.filename, f.s3_key, f.size, f.hash, f.alt_text, f.description
+      FROM record_figures f
+      INNER JOIN records r ON r.id = f.record_id
+      WHERE f.record_id = ${id} AND r.user_id = ${userId}
+    `) as RecordFile[];
+    const dataFiles = (await sql`
+      SELECT d.filename, d.s3_key, d.size, d.hash, d.description
+      FROM record_data_files d
+      INNER JOIN records r ON r.id = d.record_id
+      WHERE d.record_id = ${id} AND r.user_id = ${userId}
+    `) as RecordFile[];
 
     const record: RecordDetail = {
       id: row.id as string,

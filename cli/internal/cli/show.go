@@ -8,6 +8,7 @@ import (
 	"io"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
+	"github.com/conn-castle/personal-context/cli/internal/timeutil"
 	"github.com/spf13/cobra"
 )
 
@@ -113,16 +114,13 @@ func showJSON(w io.Writer, record repository.Record, figures []repository.Record
 		SourceRef:      record.SourceRef,
 		GitRemoteURL:   record.GitRemoteURL,
 		GitHash:        record.GitHash,
-		CreatedAt:      record.CreatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
-		UpdatedAt:      record.UpdatedAt.UTC().Format("2006-01-02T15:04:05.000Z"),
+		CreatedAt:      timeutil.FormatUTCMillis(record.CreatedAt),
+		UpdatedAt:      timeutil.FormatUTCMillis(record.UpdatedAt),
 		Figures:        make([]figureJSON, 0, len(figures)),
 		DataFiles:      make([]dataFileJSON, 0, len(dataFiles)),
 	}
 
-	if record.DeletedAt != nil {
-		s := record.DeletedAt.UTC().Format("2006-01-02T15:04:05.000Z")
-		out.DeletedAt = &s
-	}
+	out.DeletedAt = timeutil.FormatUTCMillisPtr(record.DeletedAt)
 
 	for _, f := range figures {
 		out.Figures = append(out.Figures, figureJSON{

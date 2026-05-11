@@ -69,6 +69,60 @@ func TestTodayInLocationFailsWithoutLocation(t *testing.T) {
 	}
 }
 
+func TestFormatUTCMillis(t *testing.T) {
+	tests := []struct {
+		name string
+		in   time.Time
+		want string
+	}{
+		{
+			name: "utc input rounds to millis",
+			in:   time.Date(2026, time.May, 10, 20, 1, 39, 123456789, time.UTC),
+			want: "2026-05-10T20:01:39.123Z",
+		},
+		{
+			name: "non-utc input is converted to utc",
+			in:   time.Date(2026, time.May, 10, 22, 1, 39, 0, time.FixedZone("UTC+2", 2*60*60)),
+			want: "2026-05-10T20:01:39.000Z",
+		},
+		{
+			name: "zero nanoseconds emits .000",
+			in:   time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+			want: "2026-01-01T00:00:00.000Z",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatUTCMillis(tt.in)
+			if got != tt.want {
+				t.Fatalf("FormatUTCMillis(%v) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatUTCMillisPtr(t *testing.T) {
+	if got := FormatUTCMillisPtr(nil); got != nil {
+		t.Fatalf("FormatUTCMillisPtr(nil) = %q, want nil", *got)
+	}
+
+	in := time.Date(2026, time.May, 10, 20, 1, 39, 500_000_000, time.UTC)
+	got := FormatUTCMillisPtr(&in)
+	if got == nil {
+		t.Fatal("FormatUTCMillisPtr(non-nil) returned nil")
+	}
+	if *got != "2026-05-10T20:01:39.500Z" {
+		t.Fatalf("FormatUTCMillisPtr(non-nil) = %q, want %q", *got, "2026-05-10T20:01:39.500Z")
+	}
+}
+
+func TestUTCMillisFormatConstant(t *testing.T) {
+	// Guard against accidental edits to the canonical wire format.
+	if UTCMillisFormat != "2006-01-02T15:04:05.000Z" {
+		t.Fatalf("UTCMillisFormat changed unexpectedly: %q", UTCMillisFormat)
+	}
+}
+
 func TestMicrosecondRoundTrip(t *testing.T) {
 	loc := time.FixedZone("UTC+2", 2*60*60)
 	local := time.Date(2026, time.March, 5, 8, 9, 10, 987654000, loc)

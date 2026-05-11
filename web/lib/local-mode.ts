@@ -1,7 +1,7 @@
 const LOOPBACK_HOSTS = new Set(["localhost", "::1", "[::1]"]);
 
 function isIPv4Loopback(hostname: string): boolean {
- const parts = hostname.split(".");
+  const parts = hostname.split(".");
   if (parts.length !== 4) {
     return false;
   }

@@ -12,12 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/conn-castle/personal-context/cli/internal/timeutil"
 	sqlitedriver "modernc.org/sqlite"
 )
-
-// migrationTimestampFormat matches SQLite's strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-// output: always 3 fractional-second digits (millisecond precision).
-const migrationTimestampFormat = "2006-01-02T15:04:05.000Z"
 
 func init() {
 	sqlitedriver.RegisterConnectionHook(func(conn sqlitedriver.ExecQuerierContext, dsn string) error {
@@ -214,7 +211,7 @@ func applyMigration(ctx context.Context, db *sql.DB, migration string, content [
 		ctx,
 		`INSERT INTO schema_migrations(version, applied_at) VALUES(?, ?)`,
 		migration,
-		time.Now().UTC().Format(migrationTimestampFormat),
+		timeutil.FormatUTCMillis(time.Now()),
 	); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("record migration %s: %w", migration, err)

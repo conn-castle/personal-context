@@ -349,3 +349,48 @@ func TestMovePreservesDeletedAtForSoftDeletedRecord(t *testing.T) {
 		t.Fatal("expected deleted_at to remain set after move")
 	}
 }
+
+// TestMoveDateMatchingCurrentDatePreservesPosition guards against the
+// regression where `pc move <id> --date <same-date>` with no position flags
+// silently reorders the record to the end of its day.
+func TestMoveDateMatchingCurrentDatePreservesPosition(t *testing.T) {
+	homeDir := t.TempDir()
+	runPCSuccess(t, homeDir, "setup")
+
+	date := "2025-05-10"
+	inputDir1 := createInputFolder(t, inputFolderOpts{})
+	stdout1 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir1)
+	id1 := strings.TrimSpace(stdout1)
+
+	inputDir2 := createInputFolder(t, inputFolderOpts{})
+	stdout2 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir2)
+	id2 := strings.TrimSpace(stdout2)
+
+	db := openTestDB(t, homeDir)
+	var orderBefore string
+	if err := db.QueryRow("SELECT day_order FROM records WHERE id = ?", id1).Scan(&orderBefore); err != nil {
+		t.Fatalf("query day_order before move: %v", err)
+	}
+
+	// Re-run move on id1 with the same date and no position flag. Its existing
+	// day_order must be preserved (no implicit "last"), even though id2 was
+	// added after id1.
+	runPCSuccess(t, homeDir, "move", id1, "--date", date)
+
+	var orderAfter string
+	if err := db.QueryRow("SELECT day_order FROM records WHERE id = ?", id1).Scan(&orderAfter); err != nil {
+		t.Fatalf("query day_order after move: %v", err)
+	}
+	if orderAfter != orderBefore {
+		t.Fatalf("expected day_order preserved for same-date no-position move: before=%q after=%q", orderBefore, orderAfter)
+	}
+
+	// id1 should still come before id2 lexicographically.
+	var orderID2 string
+	if err := db.QueryRow("SELECT day_order FROM records WHERE id = ?", id2).Scan(&orderID2); err != nil {
+		t.Fatalf("query day_order id2: %v", err)
+	}
+	if orderAfter >= orderID2 {
+		t.Fatalf("expected id1 still before id2: id1=%q id2=%q", orderAfter, orderID2)
+	}
+}

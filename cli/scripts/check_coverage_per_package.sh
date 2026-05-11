@@ -14,7 +14,8 @@ trap 'rm -rf "$tmp_dir"' EXIT
 
 while IFS= read -r pkg; do
 	profile_path="${tmp_dir}/$(echo "$pkg" | tr '/.' '__').out"
-	test_output="$(go test -covermode=atomic -coverprofile="$profile_path" "$pkg" 2>&1)" || {
+	# Race detector matches the aggregate run so concurrency bugs surface here too.
+	test_output="$(go test -race -covermode=atomic -coverprofile="$profile_path" "$pkg" 2>&1)" || {
 		echo "$test_output"
 		exit 1
 	}

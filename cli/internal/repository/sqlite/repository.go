@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
+	"github.com/conn-castle/personal-context/cli/internal/timeutil"
 	sqlite "modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
@@ -192,11 +193,11 @@ func listRecordsPredicateSQL(filter repository.ListRecordsFilter) (string, []any
 	}
 	if filter.UpdatedAfter != nil {
 		builder.WriteString(` AND updated_at >= ?`)
-		args = append(args, filter.UpdatedAfter.UTC().Format("2006-01-02T15:04:05.000Z"))
+		args = append(args, timeutil.FormatUTCMillis(*filter.UpdatedAfter))
 	}
 	if filter.UpdatedBefore != nil {
 		builder.WriteString(` AND updated_at <= ?`)
-		args = append(args, filter.UpdatedBefore.UTC().Format("2006-01-02T15:04:05.000Z"))
+		args = append(args, timeutil.FormatUTCMillis(*filter.UpdatedBefore))
 	}
 	if filter.Query != nil {
 		escaped := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(trimmedQuery)
@@ -1289,15 +1290,13 @@ func parseNullableTimestamp(raw sql.NullString) (*time.Time, error) {
 	return &parsed, nil
 }
 
-// sqliteTimestampFormat matches SQLite's strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-// output: always 3 fractional-second digits (millisecond precision).
-const sqliteTimestampFormat = "2006-01-02T15:04:05.000Z"
-
 func nullableTime(value *time.Time) any {
 	if value == nil {
 		return nil
 	}
-	return value.UTC().Format(sqliteTimestampFormat)
+	// SQLite's strftime('%Y-%m-%dT%H:%M:%fZ', 'now') produces the same shape:
+	// always 3 fractional-second digits (millisecond precision).
+	return timeutil.FormatUTCMillis(*value)
 }
 
 func nullableInt64(value *int64) any {

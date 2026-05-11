@@ -16,9 +16,13 @@ export function RecordThumbnail({
   isSelected,
   onClick,
 }: RecordThumbnailProps) {
+  const ariaLabel = `Record ${record.id} from ${record.date}, project ${record.project_id}`;
+
   return (
     <button
       onClick={onClick}
+      aria-label={ariaLabel}
+      aria-current={isSelected ? "true" : undefined}
       className={cn(
         "group relative w-full rounded-lg overflow-hidden transition-all duration-200",
         "border-2 hover:border-primary/50",

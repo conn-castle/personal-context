@@ -243,58 +243,81 @@ func findOrphans(ctx context.Context, repo repository.Repository, recordIDs []st
 	return orphans, nil
 }
 
-// checkMissingFigures checks all tracked records for figure files that are
-// recorded in the database but missing from disk.
-// Args: ctx is the context; repo is the repository; fs is the filesystem client; records is the list of records.
-// Returns: missing figure paths (as recordID/filename), or an error when inspection fails.
-func checkMissingFigures(ctx context.Context, repo repository.Repository, fs *filesystem.Client, records []repository.Record) ([]string, error) {
-	missingFigures := make([]string, 0)
-	for _, record := range records {
-		figures, err := repo.ListRecordFiguresByRecordID(ctx, record.ID)
-		if err != nil {
-			return nil, fmt.Errorf("list figures for %s: %w", record.ID, err)
-		}
-		for _, fig := range figures {
-			path, err := fs.ResolveFigurePath(record.ID, fig.Filename)
-			if err != nil {
-				return nil, fmt.Errorf("resolve figure path for %s/%s: %w", record.ID, fig.Filename, err)
-			}
-			if _, err := os.Stat(path); err != nil {
-				if os.IsNotExist(err) {
-					missingFigures = append(missingFigures, record.ID+"/"+fig.Filename)
-					continue
-				}
-				return nil, fmt.Errorf("stat figure path for %s/%s: %w", record.ID, fig.Filename, err)
-			}
-		}
-	}
-	return missingFigures, nil
+// missingAttachmentScanner lets one helper visit either figures or data files
+// without duplicating traversal/stat/error plumbing. label is woven into error
+// text so failures keep their human-readable category.
+type missingAttachmentScanner struct {
+	label         string
+	listFilenames func(ctx context.Context, repo repository.Repository, recordID string) ([]string, error)
+	resolvePath   func(recordID string, filename string) (string, error)
 }
 
-// checkMissingDataFiles checks all tracked records for data files that are
-// recorded in the database but missing from disk.
-// Args: ctx is the context; repo is the repository; fs is the filesystem client; records is the list of records.
-// Returns: missing data file paths (as recordID/filename), or an error when inspection fails.
-func checkMissingDataFiles(ctx context.Context, repo repository.Repository, fs *filesystem.Client, records []repository.Record) ([]string, error) {
-	missingDataFiles := make([]string, 0)
+// scanMissingAttachments returns "recordID/filename" pairs for any rows
+// whose recorded attachment file is absent from disk. A nil scanner argument
+// is treated as a programming error.
+func scanMissingAttachments(
+	ctx context.Context,
+	repo repository.Repository,
+	records []repository.Record,
+	scanner missingAttachmentScanner,
+) ([]string, error) {
+	missing := make([]string, 0)
 	for _, record := range records {
-		dataFiles, err := repo.ListRecordDataFilesByRecordID(ctx, record.ID)
+		filenames, err := scanner.listFilenames(ctx, repo, record.ID)
 		if err != nil {
-			return nil, fmt.Errorf("list data files for %s: %w", record.ID, err)
+			return nil, fmt.Errorf("list %ss for %s: %w", scanner.label, record.ID, err)
 		}
-		for _, df := range dataFiles {
-			path, err := fs.ResolveDataFilePath(record.ID, df.Filename)
+		for _, filename := range filenames {
+			path, err := scanner.resolvePath(record.ID, filename)
 			if err != nil {
-				return nil, fmt.Errorf("resolve data file path for %s/%s: %w", record.ID, df.Filename, err)
+				return nil, fmt.Errorf("resolve %s path for %s/%s: %w", scanner.label, record.ID, filename, err)
 			}
 			if _, err := os.Stat(path); err != nil {
 				if os.IsNotExist(err) {
-					missingDataFiles = append(missingDataFiles, record.ID+"/"+df.Filename)
+					missing = append(missing, record.ID+"/"+filename)
 					continue
 				}
-				return nil, fmt.Errorf("stat data file path for %s/%s: %w", record.ID, df.Filename, err)
+				return nil, fmt.Errorf("stat %s path for %s/%s: %w", scanner.label, record.ID, filename, err)
 			}
 		}
 	}
-	return missingDataFiles, nil
+	return missing, nil
+}
+
+// checkMissingFigures returns recorded figure files that are missing from disk.
+func checkMissingFigures(ctx context.Context, repo repository.Repository, fs *filesystem.Client, records []repository.Record) ([]string, error) {
+	return scanMissingAttachments(ctx, repo, records, missingAttachmentScanner{
+		label: "figure",
+		listFilenames: func(ctx context.Context, repo repository.Repository, recordID string) ([]string, error) {
+			figures, err := repo.ListRecordFiguresByRecordID(ctx, recordID)
+			if err != nil {
+				return nil, err
+			}
+			names := make([]string, 0, len(figures))
+			for _, fig := range figures {
+				names = append(names, fig.Filename)
+			}
+			return names, nil
+		},
+		resolvePath: fs.ResolveFigurePath,
+	})
+}
+
+// checkMissingDataFiles returns recorded data files that are missing from disk.
+func checkMissingDataFiles(ctx context.Context, repo repository.Repository, fs *filesystem.Client, records []repository.Record) ([]string, error) {
+	return scanMissingAttachments(ctx, repo, records, missingAttachmentScanner{
+		label: "data file",
+		listFilenames: func(ctx context.Context, repo repository.Repository, recordID string) ([]string, error) {
+			dataFiles, err := repo.ListRecordDataFilesByRecordID(ctx, recordID)
+			if err != nil {
+				return nil, err
+			}
+			names := make([]string, 0, len(dataFiles))
+			for _, df := range dataFiles {
+				names = append(names, df.Filename)
+			}
+			return names, nil
+		},
+		resolvePath: fs.ResolveDataFilePath,
+	})
 }

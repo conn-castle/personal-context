@@ -95,15 +95,18 @@ func PlanFigureReconciliation(
 		DeleteIDs: make([]int64, 0),
 	}
 
-	existingByFilename := make(map[string]repository.RecordFigure, len(existing))
-	for _, figure := range existing {
-		existingByFilename[figure.Filename] = figure
+	existingByFilename, err := syncengine.FigureMapByFilename(existing)
+	if err != nil {
+		return FigurePlan{}, fmt.Errorf("existing figures: %w", err)
 	}
 
 	desiredByFilename := make(map[string]repository.RecordFigure, len(desired))
 	for _, figure := range desired {
 		if strings.TrimSpace(figure.Filename) == "" || strings.TrimSpace(figure.S3Key) == "" {
 			return FigurePlan{}, fmt.Errorf("desired figure filename and s3_key are required")
+		}
+		if _, exists := desiredByFilename[figure.Filename]; exists {
+			return FigurePlan{}, fmt.Errorf("duplicate desired figure filename %q", figure.Filename)
 		}
 		desiredByFilename[figure.Filename] = figure
 		if existingFigure, ok := existingByFilename[figure.Filename]; ok {
@@ -153,9 +156,9 @@ func PlanDataFileReconciliation(
 		DeleteIDs: make([]int64, 0),
 	}
 
-	existingByFilename := make(map[string]repository.RecordDataFile, len(existing))
-	for _, dataFile := range existing {
-		existingByFilename[dataFile.Filename] = dataFile
+	existingByFilename, err := syncengine.DataFileMapByFilename(existing)
+	if err != nil {
+		return DataFilePlan{}, fmt.Errorf("existing data files: %w", err)
 	}
 
 	desiredByFilename := make(map[string]repository.RecordDataFile, len(desired))
@@ -166,6 +169,9 @@ func PlanDataFileReconciliation(
 			return DataFilePlan{}, fmt.Errorf(
 				"desired data file filename, s3_key, and hash are required",
 			)
+		}
+		if _, exists := desiredByFilename[dataFile.Filename]; exists {
+			return DataFilePlan{}, fmt.Errorf("duplicate desired data file filename %q", dataFile.Filename)
 		}
 		desiredByFilename[dataFile.Filename] = dataFile
 		if existingDataFile, ok := existingByFilename[dataFile.Filename]; ok {

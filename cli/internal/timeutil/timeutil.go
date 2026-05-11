@@ -5,6 +5,32 @@ import (
 	"time"
 )
 
+// UTCMillisFormat is the canonical wire format for sync-bearing timestamps:
+// ISO 8601 UTC with millisecond precision and a `Z` suffix
+// (e.g., "2026-05-10T20:01:39.000Z"). All sync cursors, API payloads, and
+// SQLite timestamp columns share this format so cross-dialect comparisons
+// stay byte-identical. Postgres microsecond timestamps truncate to
+// millisecond when serialized through this format.
+const UTCMillisFormat = "2006-01-02T15:04:05.000Z"
+
+// FormatUTCMillis renders an instant in canonical UTC millisecond ISO 8601.
+// Args: t is any instant.
+// Returns: the formatted string with `Z` suffix.
+func FormatUTCMillis(t time.Time) string {
+	return t.UTC().Format(UTCMillisFormat)
+}
+
+// FormatUTCMillisPtr renders a nullable instant, returning nil for nil input.
+// Args: t is a nullable instant.
+// Returns: a pointer to the formatted string, or nil.
+func FormatUTCMillisPtr(t *time.Time) *string {
+	if t == nil {
+		return nil
+	}
+	formatted := FormatUTCMillis(*t)
+	return &formatted
+}
+
 // LocalToUTC converts a local timestamp to UTC.
 // Args: local is a timestamp with any timezone location.
 // Returns: the equivalent UTC instant.
