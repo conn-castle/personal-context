@@ -13,7 +13,7 @@
  * Subsequent runs compare against baselines:
  *   pnpm exec playwright test tests/e2e/markdown-rendering.e2e.spec.ts
  */
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import path from "path";
 
 // Hide the Next.js dev indicator badge from screenshots via injected CSS.
@@ -252,11 +252,123 @@ async function assertNoErrors(
   await assertNoNextJsErrors(page);
 }
 
+async function openMarkdownNotes(page: Page): Promise<Locator> {
+  await setupMockApi(page);
+  await page.goto("/");
+  await expect(page.getByText("1 record")).toBeVisible();
+
+  const notesArea = page.locator(".prose");
+  await expect(notesArea).toBeVisible();
+  return notesArea;
+}
+
+async function assertComprehensiveMarkdownRendering(
+  notesArea: Locator
+): Promise<Locator> {
+  await expect(
+    notesArea.getByRole("heading", { name: "Header 1", level: 1 })
+  ).toBeVisible();
+  await expect(
+    notesArea.getByRole("heading", { name: "Header 2", level: 2 })
+  ).toBeVisible();
+  await expect(
+    notesArea.getByRole("heading", { name: "Header 3", level: 3 })
+  ).toBeVisible();
+  await expect(
+    notesArea.getByRole("heading", { name: "Header 4", level: 4 })
+  ).toBeVisible();
+  await expect(
+    notesArea.getByRole("heading", { name: "Header 5", level: 5 })
+  ).toBeVisible();
+  await expect(
+    notesArea.getByRole("heading", { name: "Header 6", level: 6 })
+  ).toBeVisible();
+  await expect(notesArea.locator("hr")).toBeVisible();
+  await expect(
+    notesArea.locator("strong", { hasText: "Bold Text" })
+  ).toBeVisible();
+  await expect(
+    notesArea.locator("em", { hasText: /^Italic Text$/ })
+  ).toBeVisible();
+  await expect(notesArea.getByText("Bold Italic Text")).toBeVisible();
+  await expect(
+    notesArea.locator("del", { hasText: "Strikethrough Text" })
+  ).toBeVisible();
+  await expect(
+    notesArea.locator("code", { hasText: "code snippet" })
+  ).toBeVisible();
+  await expect(
+    notesArea.locator("blockquote", {
+      hasText: "This is a quoted paragraph",
+    })
+  ).toBeVisible();
+  await expect(notesArea.getByText("Unordered Item 1")).toBeVisible();
+  await expect(notesArea.getByText("Nested Item 2a")).toBeVisible();
+  await expect(
+    notesArea.getByText("Ordered Item 1", { exact: true })
+  ).toBeVisible();
+  await expect(
+    notesArea.getByText("Ordered Item 3", { exact: true })
+  ).toBeVisible();
+  await expect(notesArea.getByText("Task Complete")).toBeVisible();
+  await expect(notesArea.getByText("Task Incomplete")).toBeVisible();
+  await expect(
+    notesArea.locator('input[type="checkbox"][checked]')
+  ).toBeVisible();
+  await expect(
+    notesArea.locator('input[type="checkbox"]:not([checked])')
+  ).toBeVisible();
+  await expect(notesArea.locator("table")).toBeVisible();
+  await expect(notesArea.getByText("Column A")).toBeVisible();
+  await expect(notesArea.getByText("Row 1B")).toBeVisible();
+  await expect(notesArea.getByText("Row 2C")).toBeVisible();
+  await expect(
+    notesArea.locator("code", { hasText: 'print("Code Block")' })
+  ).toBeVisible();
+
+  const link = notesArea.getByRole("link", { name: "Link Text" });
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute("href", "https://example.com");
+
+  const mermaidSvg = notesArea.locator("svg").first();
+  await expect(mermaidSvg).toBeVisible({ timeout: 10_000 });
+  await expect(notesArea.locator("svg")).toContainText("Start");
+  await expect(notesArea.locator("svg")).toContainText("Decision");
+  await expect(notesArea.locator("svg")).toContainText("Action 1");
+  await expect(notesArea.locator("svg")).toContainText("End");
+
+  return mermaidSvg;
+}
+
+async function maximizeDetailsPanel(page: Page): Promise<void> {
+  await page.keyboard.press("[");
+  await expect(
+    page.getByRole("heading", { name: "Records" })
+  ).not.toBeVisible();
+
+  const handle = page.locator('[role="separator"]');
+  await expect(handle).toBeVisible();
+  const handleBox = await handle.boundingBox();
+  if (!handleBox) throw new Error("Resize handle not found");
+
+  const viewportSize = page.viewportSize();
+  if (!viewportSize) throw new Error("Viewport size not available");
+  await page.mouse.move(
+    handleBox.x + handleBox.width / 2,
+    handleBox.y + handleBox.height / 2
+  );
+  await page.mouse.down();
+  await page.mouse.move(viewportSize.width * 0.3, handleBox.y + handleBox.height / 2, {
+    steps: 10,
+  });
+  await page.mouse.up();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-test.describe("Markdown rendering @e2e @visual", () => {
+test.describe("Markdown rendering @e2e", () => {
   let consoleErrors: string[];
   let pageErrors: string[];
   let failedRequests: string[];
@@ -281,138 +393,17 @@ test.describe("Markdown rendering @e2e @visual", () => {
     });
   });
 
+  test("all markdown elements render semantically", async ({ page }) => {
+    const notesArea = await openMarkdownNotes(page);
+    await assertComprehensiveMarkdownRendering(notesArea);
+    await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
+  });
+
   test("all markdown elements render correctly in notes panel @visual", async ({
     page,
   }) => {
-    await setupMockApi(page);
-    await page.goto("/");
-
-    // Wait for the record to load and auto-select
-    await expect(page.getByText("1 record")).toBeVisible();
-
-    // Wait for notes to render in the detail panel
-    const notesArea = page.locator(".prose");
-    await expect(notesArea).toBeVisible();
-
-    // -----------------------------------------------------------------------
-    // Headings (H1–H6)
-    // -----------------------------------------------------------------------
-    await expect(
-      notesArea.getByRole("heading", { name: "Header 1", level: 1 })
-    ).toBeVisible();
-    await expect(
-      notesArea.getByRole("heading", { name: "Header 2", level: 2 })
-    ).toBeVisible();
-    await expect(
-      notesArea.getByRole("heading", { name: "Header 3", level: 3 })
-    ).toBeVisible();
-    await expect(
-      notesArea.getByRole("heading", { name: "Header 4", level: 4 })
-    ).toBeVisible();
-    await expect(
-      notesArea.getByRole("heading", { name: "Header 5", level: 5 })
-    ).toBeVisible();
-    await expect(
-      notesArea.getByRole("heading", { name: "Header 6", level: 6 })
-    ).toBeVisible();
-
-    // -----------------------------------------------------------------------
-    // Horizontal rule
-    // -----------------------------------------------------------------------
-    await expect(notesArea.locator("hr")).toBeVisible();
-
-    // -----------------------------------------------------------------------
-    // Text formatting: bold, italic, bold+italic, strikethrough, inline code
-    // -----------------------------------------------------------------------
-    await expect(
-      notesArea.locator("strong", { hasText: "Bold Text" })
-    ).toBeVisible();
-    await expect(
-      notesArea.locator("em", { hasText: /^Italic Text$/ })
-    ).toBeVisible();
-    // Bold italic renders as <strong><em> or <em><strong>
-    await expect(notesArea.getByText("Bold Italic Text")).toBeVisible();
-    await expect(
-      notesArea.locator("del", { hasText: "Strikethrough Text" })
-    ).toBeVisible();
-    await expect(
-      notesArea.locator("code", { hasText: "code snippet" })
-    ).toBeVisible();
-
-    // -----------------------------------------------------------------------
-    // Blockquote
-    // -----------------------------------------------------------------------
-    await expect(
-      notesArea.locator("blockquote", {
-        hasText: "This is a quoted paragraph",
-      })
-    ).toBeVisible();
-
-    // -----------------------------------------------------------------------
-    // Unordered list with nesting
-    // -----------------------------------------------------------------------
-    await expect(notesArea.getByText("Unordered Item 1")).toBeVisible();
-    await expect(notesArea.getByText("Nested Item 2a")).toBeVisible();
-
-    // -----------------------------------------------------------------------
-    // Ordered list
-    // -----------------------------------------------------------------------
-    await expect(
-      notesArea.getByText("Ordered Item 1", { exact: true })
-    ).toBeVisible();
-    await expect(
-      notesArea.getByText("Ordered Item 3", { exact: true })
-    ).toBeVisible();
-
-    // -----------------------------------------------------------------------
-    // Task list (GFM)
-    // -----------------------------------------------------------------------
-    // Task lists render as checkboxes via remark-gfm
-    await expect(notesArea.getByText("Task Complete")).toBeVisible();
-    await expect(notesArea.getByText("Task Incomplete")).toBeVisible();
-    // Check that there's a checked checkbox
-    const checkedBox = notesArea.locator('input[type="checkbox"][checked]');
-    await expect(checkedBox).toBeVisible();
-    // And an unchecked one
-    const uncheckedBox = notesArea.locator(
-      'input[type="checkbox"]:not([checked])'
-    );
-    await expect(uncheckedBox).toBeVisible();
-
-    // -----------------------------------------------------------------------
-    // Table (GFM)
-    // -----------------------------------------------------------------------
-    await expect(notesArea.locator("table")).toBeVisible();
-    await expect(notesArea.getByText("Column A")).toBeVisible();
-    await expect(notesArea.getByText("Row 1B")).toBeVisible();
-    await expect(notesArea.getByText("Row 2C")).toBeVisible();
-
-    // -----------------------------------------------------------------------
-    // Code block
-    // -----------------------------------------------------------------------
-    await expect(
-      notesArea.locator("code", { hasText: 'print("Code Block")' })
-    ).toBeVisible();
-
-    // -----------------------------------------------------------------------
-    // Link
-    // -----------------------------------------------------------------------
-    const link = notesArea.getByRole("link", { name: "Link Text" });
-    await expect(link).toBeVisible();
-    await expect(link).toHaveAttribute("href", "https://example.com");
-
-    // -----------------------------------------------------------------------
-    // Mermaid diagram — renders as SVG inside the .prose container
-    // -----------------------------------------------------------------------
-    // Wait for mermaid to render (async client-side operation)
-    const mermaidSvg = notesArea.locator("svg").first();
-    await expect(mermaidSvg).toBeVisible({ timeout: 10_000 });
-
-    // Verify the diagram contains expected node labels
-    await expect(notesArea.locator("svg")).toContainText("Start");
-    await expect(notesArea.locator("svg")).toContainText("Decision");
-    await expect(notesArea.locator("svg")).toContainText("Action 1");
-    await expect(notesArea.locator("svg")).toContainText("End");
+    const notesArea = await openMarkdownNotes(page);
+    const mermaidSvg = await assertComprehensiveMarkdownRendering(notesArea);
 
     await assertNoErrors(page, consoleErrors, pageErrors, failedRequests);
 
@@ -421,28 +412,7 @@ test.describe("Markdown rendering @e2e @visual", () => {
     // 1. Hide the left nav panel with [ key
     // 2. Drag the resize handle to the far left to give details maximum width
     // -----------------------------------------------------------------------
-    await page.keyboard.press("[");
-    await expect(
-      page.getByRole("heading", { name: "Records" })
-    ).not.toBeVisible();
-
-    // Drag the resize handle between viewer and details panels to the left
-    const handle = page.locator('[role="separator"]');
-    await expect(handle).toBeVisible();
-    const handleBox = await handle.boundingBox();
-    if (!handleBox) throw new Error("Resize handle not found");
-    // Drag from handle center to 30% from the left edge of the viewport
-    const viewportSize = page.viewportSize();
-    if (!viewportSize) throw new Error("Viewport size not available");
-    await page.mouse.move(
-      handleBox.x + handleBox.width / 2,
-      handleBox.y + handleBox.height / 2
-    );
-    await page.mouse.down();
-    await page.mouse.move(viewportSize.width * 0.3, handleBox.y + handleBox.height / 2, {
-      steps: 10,
-    });
-    await page.mouse.up();
+    await maximizeDetailsPanel(page);
 
     // Wait for layout to stabilise after resize
     await expect(notesArea).toBeVisible();
@@ -488,35 +458,8 @@ test.describe("Markdown rendering @e2e @visual", () => {
   test("edit mode: shows raw markdown source in textarea @visual", async ({
     page,
   }) => {
-    await setupMockApi(page);
-    await page.goto("/");
-    await expect(page.getByText("1 record")).toBeVisible();
-
-    // Wait for rendered notes to appear
-    const notesArea = page.locator(".prose");
-    await expect(notesArea).toBeVisible();
-
-    // Hide nav panel and maximise details panel (same as render test)
-    await page.keyboard.press("[");
-    await expect(
-      page.getByRole("heading", { name: "Records" })
-    ).not.toBeVisible();
-
-    const handle = page.locator('[role="separator"]');
-    await expect(handle).toBeVisible();
-    const handleBox = await handle.boundingBox();
-    if (!handleBox) throw new Error("Resize handle not found");
-    const viewportSize = page.viewportSize();
-    if (!viewportSize) throw new Error("Viewport size not available");
-    await page.mouse.move(
-      handleBox.x + handleBox.width / 2,
-      handleBox.y + handleBox.height / 2
-    );
-    await page.mouse.down();
-    await page.mouse.move(viewportSize.width * 0.3, handleBox.y + handleBox.height / 2, {
-      steps: 10,
-    });
-    await page.mouse.up();
+    await openMarkdownNotes(page);
+    await maximizeDetailsPanel(page);
 
     // Click the edit button (pencil icon)
     const editButton = page.locator('button[title="Edit notes"]');

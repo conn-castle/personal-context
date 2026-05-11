@@ -1,10 +1,14 @@
 package syncengine
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -324,8 +328,18 @@ func TestAcquireFileLockCreatesDirAndWritesContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	if string(data) != "locked\n" {
-		t.Fatalf("lock file content = %q, want %q", string(data), "locked\n")
+	var metadata lockFileMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatalf("lock file content is not JSON metadata: %v", err)
+	}
+	if metadata.PID != os.Getpid() {
+		t.Fatalf("lock metadata PID = %d, want %d", metadata.PID, os.Getpid())
+	}
+	if strings.TrimSpace(metadata.Hostname) == "" {
+		t.Fatal("lock metadata hostname is empty")
+	}
+	if metadata.StartedAt.IsZero() {
+		t.Fatal("lock metadata started_at is zero")
 	}
 }
 
@@ -479,6 +493,277 @@ func TestAcquireFileLockExistingLockReturnsErrSyncLocked(t *testing.T) {
 
 	if err := lock1.Release(); err != nil {
 		t.Fatalf("Release() error = %v", err)
+	}
+}
+
+func TestAcquireFileLockRecoversStaleSameHostLock(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatalf("Hostname() error = %v", err)
+	}
+	staleMetadata := lockFileMetadata{
+		PID:       99_999_999,
+		Hostname:  hostname,
+		StartedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(staleMetadata)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(lockPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	lock, err := AcquireFileLock(lockPath)
+	if err != nil {
+		t.Fatalf("AcquireFileLock() error = %v, want stale lock recovery", err)
+	}
+	defer func() { _ = lock.Release() }()
+
+	recoveredData, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	var recoveredMetadata lockFileMetadata
+	if err := json.Unmarshal(recoveredData, &recoveredMetadata); err != nil {
+		t.Fatalf("recovered lock metadata unmarshal error = %v", err)
+	}
+	if recoveredMetadata.PID != os.Getpid() {
+		t.Fatalf("recovered lock PID = %d, want %d", recoveredMetadata.PID, os.Getpid())
+	}
+}
+
+func TestAcquireFileLockKeepsActiveSameHostLock(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatalf("Hostname() error = %v", err)
+	}
+	activeMetadata := lockFileMetadata{
+		PID:       os.Getpid(),
+		Hostname:  hostname,
+		StartedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(activeMetadata)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(lockPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err = AcquireFileLock(lockPath)
+	if !errors.Is(err, ErrSyncLocked) {
+		t.Fatalf("AcquireFileLock() error = %v, want %v", err, ErrSyncLocked)
+	}
+}
+
+func TestAcquireFileLockKeepsUnparseableLock(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+
+	if err := os.WriteFile(lockPath, []byte("locked\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := AcquireFileLock(lockPath)
+	if !errors.Is(err, ErrSyncLocked) {
+		t.Fatalf("AcquireFileLock() error = %v, want %v", err, ErrSyncLocked)
+	}
+}
+
+func TestAcquireFileLockSerializesStaleRecovery(t *testing.T) {
+	origHostname := osHostname
+	origKill := syscallKill
+	defer func() {
+		osHostname = origHostname
+		syscallKill = origKill
+	}()
+
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+	hostname := "test-host"
+	staleMetadata := lockFileMetadata{
+		PID:       99_999_999,
+		Hostname:  hostname,
+		StartedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(staleMetadata)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(lockPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	osHostname = func() (string, error) {
+		return hostname, nil
+	}
+	enteredProcessCheck := make(chan struct{})
+	allowRecovery := make(chan struct{})
+	var processCheckCalls int32
+	syscallKill = func(pid int, sig syscall.Signal) error {
+		call := atomic.AddInt32(&processCheckCalls, 1)
+		if call == 1 {
+			close(enteredProcessCheck)
+			<-allowRecovery
+		}
+		return syscall.ESRCH
+	}
+
+	type lockResult struct {
+		lock *FileLock
+		err  error
+	}
+	firstResult := make(chan lockResult, 1)
+	go func() {
+		lock, err := AcquireFileLock(lockPath)
+		firstResult <- lockResult{lock: lock, err: err}
+	}()
+
+	<-enteredProcessCheck
+	secondLock, err := AcquireFileLock(lockPath)
+	if !errors.Is(err, ErrSyncLocked) {
+		if secondLock != nil {
+			_ = secondLock.Release()
+		}
+		t.Fatalf("concurrent AcquireFileLock() error = %v, want %v", err, ErrSyncLocked)
+	}
+	if secondLock != nil {
+		t.Fatal("concurrent AcquireFileLock() returned a lock while stale recovery was in progress")
+	}
+
+	close(allowRecovery)
+	first := <-firstResult
+	if first.err != nil {
+		t.Fatalf("first AcquireFileLock() error = %v", first.err)
+	}
+	defer func() { _ = first.lock.Release() }()
+
+	if got := atomic.LoadInt32(&processCheckCalls); got != 1 {
+		t.Fatalf("process checks = %d, want 1 serialized stale recovery check", got)
+	}
+}
+
+func TestAcquireLockOperationGuardRejectsConcurrentHolder(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "test.lock")
+
+	guard, err := acquireLockOperationGuard(lockPath)
+	if err != nil {
+		t.Fatalf("acquireLockOperationGuard() error = %v", err)
+	}
+	defer func() { _ = guard.Release() }()
+
+	secondGuard, err := acquireLockOperationGuard(lockPath)
+	if !errors.Is(err, ErrSyncLocked) {
+		if secondGuard != nil {
+			_ = secondGuard.Release()
+		}
+		t.Fatalf("second acquireLockOperationGuard() error = %v, want %v", err, ErrSyncLocked)
+	}
+	if secondGuard != nil {
+		t.Fatal("second acquireLockOperationGuard() returned guard while first guard is held")
+	}
+}
+
+func TestAcquireLockOperationGuardChmodError(t *testing.T) {
+	origChmod := osFileChmod
+	defer func() { osFileChmod = origChmod }()
+
+	osFileChmod = func(f *os.File, mode os.FileMode) error {
+		return fmt.Errorf("injected chmod error")
+	}
+
+	guard, err := acquireLockOperationGuard(filepath.Join(t.TempDir(), "test.lock"))
+	if err == nil {
+		if guard != nil {
+			_ = guard.Release()
+		}
+		t.Fatal("acquireLockOperationGuard() error = nil, want chmod failure")
+	}
+	if errors.Is(err, ErrSyncLocked) {
+		t.Fatal("acquireLockOperationGuard() error is ErrSyncLocked, want chmod failure")
+	}
+}
+
+func TestAcquireLockOperationGuardFlockError(t *testing.T) {
+	origFlock := syscallFlock
+	defer func() { syscallFlock = origFlock }()
+
+	syscallFlock = func(fd int, how int) error {
+		return syscall.EINVAL
+	}
+
+	guard, err := acquireLockOperationGuard(filepath.Join(t.TempDir(), "test.lock"))
+	if err == nil {
+		if guard != nil {
+			_ = guard.Release()
+		}
+		t.Fatal("acquireLockOperationGuard() error = nil, want flock failure")
+	}
+	if errors.Is(err, ErrSyncLocked) {
+		t.Fatal("acquireLockOperationGuard() error is ErrSyncLocked, want flock failure")
+	}
+}
+
+func TestLockOperationGuardReleaseValidationAndDoubleRelease(t *testing.T) {
+	var nilGuard *lockOperationGuard
+	if err := nilGuard.Release(); err == nil {
+		t.Fatal("Release() on nil guard: error = nil, want validation failure")
+	}
+
+	guard, err := acquireLockOperationGuard(filepath.Join(t.TempDir(), "test.lock"))
+	if err != nil {
+		t.Fatalf("acquireLockOperationGuard() error = %v", err)
+	}
+	if err := guard.Release(); err != nil {
+		t.Fatalf("Release() error = %v", err)
+	}
+	if err := guard.Release(); err == nil {
+		t.Fatal("second Release() error = nil, want already-released failure")
+	}
+}
+
+func TestLockOperationGuardReleaseUnlockError(t *testing.T) {
+	origFlock := syscallFlock
+	defer func() { syscallFlock = origFlock }()
+
+	guard, err := acquireLockOperationGuard(filepath.Join(t.TempDir(), "test.lock"))
+	if err != nil {
+		t.Fatalf("acquireLockOperationGuard() error = %v", err)
+	}
+	syscallFlock = func(fd int, how int) error {
+		if how == syscall.LOCK_UN {
+			return syscall.EINVAL
+		}
+		return origFlock(fd, how)
+	}
+
+	if err := guard.Release(); err == nil {
+		t.Fatal("Release() error = nil, want unlock failure")
+	}
+}
+
+func TestLockOperationGuardReleaseCloseError(t *testing.T) {
+	origClose := osFileClose
+	defer func() { osFileClose = origClose }()
+
+	guard, err := acquireLockOperationGuard(filepath.Join(t.TempDir(), "test.lock"))
+	if err != nil {
+		t.Fatalf("acquireLockOperationGuard() error = %v", err)
+	}
+	osFileClose = func(f *os.File) error {
+		_ = f.Close()
+		return fmt.Errorf("injected close error")
+	}
+
+	if err := guard.Release(); err == nil {
+		t.Fatal("Release() error = nil, want close failure")
 	}
 }
 
@@ -816,6 +1101,361 @@ func TestAcquireFileLockSyncError(t *testing.T) {
 	if _, statErr := os.Stat(lockPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("lock file still exists after Sync failure (stat error = %v)", statErr)
 	}
+}
+
+func TestAcquireFileLockHostnameErrorCleansLock(t *testing.T) {
+	origHostname := osHostname
+	defer func() { osHostname = origHostname }()
+
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+	osHostname = func() (string, error) {
+		return "", fmt.Errorf("injected hostname error")
+	}
+
+	_, err := AcquireFileLock(lockPath)
+	if err == nil {
+		t.Fatal("AcquireFileLock() with hostname error: error = nil, want failure")
+	}
+	if errors.Is(err, ErrSyncLocked) {
+		t.Fatal("error should not be ErrSyncLocked for hostname failure")
+	}
+	if _, statErr := os.Stat(lockPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("lock file still exists after hostname failure (stat error = %v)", statErr)
+	}
+}
+
+func TestAcquireFileLockMarshalErrorCleansLock(t *testing.T) {
+	origMarshal := jsonMarshalLock
+	defer func() { jsonMarshalLock = origMarshal }()
+
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+	jsonMarshalLock = func(lockFileMetadata) ([]byte, error) {
+		return nil, fmt.Errorf("injected marshal error")
+	}
+
+	_, err := AcquireFileLock(lockPath)
+	if err == nil {
+		t.Fatal("AcquireFileLock() with marshal error: error = nil, want failure")
+	}
+	if errors.Is(err, ErrSyncLocked) {
+		t.Fatal("error should not be ErrSyncLocked for marshal failure")
+	}
+	if _, statErr := os.Stat(lockPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("lock file still exists after marshal failure (stat error = %v)", statErr)
+	}
+}
+
+func TestNewLockFileMetadataRejectsEmptyHostname(t *testing.T) {
+	origHostname := osHostname
+	defer func() { osHostname = origHostname }()
+
+	osHostname = func() (string, error) {
+		return "   ", nil
+	}
+
+	_, err := newLockFileMetadata()
+	if err == nil {
+		t.Fatal("newLockFileMetadata() error = nil, want empty-hostname failure")
+	}
+}
+
+func TestRecoverStaleLockMissingPathReturnsRecovered(t *testing.T) {
+	recovered, err := recoverStaleLock(filepath.Join(t.TempDir(), "missing.lock"))
+	if err != nil {
+		t.Fatalf("recoverStaleLock() error = %v", err)
+	}
+	if !recovered {
+		t.Fatal("recoverStaleLock() recovered = false, want true for missing lock")
+	}
+}
+
+func TestRecoverStaleLockReadError(t *testing.T) {
+	dir := t.TempDir()
+
+	recovered, err := recoverStaleLock(dir)
+	if err == nil {
+		t.Fatal("recoverStaleLock() error = nil, want read failure for directory path")
+	}
+	if recovered {
+		t.Fatal("recoverStaleLock() recovered = true, want false on read failure")
+	}
+}
+
+func TestRecoverStaleLockKeepsDifferentHostLock(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "test.lock")
+	metadata := lockFileMetadata{
+		PID:       99_999_999,
+		Hostname:  "another-host",
+		StartedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(lockPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	recovered, err := recoverStaleLock(lockPath)
+	if err != nil {
+		t.Fatalf("recoverStaleLock() error = %v", err)
+	}
+	if recovered {
+		t.Fatal("recoverStaleLock() recovered = true, want false for different host")
+	}
+}
+
+func TestRecoverStaleLockChangedByAnotherProcessReturnsRecovered(t *testing.T) {
+	origHostname := osHostname
+	origKill := syscallKill
+	defer func() {
+		osHostname = origHostname
+		syscallKill = origKill
+	}()
+
+	lockPath := filepath.Join(t.TempDir(), "test.lock")
+	hostname := "test-host"
+	staleMetadata := lockFileMetadata{
+		PID:       99_999_999,
+		Hostname:  hostname,
+		StartedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+	}
+	currentMetadata := lockFileMetadata{
+		PID:       os.Getpid(),
+		Hostname:  hostname,
+		StartedAt: time.Date(2026, 3, 8, 12, 1, 0, 0, time.UTC),
+	}
+	staleData, err := json.Marshal(staleMetadata)
+	if err != nil {
+		t.Fatalf("Marshal(stale) error = %v", err)
+	}
+	currentData, err := json.Marshal(currentMetadata)
+	if err != nil {
+		t.Fatalf("Marshal(current) error = %v", err)
+	}
+	if err := os.WriteFile(lockPath, append(staleData, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile(stale) error = %v", err)
+	}
+
+	osHostname = func() (string, error) {
+		return hostname, nil
+	}
+	syscallKill = func(pid int, sig syscall.Signal) error {
+		if err := os.WriteFile(lockPath, append(currentData, '\n'), 0o600); err != nil {
+			t.Fatalf("WriteFile(current) error = %v", err)
+		}
+		return syscall.ESRCH
+	}
+
+	recovered, err := recoverStaleLock(lockPath)
+	if err != nil {
+		t.Fatalf("recoverStaleLock() error = %v", err)
+	}
+	if !recovered {
+		t.Fatal("recoverStaleLock() recovered = false, want true after concurrent replacement")
+	}
+
+	got, err := os.ReadFile(lockPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.TrimSpace(string(got)) != string(currentData) {
+		t.Fatalf("lock content = %q, want current metadata %q", strings.TrimSpace(string(got)), string(currentData))
+	}
+}
+
+func TestRecoverStaleLockRemovedByAnotherProcessReturnsRecovered(t *testing.T) {
+	origHostname := osHostname
+	origKill := syscallKill
+	defer func() {
+		osHostname = origHostname
+		syscallKill = origKill
+	}()
+
+	lockPath := filepath.Join(t.TempDir(), "test.lock")
+	hostname := "test-host"
+	metadata := lockFileMetadata{
+		PID:       99_999_999,
+		Hostname:  hostname,
+		StartedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(lockPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	osHostname = func() (string, error) {
+		return hostname, nil
+	}
+	syscallKill = func(pid int, sig syscall.Signal) error {
+		if err := os.Remove(lockPath); err != nil {
+			t.Fatalf("Remove() error = %v", err)
+		}
+		return syscall.ESRCH
+	}
+
+	recovered, err := recoverStaleLock(lockPath)
+	if err != nil {
+		t.Fatalf("recoverStaleLock() error = %v", err)
+	}
+	if !recovered {
+		t.Fatal("recoverStaleLock() recovered = false, want true after concurrent removal")
+	}
+}
+
+func TestRecoverStaleLockRereadError(t *testing.T) {
+	origHostname := osHostname
+	origKill := syscallKill
+	defer func() {
+		osHostname = origHostname
+		syscallKill = origKill
+	}()
+
+	lockPath := filepath.Join(t.TempDir(), "test.lock")
+	hostname := "test-host"
+	metadata := lockFileMetadata{
+		PID:       99_999_999,
+		Hostname:  hostname,
+		StartedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(lockPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	osHostname = func() (string, error) {
+		return hostname, nil
+	}
+	syscallKill = func(pid int, sig syscall.Signal) error {
+		if err := os.Remove(lockPath); err != nil {
+			t.Fatalf("Remove() error = %v", err)
+		}
+		if err := os.Mkdir(lockPath, 0o700); err != nil {
+			t.Fatalf("Mkdir() error = %v", err)
+		}
+		return syscall.ESRCH
+	}
+
+	recovered, err := recoverStaleLock(lockPath)
+	if err == nil {
+		t.Fatal("recoverStaleLock() error = nil, want re-read failure")
+	}
+	if recovered {
+		t.Fatal("recoverStaleLock() recovered = true, want false on re-read failure")
+	}
+}
+
+func TestRecoverStaleLockHostnameError(t *testing.T) {
+	origHostname := osHostname
+	defer func() { osHostname = origHostname }()
+
+	lockPath := filepath.Join(t.TempDir(), "test.lock")
+	metadata := lockFileMetadata{
+		PID:       99_999_999,
+		Hostname:  "test-host",
+		StartedAt: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC),
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(lockPath, append(data, '\n'), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	osHostname = func() (string, error) {
+		return "", fmt.Errorf("injected hostname error")
+	}
+
+	recovered, err := recoverStaleLock(lockPath)
+	if err == nil {
+		t.Fatal("recoverStaleLock() error = nil, want hostname failure")
+	}
+	if recovered {
+		t.Fatal("recoverStaleLock() recovered = true, want false on hostname failure")
+	}
+}
+
+func TestProcessExistsBranches(t *testing.T) {
+	origKill := syscallKill
+	defer func() { syscallKill = origKill }()
+
+	exists, err := processExists(0)
+	if err != nil {
+		t.Fatalf("processExists(0) error = %v", err)
+	}
+	if exists {
+		t.Fatal("processExists(0) exists = true, want false")
+	}
+
+	tests := []struct {
+		name       string
+		killErr    error
+		wantExists bool
+		wantErr    bool
+	}{
+		{name: "alive", killErr: nil, wantExists: true},
+		{name: "missing", killErr: syscall.ESRCH, wantExists: false},
+		{name: "permission", killErr: syscall.EPERM, wantExists: true},
+		{name: "unexpected", killErr: syscall.EINVAL, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			syscallKill = func(pid int, sig syscall.Signal) error {
+				return tt.killErr
+			}
+
+			got, gotErr := processExists(123)
+			if tt.wantErr {
+				if gotErr == nil {
+					t.Fatal("processExists() error = nil, want failure")
+				}
+				return
+			}
+			if gotErr != nil {
+				t.Fatalf("processExists() error = %v", gotErr)
+			}
+			if got != tt.wantExists {
+				t.Fatalf("processExists() = %v, want %v", got, tt.wantExists)
+			}
+		})
+	}
+}
+
+func TestParseLockFileMetadataRejectsInvalidMetadata(t *testing.T) {
+	validTime := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{name: "bad json", data: []byte("{")},
+		{name: "missing pid", data: mustMarshalLockMetadata(t, lockFileMetadata{Hostname: "host", StartedAt: validTime})},
+		{name: "empty host", data: mustMarshalLockMetadata(t, lockFileMetadata{PID: 1, Hostname: " ", StartedAt: validTime})},
+		{name: "zero started at", data: mustMarshalLockMetadata(t, lockFileMetadata{PID: 1, Hostname: "host"})},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, ok := parseLockFileMetadata(tt.data); ok {
+				t.Fatal("parseLockFileMetadata() ok = true, want false")
+			}
+		})
+	}
+}
+
+func mustMarshalLockMetadata(t *testing.T, metadata lockFileMetadata) []byte {
+	t.Helper()
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	return data
 }
 
 func filepathDir(path string) string {

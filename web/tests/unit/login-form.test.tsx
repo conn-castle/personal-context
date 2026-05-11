@@ -72,4 +72,28 @@ describe("login form", () => {
     });
     expect(mockPush).not.toHaveBeenCalled();
   });
+
+  it("recovers when sign-in throws", async () => {
+    mockSignIn.mockRejectedValueOnce(new Error("network unavailable"));
+    render(<LoginForm />);
+
+    fireEvent.change(screen.getByLabelText("Email"), {
+      target: { value: "user@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Password"), {
+      target: { value: "secret-password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe(
+        "Unable to sign in. Please try again.",
+      );
+    });
+    expect(
+      (screen.getByRole("button", { name: "Sign in" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(mockPush).not.toHaveBeenCalled();
+  });
 });

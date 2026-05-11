@@ -84,7 +84,7 @@ func TestNewFetchCommandParsesFlagsAndRunsFetch(t *testing.T) {
 			proj: {{ID: "s1", Date: "2025-01-01", ProjectID: proj}},
 		},
 		dataFiles: map[string][]repository.RecordDataFile{
-			"s1": {{ID: 1, RecordID: "s1", Filename: "a.txt", S3Key: "data/s1/a.txt"}},
+			"s1": {fetchTestDataFile("s1", "a.txt", "alpha")},
 		},
 		s3Data: map[string]string{"data/s1/a.txt": "alpha"},
 	})
@@ -112,7 +112,7 @@ func TestNewFetchCommandPassesRecordIDArgument(t *testing.T) {
 			"record-arg": {ID: "record-arg", Date: "2025-03-01"},
 		},
 		dataFiles: map[string][]repository.RecordDataFile{
-			"record-arg": {{ID: 1, RecordID: "record-arg", Filename: "a.txt", S3Key: "data/record-arg/a.txt"}},
+			"record-arg": {fetchTestDataFile("record-arg", "a.txt", "alpha")},
 		},
 		s3Data: map[string]string{"data/record-arg/a.txt": "alpha"},
 	})
@@ -181,7 +181,7 @@ func TestRunFetchRecordSuccess(t *testing.T) {
 		},
 		dataFiles: map[string][]repository.RecordDataFile{
 			"record-1": {
-				{ID: 1, RecordID: "record-1", Filename: "report.csv", S3Key: "data/record-1/report.csv"},
+				fetchTestDataFile("record-1", "report.csv", "col1,col2\n1,2\n"),
 			},
 		},
 		s3Data: map[string]string{
@@ -260,8 +260,8 @@ func TestRunFetchProjectSuccess(t *testing.T) {
 			},
 		},
 		dataFiles: map[string][]repository.RecordDataFile{
-			"s1": {{ID: 1, RecordID: "s1", Filename: "a.txt", S3Key: "data/s1/a.txt"}},
-			"s2": {{ID: 2, RecordID: "s2", Filename: "b.txt", S3Key: "data/s2/b.txt"}},
+			"s1": {fetchTestDataFile("s1", "a.txt", "alpha")},
+			"s2": {fetchTestDataFile("s2", "b.txt", "beta")},
 		},
 		s3Data: map[string]string{
 			"data/s1/a.txt": "alpha",
@@ -304,7 +304,7 @@ func TestRunFetchRecentSuccess(t *testing.T) {
 			"*": {{ID: "r1", Date: "2025-03-01"}},
 		},
 		dataFiles: map[string][]repository.RecordDataFile{
-			"r1": {{ID: 1, RecordID: "r1", Filename: "data.bin", S3Key: "data/r1/data.bin"}},
+			"r1": {fetchTestDataFile("r1", "data.bin", "binary")},
 		},
 		s3Data: map[string]string{
 			"data/r1/data.bin": "binary",
@@ -344,7 +344,7 @@ func TestRunFetchS3DownloadError(t *testing.T) {
 			"record-1": {ID: "record-1", Date: "2025-03-01"},
 		},
 		dataFiles: map[string][]repository.RecordDataFile{
-			"record-1": {{ID: 1, RecordID: "record-1", Filename: "missing.csv", S3Key: "data/record-1/missing.csv"}},
+			"record-1": {fetchTestDataFile("record-1", "missing.csv", "missing")},
 		},
 		s3Error: errors.New("access denied"),
 	})
@@ -426,7 +426,7 @@ func TestRunFetchDefaultOutputPath(t *testing.T) {
 			"record-1": {ID: "record-1", Date: "2025-03-01"},
 		},
 		dataFiles: map[string][]repository.RecordDataFile{
-			"record-1": {{ID: 1, RecordID: "record-1", Filename: "f.txt", S3Key: "data/record-1/f.txt"}},
+			"record-1": {fetchTestDataFile("record-1", "f.txt", "content")},
 		},
 		s3Data: map[string]string{
 			"data/record-1/f.txt": "content",
@@ -773,7 +773,7 @@ func TestRunFetchAllReportsResolvePathFailures(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Missing/failed files: 1") {
 		t.Fatalf("stdout = %q, want failed count", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "must not include path separators") {
+	if !strings.Contains(stderr.String(), "single path segment") {
 		t.Fatalf("stderr = %q, want path validation detail", stderr.String())
 	}
 	if len(cfg.downloadedKeys) != 0 {
@@ -868,6 +868,9 @@ func TestValidateFetchAllDataFile(t *testing.T) {
 		{"s3 key", repository.RecordDataFile{RecordID: valid.RecordID, Filename: valid.Filename, Size: valid.Size, Hash: valid.Hash}, "s3_key is required"},
 		{"size", repository.RecordDataFile{RecordID: valid.RecordID, Filename: valid.Filename, S3Key: valid.S3Key, Size: -1, Hash: valid.Hash}, "size must be non-negative"},
 		{"hash", repository.RecordDataFile{RecordID: valid.RecordID, Filename: valid.Filename, S3Key: valid.S3Key, Size: valid.Size}, "hash is required"},
+		{"record id path segment", repository.RecordDataFile{RecordID: "nested/r1", Filename: valid.Filename, S3Key: "data/nested/r1/data.txt", Size: valid.Size, Hash: valid.Hash}, "record_id must be a single path segment"},
+		{"filename path segment", repository.RecordDataFile{RecordID: valid.RecordID, Filename: "../data.txt", S3Key: "data/r1/../data.txt", Size: valid.Size, Hash: valid.Hash}, "filename must be a single path segment"},
+		{"canonical s3 key", repository.RecordDataFile{RecordID: valid.RecordID, Filename: valid.Filename, S3Key: "data/other/data.txt", Size: valid.Size, Hash: valid.Hash}, "s3_key must match"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -887,12 +890,32 @@ func TestValidateFetchAllDataFile(t *testing.T) {
 
 func TestLocalDataFileMatchesHashMismatchAndDirectory(t *testing.T) {
 	dir := t.TempDir()
+	missingPath := filepath.Join(dir, "missing.txt")
+	matches, err := localDataFileMatches(repository.RecordDataFile{}, missingPath)
+	if err != nil {
+		t.Fatalf("localDataFileMatches(missing) error = %v", err)
+	}
+	if matches {
+		t.Fatal("expected missing local file to return false")
+	}
+
 	path := filepath.Join(dir, "data.txt")
 	if err := os.WriteFile(path, []byte("abc"), 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	matches, err := localDataFileMatches(repository.RecordDataFile{
+	matches, err = localDataFileMatches(repository.RecordDataFile{
+		Size: int64(len("abcd")),
+		Hash: hashFetchTestData("abc"),
+	}, path)
+	if err != nil {
+		t.Fatalf("localDataFileMatches(size mismatch) error = %v", err)
+	}
+	if matches {
+		t.Fatal("expected size mismatch to return false")
+	}
+
+	matches, err = localDataFileMatches(repository.RecordDataFile{
 		Size: int64(len("abc")),
 		Hash: hashFetchTestData("def"),
 	}, path)
@@ -926,6 +949,12 @@ func TestVerifyDataFileFailureBranches(t *testing.T) {
 	}
 	if err := verifyDataFile(repository.RecordDataFile{Size: 4, Hash: hashFetchTestData("abc")}, path); err == nil || !strings.Contains(err.Error(), "size mismatch") {
 		t.Fatalf("size verify error = %v, want size mismatch", err)
+	}
+	if err := verifyDataFile(repository.RecordDataFile{Size: 3, Hash: hashFetchTestData("def")}, path); err == nil || !strings.Contains(err.Error(), "hash mismatch") {
+		t.Fatalf("hash verify error = %v, want hash mismatch", err)
+	}
+	if err := verifyDataFile(repository.RecordDataFile{Size: 3, Hash: hashFetchTestData("abc")}, path); err != nil {
+		t.Fatalf("verifyDataFile(valid) error = %v", err)
 	}
 }
 
@@ -1089,7 +1118,7 @@ func TestRunFetchProjectCollectDataFilesError(t *testing.T) {
 	}
 }
 
-func TestRunFetchPathTraversalSanitized(t *testing.T) {
+func TestRunFetchPathTraversalRejected(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv(pcHomeEnvVar, homeDir)
 
@@ -1099,26 +1128,22 @@ func TestRunFetchPathTraversalSanitized(t *testing.T) {
 			"s1": {ID: "s1", Date: "2025-01-01"},
 		},
 		dataFiles: map[string][]repository.RecordDataFile{
-			"s1": {{RecordID: "../../etc", Filename: "../passwd", S3Key: "k"}},
+			"s1": {{RecordID: "../../etc", Filename: "../passwd", S3Key: "data/../../etc/../passwd", Size: 4, Hash: hashFetchTestData("data")}},
 		},
-		s3Data: map[string]string{"k": "data"},
+		s3Data: map[string]string{"data/../../etc/../passwd": "data"},
 	})
 
 	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "s1", fetchOptions{Output: outputDir})
-	if err != nil {
-		t.Fatalf("unexpected error = %v", err)
+	if err == nil {
+		t.Fatal("expected invalid path metadata error")
 	}
-
-	// Verify the file was written safely inside outputDir (traversal stripped).
-	safePath := filepath.Join(outputDir, "etc", "passwd")
-	if _, statErr := os.Stat(safePath); statErr != nil {
-		t.Fatalf("expected file at sanitized path %s, got error: %v", safePath, statErr)
+	if !strings.Contains(err.Error(), "single path segment") {
+		t.Fatalf("runFetch() error = %v, want single path segment validation", err)
 	}
-
-	// Verify no file was written outside outputDir.
-	unsafePath := filepath.Join(outputDir, "..", "..", "etc", "passwd")
-	if _, statErr := os.Stat(unsafePath); statErr == nil {
-		t.Fatal("traversal was NOT sanitized — file written outside output directory")
+	if entries, readErr := os.ReadDir(outputDir); readErr != nil {
+		t.Fatalf("ReadDir() error = %v", readErr)
+	} else if len(entries) != 0 {
+		t.Fatalf("expected no files in output dir, got %d", len(entries))
 	}
 }
 
@@ -1132,17 +1157,44 @@ func TestRunFetchPathTraversalEmptyComponentRejected(t *testing.T) {
 			"s1": {ID: "s1", Date: "2025-01-01"},
 		},
 		dataFiles: map[string][]repository.RecordDataFile{
-			"s1": {{RecordID: "s1", Filename: "", S3Key: "k"}},
+			"s1": {{RecordID: "s1", Filename: "", S3Key: "data/s1/", Size: 4, Hash: hashFetchTestData("data")}},
 		},
-		s3Data: map[string]string{"k": "data"},
+		s3Data: map[string]string{"data/s1/": "data"},
 	})
 
 	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "s1", fetchOptions{Output: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected error for empty filename")
 	}
-	if !strings.Contains(err.Error(), "invalid path component") {
+	if !strings.Contains(err.Error(), "filename is required") {
 		t.Fatalf("unexpected error = %v", err)
+	}
+}
+
+func TestRunFetchVerifiesDownloadedFile(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+	outputDir := t.TempDir()
+
+	mockCloudStackForFetch(t, &fetchMockConfig{
+		records: map[string]repository.Record{
+			"record-1": {ID: "record-1", Date: "2025-03-01"},
+		},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"record-1": {fetchTestDataFile("record-1", "bad.csv", "expected")},
+		},
+		s3Data: map[string]string{"data/record-1/bad.csv": "wrong"},
+	})
+
+	err := runFetch(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "record-1", fetchOptions{Output: outputDir})
+	if err == nil {
+		t.Fatal("expected verification failure")
+	}
+	if !strings.Contains(err.Error(), "verify downloaded file") {
+		t.Fatalf("runFetch() error = %v, want verification failure", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(outputDir, "record-1", "bad.csv")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("downloaded file stat error = %v, want not-exist after failed verification", statErr)
 	}
 }
 
@@ -1150,18 +1202,18 @@ func TestRunFetchPathTraversalEmptyComponentRejected(t *testing.T) {
 
 // fetchMockConfig configures the mock cloud stack for fetch tests.
 type fetchMockConfig struct {
-	records           map[string]repository.Record // keyed by record ID
-	recordsAll        []repository.Record
-	recordsByProject  map[string][]repository.Record         // keyed by project ID
-	recordsByDateFrom map[string][]repository.Record         // keyed by "*" (any date from)
-	dataFiles         map[string][]repository.RecordDataFile // keyed by record ID
-	s3Data            map[string]string                      // keyed by S3 key
-	s3Error           error
-	getRecordErr      error
-	listRecordsErr    error
-	listDataFilesErr  error
+	records                  map[string]repository.Record // keyed by record ID
+	recordsAll               []repository.Record
+	recordsByProject         map[string][]repository.Record         // keyed by project ID
+	recordsByDateFrom        map[string][]repository.Record         // keyed by "*" (any date from)
+	dataFiles                map[string][]repository.RecordDataFile // keyed by record ID
+	s3Data                   map[string]string                      // keyed by S3 key
+	s3Error                  error
+	getRecordErr             error
+	listRecordsErr           error
+	listDataFilesErr         error
 	listDataFilesErrByRecord map[string]error
-	downloadedKeys    []string
+	downloadedKeys           []string
 }
 
 // mockCloudStackForFetch sets up openCloudStackFn and downloadS3FileFn for fetch tests.
@@ -1263,4 +1315,14 @@ func (m *fetchMockRepo) ListRecordDataFilesByRecordID(_ context.Context, recordI
 func hashFetchTestData(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+func fetchTestDataFile(recordID string, filename string, content string) repository.RecordDataFile {
+	return repository.RecordDataFile{
+		RecordID: recordID,
+		Filename: filename,
+		S3Key:    fmt.Sprintf("data/%s/%s", recordID, filename),
+		Size:     int64(len(content)),
+		Hash:     hashFetchTestData(content),
+	}
 }

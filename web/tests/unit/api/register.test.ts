@@ -136,6 +136,24 @@ describe("POST /api/register", () => {
     expect(body.code).toBe("BAD_REQUEST");
   });
 
+  it("returns 413 for over-limit JSON bodies", async () => {
+    const req = new NextRequest("http://localhost/api/register", {
+      method: "POST",
+      body: JSON.stringify({ email: "a@b.com", password: "12345678" }),
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(4 * 1024 * 1024 + 1),
+      },
+    });
+
+    const res = await POST(req);
+
+    expect(res.status).toBe(413);
+    const body = await res.json();
+    expect(body.code).toBe("REQUEST_BODY_TOO_LARGE");
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
   it.each([null, [], "string", 42])(
     "returns 400 when JSON body is not an object: %s",
     async (bodyValue) => {
@@ -218,5 +236,17 @@ describe("POST /api/register", () => {
       error: "Registration failed.",
       code: "INTERNAL_ERROR",
     });
+  });
+
+  it("returns structured 500 for non-object database rejections", async () => {
+    mockQuery.mockRejectedValueOnce("db down");
+
+    const res = await POST(
+      makeReq({ email: "x@example.com", password: "12345678" }),
+    );
+
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.code).toBe("INTERNAL_ERROR");
   });
 });

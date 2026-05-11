@@ -27,10 +27,30 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
-- Issue 2026-05-10 s1k2l3: Sync lock has no stale-lock recovery
+- Issue 2026-05-11 v2w3x4: Legacy sync lock files still require manual recovery
     Priority: Medium. Area: cli/internal/syncengine
-    Description: `AcquireFileLock` creates `.pc/sync.lock` with `O_CREATE|O_EXCL` and writes only the literal string `"locked\n"` — no PID, no host, no start timestamp. If a `pc sync` (or any mutation auto-sync) is killed by SIGKILL, panics in a non-recoverable way, or the machine reboots mid-sync, the lock file persists. All future syncs return `ErrSyncLocked` indefinitely; the only recovery is for the user to manually `rm ~/personal-context/.pc/sync.lock`. There is no documented recovery path in README/CONTEXT.
-    Next step: Write PID (and optionally hostname + start timestamp in RFC3339) into the lock file. On lock-contention, parse the file; if the PID is no longer alive (or belongs to a different command via `/proc/<pid>/comm` on Linux or `ps` on macOS), remove the file and retry once. Document the recovery flag in `pc doctor`. Tests: simulate stale lock with non-existent PID and verify acquisition succeeds.
+    Description: New sync locks include JSON metadata and can recover stale same-host dead PIDs, but pre-metadata literal locks (`locked\n`) and other unparseable lock files remain blocking because they cannot be safely attributed to a dead process.
+    Next step: Add user-facing `pc doctor` guidance or a narrowly-scoped recovery command that reports the lock path and requires explicit confirmation before removing unparseable lock files.
+
+- Issue 2026-05-11 q8r9s0: Snapshot import and restore-db replacement paths are not atomic
+    Priority: High. Area: cli/internal/cli/snapshot_support.go
+    Description: `pc import` and `pc restore-db` can mutate local database/file state before the full replacement has completed, so a mid-operation error can leave users with a partial restore. `restore-db` also reports the backup path only after later replacement work succeeds.
+    Next step: Stage replacements first, report the backup path immediately after successful backup creation, and add failure tests proving the original state remains recoverable on post-backup errors.
+
+- Issue 2026-05-11 p7q8r9: Git snapshot writes remove the existing export tree before successful replacement
+    Priority: Medium. Area: cli/internal/gitsnapshot
+    Description: `gitsnapshot.Write` deletes export subdirectories under the target root before all validation and writes have completed. A later write failure can leave a previously valid export partially removed.
+    Next step: Write to a staging tree, validate the complete snapshot, then atomically swap export directories where the filesystem allows; add tests that preserve the old tree after an injected write failure.
+
+- Issue 2026-05-11 n6p7q8: Multi-project web filter paginates over an incomplete client-side result set
+    Priority: Medium. Area: web/components/spreadsheet-viewer.tsx
+    Description: Selecting multiple projects fetches an unfiltered page from the API and filters it client-side, so matching records beyond the current unfiltered page can be hidden and pagination counts/cursors do not represent the selected projects.
+    Next step: Decide whether the API should support multi-project filters or whether the UI should constrain project filtering to the server-supported single-project/all modes; then add component and hook tests for the chosen behavior.
+
+- Issue 2026-05-11 h5j6k7: Repository layer accepts non-canonical child s3_key values
+    Priority: Medium. Area: cli/internal/repository, schema
+    Description: Postgres schema checks only require `figures/` or `data/` prefixes, and repository adapters pass caller-provided child `s3_key` values through. Targeted fetch now rejects bad data-file keys, but central create/update paths can still persist paths that do not match the canonical `{kind}/{record_id}/{filename}` form.
+    Next step: Centralize child asset key derivation/validation before repository writes for figures and data files, then strengthen schema checks through the migration system when migrations are available.
 
 - Issue 2026-05-10 f1a2l3p: `pc fetch --all` is sequential; large datasets pay full round-trip per file
     Priority: Low. Area: cli/internal/cli/fetch.go
@@ -73,11 +93,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Priority: Low. Area: web/hooks/use-records.ts
     Description: When `refreshRecords` replaces the record list (e.g., after sync), `selectedRecord` retains stale data. If the selected record was deleted by another client, it remains visible in the detail panel while absent from navigation.
     Next step: After `refreshRecords`, check if `selectedRecord.id` is still in the new items list. If not, clear or re-fetch it.
-
-- Issue 2026-03-10 p1q2r3a: fetchMore can produce duplicate records
-    Priority: Low. Area: web/hooks/use-records.ts
-    Description: `fetchMore` appends new items with `setRecords(prev => [...prev, ...data.items])`. If data changed between page fetches (record inserted or reordered), the same record could appear on both pages.
-    Next step: Deduplicate by ID when appending: filter out items whose IDs are already in the current list.
 
 - Issue 2026-03-10 q3r4s5a: No request cancellation between concurrent fetch/refresh operations
     Priority: Low. Area: web/hooks/use-records.ts
@@ -158,4 +173,3 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Priority: Low. Area: cli/scripts
     Description: `check_coverage.sh` and `check_coverage_per_package.sh` both run `go test` independently. Every test runs at least twice per CI job, doubling test execution time as the package count grows.
     Next step: Merge the two scripts or have the per-package script reuse the aggregate profile.
-

@@ -101,61 +101,21 @@ func TestRunAutoSyncWarnsOnNonCloudOpenError(t *testing.T) {
 }
 
 func TestRunAutoSyncCleanupError(t *testing.T) {
-	homeDir := setupHomeWithCloudConfig(t)
-	t.Setenv(pcHomeEnvVar, homeDir)
+	originalOpen := openSyncRunnerFn
+	t.Cleanup(func() { openSyncRunnerFn = originalOpen })
 
-	originalLoad := loadAWSConfigFn
-	t.Cleanup(func() { loadAWSConfigFn = originalLoad })
-	loadAWSConfigFn = func(context.Context, string) (aws.Config, error) {
-		return aws.Config{}, nil
+	openSyncRunnerFn = func(context.Context) (syncRunner, func() error, error) {
+		return &fakeSyncRunner{}, func() error {
+			return errors.New("cleanup failed")
+		}, nil
 	}
-
-	originalPool := newPGXPoolFn
-	t.Cleanup(func() { newPGXPoolFn = originalPool })
-	newPGXPoolFn = func(context.Context, string) (*pgxpool.Pool, error) { return nil, nil }
-
-	originalResolve2 := resolveUserIDFn
-	t.Cleanup(func() { resolveUserIDFn = originalResolve2 })
-	resolveUserIDFn = func(context.Context, *pgxpool.Pool, string) (string, error) {
-		return "test-user-id", nil
-	}
-
-	originalRepo := newPostgresRepoFn
-	t.Cleanup(func() { newPostgresRepoFn = originalRepo })
-	newPostgresRepoFn = func(*pgxpool.Pool, string) (repository.Repository, error) { return &mockRepo{}, nil }
-
-	originalS3 := newCloudS3ClientFn
-	t.Cleanup(func() { newCloudS3ClientFn = originalS3 })
-	newCloudS3ClientFn = func(*awss3.Client, string, string) (*pcs3.Client, error) {
-		return &pcs3.Client{}, nil
-	}
-
-	originalSession := newSyncSessionManagerFn
-	t.Cleanup(func() { newSyncSessionManagerFn = originalSession })
-	newSyncSessionManagerFn = func(string) (pcsync.SessionManager, error) {
-		return &fakeSyncSessionManager{}, nil
-	}
-
-	originalService := newSyncServiceFn
-	t.Cleanup(func() { newSyncServiceFn = originalService })
-	newSyncServiceFn = func(*localStack, *cloudStack, pcsync.SessionManager) (syncRunner, error) {
-		return &fakeSyncRunner{}, nil
-	}
-
-	// Override closePGXPoolFn to capture that cleanup runs but doesn't generate an error
-	// through the normal path. We need the cleanup function returned by openSyncRunner
-	// to error. The simplest approach: override the localStack.Close to fail by making
-	// openSQLiteFn return a connection whose Close errors — but that's too invasive.
-	// Instead, since we can't easily inject a cleanup error in unit test, we test
-	// warnAutoSync(nil, err) separately and focus on the cleanup-error log path.
-	// The cleanup deferred in runAutoSync calls cloudStack.Close() then localStack.Close().
-	// We can make cloudStack.Close() error by making closePGXPoolFn panic, but that's bad.
-	// Actually, cloudStack.Close() always returns nil. localStack.Close() returns conn.Close() err.
-	// The cleanest approach: just verify warnAutoSync with nil stderr doesn't panic.
 
 	stderr := &bytes.Buffer{}
 	if err := runAutoSync(context.Background(), stderr); err != nil {
 		t.Fatalf("runAutoSync() error = %v", err)
+	}
+	if !strings.Contains(stderr.String(), "cleanup failed") {
+		t.Fatalf("stderr = %q, want cleanup warning", stderr.String())
 	}
 }
 

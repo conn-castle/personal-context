@@ -19,6 +19,7 @@
     "test:e2e:cli-demo": "playwright test --grep @cli-demo",
     "test:e2e:visual": "playwright test tests/e2e/ui-visual.e2e.spec.ts",
     "test:e2e:markdown": "playwright test tests/e2e/markdown-rendering.e2e.spec.ts",
+    "test:e2e:markdown:ci": "playwright test tests/e2e/markdown-rendering.e2e.spec.ts --grep-invert @visual",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],

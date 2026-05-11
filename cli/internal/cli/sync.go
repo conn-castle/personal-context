@@ -17,6 +17,7 @@ type syncRunner interface {
 }
 
 var (
+	openSyncRunnerFn        = openSyncRunner
 	newSyncSessionManagerFn = func(homeDir string) (pcsync.SessionManager, error) {
 		return syncengine.NewManager(filepath.Join(basePath(homeDir), ".pc"))
 	}
@@ -43,7 +44,7 @@ func newSyncCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 }
 
 func runSync(ctx context.Context, stdout io.Writer, _ io.Writer) (returnErr error) {
-	runner, cleanup, err := openSyncRunner(ctx)
+	runner, cleanup, err := openSyncRunnerFn(ctx)
 	if err != nil {
 		if errors.Is(err, errCloudNotConfigured) {
 			return fmt.Errorf("cloud is not configured")
@@ -69,7 +70,7 @@ func runSync(ctx context.Context, stdout io.Writer, _ io.Writer) (returnErr erro
 }
 
 func runAutoSync(ctx context.Context, stderr io.Writer) error {
-	runner, cleanup, err := openSyncRunner(ctx)
+	runner, cleanup, err := openSyncRunnerFn(ctx)
 	if err != nil {
 		if errors.Is(err, errCloudNotConfigured) {
 			return nil

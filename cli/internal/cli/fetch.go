@@ -191,18 +191,21 @@ func runFetch(ctx context.Context, stdout io.Writer, stderr io.Writer, recordID 
 		return nil
 	}
 
-	// Download each file from S3.
+	// Download each file from S3 and verify it against recorded metadata.
 	downloaded := 0
 	for _, df := range dataFiles {
-		// Sanitize path components to prevent directory traversal from cloud metadata.
-		recordDir := filepath.Base(df.RecordID)
-		fileName := filepath.Base(df.Filename)
-		if recordDir == "." || recordDir == ".." || fileName == "." || fileName == ".." {
-			return fmt.Errorf("invalid path component in record %s file %s", df.RecordID, df.Filename)
+		if err := validateFetchDataFile(df); err != nil {
+			return fmt.Errorf("%s/%s: %w", df.RecordID, df.Filename, err)
 		}
-		destPath := filepath.Join(outputBase, recordDir, fileName)
+		destPath := filepath.Join(outputBase, df.RecordID, df.Filename)
 		if err := downloadS3FileFn(ctx, cloud.S3, df.S3Key, destPath); err != nil {
 			return fmt.Errorf("download %s: %w", df.S3Key, err)
+		}
+		if err := verifyDataFile(df, destPath); err != nil {
+			if rmErr := os.Remove(destPath); rmErr != nil && !os.IsNotExist(rmErr) {
+				return fmt.Errorf("remove unverified file %s after verification failed (%v): %w", destPath, err, rmErr)
+			}
+			return fmt.Errorf("verify downloaded file %s: %w", df.S3Key, err)
 		}
 		downloaded++
 	}
@@ -320,7 +323,7 @@ func summarizeFetchAllFailures(failures []string) string {
 	return fmt.Sprintf("%d file(s) missing or failed (first %d: %s) … and %d more — see stderr", total, fetchAllFailuresErrorPreview, strings.Join(preview, "; "), total-fetchAllFailuresErrorPreview)
 }
 
-func validateFetchAllDataFile(df repository.RecordDataFile) error {
+func validateFetchDataFile(df repository.RecordDataFile) error {
 	if strings.TrimSpace(df.RecordID) == "" {
 		return fmt.Errorf("record_id is required")
 	}
@@ -336,7 +339,26 @@ func validateFetchAllDataFile(df repository.RecordDataFile) error {
 	if strings.TrimSpace(df.Hash) == "" {
 		return fmt.Errorf("hash is required")
 	}
+	if !isSinglePathSegment(df.RecordID) {
+		return fmt.Errorf("record_id must be a single path segment")
+	}
+	if !isSinglePathSegment(df.Filename) {
+		return fmt.Errorf("filename must be a single path segment")
+	}
+	expectedKey := fmt.Sprintf("data/%s/%s", df.RecordID, df.Filename)
+	if df.S3Key != expectedKey {
+		return fmt.Errorf("s3_key must match %q", expectedKey)
+	}
 	return nil
+}
+
+func validateFetchAllDataFile(df repository.RecordDataFile) error {
+	return validateFetchDataFile(df)
+}
+
+func isSinglePathSegment(value string) bool {
+	cleaned := strings.TrimSpace(value)
+	return cleaned != "" && cleaned != "." && cleaned != ".." && filepath.Base(cleaned) == cleaned
 }
 
 func localDataFileMatches(df repository.RecordDataFile, path string) (bool, error) {

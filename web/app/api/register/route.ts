@@ -3,6 +3,11 @@ import { getPool } from "@/lib/db-pool";
 import { hashPassword } from "@/lib/password";
 import { canonicalizeEmailIdentity } from "@/lib/email-identity";
 import { getLocalModeState } from "@/lib/local-mode";
+import {
+  JsonBodyError,
+  jsonBodyErrorResponse,
+  readBoundedJson,
+} from "@/lib/bounded-json";
 
 interface PgErrorLike {
   code?: string;
@@ -59,8 +64,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   let body: unknown;
   try {
-    body = await req.json();
-  } catch {
+    body = await readBoundedJson(req);
+  } catch (error) {
+    if (error instanceof JsonBodyError) {
+      return jsonBodyErrorResponse(error);
+    }
     return NextResponse.json(
       { error: "Invalid JSON body.", code: "BAD_REQUEST" },
       { status: 400 },

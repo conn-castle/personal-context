@@ -24,7 +24,10 @@ interface RecordDetailsProps {
   record: RecordDetail | null;
   activeTab?: string;
   onTabChange?: (tab: string) => void;
-  onUpdateRecord?: (id: string, body: Record<string, unknown>) => void;
+  onUpdateRecord?: (
+    id: string,
+    body: Record<string, unknown>
+  ) => boolean | Promise<boolean>;
   /** Whether the record list is empty (no records in the project). */
   isEmpty?: boolean;
 }
@@ -185,10 +188,14 @@ function NotesEditor({
 }: {
   recordId: string;
   notes: string | null;
-  onSave?: (id: string, body: Record<string, unknown>) => void;
+  onSave?: (
+    id: string,
+    body: Record<string, unknown>
+  ) => boolean | Promise<boolean>;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedNotes, setEditedNotes] = useState(notes || "");
+  const [isSaving, setIsSaving] = useState(false);
   const [copied, setCopied] = useState(false);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -224,9 +231,23 @@ function NotesEditor({
     setIsEditing(false);
   };
 
-  const handleSave = () => {
-    onSave?.(recordId, { notes: editedNotes || null });
-    setIsEditing(false);
+  const handleSave = async () => {
+    if (!onSave) {
+      setIsEditing(false);
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const didSave = await onSave(recordId, { notes: editedNotes || null });
+      if (didSave !== false) {
+        setIsEditing(false);
+      }
+    } catch {
+      // Parent mutation handlers surface failures through the shared error UI.
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (!notes && !isEditing) {
@@ -250,13 +271,18 @@ function NotesEditor({
             Editing markdown
           </span>
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" onClick={handleCancel}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCancel}
+              disabled={isSaving}
+            >
               <X className="w-3.5 h-3.5 mr-1" />
               Cancel
             </Button>
-            <Button size="sm" onClick={handleSave}>
+            <Button size="sm" onClick={handleSave} disabled={isSaving}>
               <Check className="w-3.5 h-3.5 mr-1" />
-              Save
+              {isSaving ? "Saving..." : "Save"}
             </Button>
           </div>
         </div>
@@ -306,4 +332,3 @@ function NotesEditor({
     </ScrollArea>
   );
 }
-

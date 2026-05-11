@@ -104,18 +104,24 @@ export async function handlePatchRecord(
     // Fetch child rows for full detail. Defense-in-depth INNER JOIN on
     // records so cross-tenant access stays impossible even if a refactor
     // reorders these queries relative to the UPDATE ownership check above.
-    const figures = (await sql`
-      SELECT f.filename, f.s3_key, f.size, f.hash, f.alt_text, f.description
+    const figureRows = (await sql`
+      SELECT f.filename, f.s3_key, f.alt_text
       FROM record_figures f
       INNER JOIN records r ON r.id = f.record_id
       WHERE f.record_id = ${id} AND r.user_id = ${userId}
-    `) as RecordFile[];
+    `) as Record<string, unknown>[];
     const dataFiles = (await sql`
       SELECT d.filename, d.s3_key, d.size, d.hash, d.description
       FROM record_data_files d
       INNER JOIN records r ON r.id = d.record_id
       WHERE d.record_id = ${id} AND r.user_id = ${userId}
     `) as RecordFile[];
+
+    const figures: RecordFile[] = figureRows.map((r) => ({
+      filename: r.filename as string,
+      s3_key: r.s3_key as string,
+      alt_text: (r.alt_text as string | null) ?? null,
+    }));
 
     const record: RecordDetail = {
       id: row.id as string,

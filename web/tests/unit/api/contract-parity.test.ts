@@ -409,6 +409,31 @@ describe("Contract: PATCH /api/records/[id]", () => {
       data_files: "object",
     });
   });
+
+  it("oversized JSON error matches local server code", async () => {
+    const req = new NextRequest(
+      `http://localhost/api/records/${RECORD_ID}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ notes: "updated" }),
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(4 * 1024 * 1024 + 1),
+        },
+      }
+    );
+
+    const res = await recordPATCH(req, recordCtx(RECORD_ID));
+
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as Record<string, unknown>;
+    assertExactShape(body, {
+      error: "string",
+      code: "string",
+    });
+    expect(body.code).toBe("REQUEST_BODY_TOO_LARGE");
+    expect(mockSql).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

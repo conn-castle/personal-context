@@ -158,6 +158,45 @@ func TestRunSyncInvokesServiceAndPrintsSuccess(t *testing.T) {
 	}
 }
 
+func TestRunSyncReturnsCleanupErrorAfterSuccessfulSync(t *testing.T) {
+	originalOpen := openSyncRunnerFn
+	t.Cleanup(func() { openSyncRunnerFn = originalOpen })
+
+	openSyncRunnerFn = func(context.Context) (syncRunner, func() error, error) {
+		return &fakeSyncRunner{}, func() error {
+			return errors.New("cleanup failed")
+		}, nil
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runSync(context.Background(), stdout, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "cleanup failed") {
+		t.Fatalf("runSync() error = %v, want cleanup failure", err)
+	}
+	if stdout.String() != "Sync complete\n" {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestRunSyncJoinsSyncAndCleanupErrors(t *testing.T) {
+	originalOpen := openSyncRunnerFn
+	t.Cleanup(func() { openSyncRunnerFn = originalOpen })
+
+	openSyncRunnerFn = func(context.Context) (syncRunner, func() error, error) {
+		return &failingSyncRunner{err: errors.New("sync failed")}, func() error {
+			return errors.New("cleanup failed")
+		}, nil
+	}
+
+	err := runSync(context.Background(), &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("runSync() error = nil, want joined failure")
+	}
+	if !strings.Contains(err.Error(), "run sync") || !strings.Contains(err.Error(), "cleanup failed") {
+		t.Fatalf("runSync() error = %v, want sync and cleanup failures", err)
+	}
+}
+
 func TestNewSyncCommandExecutesRunE(t *testing.T) {
 	// Exercise the sync subcommand through the root command, covering the RunE closure.
 	homeDir := setupHomeWithConfig(t)

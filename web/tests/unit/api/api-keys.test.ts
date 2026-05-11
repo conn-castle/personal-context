@@ -224,6 +224,24 @@ describe("POST /api/api-keys", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 413 for over-limit JSON bodies", async () => {
+    const req = new NextRequest("http://localhost/api/api-keys", {
+      method: "POST",
+      body: JSON.stringify({ label: "test" }),
+      headers: {
+        "content-type": "application/json",
+        "content-length": String(4 * 1024 * 1024 + 1),
+      },
+    });
+
+    const res = await POST(req);
+
+    expect(res.status).toBe(413);
+    const body = await res.json();
+    expect(body.code).toBe("REQUEST_BODY_TOO_LARGE");
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
   it("returns 400 for non-object body", async () => {
     const req = new NextRequest("http://localhost/api/api-keys", {
       method: "POST",

@@ -14,6 +14,20 @@ source_tgz="${source_tar}.gz"
 mkdir -p "$dist_dir"
 dist_abs="$(cd "$dist_dir" && pwd)"
 
+shopt -s nullglob
+existing_artifacts=("$dist_abs"/pc-* "$dist_abs"/*.tar.gz)
+shopt -u nullglob
+if [[ -e "$dist_abs/checksums.txt" ]]; then
+  existing_artifacts+=("$dist_abs/checksums.txt")
+fi
+if [[ ${#existing_artifacts[@]} -gt 0 ]]; then
+  echo "ERROR: DIST_DIR contains existing release artifacts; use an empty directory: ${dist_abs}" >&2
+  for artifact in "${existing_artifacts[@]}"; do
+    echo "  ${artifact}" >&2
+  done
+  exit 1
+fi
+
 if ! command -v git >/dev/null 2>&1; then
   echo "ERROR: git not found; cannot generate source tarball" >&2
   exit 1

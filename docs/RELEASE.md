@@ -37,7 +37,7 @@ Release assets are built by GitHub Actions. Stable release tags only are support
 ## GitHub release
 
 1. Tag push triggers `.github/workflows/release.yml`.
-2. The workflow validates the stable tag format and runs `make release-preflight RELEASE_TAG=<tag>`.
+2. The workflow validates the stable tag format, checks the matching changelog entry, and runs `make release-dist PC_VERSION=<tag> DIST_DIR=dist`.
 3. The workflow publishes macOS/Linux platform binaries, `personal-context-<version>.tar.gz` source tarball, and `checksums.txt`.
 4. Release notes are extracted from the matching `CHANGELOG.md` section.
 5. The workflow opens a PR against `conn-castle/homebrew-tap` to add or update `Formula/personal-context.rb` with the release tarball URL and SHA-256.
@@ -48,5 +48,7 @@ Release assets are built by GitHub Actions. Stable release tags only are support
 make release-preflight RELEASE_TAG="vX.Y.Z"
 make release-dist PC_VERSION="vX.Y.Z" DIST_DIR=dist
 ```
+
+`DIST_DIR` must be empty or absent before `make release-dist`; the release build refuses existing `pc-*`, `*.tar.gz`, or `checksums.txt` artifacts to avoid mixing stale files into checksums.
 
 The Homebrew formula builds from the source tarball and installs the CLI binary as `pc`.

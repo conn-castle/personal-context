@@ -128,6 +128,7 @@ expected_version="v1.0.0"
 expected_version_no_v="${expected_version#v}"
 
 run_workflow_consistency_tests
+run_stale_dist_refusal_test
 run_release_generation_test
 run_build_invocation_details
 run_artifact_verification

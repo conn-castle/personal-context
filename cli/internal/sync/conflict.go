@@ -22,7 +22,7 @@ const (
 
 // RecordBundle is the sync unit for a record and its child rows.
 type RecordBundle struct {
-	Record     repository.Record
+	Record    repository.Record
 	Figures   []repository.RecordFigure
 	DataFiles []repository.RecordDataFile
 }
@@ -122,7 +122,7 @@ func PlanFigureReconciliation(
 			continue
 		}
 		plan.Creates = append(plan.Creates, repository.CreateRecordFigureInput{
-			RecordID:  recordID,
+			RecordID: recordID,
 			Filename: figure.Filename,
 			S3Key:    figure.S3Key,
 			AltText:  figure.AltText,
@@ -194,7 +194,7 @@ func PlanDataFileReconciliation(
 			continue
 		}
 		plan.Creates = append(plan.Creates, repository.CreateRecordDataFileInput{
-			RecordID:     recordID,
+			RecordID:    recordID,
 			Filename:    dataFile.Filename,
 			S3Key:       dataFile.S3Key,
 			Size:        dataFile.Size,
@@ -217,4 +217,81 @@ func nullableStringValue(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+func sourceBundleCanRepairTargetChildren(source RecordBundle, target RecordBundle) bool {
+	if !recordPayloadsEqual(source.Record, target.Record) {
+		return false
+	}
+	figuresCanRepair := sourceHasExactFigureSuperset(source.Figures, target.Figures)
+	dataFilesCanRepair := sourceHasExactDataFileSuperset(source.DataFiles, target.DataFiles)
+	if !figuresCanRepair || !dataFilesCanRepair {
+		return false
+	}
+	return len(source.Figures) > len(target.Figures) ||
+		len(source.DataFiles) > len(target.DataFiles)
+}
+
+func recordPayloadsEqual(left repository.Record, right repository.Record) bool {
+	return left.ID == right.ID &&
+		left.Date == right.Date &&
+		left.DayOrder == right.DayOrder &&
+		nullableStringsEqual(left.HTMLContent, right.HTMLContent) &&
+		nullableStringsEqual(left.Notes, right.Notes) &&
+		left.ProjectID == right.ProjectID &&
+		left.SourceDeviceID == right.SourceDeviceID &&
+		nullableStringsEqual(left.SourceRef, right.SourceRef) &&
+		nullableStringsEqual(left.GitRemoteURL, right.GitRemoteURL) &&
+		nullableStringsEqual(left.GitHash, right.GitHash)
+}
+
+func nullableStringsEqual(left *string, right *string) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
+func sourceHasExactFigureSuperset(source []repository.RecordFigure, target []repository.RecordFigure) bool {
+	if len(source) < len(target) {
+		return false
+	}
+	sourceByFilename := make(map[string]repository.RecordFigure, len(source))
+	for _, figure := range source {
+		sourceByFilename[figure.Filename] = figure
+	}
+	for _, figure := range target {
+		match, ok := sourceByFilename[figure.Filename]
+		if !ok {
+			return false
+		}
+		if figure.S3Key != match.S3Key ||
+			nullableStringValue(figure.AltText) != nullableStringValue(match.AltText) {
+			return false
+		}
+	}
+	return true
+}
+
+func sourceHasExactDataFileSuperset(source []repository.RecordDataFile, target []repository.RecordDataFile) bool {
+	if len(source) < len(target) {
+		return false
+	}
+	sourceByFilename := make(map[string]repository.RecordDataFile, len(source))
+	for _, dataFile := range source {
+		sourceByFilename[dataFile.Filename] = dataFile
+	}
+	for _, dataFile := range target {
+		match, ok := sourceByFilename[dataFile.Filename]
+		if !ok {
+			return false
+		}
+		if dataFile.S3Key != match.S3Key ||
+			dataFile.Size != match.Size ||
+			dataFile.Hash != match.Hash ||
+			nullableStringValue(dataFile.Description) != nullableStringValue(match.Description) {
+			return false
+		}
+	}
+	return true
 }

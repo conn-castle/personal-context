@@ -189,6 +189,14 @@ Run from: `web/`
 Prerequisites: `pnpm exec playwright install` for browser binaries.
 Notes: Verifies all markdown elements (H1–H6, bold, italic, strikethrough, code, lists, tables, task lists, blockquotes, links, mermaid diagrams) render correctly in the Notes panel. Includes visual snapshots.
 
+- Run CI-safe Playwright markdown rendering e2e tests
+```bash
+pnpm test:e2e:markdown:ci
+```
+Run from: `web/`
+Prerequisites: `pnpm exec playwright install` for browser binaries.
+Notes: Runs semantic markdown and mermaid assertions without visual snapshot comparisons, because Linux visual baselines are still tracked separately in ISSUES.md.
+
 - Run Playwright e2e for standalone CLI record preview flow
 ```bash
 pnpm test:e2e:cli-record
@@ -209,7 +217,7 @@ Notes: Executes `cli/scripts/verify_local_demo.sh --no-open`, then loads the gen
 
 A root Makefile provides common targets for both workspaces. Run `make` or `make help` for a full list.
 
-- Run all pre-commit checks (schema + lint + typecheck + test + build)
+- Run all pre-commit checks (schema + lint + typecheck + coverage + build)
 ```bash
 make check
 ```
@@ -234,6 +242,7 @@ make release-dist PC_VERSION=vX.Y.Z DIST_DIR=dist
 ```
 Run from: repo root
 Notes: Cross-compiles `pc` binaries for macOS/Linux, creates `personal-context-X.Y.Z.tar.gz`, and writes `checksums.txt`.
+`DIST_DIR` must be empty or absent; existing `pc-*`, `*.tar.gz`, or `checksums.txt` artifacts are refused.
 
 - Start web UI (auto-detects local vs cloud mode)
 ```bash

@@ -13,6 +13,11 @@ import { isLocalMode, proxyToLocal } from "@/lib/local-proxy";
 import { requireUser } from "@/lib/auth-helpers";
 import type { RecordDetail, RecordFile, DeleteResponse } from "@/lib/types";
 import { handlePatchRecord } from "@/lib/records-handlers";
+import {
+  JsonBodyError,
+  jsonBodyErrorResponse,
+  readBoundedJson,
+} from "@/lib/bounded-json";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -59,7 +64,7 @@ export async function GET(
     // here keeps these queries safe even if callers/refactors reorder them.
     const [figureRows, dataFileRows] = await Promise.all([
       sql`
-        SELECT f.filename, f.s3_key, f.size, f.hash, f.alt_text, f.description
+        SELECT f.filename, f.s3_key, f.alt_text
         FROM record_figures f
         INNER JOIN records r ON r.id = f.record_id
         WHERE f.record_id = ${id} AND r.user_id = ${user.id}
@@ -77,10 +82,7 @@ export async function GET(
     const figures: RecordFile[] = figureRows.map((r) => ({
       filename: r.filename as string,
       s3_key: r.s3_key as string,
-      size: r.size != null ? Number(r.size) : undefined,
-      hash: r.hash != null ? (r.hash as string) : undefined,
       alt_text: (r.alt_text as string | null) ?? null,
-      description: (r.description as string | null) ?? null,
     }));
 
     const dataFiles: RecordFile[] = dataFileRows.map((r) => ({
@@ -144,12 +146,15 @@ export async function PATCH(
     let body: Record<string, unknown>;
 
     try {
-      const parsed = (await req.json()) as unknown;
+      const parsed = await readBoundedJson(req);
       if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
         return badRequest("Request body must be a JSON object");
       }
       body = parsed as Record<string, unknown>;
-    } catch {
+    } catch (error) {
+      if (error instanceof JsonBodyError) {
+        return jsonBodyErrorResponse(error);
+      }
       return badRequest("Invalid JSON body");
     }
 

@@ -189,6 +189,11 @@ func (s *Service) syncChangedRecords(
 			return fmt.Errorf("resolve %s bundle %s: %w", direction.name, record.ID, err)
 		}
 		if winner != direction.winningSide {
+			if winner == WinnerNone && sourceBundleCanRepairTargetChildren(sourceBundle, targetBundle) {
+				if err := direction.apply(ctx, sourceBundle, &targetBundle); err != nil {
+					return fmt.Errorf("%s repair %s record %s: %w", direction.name, direction.sourceLabel, record.ID, err)
+				}
+			}
 			continue
 		}
 		if err := direction.apply(ctx, sourceBundle, &targetBundle); err != nil {
@@ -278,7 +283,7 @@ func (s *Service) bundleForRecord(
 		return RecordBundle{}, fmt.Errorf("list data files: %w", err)
 	}
 	return RecordBundle{
-		Record:     record,
+		Record:    record,
 		Figures:   figures,
 		DataFiles: dataFiles,
 	}, nil

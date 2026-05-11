@@ -6,6 +6,7 @@ describe("extractBearerToken", () => {
     expect(extractBearerToken(null)).toBeNull();
     expect(extractBearerToken("   ")).toBeNull();
     expect(extractBearerToken("Basic abc")).toBeNull();
+    expect(extractBearerToken("Bearer    ")).toBeNull();
   });
 
   it("extracts bearer tokens case-insensitively", () => {
