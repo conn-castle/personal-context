@@ -77,10 +77,18 @@ func runMove(ctx context.Context, stdout io.Writer, stderr io.Writer, id string,
 		dateField = dateStr
 	}
 
-	// Compute day_order (exclude current record so it doesn't conflict with itself)
-	dayOrder, err := computeDayOrder(ctx, stack.Repo, dateField, id, pos)
-	if err != nil {
-		return fmt.Errorf("compute position: %w", err)
+	// When the caller passed --date matching the current date and no explicit
+	// position flag, preserve the existing day_order — otherwise the default
+	// "last" position would silently bump the record to the end of its day on
+	// every no-op date pass.
+	dayOrder := existing.DayOrder
+	dateUnchanged := dateField == existing.Date
+	if posExplicit || !dateUnchanged {
+		// Compute day_order (exclude current record so it doesn't conflict with itself)
+		dayOrder, err = computeDayOrder(ctx, stack.Repo, dateField, id, pos)
+		if err != nil {
+			return fmt.Errorf("compute position: %w", err)
+		}
 	}
 
 	// Update record (full replacement, preserve all fields except Date and DayOrder)

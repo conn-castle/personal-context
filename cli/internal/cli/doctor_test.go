@@ -948,3 +948,47 @@ func TestDoctorListRecordIDsOnDiskError(t *testing.T) {
 		t.Fatal("expected error when figures dir is a file")
 	}
 }
+
+func TestScanMissingAttachments_RejectsZeroValueScanner(t *testing.T) {
+	_, err := scanMissingAttachments(context.Background(), nil, nil, missingAttachmentScanner{label: "figure"})
+	if err == nil {
+		t.Fatal("expected error for unset scanner fields, got nil")
+	}
+	if !strings.Contains(err.Error(), "listFilenames") || !strings.Contains(err.Error(), "resolvePath") {
+		t.Fatalf("error should mention required fields, got %q", err)
+	}
+}
+
+func TestDoctorReportsDirectoryWhereFigureExpected(t *testing.T) {
+	homeDir := setupEnv(t)
+
+	id := addRecordWithContent(t,
+		`<html><img src="figures/fig.png">body</html>`,
+		"", "",
+		map[string][]byte{"fig.png": []byte("data")},
+		nil,
+	)
+
+	figurePath := filepath.Join(homeDir, "personal-context", "figures", id, "fig.png")
+	if err := os.Remove(figurePath); err != nil {
+		t.Fatalf("remove figure: %v", err)
+	}
+	if err := os.Mkdir(figurePath, 0o755); err != nil {
+		t.Fatalf("mkdir at figure path: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"doctor"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected error when figure path is a directory")
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "Missing figures:    WARN") {
+		t.Fatalf("expected missing figures WARN, got %q", out)
+	}
+	if !strings.Contains(out, "(is a directory)") {
+		t.Fatalf("expected directory annotation, got %q", out)
+	}
+}

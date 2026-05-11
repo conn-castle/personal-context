@@ -54,16 +54,21 @@ export async function GET(
       return notFound(`Record not found: ${id}`);
     }
 
+    // Defense-in-depth: re-scope child queries to the user via INNER JOIN on
+    // records. The parent check above already confirms ownership, but joining
+    // here keeps these queries safe even if callers/refactors reorder them.
     const [figureRows, dataFileRows] = await Promise.all([
       sql`
-        SELECT filename, s3_key, size, hash, alt_text, description
-        FROM record_figures
-        WHERE record_id = ${id}
+        SELECT f.filename, f.s3_key, f.size, f.hash, f.alt_text, f.description
+        FROM record_figures f
+        INNER JOIN records r ON r.id = f.record_id
+        WHERE f.record_id = ${id} AND r.user_id = ${user.id}
       ` as Promise<Record<string, unknown>[]>,
       sql`
-        SELECT filename, s3_key, size, hash, description
-        FROM record_data_files
-        WHERE record_id = ${id}
+        SELECT d.filename, d.s3_key, d.size, d.hash, d.description
+        FROM record_data_files d
+        INNER JOIN records r ON r.id = d.record_id
+        WHERE d.record_id = ${id} AND r.user_id = ${user.id}
       ` as Promise<Record<string, unknown>[]>,
     ]);
 

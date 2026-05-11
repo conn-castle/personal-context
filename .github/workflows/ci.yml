@@ -130,10 +130,7 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Test
-        run: pnpm test
-
-      - name: Enforce coverage >= 95%
+      - name: Test with coverage enforcement (>= 95%)
         run: pnpm test:coverage
 
       - name: Install Playwright browser

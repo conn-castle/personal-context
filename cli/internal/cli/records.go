@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/conn-castle/personal-context/cli/internal/listpage"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
+	"github.com/conn-castle/personal-context/cli/internal/timeutil"
 	"github.com/spf13/cobra"
 )
 
@@ -51,12 +51,6 @@ type recordListItem struct {
 	HasNotes       bool    `json:"has_notes"`
 	FigureCount    int     `json:"figure_count"`
 	DataFileCount  int     `json:"data_file_count"`
-}
-
-type cliCursorPayload struct {
-	Date     string `json:"date"`
-	DayOrder string `json:"day_order"`
-	ID       string `json:"id"`
 }
 
 func newListCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
@@ -101,7 +95,7 @@ func runList(ctx context.Context, stdout io.Writer, stderr io.Writer, opts recor
 	}
 	filter.HasHTML = opts.HasHTML
 	filter.HasData = opts.HasData
-	cursor, err := decodeCLICursor(strings.TrimSpace(opts.Cursor))
+	cursor, err := listpage.DecodeCursor(strings.TrimSpace(opts.Cursor))
 	if err != nil {
 		return err
 	}
@@ -147,7 +141,7 @@ func runList(ctx context.Context, stdout io.Writer, stderr io.Writer, opts recor
 	if !opts.All && len(items) > opts.Limit {
 		pageItems := items[:opts.Limit]
 		last := pageItems[len(pageItems)-1]
-		cursor := encodeCLICursor(cliCursorPayload{Date: last.Date, DayOrder: last.DayOrder, ID: last.ID})
+		cursor := listpage.EncodeCursor(listpage.Cursor{Date: last.Date, DayOrder: last.DayOrder, ID: last.ID})
 		nextCursor = &cursor
 		items = pageItems
 	}
@@ -430,73 +424,36 @@ func isValidRecordDate(value string) bool {
 	return err == nil && parsed.Format("2006-01-02") == value
 }
 
+// sortRecordsForDiscovery orders records date-DESC, day_order-ASC, id-ASC —
+// the canonical "newest day first; oldest position first within a day" order
+// used by `pc list` and `pc files list`.
 func sortRecordsForDiscovery(records []repository.Record) {
-	slices.SortFunc(records, func(a, b repository.Record) int {
-		if a.Date > b.Date {
-			return -1
-		}
-		if a.Date < b.Date {
-			return 1
-		}
-		if a.DayOrder < b.DayOrder {
-			return -1
-		}
-		if a.DayOrder > b.DayOrder {
-			return 1
-		}
-		if a.ID < b.ID {
-			return -1
-		}
-		if a.ID > b.ID {
-			return 1
-		}
-		return 0
-	})
+	slices.SortFunc(records, compareRecordsForDiscovery)
 }
 
-func applyRecordCursor(records []repository.Record, cursor *cliCursorPayload) []repository.Record {
+func compareRecordsForDiscovery(a, b repository.Record) int {
+	if cmp := strings.Compare(b.Date, a.Date); cmp != 0 {
+		return cmp
+	}
+	if cmp := strings.Compare(a.DayOrder, b.DayOrder); cmp != 0 {
+		return cmp
+	}
+	return strings.Compare(a.ID, b.ID)
+}
+
+// applyRecordCursor advances past records that sort before the cursor under
+// the canonical (date DESC, day_order ASC, id ASC) order, returning the
+// remaining suffix.
+func applyRecordCursor(records []repository.Record, cursor *listpage.Cursor) []repository.Record {
 	if cursor == nil {
 		return records
 	}
 	for i, record := range records {
-		if recordIsAfterCursor(record, cursor) {
+		if listpage.IsAfterCursor(record.Date, record.DayOrder, record.ID, *cursor) {
 			return records[i:]
 		}
 	}
 	return nil
-}
-
-func recordIsAfterCursor(record repository.Record, cursor *cliCursorPayload) bool {
-	if record.Date != cursor.Date {
-		return record.Date < cursor.Date
-	}
-	if record.DayOrder != cursor.DayOrder {
-		return record.DayOrder > cursor.DayOrder
-	}
-	return record.ID > cursor.ID
-}
-
-func encodeCLICursor(cursor cliCursorPayload) string {
-	data, _ := json.Marshal(cursor)
-	return base64.StdEncoding.EncodeToString(data)
-}
-
-func decodeCLICursor(raw string) (*cliCursorPayload, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	data, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		return nil, fmt.Errorf("invalid cursor encoding")
-	}
-	var cursor cliCursorPayload
-	if err := json.Unmarshal(data, &cursor); err != nil {
-		return nil, fmt.Errorf("invalid cursor format")
-	}
-	if cursor.Date == "" || cursor.DayOrder == "" || cursor.ID == "" {
-		return nil, fmt.Errorf("incomplete cursor")
-	}
-	return &cursor, nil
 }
 
 func recordIDs(records []repository.Record) []string {
@@ -778,13 +735,9 @@ func writeIndentedJSON(w io.Writer, value any) error {
 }
 
 func formatCLITime(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+	return timeutil.FormatUTCMillis(t)
 }
 
 func formatCLITimePtr(t *time.Time) *string {
-	if t == nil {
-		return nil
-	}
-	formatted := formatCLITime(*t)
-	return &formatted
+	return timeutil.FormatUTCMillisPtr(t)
 }

@@ -18,7 +18,9 @@ if [[ "${#packages[@]}" -eq 0 ]]; then
 	exit 2
 fi
 
-go test -covermode=atomic -coverprofile="$profile" "${packages[@]}"
+# `-race` catches concurrency bugs in sync, syncengine, and pc serve handlers;
+# `-covermode=atomic` is required when `-race` is enabled.
+go test -race -covermode=atomic -coverprofile="$profile" "${packages[@]}"
 
 total_line="$(go tool cover -func="$profile" | awk '/^total:/ { print }')"
 if [[ -z "$total_line" ]]; then

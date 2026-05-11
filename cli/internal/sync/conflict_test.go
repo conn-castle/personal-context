@@ -512,6 +512,72 @@ func TestPlanDataFileReconciliationExactMatchNilDescription(t *testing.T) {
 	}
 }
 
+// TestPlanFigureReconciliationRejectsDuplicateDesiredFilename guards against
+// silent overwrite when the desired source slice contains the same filename
+// twice. Prior to the syncengine.FigureMapByFilename adoption, the second
+// entry replaced the first in the in-flight map.
+func TestPlanFigureReconciliationRejectsDuplicateDesiredFilename(t *testing.T) {
+	_, err := PlanFigureReconciliation(
+		"20260308-a1b2c3d4",
+		nil,
+		[]repository.RecordFigure{
+			{Filename: "plot.png", S3Key: "figures/20260308-a1b2c3d4/plot.png"},
+			{Filename: "plot.png", S3Key: "figures/20260308-a1b2c3d4/plot-alt.png"},
+		},
+	)
+	if err == nil {
+		t.Fatal("expected error for duplicate desired figure filename")
+	}
+}
+
+// TestPlanFigureReconciliationRejectsDuplicateExistingFilename ensures the
+// existing slice is also validated through syncengine.FigureMapByFilename.
+func TestPlanFigureReconciliationRejectsDuplicateExistingFilename(t *testing.T) {
+	_, err := PlanFigureReconciliation(
+		"20260308-a1b2c3d4",
+		[]repository.RecordFigure{
+			{ID: 1, Filename: "plot.png", S3Key: "figures/20260308-a1b2c3d4/plot.png"},
+			{ID: 2, Filename: "plot.png", S3Key: "figures/20260308-a1b2c3d4/plot-2.png"},
+		},
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected error for duplicate existing figure filename")
+	}
+}
+
+// TestPlanDataFileReconciliationRejectsDuplicateDesiredFilename mirrors the
+// figure case for data files.
+func TestPlanDataFileReconciliationRejectsDuplicateDesiredFilename(t *testing.T) {
+	_, err := PlanDataFileReconciliation(
+		"20260308-a1b2c3d4",
+		nil,
+		[]repository.RecordDataFile{
+			{Filename: "metrics.csv", S3Key: "data/20260308-a1b2c3d4/metrics.csv", Hash: "deadbeef"},
+			{Filename: "metrics.csv", S3Key: "data/20260308-a1b2c3d4/metrics-alt.csv", Hash: "cafef00d"},
+		},
+	)
+	if err == nil {
+		t.Fatal("expected error for duplicate desired data file filename")
+	}
+}
+
+// TestPlanDataFileReconciliationRejectsDuplicateExistingFilename guards the
+// existing-side duplicate path for data files.
+func TestPlanDataFileReconciliationRejectsDuplicateExistingFilename(t *testing.T) {
+	_, err := PlanDataFileReconciliation(
+		"20260308-a1b2c3d4",
+		[]repository.RecordDataFile{
+			{ID: 1, Filename: "metrics.csv", S3Key: "data/20260308-a1b2c3d4/metrics.csv", Hash: "deadbeef"},
+			{ID: 2, Filename: "metrics.csv", S3Key: "data/20260308-a1b2c3d4/metrics-2.csv", Hash: "cafef00d"},
+		},
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected error for duplicate existing data file filename")
+	}
+}
+
 func newBundle(id string, updatedAt time.Time, deletedAt *time.Time) RecordBundle {
 	return RecordBundle{
 		Record: repository.Record{

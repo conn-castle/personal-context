@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-05-10 s1k2l3: Sync lock has no stale-lock recovery
+    Priority: Medium. Area: cli/internal/syncengine
+    Description: `AcquireFileLock` creates `.pc/sync.lock` with `O_CREATE|O_EXCL` and writes only the literal string `"locked\n"` — no PID, no host, no start timestamp. If a `pc sync` (or any mutation auto-sync) is killed by SIGKILL, panics in a non-recoverable way, or the machine reboots mid-sync, the lock file persists. All future syncs return `ErrSyncLocked` indefinitely; the only recovery is for the user to manually `rm ~/personal-context/.pc/sync.lock`. There is no documented recovery path in README/CONTEXT.
+    Next step: Write PID (and optionally hostname + start timestamp in RFC3339) into the lock file. On lock-contention, parse the file; if the PID is no longer alive (or belongs to a different command via `/proc/<pid>/comm` on Linux or `ps` on macOS), remove the file and retry once. Document the recovery flag in `pc doctor`. Tests: simulate stale lock with non-existent PID and verify acquisition succeeds.
+
 - Issue 2026-05-10 f1a2l3p: `pc fetch --all` is sequential; large datasets pay full round-trip per file
     Priority: Low. Area: cli/internal/cli/fetch.go
     Description: `fetchAllDataFiles` iterates records and data files one at a time, so each S3 download blocks the next and each on-disk hash blocks subsequent work. For users with thousands of records, wall-clock time is dominated by sequential network latency and hashing even though the operations are independent. Implementing a bounded worker pool would require: thread-safe stats updates (currently plain ints/int64), deterministic-enough stderr/failure ordering for tests, a concurrency cap (flag, env, or CPU-based default), and a decision on whether cancellation drains or aborts in-flight downloads.
@@ -104,20 +109,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: The `catch` block in `doSync` now logs via `console.warn`, but no error state is exposed to consumers. The UI cannot indicate that sync is failing.
     Next step: Expose a `syncError` state or `lastSyncError` ref so consumers can display a stale-data indicator.
 
-- Issue 2026-03-10 f1g2h3a: Dropdown menu items in RecordMetadataBar have no onClick handlers
-    Priority: Low. Area: web/components/record-metadata-bar.tsx
-    Description: Four action items in the "More options" dropdown (Share record, Download record, Copy link, Print) render as clickable items but do nothing. No `disabled` state or visual indication they are non-functional.
-    Next step: Add `disabled` styling or wire handlers when the features are implemented.
-
 - Issue 2026-03-10 g3h4i5a: AssetCard download/delete handlers are no-ops
     Priority: Medium. Area: web/components/record-details.tsx
     Description: The `onDownload` and `onDelete` callbacks passed to `AssetCard` for both figures and data files are empty arrow functions. The delete confirmation dialog appears but the confirmed action is a no-op.
     Next step: Implement download via the `/api/files` presigned URL endpoint. Decide on figure/data-file deletion UX (CLI-only or web-editable).
-
-- Issue 2026-03-10 i7j8k9a: Accessibility gaps in web UI components (partial fix)
-    Priority: Low. Area: web/components
-    Description: `RecordThumbnail` button has no `aria-label`; navigation view-mode toggle buttons use `title` instead of `aria-label`/`aria-pressed`. SettingsOverlay was migrated to shadcn Dialog (Escape, focus trap, ARIA role="dialog" now handled).
-    Next step: Add `aria-label` to thumbnail buttons and `aria-pressed` to toggle buttons.
 
 - Issue 2026-03-09 f7g8h9: Linux CI visual regression baselines not yet generated
     Priority: Medium. Area: web/tests/e2e
@@ -139,45 +134,20 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: `UpdateRecord` sets `deleted_at = ?` unconditionally. A caller that constructs `UpdateRecordInput` without copying the existing `DeletedAt` silently restores a soft-deleted record. All current callers are safe (they copy `existing.DeletedAt`), but the API is a footgun for future callers.
     Next step: Add `SetDeletedAt bool` flag to `UpdateRecordInput` or change SQL to `COALESCE(?, deleted_at)` with a separate explicit-clear mechanism for sync/restore.
 
-- Issue 2026-03-08 n9o0p1: Duplicate filenames silently overwritten in sync reconciliation plans
-    Priority: Medium. Area: cli/internal/sync
-    Description: `PlanFigureReconciliation` and `PlanDataFileReconciliation` build maps keyed by filename without duplicate detection. If existing or desired slices contain duplicate filenames (from corruption or bugs), one entry is silently lost. The `syncengine` package has `FigureMapByFilename`/`DataFileMapByFilename` with duplicate detection but they are not used here.
-    Next step: Either use `syncengine` map helpers or add explicit duplicate detection in `conflict.go`.
-
 - Issue 2026-03-08 o1p2q3: GitHub Actions pinned to mutable version tags
     Priority: Medium. Area: .github/workflows
     Description: GitHub Actions use major version tags (`@v4`, `@v5`, `@v6`, `@v8`) rather than full commit SHAs. Third-party actions like `golangci/golangci-lint-action@v8` carry supply-chain risk.
     Next step: Pin all actions to full commit SHAs with version comments.
-
-- Issue 2026-03-08 p3q4r5: CI web job runs tests twice (pnpm test then pnpm test:coverage)
-    Priority: Low. Area: .github/workflows/ci.yml
-    Description: The `web` CI job runs `pnpm test` (vitest run) and then `pnpm test:coverage` (vitest run --coverage), executing the identical test suite twice. The coverage run already validates test passage.
-    Next step: Remove the redundant `pnpm test` step from the web CI job.
 
 - Issue 2026-03-08 k4l5m6: Repository adapters and sync suites are oversized
     Priority: Low. Area: cli/internal/repository, cli/internal/sync
     Description: `repository.go` adapters, `service.go`, and their largest companion test files now concentrate CRUD/reconciliation helpers and long scenario suites in 600-3900 LOC files, which raises review and change risk.
     Next step: When these areas are next touched for feature work, split scan/helper logic and test scenarios into themed files without changing repository contracts.
 
-- Issue 2026-03-08 h1i2j3: doctor missing-file checks duplicate scan logic
-    Priority: Low. Area: cli/internal/cli
-    Description: `checkMissingFigures` and `checkMissingDataFiles` in `doctor.go` duplicate the same traversal/stat/error plumbing with only repository and path-resolver differences.
-    Next step: Introduce a shared internal helper that parameterizes list and path resolution while preserving existing error labels/output text.
-
-- Issue 2026-03-07 f6a7b8: pc move with --date matching current date silently reorders to end
-    Priority: Low. Area: cli/internal/cli
-    Description: `pc move <id> --date <same-date>` with no position flags defaults to `last`, reordering the record to the end of the day instead of preserving its position. Can cause unexpected ordering changes in scripted or repeated runs.
-    Next step: When the record's date doesn't change and no explicit position flag is given, preserve the existing day_order instead of recomputing.
-
 - Issue 2026-03-06 e5f6a7: edit/add commands use manual rollback instead of DB transactions
     Priority: Medium. Area: cli/internal/cli
     Description: `runEdit` and `runAdd` track mutation state with boolean flags and deferred rollback closures instead of wrapping multi-step DB operations in a transaction. This is fragile — a crash between DB writes and file operations leaves inconsistent state. The repository interface lacks transaction support by design (Phase 2 decision).
     Next step: When transaction support is added to the repository interface (Phase 6 sync or earlier), refactor edit/add to use proper DB transactions for the multi-step write sequences.
-
-- Issue 2026-03-06 a1b2c3: mapSQLiteError uses fragile string matching
-    Priority: Medium. Area: cli/internal/repository/sqlite
-    Description: `mapSQLiteError` classifies UNIQUE/FK constraint errors via `strings.Contains` on error messages. If `modernc.org/sqlite` changes message format, mapping silently breaks.
-    Next step: Investigate `modernc.org/sqlite` structured error types (`*sqlite.Error`, error codes) and replace string matching with type assertions.
 
 - Issue 2026-03-06 b2c3d4: Package-level test function variables unsafe with t.Parallel
     Priority: Low. Area: cli/internal/sqlite, cli/internal/config, cli/internal/filesystem
@@ -189,7 +159,3 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: `check_coverage.sh` and `check_coverage_per_package.sh` both run `go test` independently. Every test runs at least twice per CI job, doubling test execution time as the package count grows.
     Next step: Merge the two scripts or have the per-package script reuse the aggregate profile.
 
-- Issue 2026-03-06 d4e5f6: Coverage scripts do not use -race flag
-    Priority: Low. Area: cli/scripts
-    Description: Neither coverage script passes `-race` to `go test`. As concurrency-related code is added (sync engine, Phase 6), race detection becomes more important.
-    Next step: Add `-race` to the coverage script test commands when sync/concurrency code lands.

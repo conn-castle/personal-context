@@ -77,7 +77,7 @@ func TestListCommandRejectsInvalidOptions(t *testing.T) {
 		{"list", "--cursor", "not-base64"},
 		{"list", "--from", "2026-99-99"},
 		{"list", "--from", "2026-01-02", "--to", "2026-01-01"},
-		{"list", "--all", "--cursor", encodeCLICursor(cliCursorPayload{Date: "2026-01-01", DayOrder: "a0", ID: "20260101-aaaabbbb"})},
+		{"list", "--all", "--cursor", listpage.EncodeCursor(listpage.Cursor{Date: "2026-01-01", DayOrder: "a0", ID: "20260101-aaaabbbb"})},
 	} {
 		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 		cmd.SetArgs(args)
@@ -435,13 +435,13 @@ func TestFilesListCommandTableMissingEmptyAndInvalid(t *testing.T) {
 }
 
 func TestRecordDiscoveryHelperErrorPaths(t *testing.T) {
-	if _, err := decodeCLICursor("not-base64"); err == nil {
+	if _, err := listpage.DecodeCursor("not!valid!base64"); err == nil {
 		t.Fatal("expected invalid base64 cursor to fail")
 	}
-	if _, err := decodeCLICursor(base64ForTest(t, "{")); err == nil {
+	if _, err := listpage.DecodeCursor(base64ForTest(t, "{")); err == nil {
 		t.Fatal("expected invalid json cursor to fail")
 	}
-	if _, err := decodeCLICursor(base64ForTest(t, `{"date":"2026-01-01"}`)); err == nil {
+	if _, err := listpage.DecodeCursor(base64ForTest(t, `{"date":"2026-01-01"}`)); err == nil {
 		t.Fatal("expected incomplete cursor to fail")
 	}
 
@@ -473,14 +473,17 @@ func TestRecordDiscoveryHelperErrorPaths(t *testing.T) {
 		repositoryRecord("2026-01-01", "a", "20260101-aaaabbbb"),
 	})
 
-	cursor := &cliCursorPayload{Date: "2026-01-02", DayOrder: "m", ID: "20260102-ccccdddd"}
-	if !recordIsAfterCursor(repositoryRecord("2026-01-01", "a", "20260101-aaaabbbb"), cursor) {
+	cursor := listpage.Cursor{Date: "2026-01-02", DayOrder: "m", ID: "20260102-ccccdddd"}
+	older := repositoryRecord("2026-01-01", "a", "20260101-aaaabbbb")
+	if !listpage.IsAfterCursor(older.Date, older.DayOrder, older.ID, cursor) {
 		t.Fatal("expected older date to be after cursor in newest-first order")
 	}
-	if !recordIsAfterCursor(repositoryRecord("2026-01-02", "z", "20260102-aaaabbbb"), cursor) {
+	laterOrder := repositoryRecord("2026-01-02", "z", "20260102-aaaabbbb")
+	if !listpage.IsAfterCursor(laterOrder.Date, laterOrder.DayOrder, laterOrder.ID, cursor) {
 		t.Fatal("expected later day_order to be after cursor")
 	}
-	if !recordIsAfterCursor(repositoryRecord("2026-01-02", "m", "20260102-eeeeffff"), cursor) {
+	laterID := repositoryRecord("2026-01-02", "m", "20260102-eeeeffff")
+	if !listpage.IsAfterCursor(laterID.Date, laterID.DayOrder, laterID.ID, cursor) {
 		t.Fatal("expected later id to be after cursor")
 	}
 
@@ -497,7 +500,7 @@ func TestRecordDiscoveryHelperErrorPaths(t *testing.T) {
 	if _, _, _, err := resolveLocalAttachment(func(string, string) (string, error) { return "", errors.New("resolve failed") }, "id", "file"); err == nil {
 		t.Fatal("expected resolveLocalAttachment to surface resolver failures")
 	}
-	if got := applyRecordCursor([]repository.Record{repositoryRecord("2026-01-03", "a", "20260103-aaaabbbb")}, cursor); got != nil {
+	if got := applyRecordCursor([]repository.Record{repositoryRecord("2026-01-03", "a", "20260103-aaaabbbb")}, &cursor); got != nil {
 		t.Fatalf("expected cursor past end to return nil, got %+v", got)
 	}
 	if err := writeRecordListTable(errorWriter{}, []recordListItem{{ID: "id"}}, nil); err == nil {

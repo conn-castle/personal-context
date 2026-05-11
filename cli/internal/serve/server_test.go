@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/conn-castle/personal-context/cli/internal/listpage"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
@@ -438,18 +439,50 @@ func TestDecodeJSONObject_RejectsNonObjectBodies(t *testing.T) {
 
 	for _, body := range tests {
 		req := httptest.NewRequest(http.MethodPatch, "/api/records/20260310-aaaaaaaa", strings.NewReader(body))
-		_, errMsg := decodeJSONObject(req)
-		if errMsg != "Request body must be a JSON object" {
-			t.Fatalf("body %q: expected object error, got %q", body, errMsg)
+		w := httptest.NewRecorder()
+		_, ok := decodeJSONObject(w, req)
+		if ok {
+			t.Fatalf("body %q: expected ok=false", body)
+		}
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("body %q: expected status %d, got %d", body, http.StatusBadRequest, w.Code)
+		}
+		if !strings.Contains(w.Body.String(), "must be a JSON object") {
+			t.Fatalf("body %q: expected object error in response, got %q", body, w.Body.String())
 		}
 	}
 }
 
 func TestDecodeJSONObject_InvalidJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPatch, "/api/records/20260310-aaaaaaaa", strings.NewReader("{bad-json"))
-	_, errMsg := decodeJSONObject(req)
-	if errMsg != "Invalid JSON body" {
-		t.Fatalf("expected invalid JSON error, got %q", errMsg)
+	w := httptest.NewRecorder()
+	_, ok := decodeJSONObject(w, req)
+	if ok {
+		t.Fatal("expected ok=false")
+	}
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Invalid JSON body") {
+		t.Fatalf("expected invalid JSON error in response, got %q", w.Body.String())
+	}
+}
+
+func TestDecodeJSONObject_BodyTooLarge(t *testing.T) {
+	// Build a body larger than maxRequestBodyBytes but still valid JSON.
+	oversized := strings.Repeat("a", maxRequestBodyBytes+16)
+	payload := `{"notes":"` + oversized + `"}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/records/20260310-aaaaaaaa", strings.NewReader(payload))
+	w := httptest.NewRecorder()
+	_, ok := decodeJSONObject(w, req)
+	if ok {
+		t.Fatal("expected ok=false for oversized body")
+	}
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected status %d, got %d", http.StatusRequestEntityTooLarge, w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "REQUEST_BODY_TOO_LARGE") {
+		t.Fatalf("expected REQUEST_BODY_TOO_LARGE code in response, got %q", w.Body.String())
 	}
 }
 
@@ -506,8 +539,15 @@ func TestNewServer_Valid(t *testing.T) {
 
 // --- Shutdown tests ---
 
-func TestShutdown_NilServer(t *testing.T) {
-	srv := &Server{}
+// TestShutdown_BeforeStart confirms Shutdown is safe to call on a freshly
+// constructed server that never bound a listener. NewServer always populates
+// s.server (race-free Start/Shutdown contract), so the http.Server can absorb
+// a Shutdown call without panicking.
+func TestShutdown_BeforeStart(t *testing.T) {
+	srv, err := NewServer(newMockRepo(), t.TempDir(), 19999, testServerVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := srv.Shutdown(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -2083,15 +2123,17 @@ func TestIsValidFilename(t *testing.T) {
 }
 
 // --- Cursor tests ---
+// Cursor encoding lives in cli/internal/listpage; these tests confirm the
+// pc serve handlers can round-trip via the shared helpers.
 
 func TestCursorEncodeDecode(t *testing.T) {
-	original := cursorPayload{Date: "2026-03-10", DayOrder: "a0", ID: "20260310-aaaaaaaa"}
-	encoded := encodeCursor(original)
-	decoded, err := decodeCursor(encoded)
+	original := listpage.Cursor{Date: "2026-03-10", DayOrder: "a0", ID: "20260310-aaaaaaaa"}
+	encoded := listpage.EncodeCursor(original)
+	decoded, err := listpage.DecodeCursor(encoded)
 	if err != nil {
 		t.Fatalf("decode error: %v", err)
 	}
-	if decoded.Date != original.Date || decoded.DayOrder != original.DayOrder || decoded.ID != original.ID {
+	if decoded == nil || *decoded != original {
 		t.Fatalf("round-trip mismatch: got %+v, want %+v", decoded, original)
 	}
 }
@@ -2102,7 +2144,7 @@ func TestDecodeCursor_Invalid(t *testing.T) {
 		"dGVzdA==", // "test" - valid base64 but not JSON
 	}
 	for _, tc := range tests {
-		_, err := decodeCursor(tc)
+		_, err := listpage.DecodeCursor(tc)
 		if err == nil {
 			t.Errorf("expected error for cursor %q", tc)
 		}
@@ -2110,11 +2152,8 @@ func TestDecodeCursor_Invalid(t *testing.T) {
 }
 
 func TestDecodeCursor_Incomplete(t *testing.T) {
-	// Valid JSON but missing fields
-	data := `{"date": "2026-03-10"}`
-	encoded := encodeCursor(cursorPayload{Date: "2026-03-10"})
-	_ = data
-	_, err := decodeCursor(encoded)
+	encoded := listpage.EncodeCursor(listpage.Cursor{Date: "2026-03-10"})
+	_, err := listpage.DecodeCursor(encoded)
 	if err == nil {
 		t.Fatal("expected error for incomplete cursor")
 	}
@@ -2166,35 +2205,35 @@ func TestSortRecordsForAPI(t *testing.T) {
 }
 
 func TestIsAfterCursor(t *testing.T) {
-	cursor := &cursorPayload{Date: "2026-03-10", DayOrder: "a1", ID: "20260310-bbbbbbbb"}
+	cursor := listpage.Cursor{Date: "2026-03-10", DayOrder: "a1", ID: "20260310-bbbbbbbb"}
 
 	// Earlier date = after in DESC order
 	s1 := testRecord("20260308-aaaaaaaa", "2026-03-08", "a0")
-	if !isAfterCursor(s1, cursor) {
+	if !listpage.IsAfterCursor(s1.Date, s1.DayOrder, s1.ID, cursor) {
 		t.Fatal("earlier date should be after cursor in DESC order")
 	}
 
 	// Same date, higher day_order
 	s2 := testRecord("20260310-cccccccc", "2026-03-10", "a2")
-	if !isAfterCursor(s2, cursor) {
+	if !listpage.IsAfterCursor(s2.Date, s2.DayOrder, s2.ID, cursor) {
 		t.Fatal("same date + higher day_order should be after cursor")
 	}
 
 	// Same date, same day_order, higher ID
 	s3 := testRecord("20260310-cccccccc", "2026-03-10", "a1")
-	if !isAfterCursor(s3, cursor) {
+	if !listpage.IsAfterCursor(s3.Date, s3.DayOrder, s3.ID, cursor) {
 		t.Fatal("same date + same day_order + higher ID should be after cursor")
 	}
 
 	// Same as cursor — should NOT be after
 	s4 := testRecord("20260310-bbbbbbbb", "2026-03-10", "a1")
-	if isAfterCursor(s4, cursor) {
+	if listpage.IsAfterCursor(s4.Date, s4.DayOrder, s4.ID, cursor) {
 		t.Fatal("same as cursor should not be after cursor")
 	}
 
 	// Later date (before cursor in DESC order)
 	s5 := testRecord("20260312-aaaaaaaa", "2026-03-12", "a0")
-	if isAfterCursor(s5, cursor) {
+	if listpage.IsAfterCursor(s5.Date, s5.DayOrder, s5.ID, cursor) {
 		t.Fatal("later date should not be after cursor in DESC order")
 	}
 }
@@ -3005,7 +3044,7 @@ func TestDecodeJSON_NilBody(t *testing.T) {
 	// We must set it explicitly to nil.
 	req.Body = nil
 	var v any
-	err := decodeJSON(req, &v)
+	err := decodeJSON(httptest.NewRecorder(), req, &v)
 	if err == nil || !strings.Contains(err.Error(), "request body is empty") {
 		t.Fatalf("expected 'request body is empty' error, got %v", err)
 	}

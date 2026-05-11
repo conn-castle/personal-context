@@ -2,7 +2,6 @@ package serve
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +19,7 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/fractionalindex"
 	"github.com/conn-castle/personal-context/cli/internal/listpage"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
+	"github.com/conn-castle/personal-context/cli/internal/timeutil"
 )
 
 // Server implements the local REST API backed by SQLite + local files.
@@ -28,6 +28,9 @@ type Server struct {
 	dataDir string
 	port    int
 	version string
+	// server is fully constructed in NewServer so concurrent Shutdown and
+	// Start callers see a stable pointer. Mutating it later would re-introduce
+	// a Start/Shutdown data race.
 	server  *http.Server
 	writeMu sync.Mutex // serializes read-modify-write cycles (PATCH, reorder)
 }
@@ -48,22 +51,22 @@ func NewServer(repo repository.Repository, dataDir string, port int, version str
 	if strings.TrimSpace(version) == "" {
 		return nil, fmt.Errorf("version is required")
 	}
-	return &Server{repo: repo, dataDir: dataDir, port: port, version: version}, nil
-}
 
-// Start begins listening on 127.0.0.1:<port>. Blocks until the server shuts down.
-func (s *Server) Start() error {
+	s := &Server{repo: repo, dataDir: dataDir, port: port, version: version}
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
-
 	s.server = &http.Server{
-		Addr:         fmt.Sprintf("127.0.0.1:%d", s.port),
+		Addr:         fmt.Sprintf("127.0.0.1:%d", port),
 		Handler:      corsMiddleware(mux),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
+	return s, nil
+}
 
+// Start begins listening on 127.0.0.1:<port>. Blocks until the server shuts down.
+func (s *Server) Start() error {
 	ln, err := net.Listen("tcp", s.server.Addr)
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", s.server.Addr, err)
@@ -77,9 +80,6 @@ func (s *Server) Start() error {
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.server == nil {
-		return nil
-	}
 	return s.server.Shutdown(ctx)
 }
 
@@ -120,13 +120,32 @@ func writeError(w http.ResponseWriter, status int, message string, code string) 
 	writeJSON(w, status, errorResponse{Error: message, Code: code})
 }
 
-func decodeJSON(r *http.Request, v any) error {
+// maxRequestBodyBytes caps JSON request bodies. 4MB comfortably fits notes
+// markdown plus metadata while protecting the server from accidental OOM.
+const maxRequestBodyBytes = 4 << 20
+
+// errRequestBodyTooLarge is returned by decodeJSON when the request body
+// exceeds maxRequestBodyBytes. Callers should translate this to HTTP 413.
+var errRequestBodyTooLarge = errors.New("request body too large")
+
+// decodeJSON parses a JSON request body into v with a maxRequestBodyBytes
+// cap. The ResponseWriter is passed to http.MaxBytesReader so the server
+// connection is closed cleanly when the cap is exceeded.
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	if r.Body == nil {
 		return fmt.Errorf("request body is empty")
 	}
 	defer func() { _ = r.Body.Close() }()
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	decoder := json.NewDecoder(r.Body)
-	return decoder.Decode(v)
+	if err := decoder.Decode(v); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return errRequestBodyTooLarge
+		}
+		return err
+	}
+	return nil
 }
 
 func mapRepoError(w http.ResponseWriter, err error, entity string) {
@@ -160,46 +179,17 @@ func corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// --- Cursor helpers ---
-
-type cursorPayload struct {
-	Date     string `json:"date"`
-	DayOrder string `json:"day_order"`
-	ID       string `json:"id"`
-}
-
-func decodeCursor(raw string) (*cursorPayload, error) {
-	data, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		return nil, fmt.Errorf("invalid cursor encoding")
-	}
-	var c cursorPayload
-	if err := json.Unmarshal(data, &c); err != nil {
-		return nil, fmt.Errorf("invalid cursor format")
-	}
-	if c.Date == "" || c.DayOrder == "" || c.ID == "" {
-		return nil, fmt.Errorf("incomplete cursor")
-	}
-	return &c, nil
-}
-
-func encodeCursor(c cursorPayload) string {
-	data, _ := json.Marshal(c)
-	return base64.StdEncoding.EncodeToString(data)
-}
-
 // --- Time helpers ---
 
+// formatTime renders an instant using the canonical sync wire format.
+// Re-exported under a local name for handler readability; defers to
+// timeutil.FormatUTCMillis.
 func formatTime(t time.Time) string {
-	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+	return timeutil.FormatUTCMillis(t)
 }
 
 func formatTimePtr(t *time.Time) *string {
-	if t == nil {
-		return nil
-	}
-	s := formatTime(*t)
-	return &s
+	return timeutil.FormatUTCMillisPtr(t)
 }
 
 // --- Record ID validation ---
@@ -222,6 +212,18 @@ func isValidRecordID(id string) bool {
 		}
 	}
 	return true
+}
+
+// requireRecordIDFromPath extracts the `{id}` path value, validates it, and
+// writes a 400 response when malformed. Returns the id and ok=true on success.
+// Callers should bail when ok is false; the response is already sent.
+func requireRecordIDFromPath(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := r.PathValue("id")
+	if !isValidRecordID(id) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", id), "INVALID_ID")
+		return "", false
+	}
+	return id, true
 }
 
 // --- File path safety ---
@@ -262,7 +264,7 @@ func isValidGitHash(hash string) bool {
 
 type listRecordsQuery struct {
 	limit  int
-	cursor *cursorPayload
+	cursor *listpage.Cursor
 	filter repository.ListRecordsFilter
 }
 
@@ -287,7 +289,7 @@ func parseListRecordsQuery(query url.Values) (listRecordsQuery, string) {
 	}
 
 	if raw := query.Get("cursor"); raw != "" {
-		cursor, err := decodeCursor(raw)
+		cursor, err := listpage.DecodeCursor(raw)
 		if err != nil {
 			return listRecordsQuery{}, "Invalid cursor format"
 		}
@@ -355,16 +357,24 @@ type recordDetail struct {
 	DataFiles      []recordFile `json:"data_files"`
 }
 
-func decodeJSONObject(r *http.Request) (map[string]any, string) {
+// decodeJSONObject parses a JSON object body. On error it writes the error
+// response and returns ok=false; callers should return immediately.
+func decodeJSONObject(w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
 	var body any
-	if err := decodeJSON(r, &body); err != nil {
-		return nil, "Invalid JSON body"
+	if err := decodeJSON(w, r, &body); err != nil {
+		if errors.Is(err, errRequestBodyTooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("Request body exceeds %d byte limit", maxRequestBodyBytes), "REQUEST_BODY_TOO_LARGE")
+			return nil, false
+		}
+		writeError(w, http.StatusBadRequest, "Invalid JSON body", "BAD_REQUEST")
+		return nil, false
 	}
 	objectBody, ok := body.(map[string]any)
 	if !ok || objectBody == nil {
-		return nil, "Request body must be a JSON object"
+		writeError(w, http.StatusBadRequest, "Request body must be a JSON object", "BAD_REQUEST")
+		return nil, false
 	}
-	return objectBody, ""
+	return objectBody, true
 }
 
 func validatePatchBody(body map[string]any) (map[string]any, string) {
@@ -710,7 +720,7 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	if parsedQuery.cursor != nil {
 		startIdx := -1
 		for i, record := range records {
-			if isAfterCursor(record, parsedQuery.cursor) {
+			if listpage.IsAfterCursor(record.Date, record.DayOrder, record.ID, *parsedQuery.cursor) {
 				startIdx = i
 				break
 			}
@@ -747,7 +757,7 @@ func (s *Server) handleListRecords(w http.ResponseWriter, r *http.Request) {
 	var nextCursor *string
 	if hasNextPage && len(items) > 0 {
 		last := items[len(items)-1]
-		c := encodeCursor(cursorPayload{Date: last.Date, DayOrder: last.DayOrder, ID: last.ID})
+		c := listpage.EncodeCursor(listpage.Cursor{Date: last.Date, DayOrder: last.DayOrder, ID: last.ID})
 		nextCursor = &c
 	}
 
@@ -793,24 +803,6 @@ func compareRecordsForAPI(a, b repository.Record) int {
 	return 0
 }
 
-// isAfterCursor returns true if the record should appear after the cursor position.
-func isAfterCursor(record repository.Record, cursor *cursorPayload) bool {
-	// Sort is date DESC, day_order ASC, id ASC
-	// So "after cursor" means:
-	// (date < cursor.date) OR
-	// (date == cursor.date AND day_order > cursor.day_order) OR
-	// (date == cursor.date AND day_order == cursor.day_order AND id > cursor.id)
-	if record.Date < cursor.Date {
-		return true
-	}
-	if record.Date == cursor.Date && record.DayOrder > cursor.DayOrder {
-		return true
-	}
-	if record.Date == cursor.Date && record.DayOrder == cursor.DayOrder && record.ID > cursor.ID {
-		return true
-	}
-	return false
-}
 
 // compareRecordsByDayOrder sorts siblings within a single date by day_order then ID.
 func compareRecordsByDayOrder(left, right repository.Record) int {
@@ -840,9 +832,8 @@ func findRecordIndexByID(records []repository.Record, recordID string) int {
 }
 
 func (s *Server) handleGetRecord(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !isValidRecordID(id) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", id), "INVALID_ID")
+	id, ok := requireRecordIDFromPath(w, r)
+	if !ok {
 		return
 	}
 
@@ -862,17 +853,15 @@ func (s *Server) handleGetRecord(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePatchRecord(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !isValidRecordID(id) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", id), "INVALID_ID")
+	id, ok := requireRecordIDFromPath(w, r)
+	if !ok {
 		return
 	}
 
 	ctx := r.Context()
 
-	body, bodyErr := decodeJSONObject(r)
-	if bodyErr != "" {
-		writeError(w, http.StatusBadRequest, bodyErr, "BAD_REQUEST")
+	body, ok := decodeJSONObject(w, r)
+	if !ok {
 		return
 	}
 
@@ -964,9 +953,8 @@ func (s *Server) handlePatchRecord(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !isValidRecordID(id) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", id), "INVALID_ID")
+	id, ok := requireRecordIDFromPath(w, r)
+	if !ok {
 		return
 	}
 
@@ -1007,9 +995,8 @@ func (s *Server) handleDeleteRecord(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRestoreRecord(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !isValidRecordID(id) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", id), "INVALID_ID")
+	id, ok := requireRecordIDFromPath(w, r)
+	if !ok {
 		return
 	}
 
@@ -1050,17 +1037,15 @@ func (s *Server) handleRestoreRecord(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReorderRecord(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !isValidRecordID(id) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("Invalid record ID: %s", id), "INVALID_ID")
+	id, ok := requireRecordIDFromPath(w, r)
+	if !ok {
 		return
 	}
 
 	ctx := r.Context()
 
-	body, bodyErr := decodeJSONObject(r)
-	if bodyErr != "" {
-		writeError(w, http.StatusBadRequest, bodyErr, "BAD_REQUEST")
+	body, ok := decodeJSONObject(w, r)
+	if !ok {
 		return
 	}
 
