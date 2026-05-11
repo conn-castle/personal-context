@@ -320,7 +320,8 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted reco
 - All mode:
   - `pc fetch --all`
   - Scans every non-deleted cloud record and ensures each cloud-backed data file exists at `~/personal-context/data/{record_id}/`.
-  - Skips files whose local copy already matches the recorded size and SHA-256 hash; otherwise downloads from S3 and verifies the downloaded bytes against the same size and hash.
+  - Skips files whose local copy already matches the recorded size and SHA-256 hash; otherwise downloads from S3 and verifies the downloaded bytes against the same size and hash. If verification fails after a download, the unverified bytes are removed from the canonical path so callers never observe a known-bad file.
+  - Aborts promptly on a cancelled context (Ctrl+C) — partial summary still printed.
   - Reports records scanned, already-present files, downloads, bytes downloaded, and missing/failed files. Per-failure detail is written to stderr; on failure, exits non-zero with a bounded preview of the first few errors.
   - Cannot be combined with `--output`.
 - Record mode:

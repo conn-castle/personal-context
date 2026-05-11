@@ -615,6 +615,50 @@ func TestRunFetchAllReportsVerificationFailures(t *testing.T) {
 	if !strings.Contains(stderr.String(), "hash mismatch") {
 		t.Fatalf("stderr = %q, want hash mismatch detail", stderr.String())
 	}
+	// The unverified bytes must not remain on disk at the canonical path —
+	// otherwise a future caller (or fetch --all re-run) sees a file that fails
+	// integrity checks.
+	canonicalPath := filepath.Join(homeDir, "personal-context", "data", "r1", "data.txt")
+	if _, err := os.Stat(canonicalPath); !os.IsNotExist(err) {
+		t.Fatalf("expected canonical path to be removed after verify failure, stat err = %v", err)
+	}
+}
+
+func TestRunFetchAllAbortsOnCancelledContext(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	cfg := &fetchMockConfig{
+		recordsAll: []repository.Record{
+			{ID: "r1", Date: "2025-01-01"},
+			{ID: "r2", Date: "2025-01-02"},
+		},
+		dataFiles: map[string][]repository.RecordDataFile{
+			"r1": {{ID: 1, RecordID: "r1", Filename: "data.txt", S3Key: "data/r1/data.txt", Size: 4, Hash: hashFetchTestData("data")}},
+			"r2": {{ID: 2, RecordID: "r2", Filename: "data.txt", S3Key: "data/r2/data.txt", Size: 4, Hash: hashFetchTestData("data")}},
+		},
+		s3Data: map[string]string{
+			"data/r1/data.txt": "data",
+			"data/r2/data.txt": "data",
+		},
+	}
+	mockCloudStackForFetch(t, cfg)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	err := runFetch(ctx, stdout, stderr, "", fetchOptions{All: true})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("runFetch() error = %v, want context.Canceled", err)
+	}
+	if len(cfg.downloadedKeys) != 0 {
+		t.Fatalf("downloaded keys = %v, want no downloads after cancelled context", cfg.downloadedKeys)
+	}
+	if !strings.Contains(stdout.String(), "Records scanned: 2") {
+		t.Fatalf("stdout = %q, want Records scanned summary", stdout.String())
+	}
 }
 
 func TestNewFetchCommandParsesAllFlag(t *testing.T) {

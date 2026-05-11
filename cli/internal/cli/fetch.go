@@ -226,6 +226,11 @@ func fetchAllDataFiles(
 	stats := fetchAllStats{RecordsScanned: len(records)}
 	failures := make([]string, 0)
 	for _, record := range records {
+		// Respond promptly to Ctrl+C / cancelled context across what can be a long
+		// per-record scan + download loop.
+		if err := ctx.Err(); err != nil {
+			return stats, failures, err
+		}
 		dataFiles, err := repo.ListRecordDataFilesByRecordID(ctx, record.ID)
 		if err != nil {
 			stats.FilesFailed++
@@ -273,6 +278,13 @@ func fetchAllDataFiles(
 				continue
 			}
 			if err := verifyDataFile(df, destPath); err != nil {
+				// Verification failed after the atomic rename — the canonical path now
+				// holds known-bad bytes. Remove them so a future `pc fetch --all` (or
+				// any caller of the data path) does not observe a file that fails
+				// integrity checks.
+				if rmErr := os.Remove(destPath); rmErr != nil && !os.IsNotExist(rmErr) {
+					_, _ = fmt.Fprintf(stderr, "Failed: %s/%s: remove unverified file %s: %v\n", df.RecordID, df.Filename, destPath, rmErr)
+				}
 				stats.FilesFailed++
 				failure := fmt.Sprintf("%s/%s: verify downloaded file: %v", df.RecordID, df.Filename, err)
 				failures = append(failures, failure)

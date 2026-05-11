@@ -165,7 +165,7 @@ above with `--api-key`.
 - `pc device list|register|archive|restore` — manage the source-device registry
 - `pc doctor` — check system health (DB, orphans, missing files; cloud connectivity if configured)
 - `pc sync` — bidirectional sync between local SQLite and cloud Postgres/S3 (requires cloud configuration)
-- `pc fetch <record_id>` — download data files from cloud S3 (`--all`, `--project`, `--recent 3d/2w/1m/1y`, `--output`; `--all` always writes to the canonical local data path and verifies size/hash)
+- `pc fetch` — download data files from cloud S3. Pick one of: `<record_id>` (single record), `--all` (every non-deleted cloud record), `--project <pid>` (one project), or `--recent 3d/2w/1m/1y` (relative time window). `--output` overrides the destination for record/project/recent modes; `--all` always writes to the canonical local data path and verifies size/hash.
 - `pc export --path <dir>` — write deterministic git snapshot state (`projects.json`, `devices.json`, `templates/`, `records/`); `--from-cloud` reads record rows and assets from Postgres/S3; `--project`, `--from`, and `--to` scope exported active records
 - `pc import <path>` — merge a git snapshot into local SQLite using `updated_at` rules (`same/older -> skip`, `newer -> replace`)
 - `pc restore-db <path>` — replace local SQLite state from a git snapshot and create an auto-backup snapshot first under `~/personal-context/.pc/backups/`
