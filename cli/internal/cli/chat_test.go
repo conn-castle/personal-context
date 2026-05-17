@@ -819,4 +819,30 @@ func TestChatWritersAndGeneratedID(t *testing.T) {
 	}, time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)); err == nil || !strings.Contains(err.Error(), "exhausted retries") {
 		t.Fatalf("expected exhausted unique chat id error, got %v", err)
 	}
+
+	// A non-NotFound error from GetRecordByID must surface, not be silently
+	// swallowed as "id is taken, retry" — otherwise transient DB outages
+	// burn the 16-attempt budget and report a misleading "exhausted retries".
+	dbBoom := errors.New("db boom")
+	if _, err := generateUniqueChatID(context.Background(), &mockRepo{
+		getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+			return repository.Record{}, dbBoom
+		},
+	}, time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)); err == nil || !errors.Is(err, dbBoom) || !strings.Contains(err.Error(), "check record") {
+		t.Fatalf("expected GetRecordByID error to surface, got %v", err)
+	}
+
+	// Same contract for GetChatSessionByID: a non-NotFound error must
+	// terminate the loop with a wrapped error rather than retrying.
+	chatBoom := errors.New("chat db boom")
+	if _, err := generateUniqueChatID(context.Background(), &mockRepo{
+		getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+			return repository.Record{}, repository.ErrNotFound
+		},
+		getChatByIDFn: func(context.Context, string) (repository.ChatSession, error) {
+			return repository.ChatSession{}, chatBoom
+		},
+	}, time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)); err == nil || !errors.Is(err, chatBoom) || !strings.Contains(err.Error(), "check chat") {
+		t.Fatalf("expected GetChatSessionByID error to surface, got %v", err)
+	}
 }
