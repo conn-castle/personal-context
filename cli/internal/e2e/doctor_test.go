@@ -16,7 +16,7 @@ func TestDoctorHealthySystem(t *testing.T) {
 		HTMLContent: `<html><img src="figures/plot.png"></html>`,
 		Figures:     map[string][]byte{"plot.png": []byte("fake-png-data")},
 	})
-	runPCSuccess(t, homeDir, "add", inputDir)
+	runPCSuccess(t, homeDir, "records", "add", inputDir)
 
 	result := runPC(t, homeDir, "doctor")
 	if result.ExitCode != 0 {
@@ -60,7 +60,7 @@ func TestDoctorOrphanedFigures(t *testing.T) {
 		HTMLContent: `<html><img src="figures/fig.png"></html>`,
 		Figures:     map[string][]byte{"fig.png": []byte("figure-data")},
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Hard-delete the record via direct SQL, leaving figure on disk
@@ -99,7 +99,7 @@ func TestDoctorMissingFigureFiles(t *testing.T) {
 		HTMLContent: `<html><img src="figures/fig.png"></html>`,
 		Figures:     map[string][]byte{"fig.png": []byte("figure-data")},
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Delete the figure file from disk but leave DB record
@@ -128,10 +128,10 @@ func TestDoctorMissingFigureFilesOnDeletedRecord(t *testing.T) {
 		HTMLContent: `<html><img src="figures/fig.png"></html>`,
 		Figures:     map[string][]byte{"fig.png": []byte("figure-data")},
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 
 	figurePath := filepath.Join(homeDir, "personal-context", "figures", recordID, "fig.png")
 	if err := os.Remove(figurePath); err != nil {

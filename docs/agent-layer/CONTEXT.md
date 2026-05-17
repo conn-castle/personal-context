@@ -30,7 +30,7 @@ Do not duplicate information that belongs in other memory files:
 
 ## Project Overview
 
-Personal Context (`pc`) is a personal engineering notebook system that stores work as individual HTML records — images, text, tables, code, and data — organized chronologically and by project. Designed for 10+ year lifespan, accumulating 1,000-2,000 records per year.
+Personal Context (`pc`) is a personal engineering notebook system that stores work as individual HTML records and imported agent chats — images, text, tables, code, transcripts, and data — organized chronologically and by project. Designed for 10+ year lifespan, accumulating 1,000-2,000 records per year.
 
 Replaces yearly Google Slides decks with a database-backed, agent-friendly, multi-device, browsable system.
 
@@ -44,7 +44,7 @@ personal-context/          # code repo
 └── docs/                  # README, example GitHub Action workflow
 ```
 
-Separate **data repo**: nightly git export of record data (metadata.json, record.html, notes.md, figures via Git LFS). GitHub Action for nightly export lives there.
+Separate **data repo**: nightly git export of active record data and chat sessions (record metadata/content/notes, figures via Git LFS, chat metadata/items/raw source copies). GitHub Action for nightly export lives there.
 - Scheduled nightly at `0 4 * * *` UTC.
 - Workflow downloads the `pc` binary from code-repo releases, then runs `pc export --from-cloud --path . --github-remote origin`.
 - The code repository stores an example workflow under `docs/` for users to copy into their data repo.
@@ -64,9 +64,9 @@ GitHub + S3                     <-- portable backup (git clone + S3 = full resto
 ```
 
 Any state can be reconstructed from any other (subject to two-tier guarantee):
-- Postgres <-- git export via `pc restore-db` then `pc sync` (Tier 2: data file rows are recreated even when git export omitted the binaries; object content still requires S3/original files, and soft-deleted records stay excluded)
+- Postgres <-- git export via `pc restore-db` then `pc sync` (Tier 2: data file rows and active chat rows/items/raw sources are recreated, data file object content still requires S3/original files, and soft-deleted records/chats stay excluded)
 - Local SQLite <-- Postgres via `pc sync` (Tier 1: fully lossless)
-- Git export <-- Postgres via `pc export` (Tier 2: data file binaries stay in S3; soft-deleted excluded)
+- Git export <-- Postgres via `pc export` (Tier 2: active records and chats are exported; data file binaries stay in S3; soft-deleted records/chats are excluded)
 - Postgres <-- local SQLite via `pc sync` push phase (Tier 1: fully lossless)
 
 ### Source of Truth
@@ -74,7 +74,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - **Local dev mode** (`pc serve`): Go HTTP server implements the same REST API using local SQLite + filesystem. Next.js API routes proxy to Go when `LOCAL_BACKEND_URL` is set. Local mode is single-user and intentionally disables `/login`, `/register`, and `/api/auth/*`.
 - **Local-only mode** (CLI only): Local SQLite + local files. No web UI.
 
-## Data Model (9 Tables)
+## Data Model (12 Tables)
 
 | Table | PK | Purpose |
 |-------|-----|---------|
@@ -82,14 +82,17 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 | `api_keys` | `id` TEXT (UUID) | CLI auth keys: user_id FK, key_hash (SHA-256), label, last_used_at, revoked_at. Postgres only. |
 | `projects` | `id` TEXT (`user_id`, `id` in Postgres) | Project registry with archived state. |
 | `devices` | `id` TEXT (`user_id`, `id` in Postgres) | Source-device registry with archived state. |
+| `project_paths` | `id` auto-increment | Absolute normalized project paths per source device; used to assign imported chats without prompting. |
 | `records` | `id` TEXT (`YYYYMMDD-8hex`) | Optional HTML content, notes, project_id, source_device_id, source_ref, git fields, date, day_order, user_id (Postgres), soft delete |
+| `chat_session` | `id` TEXT (`YYYYMMDD-8hex`) | Imported agent chat session keyed idempotently by `(source, source_session_id)`; nullable project assignment, cwd/title/source path, source device, soft delete. |
+| `chat_item` | `id` auto-increment | Normalized chat messages/tool events with ordinal, role, item_type, text/search_text, raw_json. |
 | `record_figures` | `id` auto-increment | Image refs: filename, s3_key, alt_text. FK -> records CASCADE |
 | `record_data_files` | `id` auto-increment | Data file refs: filename, s3_key, size, SHA-256 hash, description. FK -> records CASCADE |
 | `templates` | `name` TEXT | HTML templates for record creation. Hardcoded, seeded by `pc setup` |
 | `sync_version` | `user_id` TEXT (Postgres) / `id` (SQLite) | Per-user version counter (Postgres), singleton (SQLite). Auto-incremented by triggers |
 
 ### Key Fields and Invariants
-- **Record ID**: `{YYYYMMDD}-{8-random-hex}` from `crypto/rand` (e.g., `20250304-a3f2b7e1`). Date prefix matches the record's `date` field (UTC-normalized).
+- **Record/chat ID**: `{YYYYMMDD}-{8-random-hex}` from `crypto/rand` (e.g., `20250304-a3f2b7e1`). Chat creation checks both records and chats to avoid cross-domain collisions.
 - **Sort key**: `ORDER BY (date, day_order, id)` — always deterministic.
 - **day_order**: Fractional index string (Figma's algorithm, safe characters only). Lexicographic sort. Reordering updates only the moved record.
 - **project_id**: Required slash-convention string (e.g., `"happy-ai/sleep-staging"`) that references a non-archived project registry row for new writes.
@@ -102,11 +105,13 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - **deleted_at**: NULL = active, non-NULL = soft-deleted. `WHERE deleted_at IS NULL` on all normal queries.
 - **notes**: Full markdown. Empty string normalized to NULL at write time. `has_notes` = `notes IS NOT NULL`.
 - **No title. No tags.** Organization is by project and date only.
+- **Chat source values**: use unambiguous product identifiers in storage (`codex`, `claude_code`, `gemini`). CLI `--agent claude` maps to `claude_code`.
+- **Chat project assignment**: import is non-interactive. Sessions whose `cwd` does not match a registered `project_paths` row are stored with `project_id = NULL`; registering a path via `pc project add <id> [path] --device <id>` backfills matching NULL sessions.
 
 ### Figure References in HTML
 - `html_content` references figures as `figures/{filename}` (relative path, no record_id — implicit from context).
 - Each rendering context resolves: web UI iframe rewrites to presigned URLs via `GET /api/files/{record_id}/figures/{filename}`; git export matches naturally (`./figures/{filename}` relative to record folder).
-- `pc add`/`pc edit` validate that every `figures/` src in HTML has a matching file in the input folder.
+- `pc records add`/`pc records edit` validate that every `figures/` src in HTML has a matching file in the input folder.
 - External URLs (`https://...`) pass through unchanged. Data files are attachments, not referenced in HTML.
 
 ### Schema Portability (Postgres / SQLite)
@@ -137,15 +142,15 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 
 ### CLI (Local-First)
 - CLI always writes to local SQLite + local files.
-- If cloud configured: auto-sync after each mutation (`pc add`, `pc edit`, `pc delete`, `pc restore`, `pc move`). Failure is non-fatal (prints warning, exit code 0). `pc gc` orchestrates cloud-first-then-local hard deletion, then runs auto-sync.
+- If cloud configured: auto-sync after each mutation (`pc records add`, `pc records edit`, `pc records delete`, `pc records restore`, `pc records move`, chat import/delete/restore). Failure is non-fatal (prints warning, exit code 0). `pc gc` orchestrates cloud-first-then-local hard deletion, then runs auto-sync.
 - If no cloud: writes succeed locally, sync silently skipped.
 - `pc sync` (explicit): full bidirectional push-then-pull. Errors if no cloud configured.
 
 ### Bidirectional Sync Protocol
 1. Acquire file lock (`.pc/sync.lock`) to prevent concurrent sync. Acquisition and stale recovery are serialized by an advisory guard at `.pc/sync.lock.guard`. The lock stores JSON metadata (`pid`, `hostname`, `started_at`); if a same-host lock points to a PID that no longer exists, the next sync replaces it while holding the guard. Unparseable or different-host locks remain blocking.
 2. Capture `last_sync_at` at sync **start** (not end).
-3. **Push**: local records where `updated_at >= last_sync_at` -> UPSERT into Neon + upload figures to S3. (No `deleted_at` check needed — trigger auto-bumps `updated_at`.)
-4. **Pull**: Neon records where `updated_at >= last_sync_at` -> UPSERT into local + download figures.
+3. **Push**: local records/chats/project paths where `updated_at >= last_sync_at` -> UPSERT into Neon; record figures upload to S3. (No `deleted_at` check needed — trigger auto-bumps `updated_at`.)
+4. **Pull**: Neon records/chats/project paths where `updated_at >= last_sync_at` -> UPSERT into local; record figures download from S3.
 5. Update `last_sync_at` only after both phases complete fully.
 6. Release lock.
 
@@ -156,7 +161,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 
 ### Child Row Sync (Critical Invariants)
 - `record_figures` and `record_data_files` auto-increment PKs diverge between Postgres and SQLite. **Sync must match child rows by `(record_id, filename)`, NOT by `id`.**
-- Child rows are **only modified as part of a parent record operation** (`pc add`, `pc edit`, sync). Never independently. The parent record's `updated_at` is the authoritative change signal. The `sync_version` triggers on child tables may cause harmless false positives during sync. If independent child modification commands are ever added, a cross-table trigger to bump parent `updated_at` must be added.
+- Child rows are **only modified as part of a parent record operation** (`pc records add`, `pc records edit`, sync). Never independently. The parent record's `updated_at` is the authoritative change signal. The `sync_version` triggers on child tables may cause harmless false positives during sync. If independent child modification commands are ever added, a cross-table trigger to bump parent `updated_at` must be added.
 
 ### Web UI Sync (Smart Layered Polling)
 Four layers, 30-second global cooldown. All version checks go through `GET /api/sync/version` (Next.js reads S3 `_version` server-side, NOT Postgres — keeps Neon asleep on free tier).
@@ -181,7 +186,8 @@ On version change: query Neon for records with `updated_at >= last_known_timesta
 │   ├── sync.lock             # JSON metadata file lock for concurrent sync prevention and stale same-host recovery
 │   └── sync.lock.guard       # advisory guard file used during lock acquisition/recovery
 ├── figures/{record_id}/{filename}
-└── data/{record_id}/{filename}  # sparse, on demand
+├── data/{record_id}/{filename}  # sparse, on demand
+└── chats/raw/{chat_session_id}/source.{json|jsonl|ndjson}  # PC-owned raw transcript copy; original imported path retained as chat_session.original_source_path
 ```
 
 ### S3
@@ -190,6 +196,7 @@ s3://personal-context-prod/
 └── users/{user_id}/
     ├── figures/{record_id}/{filename}
     ├── data/{record_id}/{filename}
+    ├── chats/raw/{chat_session_id}/source.{json|jsonl|ndjson}
     └── _version                # per-user sync heartbeat
 ```
 
@@ -199,13 +206,17 @@ personal-context-data/
 ├── projects.json
 ├── devices.json
 ├── templates/*.html
+├── chats/{session_id}/
+│   ├── metadata.json           # ChatExport
+│   ├── items.jsonl             # one ChatItemExport per line
+│   └── source.{json|jsonl|ndjson}
 └── records/{record_id}/
     ├── metadata.json           # RecordExport (no HTML, no notes text)
     ├── record.html              # optional; absent means html_content is NULL
     ├── notes.md                # only if has_notes
     └── figures/                # Git LFS
 ```
-Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted records excluded from export. Export must be deterministic (consistent JSON key order, sorted arrays) for clean git diffs.
+Data files stay in S3 only; `metadata.json` lists what exists. Current chat export includes normalized metadata/items plus the Personal Context-owned raw source copy. Soft-deleted records and chats are excluded from export. Export must be deterministic (consistent JSON key order, sorted arrays) for clean git diffs. Long-term chat export size/privacy policy remains tracked in BACKLOG.md.
 
 ## Technology Stack
 
@@ -254,8 +265,8 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted reco
 ### Go Repository Pattern
 - `Repository` interface with separate SQLite and Postgres implementations.
 - SQL dialects diverge enough that sharing query code via `database/sql` is a false economy.
-- **SQLite** (`cli/internal/sqlite/`): modernc.org/sqlite (pure Go), `?` positional params, `LIKE` for search, text timestamps. Custom migration runner with single embedded `sqlite_schema.sql`.
-- **Postgres** (`cli/internal/repository/postgres/`): pgx (direct, not database/sql), `$N` positional params, `ILIKE` for case-insensitive search, `RETURNING` clauses, native `time.Time`. Embedded DDL via `postgres_schema.sql` + `ApplySchema()`. No separate migration history under `cli/`.
+- **SQLite** (`cli/internal/sqlite/`): modernc.org/sqlite (pure Go), `?` positional params, FTS5 virtual tables for record/chat search, text timestamps. Custom migration runner with single embedded `sqlite_schema.sql`.
+- **Postgres** (`cli/internal/repository/postgres/`): pgx (direct, not database/sql), `$N` positional params, generated `tsvector` columns plus GIN indexes for record/chat search, `RETURNING` clauses, native `time.Time`. Embedded DDL via `postgres_schema.sql` + `ApplySchema()`. No separate migration history under `cli/`.
 - **Contract tests** (`cli/internal/repository/repositorytest/`): backend-agnostic test suite run against both SQLite and Postgres implementations.
 - **Integration tests**: testcontainers-go for both backends — Postgres uses schema-per-test isolation, SQLite uses temp files.
 
@@ -271,33 +282,36 @@ Data files stay in S3 only; `metadata.json` lists what exists. Soft-deleted reco
 - `cli/internal/config/validate.go` — `ValidateNeonURL` (postgres:// scheme + host), `ValidateS3Bucket` (S3 naming rules), `ValidateS3Region` (AWS region format), `ValidateCloudConfig` (composite).
 
 ### Schema Equivalence Guard
-- `scripts/check_schema_equivalence.sh` — CI script comparing Postgres (`schema/schema.sql`) and SQLite (`cli/internal/sqlite/sqlite_schema.sql`) schemas for structural equivalence: tables, columns, indexes, UNIQUE constraints. Does not compare types, CHECK expressions, or triggers (intentionally dialect-specific).
+- `scripts/check_schema_equivalence.sh` — CI script comparing Postgres (`schema/schema.sql`) and SQLite (`cli/internal/sqlite/sqlite_schema.sql`) schemas for structural equivalence: tables, columns, indexes, UNIQUE constraints, and search-index structures (SQLite FTS tables/triggers plus Postgres TSVECTOR/GIN indexes). Does not compare types, CHECK expressions, or non-search triggers (intentionally dialect-specific).
 - `scripts/verify_phase5_demo.sh` — repository-level Phase 5 demo runner: executes schema contract/equivalence checks, cloud config validation tests, and Docker-backed Postgres/S3 integration suites.
 
 ## CLI Commands
 
 ### Setup & Health
 - `pc setup` — first-time or reconfigure (idempotent, interactive/non-interactive, `--remove-cloud`)
-- `pc doctor` — health checks (DB readability, orphaned figure/data directories, missing local figure/data files; cloud connectivity WARN if configured but unreachable)
+- `pc doctor` — health checks (DB readability, orphaned figure/data directories, missing local figure/data/chat raw-source files; cloud connectivity and chat raw cloud checks WARN if configured but unreachable)
 
 ### Record CRUD
-- `pc add <path>` — create record from folder (`record.html` optional; project/device provenance required through flags or metadata)
-- `pc edit <id> <path>` — full replacement of content, notes, figures, data files, git fields (`updated_at` auto-bumped by trigger)
-- `pc delete <id>` — soft-delete
-- `pc restore <id>` — un-delete
-- `pc move <id>` — change date or position
-- `pc show <id>` — display metadata (including git fields), notes, figures, data files (`--format text|json`)
+- `pc records add <path>` — create record from folder (`record.html` optional; project/device provenance required through flags or metadata)
+- `pc records edit <id> <path>` — full replacement of content, notes, figures, data files, git fields (`updated_at` auto-bumped by trigger)
+- `pc records delete <id>` — soft-delete
+- `pc records restore <id>` — un-delete
+- `pc records move <id>` — change date or position
+- `pc records show <id>` — display record metadata (including git fields), notes, figures, data files (`--format text|json`)
+- `pc show <id>` — cross-domain record/chat display.
 
 ### Trash
-- `pc trash` — list soft-deleted records
-- `pc gc` — hard-delete trash > 30 days (cloud-first if configured: deletes from Neon before local to prevent sync re-creation, warns if cloud unreachable, removes local figure/data files, runs auto-sync)
+- `pc trash` — list soft-deleted records and chats
+- `pc gc` — hard-delete trash > 30 days (cloud-first if configured: deletes from Neon/S3 before local to prevent sync re-creation, warns if cloud unreachable, removes local figure/data/chat raw-source files, runs auto-sync)
 
 ### Search & Registries
-- `pc search <query>` — LIKE/ILIKE on `html_content`, `notes`, `project_id`, `source_device_id`, and `source_ref`; default `--limit` is 50, `--limit 0` is unlimited, table/ids output surfaces truncation, and JSON uses `{items,total,next_cursor}` with `next_cursor: null`
-- `pc list` — bounded newest-first record summaries with cursor pagination, date/project/deleted filters, `--has-html`, `--has-data`, `--all`, and `--format table|ids|json`; JSON returns `{items,total,next_cursor}`
-- `pc stats` — local record statistics with active/deleted counts, content/attachment counts, oldest/newest dates, and explicit size fields (`recorded_data_file_bytes`, `local_attachment_bytes`, `store_file_bytes`, `local_total_bytes`)
-- `pc files list` — local record attachment inventory with figure/data rows, recorded data-file size, local file size/path, and present/missing status
-- `pc project list|add|archive|restore` — manage registered projects
+- `pc search <query>` — cross-domain records/chats search; `--json`/`--format json` emits a flat array with `domain` on every item.
+- `pc records list` — bounded newest-first record summaries with cursor pagination, date/project/deleted filters, `--query`, `--has-html`, `--has-data`, `--all`, and `--format table|ids|json`; JSON returns `{items,total,next_cursor}`.
+- `pc records stats` — local record statistics with active/deleted counts, content/attachment counts, oldest/newest dates, and explicit size fields (`recorded_data_file_bytes`, `local_attachment_bytes`, `store_file_bytes`, `local_total_bytes`)
+- `pc records files list` — local record attachment inventory with figure/data rows, recorded data-file size, local file size/path, and present/missing status
+- `pc chat import --device <id>` — full-scan import for Codex, Claude Code, and Gemini transcripts; `--agent` narrows and `--root` overrides default roots while requiring `--agent`.
+- `pc chat list|search|show|delete|restore` — chat browsing, item search, transcript rendering, soft deletion, and restore. `pc chat show` uses `$PAGER` only when stdout is a TTY.
+- `pc project list|add|archive|restore` — manage registered projects; optional `pc project add <id> [path] --device <id>` registers a project path and backfills matching unassigned chats.
 - `pc device list|register|archive|restore` — manage registered source devices
 
 ### Local Dev Server

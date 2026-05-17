@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -58,15 +59,19 @@ func TestSeedIdempotent(t *testing.T) {
 		t.Errorf("expected 'already exist' on second seed, got: %s", stdout2)
 	}
 
-	// Verify the count hasn't doubled by searching again.
-	searchOut := runPCSuccess(t, homeDir, "search", "tutorial", "--format", "json")
+	// Verify the count hasn't doubled by listing the tutorial project again.
+	listOut := runPCSuccess(t, homeDir, "records", "list", "--project", "personal-context/tutorial", "--format", "json", "--all")
 	if firstIDs != 6 {
 		t.Errorf("expected 6 record IDs in first seed output, got %d", firstIDs)
 	}
-	// The search should still return exactly 6 tutorial records, not 12.
-	searchIDs := strings.Count(searchOut, `"id"`)
-	if searchIDs != 6 {
-		t.Errorf("expected 6 record IDs in search output after second seed, got %d", searchIDs)
+	var page struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(listOut), &page); err != nil {
+		t.Fatalf("parse records list json: %v\noutput: %s", err, listOut)
+	}
+	if len(page.Items) != 6 {
+		t.Errorf("expected 6 tutorial records after second seed, got %d", len(page.Items))
 	}
 }
 

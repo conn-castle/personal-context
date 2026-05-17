@@ -13,10 +13,10 @@ Usage: ./scripts/verify_local_demo.sh [options]
 Runs a generalized local demo flow using the real `pc` binary:
 - setup
 - project set
-- add 10 numbered records
-- delete 5 records
-- restore 1 of them
-- move 1 remaining record
+- records add 10 numbered records
+- records delete 5 records
+- records restore 1 of them
+- records move 1 remaining record
 - verify search, trash, show, project list, and doctor output
 
 Then prepares a human-viewable HTML summary page plus persisted record previews for
@@ -203,23 +203,23 @@ for i in {1..10}; do
 	write_record_input "${i}"
 	title="$(printf 'Record %02d' "${i}")"
 	record_titles["${i}"]="${title}"
-	id="$(run_pc add --date "${date_value}" --project "${project_id}" --device "${device_id}" "${inputs_root}/record-${i}" | trim_crlf)"
+	id="$(run_pc records add --date "${date_value}" --project "${project_id}" --device "${device_id}" "${inputs_root}/record-${i}" | trim_crlf)"
 	[[ "${id}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected record ID format from add ${i}: ${id}"
 	record_ids["${i}"]="${id}"
 done
 
 for i in 6 7 8 9 10; do
-	delete_out="$(run_pc delete "${record_ids[${i}]}")"
+	delete_out="$(run_pc records delete "${record_ids[${i}]}")"
 	[[ "${delete_out}" == *"deleted"* ]] || fail "delete output did not include success message for record ${i}"
 done
 
-restore_out="$(run_pc restore "${record_ids[8]}")"
+restore_out="$(run_pc records restore "${record_ids[8]}")"
 [[ "${restore_out}" == *"restored"* ]] || fail "restore output did not include success message for record 8"
 
-move_out="$(run_pc move "${record_ids[4]}" --after "${record_ids[2]}")"
+move_out="$(run_pc records move "${record_ids[4]}" --after "${record_ids[2]}")"
 [[ "${move_out}" == *"moved"* ]] || fail "move output did not include success message for record 4"
 
-active_ids_raw="$(run_pc search --format ids "Record")"
+active_ids_raw="$(run_pc records list --format ids --project "${project_id}" --all)"
 mapfile -t active_ids < <(printf '%s\n' "${active_ids_raw}" | sed '/^$/d')
 expected_active=(
 	"${record_ids[1]}"
@@ -249,7 +249,7 @@ for idx in "${!expected_deleted[@]}"; do
 	[[ "${deleted_ids[${idx}]}" == "${expected_deleted[${idx}]}" ]] || fail "trash order mismatch at position $((idx + 1)): expected ${expected_deleted[${idx}]}, got ${deleted_ids[${idx}]}"
 done
 
-contains_line "${record_ids[8]}" "${active_ids[@]}" || fail "restored record 8 was not returned in active search results"
+contains_line "${record_ids[8]}" "${active_ids[@]}" || fail "restored record 8 was not returned in active record list"
 if contains_line "${record_ids[8]}" "${deleted_ids[@]}"; then
 	fail "restored record 8 still appeared in trash output"
 fi

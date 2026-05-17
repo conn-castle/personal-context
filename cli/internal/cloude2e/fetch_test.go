@@ -26,7 +26,7 @@ func TestFetchSuccessPathFromRealCloudState(t *testing.T) {
 		map[string][]byte{"dataset1.csv": []byte("x,y\n1,2\n3,4\n")},
 	)
 	alpha1ID := strings.TrimSpace(runPCSuccessNoStderr(t, homeA, userHomeA,
-		"add", "--project", "alpha", inputAlpha1))
+		"records", "add", "--project", "alpha", inputAlpha1))
 
 	// Alpha record 2 with data file.
 	inputAlpha2 := createInputFolder(t,
@@ -36,7 +36,7 @@ func TestFetchSuccessPathFromRealCloudState(t *testing.T) {
 		map[string][]byte{"results.json": []byte(`{"accuracy": 0.95}`)},
 	)
 	alpha2ID := strings.TrimSpace(runPCSuccessNoStderr(t, homeA, userHomeA,
-		"add", "--project", "alpha", inputAlpha2))
+		"records", "add", "--project", "alpha", inputAlpha2))
 
 	// Beta record with data file.
 	inputBeta := createInputFolder(t,
@@ -46,7 +46,7 @@ func TestFetchSuccessPathFromRealCloudState(t *testing.T) {
 		map[string][]byte{"report.txt": []byte("Beta report content")},
 	)
 	betaID := strings.TrimSpace(runPCSuccessNoStderr(t, homeA, userHomeA,
-		"add", "--project", "beta", inputBeta))
+		"records", "add", "--project", "beta", inputBeta))
 
 	// Sync homeA → cloud.
 	syncOut := runPCSuccessNoStderr(t, homeA, userHomeA, "sync")

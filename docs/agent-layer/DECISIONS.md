@@ -27,6 +27,11 @@ A rolling log of important, non-obvious decisions that materially affect future 
 
 <!-- ENTRIES START -->
 
+- Decision 2026-05-16 c4d5e6: Raw chat sources are Personal Context-owned with record-style canonical keys
+    Decision: `pc chat import` copies the raw transcript into `<PC_HOME>/personal-context/chats/raw/{chat_session_id}/source.{json|jsonl|ndjson}`. `chat_session.original_source_path` retains the original imported path as provenance; `chat_session.raw_source_key` stores the canonical relative key for both local lookup and S3 object lookup (under `users/{user_id}/` in cloud mode). Key shape is enforced by CHECK constraint in canonical/SQLite/Postgres schemas and by the `filesystem.ValidateChatSourceKey` helper at every code boundary.
+    Reason: Mirrors the record figure/data file model (one canonical relative key, no machine-specific absolute paths in storage references). Avoids split-brain identity between the managed file and provenance metadata, and lets `pc chat import --delete-source` safely remove the agent-owned original after Personal Context takes ownership.
+    Tradeoffs: One managed raw file per chat session — multiple raw files per chat would require a separate `chat_source_files` table later. Re-import overwrites the previous managed file through staged/rollback-safe promotion; on copy or DB failure the prior file is restored. Re-import always bumps the chat session sync signal (via the trigger on `updated_at`), even when the final `raw_source_key` string is unchanged.
+
 - Decision 2026-03-05 b3c4d5: Figma's fractional indexing for day_order
     Decision: Use Figma's fractional indexing algorithm (Go port) for `day_order` strings.
     Reason: Industry standard for collaborative reordering. Lexicographic sort, only moved item updated.
@@ -68,7 +73,7 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: Adding new structured metadata requires a schema change; acceptable for a 5-table system.
 
 - Decision 2026-03-05 i5j6k7: Git fields — CLI via metadata.json only, web UI via PATCH
-    Decision: CLI (`pc add`, `pc edit`): `git_remote_url` and `git_hash` come exclusively from `metadata.json` in the input folder. No `--git-remote-url` or `--git-hash` CLI flags. Web UI: edits git fields via `PATCH /api/records/[id]` — a different interface, not contradictory.
+    Decision: CLI (`pc records add`, `pc records edit`): `git_remote_url` and `git_hash` come exclusively from `metadata.json` in the input folder. No `--git-remote-url` or `--git-hash` CLI flags. Web UI: edits git fields via `PATCH /api/records/[id]` — a different interface, not contradictory.
     Reason: CLI uses folder-based input (single source of truth per operation). Web UI uses field-level mutation (different interface contract).
     Tradeoffs: Manual CLI users must create `metadata.json` to set git fields; acceptable since these fields are primarily for agent use.
 
@@ -108,7 +113,7 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: Marginal re-processing cost (one record per sync cycle); negligible for single-user.
 
 - Decision 2026-03-05 u9v0w1: Figure references in HTML use relative paths
-    Decision: `html_content` references figures as `figures/{filename}` (relative, no record_id). Each rendering context resolves: web UI rewrites to presigned URLs; git export matches naturally (`./figures/{filename}` relative to record folder). `pc add`/`pc edit` validate that every `figures/` src has a matching file.
+    Decision: `html_content` references figures as `figures/{filename}` (relative, no record_id). Each rendering context resolves: web UI rewrites to presigned URLs; git export matches naturally (`./figures/{filename}` relative to record folder). `pc records add`/`pc records edit` validate that every `figures/` src has a matching file.
     Reason: Standard HTML with relative paths. No custom protocol for agents to learn. Natural fit for git export structure.
     Tradeoffs: Requires per-context resolution logic; trivial (URL rewriting in iframe, validation in CLI).
 
@@ -138,8 +143,8 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: Cannot distinguish "bucket exists but no _version" from "version is literally 0"; not meaningful in practice since UpdateVersion always increments.
 
 - Decision 2026-03-07 c5d6e7p: Schema equivalence guard compares structure not dialect
-    Decision: `scripts/check_schema_equivalence.sh` compares tables, columns, indexes, and UNIQUE constraints between Postgres and SQLite schemas but does NOT compare types, CHECK expressions, or triggers.
-    Reason: Type names (`TIMESTAMPTZ` vs `TEXT`), CHECK syntax, and trigger syntax are intentionally different between dialects. Structural equivalence (same tables with same columns and same indexes) is the meaningful invariant.
+    Decision: `scripts/check_schema_equivalence.sh` compares tables, columns, indexes, UNIQUE constraints, and search-index structures between Postgres and SQLite schemas, but does NOT compare types, CHECK expressions, or non-search triggers.
+    Reason: Type names (`TIMESTAMPTZ` vs `TEXT`), CHECK syntax, and most trigger syntax are intentionally different between dialects. Search structures are pinned because both backends depend on them for user-visible search correctness.
     Tradeoffs: A column type mismatch (e.g., wrong SQLite type) would not be caught; mitigated by integration tests exercising both backends against the same contract suite.
 
 - Decision 2026-03-08 d7e8f9: S3Endpoint and S3ForcePathStyle config fields for S3-compatible services
@@ -213,6 +218,16 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: This is source-available, not open source by OSI criteria; some package ecosystems and commercial users may reject or require legal review before use.
 
 - Decision 2026-05-08 e8f9g0: List/search JSON uses paginated envelope
-    Decision: Go list/search JSON responses use `cli/internal/listpage.Response` with `{items,total,next_cursor}`; the Next.js record-list route mirrors the same shape via `PaginatedResponse<T>`.
-    Reason: CLI, local `pc serve`, and cloud record-list consumers need consistent full filtered totals before cursor/limit are applied.
-    Tradeoffs: `pc search --format json` is a breaking shape change from a bare array, but it exposes totals and keeps list/search pagination contracts aligned.
+    Decision: Domain-specific list/search JSON responses use `cli/internal/listpage.Response` with `{items,total,next_cursor}`; top-level `pc search --json`/`--format json` is the cross-domain exception and returns a flat array with `domain` on each item.
+    Reason: Domain lists need totals/cursors, while cross-domain search has heterogeneous record/chat result shapes and is optimized for direct piping/export.
+    Tradeoffs: Consumers must distinguish domain-specific search/list responses from top-level cross-domain search.
+
+- Decision 2026-05-14 n2p3q4: Chat feature is a pre-release clean-cut schema update
+    Decision: Add `project_paths`, chat tables, and search structures directly to fresh SQLite/Postgres bootstrap schemas; do not add forward migrations or database rewrite/delete behavior for this feature.
+    Reason: The maintainer confirmed there are no prior users or prior data to preserve for this slice.
+    Tradeoffs: Existing developer databases created before this feature must be recreated manually; future post-release schema changes still need a migration strategy.
+
+- Decision 2026-05-14 r5s6t7: Chat import uses explicit device provenance and nullable project assignment
+    Decision: `pc chat import` requires `--device`; project assignment is derived from registered `project_paths`, and unmatched sessions remain `project_id = NULL` until `pc project add <id> [path] --device <id>` backfills them.
+    Reason: This mirrors record provenance rules and avoids hidden current-device/current-project defaults.
+    Tradeoffs: First-time setup requires registering devices and paths before imports classify cleanly, but unassigned sessions stay visible for later review.

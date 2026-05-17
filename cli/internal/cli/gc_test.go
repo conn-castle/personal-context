@@ -25,7 +25,7 @@ func TestGCCloudNotConfiguredStillDeletesLocally(t *testing.T) {
 
 	// Soft-delete.
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestGCCloudNotConfiguredStillDeletesLocally(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	if err := runGC(context.Background(), stdout, stderr); err != nil {
+	if err := runGCAll(context.Background(), stdout, stderr, allTrashDomains()); err != nil {
 		t.Fatalf("runGC() error = %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestGCCloudUnreachableWarnsOnStderr(t *testing.T) {
 	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestGCCloudUnreachableWarnsOnStderr(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	if err := runGC(context.Background(), stdout, stderr); err != nil {
+	if err := runGCAll(context.Background(), stdout, stderr, allTrashDomains()); err != nil {
 		t.Fatalf("runGC() error = %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestGCCloudDeletesFromCloudRepo(t *testing.T) {
 	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestGCCloudDeletesFromCloudRepo(t *testing.T) {
 	runAutoSyncFn = func(context.Context, io.Writer) error { return nil }
 
 	stdout := &bytes.Buffer{}
-	if err := runGC(context.Background(), stdout, &bytes.Buffer{}); err != nil {
+	if err := runGCAll(context.Background(), stdout, &bytes.Buffer{}, allTrashDomains()); err != nil {
 		t.Fatalf("runGC() error = %v", err)
 	}
 
@@ -142,7 +142,7 @@ func TestGCCloudDeleteNotFoundIsIgnored(t *testing.T) {
 	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestGCCloudDeleteNotFoundIsIgnored(t *testing.T) {
 	runAutoSyncFn = func(context.Context, io.Writer) error { return nil }
 
 	stdout := &bytes.Buffer{}
-	if err := runGC(context.Background(), stdout, &bytes.Buffer{}); err != nil {
+	if err := runGCAll(context.Background(), stdout, &bytes.Buffer{}, allTrashDomains()); err != nil {
 		t.Fatalf("runGC() error = %v", err)
 	}
 
@@ -180,7 +180,7 @@ func TestGCCloudDeleteErrorSkipsRecord(t *testing.T) {
 	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestGCCloudDeleteErrorSkipsRecord(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	if err := runGC(context.Background(), stdout, stderr); err != nil {
+	if err := runGCAll(context.Background(), stdout, stderr, allTrashDomains()); err != nil {
 		t.Fatalf("runGC() error = %v", err)
 	}
 
@@ -212,7 +212,7 @@ func TestGCCloudDeleteErrorSkipsRecord(t *testing.T) {
 	if !strings.Contains(stderr.String(), "Warning: failed to delete record") {
 		t.Fatalf("expected cloud delete warning on stderr, got %q", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Removed 0 record(s)") {
+	if !strings.Contains(stdout.String(), "Removed 0 item(s)") {
 		t.Fatalf("expected 0 removed, got %q", stdout.String())
 	}
 }
@@ -222,7 +222,7 @@ func TestGCAutoSyncCalledAfterDeletion(t *testing.T) {
 	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestGCAutoSyncCalledAfterDeletion(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
-	if err := runGC(context.Background(), stdout, stderr); err != nil {
+	if err := runGCAll(context.Background(), stdout, stderr, allTrashDomains()); err != nil {
 		t.Fatalf("runGC() error = %v", err)
 	}
 
@@ -297,7 +297,7 @@ func TestGCDeletesExpiredTrash(t *testing.T) {
 
 	// Soft-delete.
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestGCDeletesExpiredTrash(t *testing.T) {
 	if !strings.Contains(out, fmt.Sprintf("Deleted %s", id)) {
 		t.Fatalf("expected 'Deleted %s' in output, got %q", id, out)
 	}
-	if !strings.Contains(out, "Removed 1 record(s).") {
+	if !strings.Contains(out, "Removed 1 item(s).") {
 		t.Fatalf("expected summary, got %q", out)
 	}
 
@@ -353,7 +353,7 @@ func TestGCLeavesYoungTrashUnit(t *testing.T) {
 
 	// Soft-delete (just now).
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestGCMixedAgesUnit(t *testing.T) {
 	// Soft-delete both.
 	for _, id := range []string{idOld, idYoung} {
 		delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-		delCmd.SetArgs([]string{"delete", id})
+		delCmd.SetArgs([]string{"records", "delete", id})
 		if err := delCmd.Execute(); err != nil {
 			t.Fatalf("delete %s: %v", id, err)
 		}
@@ -424,7 +424,7 @@ func TestGCDeleteRecordError(t *testing.T) {
 
 	// Soft-delete
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -461,7 +461,7 @@ func TestGCDeleteRecordDirError(t *testing.T) {
 
 	// Soft-delete
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}

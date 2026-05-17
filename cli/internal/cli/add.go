@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/fractionalindex"
-	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/conn-castle/personal-context/cli/internal/recordid"
 	"github.com/conn-castle/personal-context/cli/internal/recordio"
+	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/spf13/cobra"
 )
 
@@ -182,7 +182,7 @@ func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath s
 		}
 		copiedFigures = append(copiedFigures, stored.Filename)
 		if _, err := stack.Repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: stored.Filename,
 			S3Key:    stored.S3Key,
 		}); err != nil {
@@ -202,7 +202,7 @@ func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath s
 			return fmt.Errorf("hash data file %s: %w", stored.Filename, err)
 		}
 		if _, err := stack.Repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: stored.Filename,
 			S3Key:    stored.S3Key,
 			Size:     stored.Size,

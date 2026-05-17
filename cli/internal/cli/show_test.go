@@ -2,9 +2,15 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
 // --- Show tests (from coverage_test.go) ---
@@ -84,7 +90,7 @@ func TestShowDeletedRecordText(t *testing.T) {
 
 	// Delete the record
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -107,7 +113,7 @@ func TestShowDeletedRecordJSON(t *testing.T) {
 	id := addRecord(t)
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -237,6 +243,109 @@ func TestShowCommandNoArgs(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for missing args")
+	}
+}
+
+func TestRecordsShowCommandErrorBranches(t *testing.T) {
+	setupEnv(t)
+	id := addRecordWithContent(t, "<html>source ref</html>", "", `{"source_ref":"ref-1"}`, nil, nil)
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"records", "show", id})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("records show: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Source Ref: ref-1") {
+		t.Fatalf("expected source ref in records show output, got %q", stdout.String())
+	}
+
+	for _, args := range [][]string{
+		{"records", "show", "--format", "xml", id},
+		{"records", "show", "missing-record"},
+	} {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err == nil {
+			t.Fatalf("expected %v to fail", args)
+		}
+	}
+}
+
+func TestTopLevelShowAmbiguousRecordAndChatID(t *testing.T) {
+	setupEnv(t)
+	origNewSQLiteRepo := newSQLiteRepoFn
+	t.Cleanup(func() { newSQLiteRepoFn = origNewSQLiteRepo })
+
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
+		return &mockRepo{
+			getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+				return repository.Record{ID: "ambiguous-id", CreatedAt: now, UpdatedAt: now}, nil
+			},
+			getChatByIDFn: func(context.Context, string) (repository.ChatSession, error) {
+				return repository.ChatSession{ID: "ambiguous-id", Source: "codex", SourceSessionID: "ambiguous-source", StartedAt: now, LastActivityAt: now}, nil
+			},
+		}, nil
+	}
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"show", "ambiguous-id"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("expected ambiguous show error, got %v", err)
+	}
+}
+
+func TestShowRepositoryErrorBranches(t *testing.T) {
+	setupEnv(t)
+	origNewSQLiteRepo := newSQLiteRepoFn
+	t.Cleanup(func() { newSQLiteRepoFn = origNewSQLiteRepo })
+
+	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
+		return &mockRepo{
+			getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+				return repository.Record{}, repository.ErrNotFound
+			},
+			getChatByIDFn: func(context.Context, string) (repository.ChatSession, error) {
+				return repository.ChatSession{}, errors.New("chat lookup failed")
+			},
+		}, nil
+	}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"show", "id"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "get chat") {
+		t.Fatalf("expected chat lookup error, got %v", err)
+	}
+
+	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
+		return &mockRepo{
+			getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+				return repository.Record{}, errors.New("record lookup failed")
+			},
+		}, nil
+	}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"records", "show", "id"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "get record") {
+		t.Fatalf("expected record lookup error, got %v", err)
+	}
+
+	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
+		return &mockRepo{
+			getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+				now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+				return repository.Record{ID: "id", Date: "2026-05-14", DayOrder: "a0", CreatedAt: now, UpdatedAt: now}, nil
+			},
+			listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+				return nil, errors.New("figures failed")
+			},
+		}, nil
+	}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"records", "show", "id"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "list figures") {
+		t.Fatalf("expected list figures error, got %v", err)
 	}
 }
 

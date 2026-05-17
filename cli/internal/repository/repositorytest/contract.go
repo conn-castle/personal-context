@@ -196,6 +196,149 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 	})
 
+	t.Run("project paths and chats", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+
+		if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "chat/project", CreatedAt: &now, UpdatedAt: &now}); err != nil && !errors.Is(err, repository.ErrConflict) {
+			t.Fatalf("CreateProject() error = %v", err)
+		}
+		if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "chat/project-child", CreatedAt: &now, UpdatedAt: &now}); err != nil && !errors.Is(err, repository.ErrConflict) {
+			t.Fatalf("CreateProject(child) error = %v", err)
+		}
+		if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "chat-device", CreatedAt: &now, UpdatedAt: &now}); err != nil && !errors.Is(err, repository.ErrConflict) {
+			t.Fatalf("CreateDevice() error = %v", err)
+		}
+		path, created, err := repo.UpsertProjectPath(ctx, repository.CreateProjectPathInput{ProjectID: "chat/project", Path: "/tmp/chat-project", DeviceID: "chat-device", CreatedAt: &now, UpdatedAt: &now})
+		if err != nil {
+			t.Fatalf("UpsertProjectPath() error = %v", err)
+		}
+		if !created || path.ProjectID != "chat/project" || path.Path != "/tmp/chat-project" {
+			t.Fatalf("unexpected project path: created=%v path=%+v", created, path)
+		}
+		_, createdAgain, err := repo.UpsertProjectPath(ctx, repository.CreateProjectPathInput{ProjectID: "chat/project", Path: "/tmp/chat-project", DeviceID: "chat-device"})
+		if err != nil {
+			t.Fatalf("UpsertProjectPath(again) error = %v", err)
+		}
+		if createdAgain {
+			t.Fatal("expected duplicate project path to report created=false")
+		}
+		if _, _, err := repo.UpsertProjectPath(ctx, repository.CreateProjectPathInput{ProjectID: "chat/project-child", Path: "/tmp/chat-project/nested", DeviceID: "chat-device", CreatedAt: &now, UpdatedAt: &now}); err != nil {
+			t.Fatalf("UpsertProjectPath(child) error = %v", err)
+		}
+
+		cwd := "/tmp/chat-project/nested/deeper"
+		session, created, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              "20260514-abcdef12",
+				Source:          "codex",
+				SourceSessionID: "source-1",
+				SourceDeviceID:  "chat-device",
+				CWD:             &cwd,
+				StartedAt:       now,
+				LastActivityAt:  now,
+				CreatedAt:       &now,
+				UpdatedAt:       &now,
+			},
+			ClearDeleted: true,
+		})
+		if err != nil {
+			t.Fatalf("UpsertChatSession() error = %v", err)
+		}
+		if !created || session.ID != "20260514-abcdef12" {
+			t.Fatalf("unexpected chat session: created=%v session=%+v", created, session)
+		}
+		if backfilled, err := repo.BackfillChatProjects(ctx); err != nil {
+			t.Fatalf("BackfillChatProjects() error = %v", err)
+		} else if backfilled != 1 {
+			t.Fatalf("expected one chat backfill, got %d", backfilled)
+		}
+		session, err = repo.GetChatSessionByID(ctx, session.ID)
+		if err != nil {
+			t.Fatalf("GetChatSessionByID() error = %v", err)
+		}
+		if session.ProjectID == nil || *session.ProjectID != "chat/project-child" {
+			t.Fatalf("expected chat project backfilled, got %+v", session.ProjectID)
+		}
+		itemText := "needle chat transcript text"
+		if _, err := repo.CreateChatItem(ctx, repository.CreateChatItemInput{SessionID: session.ID, Ordinal: 0, Role: "user", ItemType: "message", Text: &itemText, SearchText: itemText, CreatedAt: &now}); err != nil {
+			t.Fatalf("CreateChatItem() error = %v", err)
+		}
+		replacementText := "needle replacement chat transcript text"
+		if err := repo.ReplaceChatItems(ctx, session.ID, []repository.CreateChatItemInput{{SessionID: session.ID, Ordinal: 0, Role: "assistant", ItemType: "message", Text: &replacementText, SearchText: replacementText, CreatedAt: &now}}); err != nil {
+			t.Fatalf("ReplaceChatItems() error = %v", err)
+		}
+		items, err := repo.ListChatItems(ctx, session.ID)
+		if err != nil {
+			t.Fatalf("ListChatItems() error = %v", err)
+		}
+		if len(items) != 1 || items[0].SearchText != replacementText {
+			t.Fatalf("unexpected replaced chat items: %+v", items)
+		}
+		results, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle"})
+		if err != nil {
+			t.Fatalf("SearchChatItems() error = %v", err)
+		}
+		if len(results) != 1 || results[0].Session.ID != session.ID || results[0].Item.Ordinal != 0 {
+			t.Fatalf("unexpected chat search results: %+v", results)
+		}
+		if _, err := repo.CreateRecord(ctx, repository.CreateRecordInput{
+			ID:             session.ID,
+			Date:           "2026-05-14",
+			DayOrder:       "z",
+			HTMLContent:    strPtr("<p>collision</p>"),
+			ProjectID:      "chat/project",
+			SourceDeviceID: "chat-device",
+		}); !errors.Is(err, repository.ErrConflict) {
+			t.Fatalf("expected ErrConflict for record id colliding with chat session, got %v", err)
+		}
+		record := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
+			ID:             "20260514-fedcba98",
+			Date:           "2026-05-14",
+			DayOrder:       "y",
+			HTMLContent:    strPtr("<p>record before chat collision</p>"),
+			ProjectID:      "chat/project",
+			SourceDeviceID: "chat-device",
+		})
+		if _, _, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              record.ID,
+				Source:          "codex",
+				SourceSessionID: "source-collision",
+				SourceDeviceID:  "chat-device",
+				StartedAt:       now,
+				LastActivityAt:  now,
+			},
+			ClearDeleted: true,
+		}); !errors.Is(err, repository.ErrConflict) {
+			t.Fatalf("expected ErrConflict for chat id colliding with record, got %v", err)
+		}
+		if err := repo.SoftDeleteChatSession(ctx, session.ID); err != nil {
+			t.Fatalf("SoftDeleteChatSession() error = %v", err)
+		}
+		deleted, err := repo.GetChatSessionByID(ctx, session.ID)
+		if err != nil {
+			t.Fatalf("GetChatSessionByID(deleted) error = %v", err)
+		}
+		if deleted.DeletedAt == nil {
+			t.Fatal("expected deleted_at after chat soft delete")
+		}
+		if err := repo.RestoreChatSession(ctx, session.ID); err != nil {
+			t.Fatalf("RestoreChatSession() error = %v", err)
+		}
+		restored, err := repo.GetChatSessionByID(ctx, session.ID)
+		if err != nil {
+			t.Fatalf("GetChatSessionByID(restored) error = %v", err)
+		}
+		if restored.DeletedAt != nil {
+			t.Fatalf("expected deleted_at to be cleared after restore, got %v", restored.DeletedAt)
+		}
+		if err := repo.RestoreChatSession(ctx, "20250101-nonexist"); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound for missing chat restore, got %v", err)
+		}
+	})
+
 	t.Run("figure and data-file get/list/update", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
@@ -675,7 +818,6 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		expected := []string{
 			"20250402-a0a0a0a1",
 			"20250402-b0b0b0b2",
-			"20250402-c0c0c0c3",
 		}
 		assertExactOrder(t, ids, expected)
 
@@ -991,22 +1133,22 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			t.Fatalf("empty count = %d, want 0", count)
 		}
 
-		sourceDeviceQuery := "source-alpha-device"
-		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{Query: &sourceDeviceQuery})
+		notesQuery := "alpha notes"
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{Query: &notesQuery})
 		if err != nil {
-			t.Fatalf("CountRecords(source_device_id query) error = %v", err)
+			t.Fatalf("CountRecords(notes query) error = %v", err)
 		}
 		if count != 1 {
-			t.Fatalf("source_device_id query count = %d, want 1", count)
+			t.Fatalf("notes query count = %d, want 1", count)
 		}
 
-		sourceRefQuery := "source-alpha-ref"
-		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{Query: &sourceRefQuery})
+		htmlQuery := "alpha html"
+		count, err = repo.CountRecords(ctx, repository.ListRecordsFilter{Query: &htmlQuery})
 		if err != nil {
-			t.Fatalf("CountRecords(source_ref query) error = %v", err)
+			t.Fatalf("CountRecords(html query) error = %v", err)
 		}
 		if count != 1 {
-			t.Fatalf("source_ref query count = %d, want 1", count)
+			t.Fatalf("html query count = %d, want 1", count)
 		}
 
 		_ = beta

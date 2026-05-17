@@ -33,12 +33,26 @@ type mockRepo struct {
 	createDataFileFn    func(ctx context.Context, input repository.CreateRecordDataFileInput) (repository.RecordDataFile, error)
 	updateDataFileFn    func(ctx context.Context, input repository.UpdateRecordDataFileInput) (repository.RecordDataFile, error)
 	deleteDataFileFn    func(ctx context.Context, id int64) error
+	listTemplatesFn     func(ctx context.Context) ([]repository.Template, error)
 	createProjectFn     func(ctx context.Context, input repository.CreateRegistryInput) (repository.Project, error)
 	getProjectByIDFn    func(ctx context.Context, id string) (repository.Project, error)
+	listProjectsFn      func(ctx context.Context, includeArchived bool) ([]repository.Project, error)
 	upsertProjectFn     func(ctx context.Context, project repository.Project) (bool, error)
+	listProjectPathsFn  func(ctx context.Context, projectID *string) ([]repository.ProjectPath, error)
 	createDeviceFn      func(ctx context.Context, input repository.CreateRegistryInput) (repository.Device, error)
 	getDeviceByIDFn     func(ctx context.Context, id string) (repository.Device, error)
+	listDevicesFn       func(ctx context.Context, includeArchived bool) ([]repository.Device, error)
 	upsertDeviceFn      func(ctx context.Context, device repository.Device) (bool, error)
+	upsertChatSessionFn func(ctx context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error)
+	getChatByIDFn       func(ctx context.Context, id string) (repository.ChatSession, error)
+	getChatBySourceFn   func(ctx context.Context, source string, sourceSessionID string) (repository.ChatSession, error)
+	listChatSessionsFn  func(ctx context.Context, filter repository.ListChatSessionsFilter) ([]repository.ChatSession, error)
+	countChatSessionsFn func(ctx context.Context, filter repository.ListChatSessionsFilter) (int, error)
+	listChatItemsFn     func(ctx context.Context, sessionID string) ([]repository.ChatItem, error)
+	searchChatItemsFn   func(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error)
+	maxChatOrdinalFn    func(ctx context.Context, sessionID string) (int, error)
+	createChatItemFn    func(ctx context.Context, input repository.CreateChatItemInput) (repository.ChatItem, error)
+	replaceChatItemsFn  func(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error
 }
 
 func (m *mockRepo) GetTemplateByName(ctx context.Context, name string) (repository.Template, error) {
@@ -168,8 +182,13 @@ func (m *mockRepo) DeleteRecordDataFile(ctx context.Context, id int64) error {
 func (m *mockRepo) UpdateTemplate(context.Context, repository.UpdateTemplateInput) (repository.Template, error) {
 	return repository.Template{}, nil
 }
-func (m *mockRepo) ListTemplates(context.Context) ([]repository.Template, error) { return nil, nil }
-func (m *mockRepo) DeleteTemplate(context.Context, string) error                 { return nil }
+func (m *mockRepo) ListTemplates(ctx context.Context) ([]repository.Template, error) {
+	if m.listTemplatesFn != nil {
+		return m.listTemplatesFn(ctx)
+	}
+	return nil, nil
+}
+func (m *mockRepo) DeleteTemplate(context.Context, string) error { return nil }
 func (m *mockRepo) GetSyncVersion(context.Context) (repository.SyncVersion, error) {
 	return repository.SyncVersion{}, nil
 }
@@ -185,7 +204,12 @@ func (m *mockRepo) GetProjectByID(ctx context.Context, id string) (repository.Pr
 	}
 	return repository.Project{}, repository.ErrNotFound
 }
-func (m *mockRepo) ListProjects(context.Context, bool) ([]repository.Project, error) { return nil, nil }
+func (m *mockRepo) ListProjects(ctx context.Context, includeArchived bool) ([]repository.Project, error) {
+	if m.listProjectsFn != nil {
+		return m.listProjectsFn(ctx, includeArchived)
+	}
+	return nil, nil
+}
 func (m *mockRepo) ArchiveProject(context.Context, string) (repository.Project, error) {
 	return repository.Project{}, nil
 }
@@ -198,6 +222,16 @@ func (m *mockRepo) UpsertProjectForImport(ctx context.Context, project repositor
 	}
 	return true, nil
 }
+func (m *mockRepo) UpsertProjectPath(context.Context, repository.CreateProjectPathInput) (repository.ProjectPath, bool, error) {
+	return repository.ProjectPath{}, true, nil
+}
+func (m *mockRepo) ListProjectPaths(ctx context.Context, projectID *string) ([]repository.ProjectPath, error) {
+	if m.listProjectPathsFn != nil {
+		return m.listProjectPathsFn(ctx, projectID)
+	}
+	return nil, nil
+}
+func (m *mockRepo) BackfillChatProjects(context.Context) (int, error) { return 0, nil }
 func (m *mockRepo) CreateDevice(ctx context.Context, input repository.CreateRegistryInput) (repository.Device, error) {
 	if m.createDeviceFn != nil {
 		return m.createDeviceFn(ctx, input)
@@ -210,7 +244,12 @@ func (m *mockRepo) GetDeviceByID(ctx context.Context, id string) (repository.Dev
 	}
 	return repository.Device{}, repository.ErrNotFound
 }
-func (m *mockRepo) ListDevices(context.Context, bool) ([]repository.Device, error) { return nil, nil }
+func (m *mockRepo) ListDevices(ctx context.Context, includeArchived bool) ([]repository.Device, error) {
+	if m.listDevicesFn != nil {
+		return m.listDevicesFn(ctx, includeArchived)
+	}
+	return nil, nil
+}
 func (m *mockRepo) ArchiveDevice(context.Context, string) (repository.Device, error) {
 	return repository.Device{}, nil
 }
@@ -222,6 +261,72 @@ func (m *mockRepo) UpsertDeviceForImport(ctx context.Context, device repository.
 		return m.upsertDeviceFn(ctx, device)
 	}
 	return true, nil
+}
+func (m *mockRepo) UpsertChatSession(ctx context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+	if m.upsertChatSessionFn != nil {
+		return m.upsertChatSessionFn(ctx, input)
+	}
+	return repository.ChatSession{}, true, nil
+}
+func (m *mockRepo) GetChatSessionByID(ctx context.Context, id string) (repository.ChatSession, error) {
+	if m.getChatByIDFn != nil {
+		return m.getChatByIDFn(ctx, id)
+	}
+	return repository.ChatSession{}, repository.ErrNotFound
+}
+func (m *mockRepo) GetChatSessionBySource(ctx context.Context, source string, sourceSessionID string) (repository.ChatSession, error) {
+	if m.getChatBySourceFn != nil {
+		return m.getChatBySourceFn(ctx, source, sourceSessionID)
+	}
+	return repository.ChatSession{}, repository.ErrNotFound
+}
+func (m *mockRepo) ListChatSessions(ctx context.Context, filter repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+	if m.listChatSessionsFn != nil {
+		return m.listChatSessionsFn(ctx, filter)
+	}
+	return nil, nil
+}
+func (m *mockRepo) CountChatSessions(ctx context.Context, filter repository.ListChatSessionsFilter) (int, error) {
+	if m.countChatSessionsFn != nil {
+		return m.countChatSessionsFn(ctx, filter)
+	}
+	return 0, nil
+}
+func (m *mockRepo) SoftDeleteChatSession(context.Context, string) error { return nil }
+func (m *mockRepo) RestoreChatSession(context.Context, string) error    { return nil }
+func (m *mockRepo) DeleteChatSession(context.Context, string) error     { return nil }
+func (m *mockRepo) MaxChatItemOrdinal(ctx context.Context, sessionID string) (int, error) {
+	if m.maxChatOrdinalFn != nil {
+		return m.maxChatOrdinalFn(ctx, sessionID)
+	}
+	return -1, nil
+}
+func (m *mockRepo) CreateChatItem(ctx context.Context, input repository.CreateChatItemInput) (repository.ChatItem, error) {
+	if m.createChatItemFn != nil {
+		return m.createChatItemFn(ctx, input)
+	}
+	return repository.ChatItem{}, nil
+}
+func (m *mockRepo) ReplaceChatItems(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error {
+	if m.replaceChatItemsFn != nil {
+		return m.replaceChatItemsFn(ctx, sessionID, items)
+	}
+	return nil
+}
+func (m *mockRepo) ListChatItems(ctx context.Context, sessionID string) ([]repository.ChatItem, error) {
+	if m.listChatItemsFn != nil {
+		return m.listChatItemsFn(ctx, sessionID)
+	}
+	return nil, nil
+}
+func (m *mockRepo) SearchChatItems(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
+	if m.searchChatItemsFn != nil {
+		return m.searchChatItemsFn(ctx, filter)
+	}
+	return nil, nil
+}
+func (m *mockRepo) SearchAll(context.Context, repository.UnifiedSearchFilter) ([]repository.DomainSearchResult, error) {
+	return nil, nil
 }
 func (m *mockRepo) CountActiveRecords(context.Context) (int, error)       { return 0, nil }
 func (m *mockRepo) CountTrashedRecords(context.Context) (int, error)      { return 0, nil }

@@ -1,7 +1,9 @@
 package sync
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -69,6 +71,293 @@ func TestServiceSyncPushesLocalBundleToCloud(t *testing.T) {
 	if !exists {
 		t.Fatal("expected successful sync to persist last_sync")
 	}
+}
+
+func TestServiceSyncPushesProjectPathsAndChatsToCloud(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	service, localRepo, cloudRepo, _, _, _ := newTestService(t, nil, nil)
+	localRepo.projects["sync/chat-project"] = repository.Project{ID: "sync/chat-project", CreatedAt: now, UpdatedAt: now}
+	localRepo.devices["sync-chat-device"] = repository.Device{ID: "sync-chat-device", CreatedAt: now, UpdatedAt: now}
+	localRepo.projectPaths["sync/chat-project|/tmp/sync-chat|sync-chat-device"] = repository.ProjectPath{
+		ID:        1,
+		ProjectID: "sync/chat-project",
+		Path:      "/tmp/sync-chat",
+		DeviceID:  "sync-chat-device",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	title := "Sync chat"
+	cwd := "/tmp/sync-chat"
+	projectID := "sync/chat-project"
+	localRepo.chatSessions["20260514-syncchat"] = repository.ChatSession{
+		ID:              "20260514-syncchat",
+		Source:          "codex",
+		SourceSessionID: "sync-source",
+		SourceDeviceID:  "sync-chat-device",
+		ProjectID:       &projectID,
+		CWD:             &cwd,
+		Title:           &title,
+		StartedAt:       now,
+		LastActivityAt:  now.Add(time.Minute),
+		CreatedAt:       now,
+		UpdatedAt:       now.Add(time.Minute),
+	}
+	text := "sync chat item"
+	localRepo.chatItems["20260514-syncchat"] = []repository.ChatItem{{
+		ID:         1,
+		SessionID:  "20260514-syncchat",
+		Ordinal:    0,
+		Role:       "user",
+		ItemType:   "message",
+		Text:       &text,
+		SearchText: text,
+		CreatedAt:  now.Add(time.Minute),
+	}}
+
+	if err := service.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	if _, ok := cloudRepo.projectPaths["sync/chat-project|/tmp/sync-chat|sync-chat-device"]; !ok {
+		t.Fatalf("expected project path to sync, got %+v", cloudRepo.projectPaths)
+	}
+	cloudSession, ok := cloudRepo.chatSessions["20260514-syncchat"]
+	if !ok {
+		t.Fatalf("expected chat session to sync, got %+v", cloudRepo.chatSessions)
+	}
+	if cloudSession.Title == nil || *cloudSession.Title != title {
+		t.Fatalf("unexpected synced chat session: %+v", cloudSession)
+	}
+	cloudItems := cloudRepo.chatItems["20260514-syncchat"]
+	if len(cloudItems) != 1 || cloudItems[0].SearchText != text {
+		t.Fatalf("unexpected synced chat items: %+v", cloudItems)
+	}
+}
+
+func TestServiceSyncPullsProjectPathsAndChatsToLocal(t *testing.T) {
+	now := time.Date(2026, 5, 14, 13, 0, 0, 0, time.UTC)
+	service, localRepo, cloudRepo, _, _, _ := newTestService(t, nil, nil)
+	cloudRepo.projects["sync/cloud-chat-project"] = repository.Project{ID: "sync/cloud-chat-project", CreatedAt: now, UpdatedAt: now}
+	cloudRepo.devices["sync-cloud-chat-device"] = repository.Device{ID: "sync-cloud-chat-device", CreatedAt: now, UpdatedAt: now}
+	cloudRepo.projectPaths["sync/cloud-chat-project|/tmp/cloud-sync-chat|sync-cloud-chat-device"] = repository.ProjectPath{
+		ID:        1,
+		ProjectID: "sync/cloud-chat-project",
+		Path:      "/tmp/cloud-sync-chat",
+		DeviceID:  "sync-cloud-chat-device",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	title := "Cloud sync chat"
+	projectID := "sync/cloud-chat-project"
+	cloudRepo.chatSessions["20260514-facefeed"] = repository.ChatSession{
+		ID:              "20260514-facefeed",
+		Source:          "gemini",
+		SourceSessionID: "cloud-source",
+		SourceDeviceID:  "sync-cloud-chat-device",
+		ProjectID:       &projectID,
+		Title:           &title,
+		StartedAt:       now,
+		LastActivityAt:  now.Add(time.Minute),
+		CreatedAt:       now,
+		UpdatedAt:       now.Add(time.Minute),
+	}
+	text := "pulled sync chat item"
+	cloudRepo.chatItems["20260514-facefeed"] = []repository.ChatItem{{
+		ID:         1,
+		SessionID:  "20260514-facefeed",
+		Ordinal:    0,
+		Role:       "assistant",
+		ItemType:   "message",
+		SearchText: text,
+		CreatedAt:  now.Add(time.Minute),
+	}}
+
+	if err := service.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync() error = %v", err)
+	}
+
+	if _, ok := localRepo.projectPaths["sync/cloud-chat-project|/tmp/cloud-sync-chat|sync-cloud-chat-device"]; !ok {
+		t.Fatalf("expected cloud project path locally, got %+v", localRepo.projectPaths)
+	}
+	if session, ok := localRepo.chatSessions["20260514-facefeed"]; !ok || session.Source != "gemini" {
+		t.Fatalf("expected pulled chat session, got ok=%v session=%+v", ok, session)
+	}
+	if items := localRepo.chatItems["20260514-facefeed"]; len(items) != 1 || items[0].SearchText != text {
+		t.Fatalf("expected pulled chat item, got %+v", items)
+	}
+}
+
+func TestSyncChangedChatsErrorBranches(t *testing.T) {
+	now := time.Date(2026, 5, 14, 14, 0, 0, 0, time.UTC)
+	source := newMemoryRepo(nil)
+	target := newMemoryRepo(nil)
+	source.listChatSessionsErr = errors.New("list chats failed")
+	if err := syncChangedChats(context.Background(), time.Time{}, "test", source, target, nil, nil); err == nil || !strings.Contains(err.Error(), "list test chat changes") {
+		t.Fatalf("expected list chat changes error, got %v", err)
+	}
+
+	source = newMemoryRepo(nil)
+	source.chatSessions["20260514-beadfeed"] = repository.ChatSession{
+		ID:              "20260514-beadfeed",
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	source.listChatItemsErr = errors.New("items failed")
+	if err := syncChangedChats(context.Background(), time.Time{}, "test", source, target, nil, nil); err == nil || !strings.Contains(err.Error(), "list test chat items") {
+		t.Fatalf("expected list chat items error, got %v", err)
+	}
+
+	source.listChatItemsErr = nil
+	source.chatItems["20260514-beadfeed"] = []repository.ChatItem{{SessionID: "20260514-beadfeed", Ordinal: 0, Role: "user", ItemType: "message", SearchText: "x", CreatedAt: now}}
+	target = newMemoryRepo(nil)
+	target.replaceChatItemsErr = errors.New("replace failed")
+	if err := syncChangedChats(context.Background(), time.Time{}, "test", source, target, nil, nil); err == nil || !strings.Contains(err.Error(), "test chat items") {
+		t.Fatalf("expected replace chat items error, got %v", err)
+	}
+}
+
+func TestSyncChangedChatsReplacesItemsAndSkipsOlderSource(t *testing.T) {
+	now := time.Date(2026, 5, 14, 14, 0, 0, 0, time.UTC)
+	source := newMemoryRepo(nil)
+	target := newMemoryRepo(nil)
+	source.chatSessions["20260514-beadfeed"] = repository.ChatSession{
+		ID:              "20260514-beadfeed",
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		StartedAt:       now,
+		LastActivityAt:  now.Add(time.Minute),
+		CreatedAt:       now,
+		UpdatedAt:       now.Add(time.Minute),
+	}
+	target.chatSessions["20260514-beadfeed"] = repository.ChatSession{
+		ID:              "20260514-beadfeed",
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	oldText := "old target item"
+	newText := "new source item"
+	target.chatItems["20260514-beadfeed"] = []repository.ChatItem{{SessionID: "20260514-beadfeed", Ordinal: 0, Role: "user", ItemType: "message", SearchText: oldText, CreatedAt: now}}
+	source.chatItems["20260514-beadfeed"] = []repository.ChatItem{{SessionID: "20260514-beadfeed", Ordinal: 0, Role: "user", ItemType: "message", SearchText: newText, CreatedAt: now.Add(time.Minute)}}
+
+	if err := syncChangedChatsDirected(context.Background(), time.Time{}, "test", source, target, WinnerLocal, nil, nil); err != nil {
+		t.Fatalf("syncChangedChatsDirected(replace) error = %v", err)
+	}
+	if items := target.chatItems["20260514-beadfeed"]; len(items) != 1 || items[0].SearchText != newText {
+		t.Fatalf("expected target chat items to be replaced, got %+v", items)
+	}
+
+	source.chatSessions["20260514-beadfeed"] = repository.ChatSession{
+		ID:              "20260514-beadfeed",
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now.Add(time.Minute),
+	}
+	target.chatSessions["20260514-beadfeed"] = repository.ChatSession{
+		ID:              "20260514-beadfeed",
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		StartedAt:       now,
+		LastActivityAt:  now.Add(2 * time.Minute),
+		CreatedAt:       now,
+		UpdatedAt:       now.Add(2 * time.Minute),
+	}
+	target.chatItems["20260514-beadfeed"] = []repository.ChatItem{{SessionID: "20260514-beadfeed", Ordinal: 0, Role: "user", ItemType: "message", SearchText: oldText, CreatedAt: now.Add(2 * time.Minute)}}
+
+	if err := syncChangedChatsDirected(context.Background(), time.Time{}, "test", source, target, WinnerLocal, nil, nil); err != nil {
+		t.Fatalf("syncChangedChatsDirected(skip older) error = %v", err)
+	}
+	if items := target.chatItems["20260514-beadfeed"]; len(items) != 1 || items[0].SearchText != oldText {
+		t.Fatalf("expected newer target chat items to be preserved, got %+v", items)
+	}
+}
+
+func TestSyncChangedChatsReturnsWarningWriteErrors(t *testing.T) {
+	now := time.Date(2026, 5, 14, 14, 0, 0, 0, time.UTC)
+	rawKey := "chats/raw/20260514-beadfeed/source.jsonl"
+	session := repository.ChatSession{
+		ID:              "20260514-beadfeed",
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		RawSourceKey:    &rawKey,
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	source := newMemoryRepo(nil)
+	target := newMemoryRepo(nil)
+	source.chatSessions[session.ID] = session
+	rawTransfer := func(_ context.Context, _ string, session repository.ChatSession, report *chatRawSyncReport) error {
+		report.MissingLocal = append(report.MissingLocal, session.ID)
+		return nil
+	}
+	err := syncChangedChatsDirected(context.Background(), time.Time{}, "test", source, target, WinnerLocal, rawTransfer, failingSyncWarnWriter{})
+	if err == nil || !strings.Contains(err.Error(), "write local chat raw source warning") {
+		t.Fatalf("expected warning write error, got %v", err)
+	}
+
+	source = newMemoryRepo(nil)
+	target = newMemoryRepo(nil)
+	source.chatSessions[session.ID] = session
+	rawTransfer = func(_ context.Context, _ string, session repository.ChatSession, report *chatRawSyncReport) error {
+		report.MissingCloud = append(report.MissingCloud, session.ID)
+		return nil
+	}
+	err = syncChangedChatsDirected(context.Background(), time.Time{}, "test", source, target, WinnerLocal, rawTransfer, failingSyncWarnWriter{})
+	if err == nil || !strings.Contains(err.Error(), "write cloud chat raw source warning") {
+		t.Fatalf("expected cloud warning write error, got %v", err)
+	}
+}
+
+func TestSyncChangedChatsReturnsTargetLoadErrors(t *testing.T) {
+	now := time.Date(2026, 5, 14, 14, 0, 0, 0, time.UTC)
+	source := newMemoryRepo(nil)
+	source.chatSessions["20260514-beadfeed"] = repository.ChatSession{
+		ID:              "20260514-beadfeed",
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	target := &getChatSessionErrorRepo{memoryRepo: newMemoryRepo(nil)}
+	err := syncChangedChatsDirected(context.Background(), time.Time{}, "test", source, target, WinnerLocal, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "load target chat session") {
+		t.Fatalf("expected load target chat session error, got %v", err)
+	}
+}
+
+type failingSyncWarnWriter struct{}
+
+func (failingSyncWarnWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
+type getChatSessionErrorRepo struct {
+	*memoryRepo
+}
+
+func (r *getChatSessionErrorRepo) GetChatSessionByID(context.Context, string) (repository.ChatSession, error) {
+	return repository.ChatSession{}, errors.New("lookup failed")
 }
 
 func TestServiceSyncPullsCloudBundleToLocalWithoutDownloadingDataFiles(t *testing.T) {
@@ -2468,6 +2757,10 @@ func (f *fixedPathLocalFiles) ResolveDataFilePath(_ string, _ string) (string, e
 	return f.dataFilePath, nil
 }
 
+func (f *fixedPathLocalFiles) ResolveChatSourcePath(_ string, _ string) (string, error) {
+	return "/tmp/stub/chat-raw", nil
+}
+
 // --- applyDataFilesToCloud: metadata-only create/update when local binary is absent ---
 
 func TestSyncPushCreatesCloudDataFileMetadataWithoutLocalBinary(t *testing.T) {
@@ -3528,6 +3821,10 @@ func (c *countingLocalFiles) ResolveDataFilePath(recordID string, filename strin
 	return filepath.Join("/tmp/counting", recordID, "data", filename), nil
 }
 
+func (c *countingLocalFiles) ResolveChatSourcePath(chatSessionID string, rawSourceKey string) (string, error) {
+	return filepath.Join("/tmp/counting", chatSessionID, "chats", rawSourceKey), nil
+}
+
 // --- errLocalFiles for testing LocalFiles error paths ---
 
 type errLocalFiles struct {
@@ -3549,6 +3846,10 @@ func (e *errLocalFiles) ResolveDataFilePath(_ string, _ string) (string, error) 
 	return "/tmp/stub/data", nil
 }
 
+func (e *errLocalFiles) ResolveChatSourcePath(_ string, _ string) (string, error) {
+	return "/tmp/stub/chat-raw", nil
+}
+
 // --- stubLocalFiles for NewService nil-arg tests ---
 
 type stubLocalFiles struct{}
@@ -3559,6 +3860,10 @@ func (s *stubLocalFiles) ResolveFigurePath(recordID string, filename string) (st
 
 func (s *stubLocalFiles) ResolveDataFilePath(recordID string, filename string) (string, error) {
 	return filepath.Join("/tmp/stub", recordID, "data", filename), nil
+}
+
+func (s *stubLocalFiles) ResolveChatSourcePath(chatSessionID string, rawSourceKey string) (string, error) {
+	return filepath.Join("/tmp/stub", chatSessionID, "chats", rawSourceKey), nil
 }
 
 // completeErrSessionWrapper wraps a real session and injects a Complete error.
@@ -3597,10 +3902,14 @@ type memoryRepo struct {
 	records         map[string]repository.Record
 	projects        map[string]repository.Project
 	devices         map[string]repository.Device
+	projectPaths    map[string]repository.ProjectPath
+	chatSessions    map[string]repository.ChatSession
+	chatItems       map[string][]repository.ChatItem
 	figuresByRecord map[string]map[string]repository.RecordFigure
 	dataByRecord    map[string]map[string]repository.RecordDataFile
 	nextFigureID    int64
 	nextDataID      int64
+	nextChatItemID  int64
 	syncVersion     repository.SyncVersion
 
 	// Error injection fields.
@@ -3617,6 +3926,12 @@ type memoryRepo struct {
 	deleteRecordDataFileErr    error
 	updateRecordErr            error
 	createRecordErr            error
+	listChatSessionsErr        error
+	listChatItemsErr           error
+	maxChatItemOrdinalErr      error
+	createChatItemErr          error
+	replaceChatItemsErr        error
+	getChatBySourceErr         error
 }
 
 func newMemoryRepo(bundles []RecordBundle) *memoryRepo {
@@ -3624,10 +3939,14 @@ func newMemoryRepo(bundles []RecordBundle) *memoryRepo {
 		records:         make(map[string]repository.Record),
 		projects:        make(map[string]repository.Project),
 		devices:         make(map[string]repository.Device),
+		projectPaths:    make(map[string]repository.ProjectPath),
+		chatSessions:    make(map[string]repository.ChatSession),
+		chatItems:       make(map[string][]repository.ChatItem),
 		figuresByRecord: make(map[string]map[string]repository.RecordFigure),
 		dataByRecord:    make(map[string]map[string]repository.RecordDataFile),
 		nextFigureID:    1,
 		nextDataID:      1,
+		nextChatItemID:  1,
 		syncVersion:     repository.SyncVersion{ID: 1, Version: 1},
 	}
 	for _, bundle := range bundles {
@@ -4014,6 +4333,34 @@ func (m *memoryRepo) UpsertProjectForImport(_ context.Context, project repositor
 	m.projects[project.ID] = project
 	return true, nil
 }
+func (m *memoryRepo) UpsertProjectPath(_ context.Context, input repository.CreateProjectPathInput) (repository.ProjectPath, bool, error) {
+	key := input.ProjectID + "|" + input.Path + "|" + input.DeviceID
+	if existing, ok := m.projectPaths[key]; ok {
+		return existing, false, nil
+	}
+	path := repository.ProjectPath{
+		ID:        int64(len(m.projectPaths) + 1),
+		ProjectID: input.ProjectID,
+		Path:      input.Path,
+		DeviceID:  input.DeviceID,
+		CreatedAt: derefTime(input.CreatedAt),
+		UpdatedAt: derefTime(input.UpdatedAt),
+	}
+	m.projectPaths[key] = path
+	return path, true, nil
+}
+func (m *memoryRepo) ListProjectPaths(_ context.Context, projectID *string) ([]repository.ProjectPath, error) {
+	paths := make([]repository.ProjectPath, 0, len(m.projectPaths))
+	for _, path := range m.projectPaths {
+		if projectID != nil && path.ProjectID != *projectID {
+			continue
+		}
+		paths = append(paths, path)
+	}
+	sort.Slice(paths, func(i, j int) bool { return paths[i].Path < paths[j].Path })
+	return paths, nil
+}
+func (m *memoryRepo) BackfillChatProjects(_ context.Context) (int, error) { return 0, nil }
 func (m *memoryRepo) CreateDevice(_ context.Context, input repository.CreateRegistryInput) (repository.Device, error) {
 	device := repository.Device{ID: input.ID, CreatedAt: derefTime(input.CreatedAt), UpdatedAt: derefTime(input.UpdatedAt), ArchivedAt: cloneTimePtr(input.ArchivedAt)}
 	m.devices[input.ID] = device
@@ -4063,6 +4410,150 @@ func (m *memoryRepo) UpsertDeviceForImport(_ context.Context, device repository.
 	}
 	m.devices[device.ID] = device
 	return true, nil
+}
+func (m *memoryRepo) UpsertChatSession(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+	created := true
+	for id, existing := range m.chatSessions {
+		if existing.Source == input.Source && existing.SourceSessionID == input.SourceSessionID {
+			session := chatSessionFromInput(input)
+			session.ID = id
+			if session.ProjectID == nil {
+				session.ProjectID = existing.ProjectID
+			}
+			if session.Title == nil {
+				session.Title = existing.Title
+			}
+			if input.ClearDeleted {
+				session.DeletedAt = nil
+			}
+			m.chatSessions[id] = session
+			return session, false, nil
+		}
+	}
+	session := chatSessionFromInput(input)
+	m.chatSessions[session.ID] = session
+	return session, created, nil
+}
+func (m *memoryRepo) GetChatSessionByID(_ context.Context, id string) (repository.ChatSession, error) {
+	session, ok := m.chatSessions[id]
+	if !ok {
+		return repository.ChatSession{}, repository.ErrNotFound
+	}
+	return session, nil
+}
+func (m *memoryRepo) GetChatSessionBySource(_ context.Context, source string, sourceSessionID string) (repository.ChatSession, error) {
+	if m.getChatBySourceErr != nil {
+		return repository.ChatSession{}, m.getChatBySourceErr
+	}
+	for _, session := range m.chatSessions {
+		if session.Source == source && session.SourceSessionID == sourceSessionID {
+			return session, nil
+		}
+	}
+	return repository.ChatSession{}, repository.ErrNotFound
+}
+func (m *memoryRepo) ListChatSessions(_ context.Context, filter repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+	if m.listChatSessionsErr != nil {
+		return nil, m.listChatSessionsErr
+	}
+	sessions := make([]repository.ChatSession, 0, len(m.chatSessions))
+	for _, session := range m.chatSessions {
+		if !filter.IncludeDeleted && !filter.OnlyDeleted && session.DeletedAt != nil {
+			continue
+		}
+		if filter.OnlyDeleted && session.DeletedAt == nil {
+			continue
+		}
+		if filter.UpdatedAfter != nil && session.UpdatedAt.Before(*filter.UpdatedAfter) {
+			continue
+		}
+		sessions = append(sessions, session)
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		if !sessions[i].LastActivityAt.Equal(sessions[j].LastActivityAt) {
+			return sessions[i].LastActivityAt.After(sessions[j].LastActivityAt)
+		}
+		return sessions[i].ID < sessions[j].ID
+	})
+	return sessions, nil
+}
+func (m *memoryRepo) CountChatSessions(_ context.Context, _ repository.ListChatSessionsFilter) (int, error) {
+	return len(m.chatSessions), nil
+}
+func (m *memoryRepo) SoftDeleteChatSession(_ context.Context, _ string) error { return nil }
+func (m *memoryRepo) RestoreChatSession(_ context.Context, _ string) error    { return nil }
+func (m *memoryRepo) DeleteChatSession(_ context.Context, id string) error {
+	delete(m.chatSessions, id)
+	delete(m.chatItems, id)
+	return nil
+}
+func (m *memoryRepo) MaxChatItemOrdinal(_ context.Context, sessionID string) (int, error) {
+	if m.maxChatItemOrdinalErr != nil {
+		return 0, m.maxChatItemOrdinalErr
+	}
+	maxOrdinal := -1
+	for _, item := range m.chatItems[sessionID] {
+		if item.Ordinal > maxOrdinal {
+			maxOrdinal = item.Ordinal
+		}
+	}
+	return maxOrdinal, nil
+}
+func (m *memoryRepo) CreateChatItem(_ context.Context, input repository.CreateChatItemInput) (repository.ChatItem, error) {
+	if m.createChatItemErr != nil {
+		return repository.ChatItem{}, m.createChatItemErr
+	}
+	item := repository.ChatItem{
+		ID:         m.nextChatItemID,
+		SessionID:  input.SessionID,
+		Ordinal:    input.Ordinal,
+		Role:       input.Role,
+		ItemType:   input.ItemType,
+		Text:       cloneStringPtr(input.Text),
+		SearchText: input.SearchText,
+		RawJSON:    cloneStringPtr(input.RawJSON),
+		CreatedAt:  derefTime(input.CreatedAt),
+	}
+	m.nextChatItemID++
+	m.chatItems[input.SessionID] = append(m.chatItems[input.SessionID], item)
+	return item, nil
+}
+func (m *memoryRepo) ReplaceChatItems(_ context.Context, sessionID string, inputs []repository.CreateChatItemInput) error {
+	if m.replaceChatItemsErr != nil {
+		return m.replaceChatItemsErr
+	}
+	replaced := make([]repository.ChatItem, 0, len(inputs))
+	for _, input := range inputs {
+		item := repository.ChatItem{
+			ID:         m.nextChatItemID,
+			SessionID:  sessionID,
+			Ordinal:    input.Ordinal,
+			Role:       input.Role,
+			ItemType:   input.ItemType,
+			Text:       cloneStringPtr(input.Text),
+			SearchText: input.SearchText,
+			RawJSON:    cloneStringPtr(input.RawJSON),
+			CreatedAt:  derefTime(input.CreatedAt),
+		}
+		m.nextChatItemID++
+		replaced = append(replaced, item)
+	}
+	m.chatItems[sessionID] = replaced
+	return nil
+}
+func (m *memoryRepo) ListChatItems(_ context.Context, sessionID string) ([]repository.ChatItem, error) {
+	if m.listChatItemsErr != nil {
+		return nil, m.listChatItemsErr
+	}
+	items := append([]repository.ChatItem(nil), m.chatItems[sessionID]...)
+	sort.Slice(items, func(i, j int) bool { return items[i].Ordinal < items[j].Ordinal })
+	return items, nil
+}
+func (m *memoryRepo) SearchChatItems(_ context.Context, _ repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
+	return nil, nil
+}
+func (m *memoryRepo) SearchAll(_ context.Context, _ repository.UnifiedSearchFilter) ([]repository.DomainSearchResult, error) {
+	return nil, nil
 }
 func (m *memoryRepo) CountActiveRecords(_ context.Context) (int, error)       { return 0, nil }
 func (m *memoryRepo) CountTrashedRecords(_ context.Context) (int, error)      { return 0, nil }
@@ -4284,6 +4775,25 @@ func derefTime(value *time.Time) time.Time {
 	return *value
 }
 
+func chatSessionFromInput(input repository.UpsertChatSessionInput) repository.ChatSession {
+	return repository.ChatSession{
+		ID:                 input.ID,
+		Source:             input.Source,
+		SourceSessionID:    input.SourceSessionID,
+		SourceDeviceID:     input.SourceDeviceID,
+		ProjectID:          cloneStringPtr(input.ProjectID),
+		CWD:                cloneStringPtr(input.CWD),
+		Title:              cloneStringPtr(input.Title),
+		StartedAt:          input.StartedAt,
+		LastActivityAt:     input.LastActivityAt,
+		OriginalSourcePath: cloneStringPtr(input.OriginalSourcePath),
+		RawSourceKey:       cloneStringPtr(input.RawSourceKey),
+		CreatedAt:          derefTime(input.CreatedAt),
+		UpdatedAt:          derefTime(input.UpdatedAt),
+		DeletedAt:          cloneTimePtr(input.DeletedAt),
+	}
+}
+
 func cloneStringPtr(value *string) *string {
 	if value == nil {
 		return nil
@@ -4298,4 +4808,37 @@ func cloneTimePtr(value *time.Time) *time.Time {
 	}
 	copied := *value
 	return &copied
+}
+
+// TestServiceSetWarnWriterRoutesChatRawWarnings verifies that warnings
+// raised by syncChangedChats are written to the writer registered with
+// SetWarnWriter rather than the package default (os.Stderr).
+func TestServiceSetWarnWriterRoutesChatRawWarnings(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	service, localRepo, _, _, _, _ := newTestService(t, nil, nil)
+	key := "chats/raw/20260514-feedface/source.json"
+	localRepo.chatSessions["20260514-feedface"] = repository.ChatSession{
+		ID:              "20260514-feedface",
+		Source:          "codex",
+		SourceSessionID: "warn-sess",
+		SourceDeviceID:  "warn-device",
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		RawSourceKey:    &key,
+	}
+
+	captured := &bytes.Buffer{}
+	service.SetWarnWriter(captured)
+	if err := service.pushChangedChats(context.Background(), time.Time{}); err != nil {
+		t.Fatalf("pushChangedChats: %v", err)
+	}
+	if !strings.Contains(captured.String(), "raw chat source files missing locally") {
+		t.Fatalf("expected captured warning, got %q", captured.String())
+	}
+
+	// nil resets to default; we don't assert default contents, only that it
+	// does not panic and re-uses the package default writer.
+	service.SetWarnWriter(nil)
 }

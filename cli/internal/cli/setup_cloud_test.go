@@ -45,6 +45,64 @@ func TestSetupOptionsHasCloudFlags(t *testing.T) {
 	}
 }
 
+func TestValidateNeonConnectivityConnectError(t *testing.T) {
+	origNewPool := newPGXPoolFn
+	newPGXPoolFn = func(context.Context, string) (*pgxpool.Pool, error) {
+		return nil, errors.New("connect failed")
+	}
+	t.Cleanup(func() { newPGXPoolFn = origNewPool })
+
+	err := validateNeonConnectivityFn(context.Background(), "postgres://example")
+	if err == nil || !strings.Contains(err.Error(), "connect") {
+		t.Fatalf("expected connect error, got %v", err)
+	}
+}
+
+func TestRunSetupInitCloudSchemaErrorBranches(t *testing.T) {
+	if err := runSetupInitCloudSchema(context.Background(), &bytes.Buffer{}, "not-a-url"); err == nil || !strings.Contains(err.Error(), "invalid neon URL") {
+		t.Fatalf("expected invalid neon URL error, got %v", err)
+	}
+
+	origValidate := validateNeonConnectivityFn
+	origNewPool := newPGXPoolFn
+	origApply := applyPostgresSchemaFn
+	t.Cleanup(func() {
+		validateNeonConnectivityFn = origValidate
+		newPGXPoolFn = origNewPool
+		applyPostgresSchemaFn = origApply
+	})
+
+	validateNeonConnectivityFn = func(context.Context, string) error { return nil }
+	newPGXPoolFn = func(context.Context, string) (*pgxpool.Pool, error) {
+		return nil, errors.New("schema connect failed")
+	}
+	if err := runSetupInitCloudSchema(context.Background(), &bytes.Buffer{}, "postgres://user:pass@example.com/db"); err == nil || !strings.Contains(err.Error(), "connect to postgres") {
+		t.Fatalf("expected schema connect error, got %v", err)
+	}
+
+	newPGXPoolFn = func(context.Context, string) (*pgxpool.Pool, error) { return nil, nil }
+	applyPostgresSchemaFn = func(context.Context, *pgxpool.Pool) error {
+		return errors.New("schema apply failed")
+	}
+	if err := runSetupInitCloudSchema(context.Background(), &bytes.Buffer{}, "postgres://user:pass@example.com/db"); err == nil || !strings.Contains(err.Error(), "apply postgres schema") {
+		t.Fatalf("expected schema apply error, got %v", err)
+	}
+}
+
+func TestRunSetupCloudInteractiveRequiresLocalRepo(t *testing.T) {
+	store, err := config.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	err = runSetupCloud(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("y\n"),
+		t.TempDir(), store,
+		"postgres://user:pass@example.com/db", "bucket-name", "us-east-1", "aws-key", "aws-secret", "", false, "pc_key_test",
+		nil, true)
+	if err == nil || !strings.Contains(err.Error(), "localRepo is required") {
+		t.Fatalf("expected localRepo required error, got %v", err)
+	}
+}
+
 func TestSetupOptionsValidateCloudFlagsComplete(t *testing.T) {
 	tests := []struct {
 		name    string

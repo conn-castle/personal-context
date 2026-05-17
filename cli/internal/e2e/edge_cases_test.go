@@ -17,7 +17,7 @@ func TestEdgeCaseMinimalRecord(t *testing.T) {
 	inputDir := createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body><p>Bare record</p></body></html>",
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 	if recordID == "" {
 		t.Fatal("expected record ID in stdout")
@@ -84,7 +84,7 @@ func TestEdgeCaseManyFigures(t *testing.T) {
 		HTMLContent: strings.Join(htmlParts, "\n"),
 		Figures:     figures,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Verify all 12 figure files exist on disk.
@@ -126,7 +126,7 @@ func TestEdgeCaseSpecialCharactersInFilenames(t *testing.T) {
 			"results (final).csv": []byte("col1,col2\n1,2\n"),
 		},
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Verify figure files with special characters exist on disk.
@@ -173,7 +173,7 @@ func TestEdgeCaseUnicodeInHTMLAndNotes(t *testing.T) {
 		HTMLContent: unicodeHTML,
 		Notes:       unicodeNotes,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Verify via JSON that unicode round-trips correctly.
@@ -209,7 +209,7 @@ func TestEdgeCaseEmptyNotesFile(t *testing.T) {
 		t.Fatalf("write empty notes.md: %v", err)
 	}
 
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Verify via JSON that notes is null (NormalizeString returns nil for empty).
@@ -236,7 +236,7 @@ func TestEdgeCaseMultipleRecordsOnSameDate(t *testing.T) {
 		inputDir := createInputFolder(t, inputFolderOpts{
 			HTMLContent: fmt.Sprintf("<html><body>Record %d</body></html>", i+1),
 		})
-		stdout := runPCSuccess(t, homeDir, "add", "--date", date, inputDir)
+		stdout := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir)
 		recordIDs[i] = strings.TrimSpace(stdout)
 	}
 

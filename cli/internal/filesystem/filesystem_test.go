@@ -748,6 +748,29 @@ func TestDeleteRecordDir(t *testing.T) {
 		}
 	})
 
+	t.Run("returns remove errors", func(t *testing.T) {
+		if runtime.GOOS == "windows" || os.Getuid() == 0 {
+			t.Skip("permission-based remove failure is not reliable")
+		}
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+		parent := filepath.Join(root, "figures")
+		recordDir := filepath.Join(parent, "record-1")
+		if err := os.MkdirAll(recordDir, 0o700); err != nil {
+			t.Fatalf("MkdirAll(recordDir) error = %v", err)
+		}
+		if err := os.Chmod(parent, 0o500); err != nil {
+			t.Fatalf("Chmod(parent) error = %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
+		if err := client.DeleteRecordDir("record-1"); err == nil || !strings.Contains(err.Error(), "remove figures/record-1") {
+			t.Fatalf("expected remove error, got %v", err)
+		}
+	})
+
 	t.Run("files inside directories are also removed", func(t *testing.T) {
 		root := t.TempDir()
 		client, err := NewClient(root)

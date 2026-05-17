@@ -108,7 +108,7 @@ func TestAddAfterNonexistentRef(t *testing.T) {
 	writeDefaultProvenanceMetadata(t, dir)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", "--after", "nonexistent-ref", "--date", "2099-01-01", dir})
+	cmd.SetArgs([]string{"records", "add", "--after", "nonexistent-ref", "--date", "2099-01-01", dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error for --after nonexistent reference")
 	}
@@ -131,7 +131,7 @@ func withBrokenHomeDir(t *testing.T, fn func()) {
 func TestAddHomeDirError(t *testing.T) {
 	withBrokenHomeDir(t, func() {
 		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-		cmd.SetArgs([]string{"add", "/tmp/fake"})
+		cmd.SetArgs([]string{"records", "add", "/tmp/fake"})
 		if err := cmd.Execute(); err == nil {
 			t.Fatal("expected error")
 		}
@@ -151,7 +151,7 @@ func TestShowHomeDirError(t *testing.T) {
 func TestEditHomeDirError(t *testing.T) {
 	withBrokenHomeDir(t, func() {
 		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-		cmd.SetArgs([]string{"edit", "some-id", "/tmp/fake"})
+		cmd.SetArgs([]string{"records", "edit", "some-id", "/tmp/fake"})
 		if err := cmd.Execute(); err == nil {
 			t.Fatal("expected error")
 		}
@@ -161,7 +161,7 @@ func TestEditHomeDirError(t *testing.T) {
 func TestDeleteHomeDirError(t *testing.T) {
 	withBrokenHomeDir(t, func() {
 		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-		cmd.SetArgs([]string{"delete", "some-id"})
+		cmd.SetArgs([]string{"records", "delete", "some-id"})
 		if err := cmd.Execute(); err == nil {
 			t.Fatal("expected error")
 		}
@@ -171,7 +171,7 @@ func TestDeleteHomeDirError(t *testing.T) {
 func TestRestoreHomeDirError(t *testing.T) {
 	withBrokenHomeDir(t, func() {
 		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-		cmd.SetArgs([]string{"restore", "some-id"})
+		cmd.SetArgs([]string{"records", "restore", "some-id"})
 		if err := cmd.Execute(); err == nil {
 			t.Fatal("expected error")
 		}
@@ -181,7 +181,7 @@ func TestRestoreHomeDirError(t *testing.T) {
 func TestMoveHomeDirError(t *testing.T) {
 	withBrokenHomeDir(t, func() {
 		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-		cmd.SetArgs([]string{"move", "some-id", "--date", "2025-01-01"})
+		cmd.SetArgs([]string{"records", "move", "some-id", "--date", "2025-01-01"})
 		if err := cmd.Execute(); err == nil {
 			t.Fatal("expected error")
 		}
@@ -242,7 +242,7 @@ func TestAddWithoutSetup(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", dir})
+	cmd.SetArgs([]string{"records", "add", dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error without setup")
 	}
@@ -269,7 +269,7 @@ func TestEditWithoutSetup(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", "some-id", dir})
+	cmd.SetArgs([]string{"records", "edit", "some-id", dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error without setup")
 	}
@@ -280,7 +280,7 @@ func TestDeleteWithoutSetup(t *testing.T) {
 	t.Setenv("PC_HOME", homeDir)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"delete", "some-id"})
+	cmd.SetArgs([]string{"records", "delete", "some-id"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error without setup")
 	}
@@ -291,7 +291,7 @@ func TestRestoreWithoutSetup(t *testing.T) {
 	t.Setenv("PC_HOME", homeDir)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"restore", "some-id"})
+	cmd.SetArgs([]string{"records", "restore", "some-id"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error without setup")
 	}
@@ -302,7 +302,7 @@ func TestMoveWithoutSetup(t *testing.T) {
 	t.Setenv("PC_HOME", homeDir)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"move", "some-id", "--date", "2025-01-01"})
+	cmd.SetArgs([]string{"records", "move", "some-id", "--date", "2025-01-01"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error without setup")
 	}
@@ -535,7 +535,7 @@ func TestAddInvalidInputDir(t *testing.T) {
 	setupEnv(t)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", "/nonexistent/path/to/nowhere"})
+	cmd.SetArgs([]string{"records", "add", "/nonexistent/path/to/nowhere"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error for nonexistent input dir")
 	}
@@ -604,7 +604,7 @@ func TestDeleteDBError(t *testing.T) {
 	corruptTable(t, homeDir, "records")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"delete", id})
+	cmd.SetArgs([]string{"records", "delete", id})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when records table missing")
 	}
@@ -617,7 +617,7 @@ func TestRestoreDBError(t *testing.T) {
 	corruptTable(t, homeDir, "records")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"restore", id})
+	cmd.SetArgs([]string{"records", "restore", id})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when records table missing")
 	}
@@ -674,7 +674,7 @@ func TestEditGetRecordError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", id, dir})
+	cmd.SetArgs([]string{"records", "edit", id, dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when records table missing")
 	}
@@ -687,7 +687,7 @@ func TestEditInputParseError(t *testing.T) {
 	emptyDir := t.TempDir()
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", id, emptyDir})
+	cmd.SetArgs([]string{"records", "edit", id, emptyDir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error for missing record.html in edit")
 	}
@@ -700,7 +700,7 @@ func TestMoveGetRecordError(t *testing.T) {
 	corruptTable(t, homeDir, "records")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"move", id, "--date", "2025-01-01"})
+	cmd.SetArgs([]string{"records", "move", id, "--date", "2025-01-01"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when records table missing")
 	}
@@ -713,7 +713,7 @@ func TestMoveAfterNonexistentRef(t *testing.T) {
 	id2 := addRecord(t, "--date", "2025-07-01")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"move", id2, "--after", "nonexistent-ref"})
+	cmd.SetArgs([]string{"records", "move", id2, "--after", "nonexistent-ref"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error for --after nonexistent ref")
 	}
@@ -737,7 +737,7 @@ func TestEditOldFiguresListError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", id, newDir})
+	cmd.SetArgs([]string{"records", "edit", id, newDir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when record_figures table missing")
 	}
@@ -761,7 +761,7 @@ func TestEditOldDataFilesListError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", id, newDir})
+	cmd.SetArgs([]string{"records", "edit", id, newDir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when record_data_files table missing")
 	}
@@ -780,7 +780,7 @@ func TestAddCreateRecordError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", dir})
+	cmd.SetArgs([]string{"records", "add", dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when records table missing")
 	}
@@ -793,7 +793,7 @@ func TestMoveMutuallyExclusiveFlags(t *testing.T) {
 	id := addRecord(t)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"move", id, "--first", "--last"})
+	cmd.SetArgs([]string{"records", "move", id, "--first", "--last"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error for mutually exclusive flags")
 	}
@@ -830,7 +830,7 @@ func TestAddFigureCopyError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", dir})
+	cmd.SetArgs([]string{"records", "add", dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when figures dir is unwritable")
 	}
@@ -867,7 +867,7 @@ func TestAddDataFileCopyError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", dir})
+	cmd.SetArgs([]string{"records", "add", dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when data dir is unwritable")
 	}
@@ -902,7 +902,7 @@ func TestEditFigureCopyError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", id, dir})
+	cmd.SetArgs([]string{"records", "edit", id, dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when figures dir is unwritable")
 	}
@@ -937,7 +937,7 @@ func TestEditDataFileCopyError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", id, dir})
+	cmd.SetArgs([]string{"records", "edit", id, dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when data dir is unwritable")
 	}
@@ -990,7 +990,7 @@ func TestMoveMultiplePositionFlags(t *testing.T) {
 
 	// --first and --after together should fail
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"move", id, "--first", "--after", "some-id"})
+	cmd.SetArgs([]string{"records", "move", id, "--first", "--after", "some-id"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error for multiple position flags")
 	}
@@ -1016,7 +1016,7 @@ func TestAddCreateRecordFigureError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", dir})
+	cmd.SetArgs([]string{"records", "add", dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when record_figures table missing")
 	}
@@ -1060,7 +1060,7 @@ func TestAddCreateRecordDataFileError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", dir})
+	cmd.SetArgs([]string{"records", "add", dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when record_data_files table missing")
 	}
@@ -1134,7 +1134,7 @@ func TestMoveUpdateRecordError(t *testing.T) {
 	corruptTable(t, homeDir, "sync_version")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"move", id, "--date", "2025-09-01"})
+	cmd.SetArgs([]string{"records", "move", id, "--date", "2025-09-01"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when sync_version table missing (trigger fails)")
 	}
@@ -1160,7 +1160,7 @@ func TestEditUpdateRecordError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", id, dir})
+	cmd.SetArgs([]string{"records", "edit", id, dir})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error when sync_version table missing")
@@ -1213,7 +1213,7 @@ func TestEditDeleteRecordFigureError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", id, dir})
+	cmd.SetArgs([]string{"records", "edit", id, dir})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error when figure delete trigger fails")
@@ -1239,7 +1239,7 @@ func TestEditDeleteRecordDataFileError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", id, dir})
+	cmd.SetArgs([]string{"records", "edit", id, dir})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error when data file delete trigger fails")
@@ -1274,7 +1274,7 @@ func TestAddCreateRecordTriggError(t *testing.T) {
 	}
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", dir})
+	cmd.SetArgs([]string{"records", "add", dir})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when record insert trigger fails")
 	}
@@ -1291,7 +1291,7 @@ func TestDeleteTriggerError(t *testing.T) {
 	corruptTable(t, homeDir, "sync_version")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"delete", id})
+	cmd.SetArgs([]string{"records", "delete", id})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when delete trigger fails")
 	}
@@ -1305,7 +1305,7 @@ func TestRestoreTriggerError(t *testing.T) {
 
 	// Delete first (so there's something to restore)
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
@@ -1314,7 +1314,7 @@ func TestRestoreTriggerError(t *testing.T) {
 	corruptTable(t, homeDir, "sync_version")
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"restore", id})
+	cmd.SetArgs([]string{"records", "restore", id})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when restore trigger fails")
 	}

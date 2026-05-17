@@ -9,10 +9,12 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/config"
@@ -33,6 +35,20 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 		map[string][]byte{"original.png": []byte("original-figure")},
 		map[string][]byte{"original.csv": []byte("x,y\n1,2\n")},
 	)
+	chatRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(chatRoot, "snapshot-chat.json"), []byte(`{
+  "id": "snapshot-chat",
+  "title": "Snapshot support chat",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [{"role": "user", "content": "snapshot support chat needle"}]
+}`), 0o644); err != nil {
+		t.Fatalf("write chat transcript: %v", err)
+	}
+	chatCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	chatCmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", chatRoot})
+	if err := chatCmd.Execute(); err != nil {
+		t.Fatalf("chat import: %v", err)
+	}
 
 	sourceStack, err := openLocalStack(sourceHome)
 	if err != nil {
@@ -57,6 +73,12 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 	if len(snapshot.Records) != 1 {
 		t.Fatalf("expected 1 record in snapshot, got %d", len(snapshot.Records))
 	}
+	if len(snapshot.Chats) != 1 || len(snapshot.Chats[0].Items) != 1 {
+		t.Fatalf("expected 1 chat with item in snapshot, got %+v", snapshot.Chats)
+	}
+	if snapshot.Chats[0].RawSourceKey == nil || len(snapshot.Chats[0].RawSourceContent) == 0 {
+		t.Fatalf("expected chat snapshot to carry raw source bytes, got %+v", snapshot.Chats[0])
+	}
 
 	targetHome := t.TempDir()
 	if err := ensureLocalEnvironment(ctx, targetHome); err != nil {
@@ -75,10 +97,36 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 	if stats.Created != 1 || stats.Updated != 0 || stats.Skipped != 0 {
 		t.Fatalf("create stats = %+v", stats)
 	}
+	importedChat, err := targetStack.Repo.GetChatSessionBySource(ctx, "codex", "snapshot-chat")
+	if err != nil {
+		t.Fatalf("GetChatSessionBySource(imported): %v", err)
+	}
+	importedItems, err := targetStack.Repo.ListChatItems(ctx, importedChat.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems(imported): %v", err)
+	}
+	if len(importedItems) != 1 || importedItems[0].SearchText != "snapshot support chat needle" {
+		t.Fatalf("unexpected imported chat items: %+v", importedItems)
+	}
+	if importedChat.RawSourceKey == nil {
+		t.Fatalf("expected imported chat raw_source_key, got %+v", importedChat)
+	}
+	importedRawPath, err := targetStack.FS.ResolveChatSourcePath(importedChat.ID, *importedChat.RawSourceKey)
+	if err != nil {
+		t.Fatalf("ResolveChatSourcePath(imported): %v", err)
+	}
+	importedRaw, err := os.ReadFile(importedRawPath)
+	if err != nil {
+		t.Fatalf("read imported chat raw source: %v", err)
+	}
+	if !strings.Contains(string(importedRaw), "snapshot support chat needle") {
+		t.Fatalf("unexpected imported chat raw source: %q", string(importedRaw))
+	}
 
 	updatedSnapshot := snapshot
 	updatedSnapshot.Templates = append([]gitsnapshot.Template(nil), snapshot.Templates...)
 	updatedSnapshot.Records = append([]gitsnapshot.Record(nil), snapshot.Records...)
+	updatedSnapshot.Chats = append([]gitsnapshot.ChatSession(nil), snapshot.Chats...)
 
 	for i := range updatedSnapshot.Templates {
 		if updatedSnapshot.Templates[i].Name == "text-only" {
@@ -109,6 +157,18 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 		Hash:     hashData("fresh,data\n"),
 	}}
 	updatedSnapshot.Records[0] = updatedRecord
+	updatedChat := updatedSnapshot.Chats[0]
+	updatedChat.UpdatedAt = updatedChat.UpdatedAt.Add(time.Minute)
+	updatedChat.LastActivityAt = updatedChat.LastActivityAt.Add(time.Minute)
+	updatedChat.RawSourceContent = []byte(`{"id":"snapshot-chat","messages":[{"role":"user","content":"snapshot support chat replaced"}]}`)
+	updatedChat.Items = []gitsnapshot.ChatItem{{
+		Ordinal:    0,
+		Role:       "user",
+		ItemType:   "message",
+		SearchText: "snapshot support chat replaced",
+		CreatedAt:  updatedChat.LastActivityAt,
+	}}
+	updatedSnapshot.Chats[0] = updatedChat
 
 	stats, err = importSnapshotIntoStack(ctx, targetStack, updatedSnapshot)
 	if err != nil {
@@ -134,6 +194,42 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(basePath(targetHome), "figures", recordID, "original.png")); !os.IsNotExist(err) {
 		t.Fatalf("original figure should be removed after update, stat err = %v", err)
+	}
+	importedItems, err = targetStack.Repo.ListChatItems(ctx, importedChat.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems(updated): %v", err)
+	}
+	if len(importedItems) != 1 || importedItems[0].SearchText != "snapshot support chat replaced" {
+		t.Fatalf("expected snapshot import to replace chat items, got %+v", importedItems)
+	}
+	importedRaw, err = os.ReadFile(importedRawPath)
+	if err != nil {
+		t.Fatalf("read updated chat raw source: %v", err)
+	}
+	if !strings.Contains(string(importedRaw), "snapshot support chat replaced") {
+		t.Fatalf("expected updated chat raw source, got %q", string(importedRaw))
+	}
+
+	stats, err = importSnapshotIntoStack(ctx, targetStack, snapshot)
+	if err != nil {
+		t.Fatalf("importSnapshotIntoStack(stale chat snapshot): %v", err)
+	}
+	if stats.Created != 0 || stats.Updated != 0 || stats.Skipped != 1 {
+		t.Fatalf("stale snapshot stats = %+v", stats)
+	}
+	importedItems, err = targetStack.Repo.ListChatItems(ctx, importedChat.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems(after stale): %v", err)
+	}
+	if len(importedItems) != 1 || importedItems[0].SearchText != "snapshot support chat replaced" {
+		t.Fatalf("expected stale snapshot to preserve newer chat items, got %+v", importedItems)
+	}
+	importedRaw, err = os.ReadFile(importedRawPath)
+	if err != nil {
+		t.Fatalf("read chat raw source after stale import: %v", err)
+	}
+	if !strings.Contains(string(importedRaw), "snapshot support chat replaced") {
+		t.Fatalf("expected stale snapshot to preserve newer chat raw source, got %q", string(importedRaw))
 	}
 
 	stats, err = importSnapshotIntoStack(ctx, targetStack, updatedSnapshot)
@@ -200,6 +296,13 @@ func TestRunExportImportRestoreAndVerifyLocal(t *testing.T) {
 		nil,
 		nil,
 	)
+	staleChatRawPath := filepath.Join(basePath(targetHome), "chats", "raw", "20260514-deadbeef", "source.json")
+	if err := os.MkdirAll(filepath.Dir(staleChatRawPath), 0o700); err != nil {
+		t.Fatalf("mkdir stale chat raw dir: %v", err)
+	}
+	if err := os.WriteFile(staleChatRawPath, []byte(`{"id":"stale"}`), 0o600); err != nil {
+		t.Fatalf("write stale chat raw source: %v", err)
+	}
 	stdout.Reset()
 	if err := runRestoreDB(ctx, stdout, &bytes.Buffer{}, exportDir); err != nil {
 		t.Fatalf("runRestoreDB(): %v", err)
@@ -218,6 +321,9 @@ func TestRunExportImportRestoreAndVerifyLocal(t *testing.T) {
 	}
 	if _, err := stack.Repo.GetRecordByID(ctx, extraID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("extra record should be removed by restore-db, err = %v", err)
+	}
+	if _, err := os.Stat(staleChatRawPath); !os.IsNotExist(err) {
+		t.Fatalf("stale chat raw source should be removed by restore-db, stat err = %v", err)
 	}
 }
 
@@ -332,10 +438,10 @@ func hashData(value string) string {
 
 type snapshotRepoStub struct {
 	mockRepo
-	listTemplatesFn     func(context.Context) ([]repository.Template, error)
+	listTemplatesFn      func(context.Context) ([]repository.Template, error)
 	listRecordsFn        func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error)
-	listFiguresFn       func(context.Context, string) ([]repository.RecordFigure, error)
-	listDataFilesFn     func(context.Context, string) ([]repository.RecordDataFile, error)
+	listFiguresFn        func(context.Context, string) ([]repository.RecordFigure, error)
+	listDataFilesFn      func(context.Context, string) ([]repository.RecordDataFile, error)
 	getRecordByIDFn      func(context.Context, string) (repository.Record, error)
 	createRecordFn       func(context.Context, repository.CreateRecordInput) (repository.Record, error)
 	updateRecordFn       func(context.Context, repository.UpdateRecordInput) (repository.Record, error)
@@ -440,11 +546,12 @@ func TestBuildSnapshotErrorPaths(t *testing.T) {
 	baseFigure := repository.RecordFigure{RecordID: baseRecord.ID, Filename: "plot.png"}
 
 	tests := []struct {
-		name          string
-		templateRepo  repository.Repository
-		recordRepo     repository.Repository
-		readFigure    func(context.Context, repository.RecordFigure) ([]byte, error)
-		wantSubstring string
+		name              string
+		templateRepo      repository.Repository
+		recordRepo        repository.Repository
+		readFigure        func(context.Context, repository.RecordFigure) ([]byte, error)
+		readChatRawSource func(context.Context, repository.ChatSession) ([]byte, error)
+		wantSubstring     string
 	}{
 		{
 			name: "list templates",
@@ -453,7 +560,7 @@ func TestBuildSnapshotErrorPaths(t *testing.T) {
 					return nil, errors.New("templates failed")
 				},
 			},
-			recordRepo:     &snapshotRepoStub{},
+			recordRepo:    &snapshotRepoStub{},
 			readFigure:    func(context.Context, repository.RecordFigure) ([]byte, error) { return nil, nil },
 			wantSubstring: "list templates",
 		},
@@ -467,6 +574,28 @@ func TestBuildSnapshotErrorPaths(t *testing.T) {
 			},
 			readFigure:    func(context.Context, repository.RecordFigure) ([]byte, error) { return nil, nil },
 			wantSubstring: "list records",
+		},
+		{
+			name:         "list projects",
+			templateRepo: &snapshotRepoStub{},
+			recordRepo: &snapshotRepoStub{mockRepo: mockRepo{
+				listProjectsFn: func(context.Context, bool) ([]repository.Project, error) {
+					return nil, errors.New("projects failed")
+				},
+			}},
+			readFigure:    func(context.Context, repository.RecordFigure) ([]byte, error) { return nil, nil },
+			wantSubstring: "list projects",
+		},
+		{
+			name:         "list devices",
+			templateRepo: &snapshotRepoStub{},
+			recordRepo: &snapshotRepoStub{mockRepo: mockRepo{
+				listDevicesFn: func(context.Context, bool) ([]repository.Device, error) {
+					return nil, errors.New("devices failed")
+				},
+			}},
+			readFigure:    func(context.Context, repository.RecordFigure) ([]byte, error) { return nil, nil },
+			wantSubstring: "list devices",
 		},
 		{
 			name:         "list figures",
@@ -518,11 +647,62 @@ func TestBuildSnapshotErrorPaths(t *testing.T) {
 			},
 			wantSubstring: "load figure",
 		},
+		{
+			name:         "list chats",
+			templateRepo: &snapshotRepoStub{},
+			recordRepo: &snapshotRepoStub{mockRepo: mockRepo{
+				listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+					return nil, errors.New("list chats failed")
+				},
+			}},
+			readFigure:    func(context.Context, repository.RecordFigure) ([]byte, error) { return nil, nil },
+			wantSubstring: "list chats",
+		},
+		{
+			name:         "list chat items",
+			templateRepo: &snapshotRepoStub{},
+			recordRepo: &snapshotRepoStub{mockRepo: mockRepo{
+				listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+					return []repository.ChatSession{{ID: "20260309-feed0001"}}, nil
+				},
+				listChatItemsFn: func(context.Context, string) ([]repository.ChatItem, error) {
+					return nil, errors.New("list chat items failed")
+				},
+			}},
+			readFigure:    func(context.Context, repository.RecordFigure) ([]byte, error) { return nil, nil },
+			wantSubstring: "list chat items",
+		},
+		{
+			name:         "read chat raw source",
+			templateRepo: &snapshotRepoStub{},
+			recordRepo: &snapshotRepoStub{mockRepo: mockRepo{
+				listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+					rawKey := "chats/raw/20260309-chatbeef/source.json"
+					return []repository.ChatSession{{
+						ID:           "20260309-chatbeef",
+						RawSourceKey: &rawKey,
+					}}, nil
+				},
+			}},
+			readFigure: func(context.Context, repository.RecordFigure) ([]byte, error) {
+				return nil, nil
+			},
+			readChatRawSource: func(context.Context, repository.ChatSession) ([]byte, error) {
+				return nil, errors.New("chat raw failed")
+			},
+			wantSubstring: "load chat raw source",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := buildSnapshot(ctx, tt.templateRepo, tt.recordRepo, tt.readFigure, repository.ListRecordsFilter{})
+			readChatRawSource := tt.readChatRawSource
+			if readChatRawSource == nil {
+				readChatRawSource = func(context.Context, repository.ChatSession) ([]byte, error) {
+					return nil, nil
+				}
+			}
+			_, err := buildSnapshot(ctx, tt.templateRepo, tt.recordRepo, tt.readFigure, readChatRawSource, repository.ListRecordsFilter{})
 			if err == nil || !strings.Contains(err.Error(), tt.wantSubstring) {
 				t.Fatalf("buildSnapshot() error = %v, want substring %q", err, tt.wantSubstring)
 			}
@@ -624,6 +804,21 @@ func TestImportSnapshotIntoStackErrorPaths(t *testing.T) {
 			wantSubstring: "delete existing figure",
 		},
 		{
+			name: "list existing figures",
+			repo: &snapshotRepoStub{
+				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+					return repository.Record{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
+				},
+				updateRecordFn: func(context.Context, repository.UpdateRecordInput) (repository.Record, error) {
+					return repository.Record{}, nil
+				},
+				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+					return nil, errors.New("list figures failed")
+				},
+			},
+			wantSubstring: "list existing figures",
+		},
+		{
 			name: "delete data file",
 			repo: &snapshotRepoStub{
 				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
@@ -705,6 +900,488 @@ func TestImportSnapshotIntoStackErrorPaths(t *testing.T) {
 				t.Fatalf("importSnapshotIntoStack() error = %v, want substring %q", err, tt.wantSubstring)
 			}
 		})
+	}
+}
+
+func TestImportSnapshotIntoStackChatErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	chatID := "20260309-cafe0001"
+	baseChat := gitsnapshot.ChatSession{
+		ID:              chatID,
+		Source:          "codex",
+		SourceSessionID: "snapshot-chat",
+		SourceDeviceID:  "test-device",
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		Items: []gitsnapshot.ChatItem{{
+			Ordinal:    0,
+			Role:       "user",
+			ItemType:   "message",
+			SearchText: "snapshot chat",
+			CreatedAt:  now,
+		}},
+	}
+
+	t.Run("empty raw source content", func(t *testing.T) {
+		rawKey := "chats/raw/" + chatID + "/source.json"
+		chat := baseChat
+		chat.RawSourceKey = &rawKey
+
+		_, err := importSnapshotIntoStack(ctx, &localStack{Repo: &mockRepo{}}, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{chat}})
+		if err == nil || !strings.Contains(err.Error(), "raw_source_key is set but raw source content is empty") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want empty raw source error", err)
+		}
+	})
+
+	t.Run("get chat", func(t *testing.T) {
+		repo := &mockRepo{
+			getChatByIDFn: func(context.Context, string) (repository.ChatSession, error) {
+				return repository.ChatSession{}, errors.New("lookup failed")
+			},
+		}
+
+		_, err := importSnapshotIntoStack(ctx, &localStack{Repo: repo}, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{baseChat}})
+		if err == nil || !strings.Contains(err.Error(), "look up existing chat rollback state") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want rollback lookup error", err)
+		}
+	})
+
+	t.Run("rollback list chat items", func(t *testing.T) {
+		repo := &mockRepo{
+			getChatByIDFn: func(context.Context, string) (repository.ChatSession, error) {
+				return repository.ChatSession{ID: chatID}, nil
+			},
+			listChatItemsFn: func(context.Context, string) ([]repository.ChatItem, error) {
+				return nil, errors.New("list items failed")
+			},
+		}
+
+		_, err := importSnapshotIntoStack(ctx, &localStack{Repo: repo}, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{baseChat}})
+		if err == nil || !strings.Contains(err.Error(), "list existing chat items for rollback") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want rollback item list error", err)
+		}
+	})
+
+	t.Run("rollback resolve raw source", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+		rawKey := "chats/raw/other/source.json"
+		stack.Repo = &mockRepo{
+			getChatByIDFn: func(context.Context, string) (repository.ChatSession, error) {
+				return repository.ChatSession{ID: chatID, RawSourceKey: &rawKey}, nil
+			},
+			listChatItemsFn: func(context.Context, string) ([]repository.ChatItem, error) {
+				return nil, nil
+			},
+		}
+
+		_, err = importSnapshotIntoStack(ctx, stack, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{baseChat}})
+		if err == nil || !strings.Contains(err.Error(), "resolve existing chat raw source for rollback") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want rollback raw resolve error", err)
+		}
+	})
+
+	t.Run("rollback backup raw source", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+		rawKey := "chats/raw/" + chatID + "/source.json"
+		rawPath, err := stack.FS.ResolveChatSourcePath(chatID, rawKey)
+		if err != nil {
+			t.Fatalf("ResolveChatSourcePath(): %v", err)
+		}
+		if err := os.MkdirAll(rawPath, 0o700); err != nil {
+			t.Fatalf("create raw source directory blocker: %v", err)
+		}
+		stack.Repo = &mockRepo{
+			getChatByIDFn: func(context.Context, string) (repository.ChatSession, error) {
+				return repository.ChatSession{ID: chatID, RawSourceKey: &rawKey}, nil
+			},
+			listChatItemsFn: func(context.Context, string) ([]repository.ChatItem, error) {
+				return nil, nil
+			},
+		}
+
+		_, err = importSnapshotIntoStack(ctx, stack, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{baseChat}})
+		if err == nil || !strings.Contains(err.Error(), "back up existing chat raw source for rollback") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want rollback raw backup error", err)
+		}
+	})
+
+	t.Run("source identity with different id fails before mutation", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+
+		existingID := "20260309-cafe9999"
+		createdAt := now.Add(-time.Hour)
+		if _, _, err := stack.Repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              existingID,
+				Source:          baseChat.Source,
+				SourceSessionID: baseChat.SourceSessionID,
+				SourceDeviceID:  baseChat.SourceDeviceID,
+				StartedAt:       createdAt,
+				LastActivityAt:  createdAt,
+				CreatedAt:       &createdAt,
+				UpdatedAt:       &createdAt,
+			},
+			ClearDeleted: true,
+		}); err != nil {
+			t.Fatalf("seed existing chat: %v", err)
+		}
+		if err := replaceChatItems(ctx, stack.Repo, existingID, []repository.CreateChatItemInput{{
+			Ordinal:    0,
+			Role:       "user",
+			ItemType:   "message",
+			SearchText: "existing item",
+			CreatedAt:  &createdAt,
+		}}); err != nil {
+			t.Fatalf("seed existing chat item: %v", err)
+		}
+
+		_, err = importSnapshotIntoStack(ctx, stack, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{baseChat}})
+		if err == nil || !strings.Contains(err.Error(), "already exists with id "+existingID) {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want source identity conflict", err)
+		}
+		if _, err := stack.Repo.GetChatSessionByID(ctx, chatID); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("snapshot chat id should not be created, err = %v", err)
+		}
+		items, err := stack.Repo.ListChatItems(ctx, existingID)
+		if err != nil {
+			t.Fatalf("ListChatItems(existing): %v", err)
+		}
+		if len(items) != 1 || items[0].SearchText != "existing item" {
+			t.Fatalf("existing chat items should remain unchanged, got %+v", items)
+		}
+	})
+
+	t.Run("duplicate source identity in snapshot fails before mutation", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+
+		duplicateChat := baseChat
+		duplicateChat.ID = "20260309-cafe0002"
+		templateName := "duplicate-source-template"
+		_, err = importSnapshotIntoStack(ctx, stack, gitsnapshot.Snapshot{
+			Templates: []gitsnapshot.Template{{Name: templateName, HTMLContent: "<html>duplicate</html>"}},
+			Chats:     []gitsnapshot.ChatSession{baseChat, duplicateChat},
+		})
+		if err == nil || !strings.Contains(err.Error(), "appears multiple times in snapshot") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want duplicate source identity error", err)
+		}
+		if _, err := stack.Repo.GetTemplateByName(ctx, templateName); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("template should not be created before duplicate chat preflight, err = %v", err)
+		}
+		if _, err := stack.Repo.GetChatSessionByID(ctx, baseChat.ID); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("first duplicate chat should not be created, err = %v", err)
+		}
+		if _, err := stack.Repo.GetChatSessionByID(ctx, duplicateChat.ID); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("second duplicate chat should not be created, err = %v", err)
+		}
+	})
+
+	t.Run("invalid raw source key", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+
+		rawKey := "chats/raw/other/source.json"
+		chat := baseChat
+		chat.RawSourceKey = &rawKey
+		chat.RawSourceContent = []byte("raw")
+
+		_, err = importSnapshotIntoStack(ctx, stack, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{chat}})
+		if err == nil || !strings.Contains(err.Error(), "resolve chat raw source") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want raw source resolve error", err)
+		}
+	})
+
+	t.Run("stage raw source", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+
+		rawKey := "chats/raw/" + chatID + "/source.json"
+		chat := baseChat
+		chat.RawSourceKey = &rawKey
+		chat.RawSourceContent = []byte("raw")
+		blockerPath := filepath.Join(basePath(homeDir), "chats", "raw")
+		if err := os.MkdirAll(filepath.Dir(blockerPath), 0o700); err != nil {
+			t.Fatalf("create raw parent: %v", err)
+		}
+		if err := os.WriteFile(blockerPath, []byte("blocker"), 0o600); err != nil {
+			t.Fatalf("write blocker: %v", err)
+		}
+
+		_, err = importSnapshotIntoStack(ctx, stack, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{chat}})
+		if err == nil || !strings.Contains(err.Error(), "create chat raw staging root") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want raw source stage error", err)
+		}
+	})
+
+	t.Run("create raw stage", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+
+		rawRoot := filepath.Join(basePath(homeDir), "chats", "raw")
+		if err := os.MkdirAll(rawRoot, 0o700); err != nil {
+			t.Fatalf("create raw root: %v", err)
+		}
+		if err := os.Chmod(rawRoot, 0o500); err != nil {
+			t.Fatalf("chmod raw root: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(rawRoot, 0o700) })
+
+		rawKey := "chats/raw/" + chatID + "/source.json"
+		chat := baseChat
+		chat.RawSourceKey = &rawKey
+		chat.RawSourceContent = []byte("raw")
+
+		_, err = importSnapshotIntoStack(ctx, stack, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{chat}})
+		if err == nil || !strings.Contains(err.Error(), "create chat raw stage") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want raw stage creation error", err)
+		}
+	})
+
+	t.Run("upsert chat", func(t *testing.T) {
+		repo := &mockRepo{
+			upsertChatSessionFn: func(context.Context, repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+				return repository.ChatSession{}, false, errors.New("upsert failed")
+			},
+		}
+
+		_, err := importSnapshotIntoStack(ctx, &localStack{Repo: repo}, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{baseChat}})
+		if err == nil || !strings.Contains(err.Error(), "upsert chat") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want upsert chat error", err)
+		}
+	})
+
+	t.Run("replace chat items", func(t *testing.T) {
+		repo := &mockRepo{
+			upsertChatSessionFn: func(context.Context, repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+				return repository.ChatSession{ID: chatID}, true, nil
+			},
+			replaceChatItemsFn: func(context.Context, string, []repository.CreateChatItemInput) error {
+				return errors.New("replace failed")
+			},
+		}
+
+		_, err := importSnapshotIntoStack(ctx, &localStack{Repo: repo}, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{baseChat}})
+		if err == nil || !strings.Contains(err.Error(), "replace chat items") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want replace chat items error", err)
+		}
+	})
+
+	t.Run("replace chat items failure does not publish new raw source", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+
+		rawKey := "chats/raw/" + chatID + "/source.json"
+		chat := baseChat
+		chat.RawSourceKey = &rawKey
+		chat.RawSourceContent = []byte(`{"id":"new"}`)
+		chat.Items = []gitsnapshot.ChatItem{{
+			Ordinal:   -1,
+			Role:      "user",
+			ItemType:  "message",
+			CreatedAt: now,
+		}}
+
+		_, err = importSnapshotIntoStack(ctx, stack, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{chat}})
+		if err == nil || !strings.Contains(err.Error(), "replace chat items") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want replace chat items error", err)
+		}
+		if _, err := stack.Repo.GetChatSessionByID(ctx, chatID); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("new chat row should be rolled back after item failure, err = %v", err)
+		}
+		rawPath, err := stack.FS.ResolveChatSourcePath(chatID, rawKey)
+		if err != nil {
+			t.Fatalf("ResolveChatSourcePath(): %v", err)
+		}
+		if _, err := os.Stat(rawPath); !os.IsNotExist(err) {
+			t.Fatalf("new raw source should not be published after item failure, stat err = %v", err)
+		}
+	})
+
+	t.Run("existing raw source survives replacement failure", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+
+		rawKey := "chats/raw/" + chatID + "/source.json"
+		createdAt := now.Add(-time.Hour)
+		if _, _, err := stack.Repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              chatID,
+				Source:          baseChat.Source,
+				SourceSessionID: baseChat.SourceSessionID,
+				SourceDeviceID:  baseChat.SourceDeviceID,
+				StartedAt:       createdAt,
+				LastActivityAt:  createdAt,
+				RawSourceKey:    &rawKey,
+				CreatedAt:       &createdAt,
+				UpdatedAt:       &createdAt,
+			},
+			ClearDeleted: true,
+		}); err != nil {
+			t.Fatalf("seed existing chat: %v", err)
+		}
+		rawPath, err := stack.FS.ResolveChatSourcePath(chatID, rawKey)
+		if err != nil {
+			t.Fatalf("ResolveChatSourcePath(existing): %v", err)
+		}
+		if err := writeTextFileAtomically(rawPath, []byte(`{"id":"old"}`), 0o700, 0o600); err != nil {
+			t.Fatalf("write existing raw source: %v", err)
+		}
+
+		chat := baseChat
+		chat.RawSourceKey = &rawKey
+		chat.RawSourceContent = []byte(`{"id":"new"}`)
+		chat.Items = []gitsnapshot.ChatItem{{
+			Ordinal:   -1,
+			Role:      "user",
+			ItemType:  "message",
+			CreatedAt: now,
+		}}
+
+		_, err = importSnapshotIntoStack(ctx, stack, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{chat}})
+		if err == nil || !strings.Contains(err.Error(), "replace chat items") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want replace chat items error", err)
+		}
+		got, err := os.ReadFile(rawPath)
+		if err != nil {
+			t.Fatalf("read existing raw source: %v", err)
+		}
+		if string(got) != `{"id":"old"}` {
+			t.Fatalf("existing raw source should survive replacement failure, got %q", got)
+		}
+		restored, err := stack.Repo.GetChatSessionByID(ctx, chatID)
+		if err != nil {
+			t.Fatalf("existing chat should be restored after failure: %v", err)
+		}
+		if !restored.UpdatedAt.Equal(createdAt) {
+			t.Fatalf("existing chat updated_at should be restored, got %s want %s", restored.UpdatedAt, createdAt)
+		}
+	})
+
+	t.Run("promote raw source failure rolls back chat", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+		rawRoot := filepath.Join(basePath(homeDir), "chats", "raw")
+		t.Cleanup(func() { _ = os.Chmod(rawRoot, 0o700) })
+
+		rawKey := "chats/raw/" + chatID + "/source.json"
+		chat := baseChat
+		chat.RawSourceKey = &rawKey
+		chat.RawSourceContent = []byte(`{"id":"new"}`)
+		stack.Repo = &mockRepo{
+			upsertChatSessionFn: func(context.Context, repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+				return repository.ChatSession{ID: chatID}, true, nil
+			},
+			replaceChatItemsFn: func(context.Context, string, []repository.CreateChatItemInput) error {
+				if err := os.Chmod(rawRoot, 0o500); err != nil {
+					return err
+				}
+				return nil
+			},
+		}
+
+		_, err = importSnapshotIntoStack(ctx, stack, gitsnapshot.Snapshot{Chats: []gitsnapshot.ChatSession{chat}})
+		if err == nil || !strings.Contains(err.Error(), "promote chat raw source") {
+			t.Fatalf("importSnapshotIntoStack() error = %v, want promote failure", err)
+		}
+	})
+}
+
+func TestEnsureSnapshotChatSourceIdentity(t *testing.T) {
+	ctx := context.Background()
+	chat := gitsnapshot.ChatSession{
+		ID:              "20260309-cafe0001",
+		Source:          "codex",
+		SourceSessionID: "source-session",
+	}
+
+	if err := ensureSnapshotChatSourceIdentity(ctx, &mockRepo{}, chat); err != nil {
+		t.Fatalf("ensureSnapshotChatSourceIdentity(not found) error = %v", err)
+	}
+
+	sameIDRepo := &mockRepo{
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			return repository.ChatSession{ID: chat.ID}, nil
+		},
+	}
+	if err := ensureSnapshotChatSourceIdentity(ctx, sameIDRepo, chat); err != nil {
+		t.Fatalf("ensureSnapshotChatSourceIdentity(same id) error = %v", err)
+	}
+
+	errorRepo := &mockRepo{
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			return repository.ChatSession{}, errors.New("source lookup failed")
+		},
+	}
+	if err := ensureSnapshotChatSourceIdentity(ctx, errorRepo, chat); err == nil || !strings.Contains(err.Error(), "load chat source") {
+		t.Fatalf("ensureSnapshotChatSourceIdentity(error) = %v, want load chat source error", err)
+	}
+}
+
+func TestReplaceRecordChildrenPathError(t *testing.T) {
+	ctx := context.Background()
+	homeDir := setupEnv(t)
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		t.Fatalf("openLocalStack(): %v", err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+
+	err = replaceRecordChildren(ctx, stack, gitsnapshot.Record{
+		ID: "20260309-badf100d",
+		Figures: []gitsnapshot.Figure{{
+			Filename: "../bad.png",
+			S3Key:    "figures/20260309-badf100d/../bad.png",
+			Content:  []byte("bad"),
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected invalid figure path to fail")
 	}
 }
 
@@ -824,7 +1501,7 @@ func TestPhase7CommandAdditionalErrorPaths(t *testing.T) {
 			UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 		}
 		figure := repository.RecordFigure{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: "cloud.png",
 			S3Key:    "figures/20260309-clouddead/cloud.png",
 		}
@@ -890,6 +1567,116 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 		}
 	})
 
+	t.Run("buildLocalSnapshot missing chat raw source", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+
+		chatID := "20260309-face0001"
+		rawKey := "chats/raw/" + chatID + "/source.json"
+		now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+		if _, _, err := stack.Repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              chatID,
+				Source:          "codex",
+				SourceSessionID: "missing-local-raw",
+				SourceDeviceID:  "test-device",
+				StartedAt:       now,
+				LastActivityAt:  now,
+				RawSourceKey:    &rawKey,
+				CreatedAt:       &now,
+				UpdatedAt:       &now,
+			},
+			ClearDeleted: true,
+		}); err != nil {
+			t.Fatalf("seed chat session: %v", err)
+		}
+
+		if _, err := buildLocalSnapshot(ctx, stack, repository.ListRecordsFilter{}); err == nil || !strings.Contains(err.Error(), "read local chat raw source") {
+			t.Fatalf("buildLocalSnapshot() error = %v, want local chat raw source failure", err)
+		}
+	})
+
+	t.Run("buildLocalSnapshot invalid figure path", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+		stack.Repo = &snapshotRepoStub{mockRepo: mockRepo{
+			listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+				return []repository.Record{{ID: "20260309-badf00d", UpdatedAt: time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)}}, nil
+			},
+			listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+				return []repository.RecordFigure{{RecordID: "20260309-badf00d", Filename: "../bad.png"}}, nil
+			},
+			listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
+				return nil, nil
+			},
+		}}
+
+		if _, err := buildLocalSnapshot(ctx, stack, repository.ListRecordsFilter{}); err == nil || !strings.Contains(err.Error(), "load figure") {
+			t.Fatalf("buildLocalSnapshot() error = %v, want figure path failure", err)
+		}
+	})
+
+	t.Run("buildLocalSnapshot invalid chat raw source key", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+		rawKey := "chats/raw/other/source.json"
+		stack.Repo = &snapshotRepoStub{mockRepo: mockRepo{
+			listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+				return []repository.ChatSession{{ID: "20260309-chatbeef", RawSourceKey: &rawKey}}, nil
+			},
+		}}
+
+		if _, err := buildLocalSnapshot(ctx, stack, repository.ListRecordsFilter{}); err == nil || !strings.Contains(err.Error(), "load chat raw source") {
+			t.Fatalf("buildLocalSnapshot() error = %v, want chat raw source failure", err)
+		}
+	})
+
+	t.Run("buildLocalSnapshot chat without raw source", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+
+		now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+		if _, _, err := stack.Repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              "20260309-face0002",
+				Source:          "codex",
+				SourceSessionID: "no-local-raw",
+				SourceDeviceID:  "test-device",
+				StartedAt:       now,
+				LastActivityAt:  now,
+				CreatedAt:       &now,
+				UpdatedAt:       &now,
+			},
+			ClearDeleted: true,
+		}); err != nil {
+			t.Fatalf("seed chat session: %v", err)
+		}
+
+		snapshot, err := buildLocalSnapshot(ctx, stack, repository.ListRecordsFilter{})
+		if err != nil {
+			t.Fatalf("buildLocalSnapshot(): %v", err)
+		}
+		if len(snapshot.Chats) != 1 || snapshot.Chats[0].RawSourceContent != nil {
+			t.Fatalf("unexpected local chat snapshot: %+v", snapshot.Chats)
+		}
+	})
+
 	t.Run("buildCloudSnapshot downloads figure content", func(t *testing.T) {
 		homeDir := setupEnv(t)
 		record := repository.Record{
@@ -903,16 +1690,17 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 			UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
 		}
 		figure := repository.RecordFigure{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: "cloud.png",
 			S3Key:    "figures/20260309-cloudbeef/cloud.png",
 		}
-
-		origDownloadCloudFigureFn := downloadCloudFigureFn
-		downloadCloudFigureFn = func(context.Context, *cloudStack, string) (io.ReadCloser, error) {
-			return io.NopCloser(strings.NewReader("cloud-bytes")), nil
-		}
-		t.Cleanup(func() { downloadCloudFigureFn = origDownloadCloudFigureFn })
+		s3 := newTestS3Client(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, figure.S3Key) {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = io.WriteString(w, "cloud-bytes")
+		}))
 
 		snapshot, err := buildCloudSnapshot(ctx, homeDir, &cloudStack{
 			Repo: &snapshotRepoStub{
@@ -926,12 +1714,153 @@ func TestSnapshotSupportAdditionalHelperPaths(t *testing.T) {
 					return nil, nil
 				},
 			},
+			S3: s3,
 		}, repository.ListRecordsFilter{})
 		if err != nil {
 			t.Fatalf("buildCloudSnapshot(): %v", err)
 		}
 		if got := string(snapshot.Records[0].Figures[0].Content); got != "cloud-bytes" {
 			t.Fatalf("cloud figure content = %q, want %q", got, "cloud-bytes")
+		}
+	})
+
+	t.Run("buildCloudSnapshot read figure content", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		record := repository.Record{
+			ID:             "20260309-cloudf00d",
+			Date:           "2026-03-09",
+			DayOrder:       "a0",
+			ProjectID:      "phase7/test",
+			SourceDeviceID: "test-device",
+			CreatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+			UpdatedAt:      time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		}
+		figure := repository.RecordFigure{RecordID: record.ID, Filename: "cloud.png", S3Key: "figures/20260309-cloudf00d/cloud.png"}
+		origDownloadCloudFigureFn := downloadCloudFigureFn
+		downloadCloudFigureFn = func(context.Context, *cloudStack, string) (io.ReadCloser, error) {
+			return io.NopCloser(iotest.ErrReader(errors.New("read failed"))), nil
+		}
+		t.Cleanup(func() { downloadCloudFigureFn = origDownloadCloudFigureFn })
+
+		_, err := buildCloudSnapshot(ctx, homeDir, &cloudStack{
+			Repo: &snapshotRepoStub{
+				listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+					return []repository.Record{record}, nil
+				},
+				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+					return []repository.RecordFigure{figure}, nil
+				},
+				listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
+					return nil, nil
+				},
+			},
+		}, repository.ListRecordsFilter{})
+		if err == nil || !strings.Contains(err.Error(), "read cloud figure") {
+			t.Fatalf("buildCloudSnapshot() error = %v, want cloud figure read error", err)
+		}
+	})
+
+	t.Run("buildCloudSnapshot requires S3 for chat raw source", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		chatID := "20260309-cloudchat"
+		rawKey := "chats/raw/" + chatID + "/source.json"
+
+		_, err := buildCloudSnapshot(ctx, homeDir, &cloudStack{
+			Repo: &snapshotRepoStub{mockRepo: mockRepo{
+				listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+					return []repository.ChatSession{{
+						ID:              chatID,
+						Source:          "codex",
+						SourceSessionID: "cloud-chat",
+						RawSourceKey:    &rawKey,
+					}}, nil
+				},
+			}},
+		}, repository.ListRecordsFilter{})
+		if err == nil || !strings.Contains(err.Error(), "cloud S3 client is required") {
+			t.Fatalf("buildCloudSnapshot() error = %v, want missing S3 error", err)
+		}
+	})
+
+	t.Run("buildCloudSnapshot chat without raw source", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		chatID := "20260309-cloudnil"
+
+		snapshot, err := buildCloudSnapshot(ctx, homeDir, &cloudStack{
+			Repo: &snapshotRepoStub{mockRepo: mockRepo{
+				listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+					return []repository.ChatSession{{
+						ID:              chatID,
+						Source:          "codex",
+						SourceSessionID: "cloud-chat-no-raw",
+					}}, nil
+				},
+			}},
+		}, repository.ListRecordsFilter{})
+		if err != nil {
+			t.Fatalf("buildCloudSnapshot(): %v", err)
+		}
+		if len(snapshot.Chats) != 1 || snapshot.Chats[0].RawSourceContent != nil {
+			t.Fatalf("unexpected cloud chat snapshot: %+v", snapshot.Chats)
+		}
+	})
+
+	t.Run("buildCloudSnapshot reports chat raw download error", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		chatID := "20260309-clouderr"
+		rawKey := "chats/raw/" + chatID + "/source.json"
+		s3 := newTestS3Client(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		}))
+
+		_, err := buildCloudSnapshot(ctx, homeDir, &cloudStack{
+			Repo: &snapshotRepoStub{mockRepo: mockRepo{
+				listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+					return []repository.ChatSession{{
+						ID:              chatID,
+						Source:          "codex",
+						SourceSessionID: "cloud-chat-error",
+						RawSourceKey:    &rawKey,
+					}}, nil
+				},
+			}},
+			S3: s3,
+		}, repository.ListRecordsFilter{})
+		if err == nil || !strings.Contains(err.Error(), "load chat raw source") {
+			t.Fatalf("buildCloudSnapshot() error = %v, want chat raw download error", err)
+		}
+	})
+
+	t.Run("buildCloudSnapshot downloads chat raw source", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		chatID := "20260309-cloudraw"
+		rawKey := "chats/raw/" + chatID + "/source.json"
+		s3 := newTestS3Client(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, rawKey) {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = io.WriteString(w, `{"id":"cloud-chat"}`)
+		}))
+
+		snapshot, err := buildCloudSnapshot(ctx, homeDir, &cloudStack{
+			Repo: &snapshotRepoStub{mockRepo: mockRepo{
+				listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+					return []repository.ChatSession{{
+						ID:              chatID,
+						Source:          "codex",
+						SourceSessionID: "cloud-chat",
+						RawSourceKey:    &rawKey,
+					}}, nil
+				},
+			}},
+			S3: s3,
+		}, repository.ListRecordsFilter{})
+		if err != nil {
+			t.Fatalf("buildCloudSnapshot(): %v", err)
+		}
+		if len(snapshot.Chats) != 1 || string(snapshot.Chats[0].RawSourceContent) != `{"id":"cloud-chat"}` {
+			t.Fatalf("unexpected chat raw source content: %+v", snapshot.Chats)
 		}
 	})
 

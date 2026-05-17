@@ -72,6 +72,46 @@ interface Device {
   archived_at: string | null;
 }
 
+interface ProjectPath {
+  id: number;
+  user_id?: string;          // Postgres only; absent in SQLite
+  project_id: string;
+  path: string;              // absolute, normalized project path
+  device_id: string;
+  created_at: string;        // ISO 8601 UTC
+  updated_at: string;        // ISO 8601 UTC
+}
+
+interface ChatSession {
+  id: string;                // "20250304-a3f2b7e1"
+  user_id?: string;          // Postgres only; absent in SQLite
+  source: "codex" | "claude_code" | "gemini" | string;
+  source_session_id: string;
+  source_device_id: string;
+  project_id: string | null;
+  cwd: string | null;
+  title: string | null;
+  started_at: string;        // ISO 8601 UTC
+  last_activity_at: string;  // ISO 8601 UTC
+  original_source_path: string | null;
+  raw_source_key: string | null;  // chats/raw/{id}/source.{json|jsonl|ndjson}
+  created_at: string;        // ISO 8601 UTC
+  updated_at: string;        // ISO 8601 UTC
+  deleted_at: string | null;
+}
+
+interface ChatItem {
+  id: number;
+  session_id: string;
+  ordinal: number;
+  role: string;
+  item_type: string;
+  text: string | null;
+  search_text: string;
+  raw_json: string | null;
+  created_at: string;        // ISO 8601 UTC
+}
+
 // Sort key: ORDER BY (date, day_order, id)
 
 interface RecordFigure {
@@ -149,6 +189,33 @@ interface DataFileExport {
   size: number;
   hash: string;
   description: string | null;
+}
+
+interface ChatExport {
+  format_version: 2;  // v2 renamed source_path→original_source_path, added raw_source_key.
+  id: string;
+  source: string;
+  source_session_id: string;
+  source_device_id: string;
+  project_id?: string;
+  cwd?: string;
+  title?: string;
+  started_at: string;
+  last_activity_at: string;
+  original_source_path?: string;
+  raw_source_key?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ChatItemExport {
+  ordinal: number;
+  role: string;
+  item_type: string;
+  text?: string;
+  search_text: string;
+  raw_json?: string;
+  created_at: string;
 }
 
 // -----------------------------------------------------------------------------

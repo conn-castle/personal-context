@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
@@ -55,6 +58,124 @@ func TestProjectRegistryCommands(t *testing.T) {
 	cmd.SetArgs([]string{"project", "restore", "alpha"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("project restore: %v", err)
+	}
+}
+
+func TestProjectAddPathRegistersAndBackfillsChat(t *testing.T) {
+	projectPath := t.TempDir()
+	normalizedProjectPath, err := normalizeProjectPath(projectPath)
+	if err != nil {
+		t.Fatalf("normalize project path: %v", err)
+	}
+	setupEnv(t)
+	root := t.TempDir()
+	transcript := `{
+  "id": "project-path-session",
+  "cwd": "` + filepath.ToSlash(filepath.Join(normalizedProjectPath, "nested", "child")) + `",
+  "title": "Path chat",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [{"role": "user", "content": "path backfill needle"}]
+}`
+	if err := os.WriteFile(filepath.Join(root, "session.json"), []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "add", "path/project", projectPath, "--device", "test-device"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project add path: %v", err)
+	}
+	out := stdout.String()
+	for _, want := range []string{"path/project registered", "path registered", "Backfilled 1 chat session"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in project add output, got %q", want, out)
+		}
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "add", "path/project", projectPath, "--device", "test-device"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project add path idempotent: %v", err)
+	}
+	if out := stdout.String(); !strings.Contains(out, "already registered") || !strings.Contains(out, "path already registered") {
+		t.Fatalf("expected idempotent output, got %q", out)
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "list", "--format", "json", "--project", "path/project"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat list by project: %v", err)
+	}
+	if !strings.Contains(stdout.String(), `"project_id": "path/project"`) {
+		t.Fatalf("expected backfilled project in chat list, got %q", stdout.String())
+	}
+}
+
+func TestProjectAddPathValidationBranches(t *testing.T) {
+	setupEnv(t)
+	projectPath := t.TempDir()
+	cases := [][]string{
+		{"project", "add", "missing-device", projectPath},
+		{"project", "add", "unknown-device", projectPath, "--device", "does-not-exist"},
+		{"project", "add", "bad-path", filepath.Join(projectPath, "missing"), "--device", "test-device"},
+	}
+	for _, args := range cases {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err == nil {
+			t.Fatalf("expected %v to fail", args)
+		}
+	}
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "list"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project list after failed path registration: %v", err)
+	}
+	for _, unexpected := range []string{"missing-device", "unknown-device", "bad-path"} {
+		if strings.Contains(stdout.String(), unexpected) {
+			t.Fatalf("failed path registration created project %q: %q", unexpected, stdout.String())
+		}
+	}
+
+	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"device", "archive", "test-device"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("archive device: %v", err)
+	}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "add", "archived-device", projectPath, "--device", "test-device"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected archived device path registration to fail")
+	}
+}
+
+func TestProjectPathAndDeviceValidationHelpers(t *testing.T) {
+	if _, err := normalizeProjectPath("   "); err == nil {
+		t.Fatal("expected empty project path to fail")
+	}
+	if err := validateActiveDevice(context.Background(), &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return repository.Device{}, errors.New("device lookup failed")
+		},
+	}, "device-x"); err == nil || !strings.Contains(err.Error(), "get device") {
+		t.Fatalf("expected device lookup error, got %v", err)
+	}
+	archived := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	if err := validateActiveDevice(context.Background(), &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return repository.Device{ID: "device-x", ArchivedAt: &archived}, nil
+		},
+	}, "device-x"); err == nil || !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("expected archived device error, got %v", err)
 	}
 }
 
@@ -152,7 +273,9 @@ func TestRegistryCommandsHomeResolutionErrors(t *testing.T) {
 		run  func() error
 	}{
 		{name: "project list", run: func() error { return runProjectList(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, false) }},
-		{name: "project add", run: func() error { return runProjectAdd(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "p") }},
+		{name: "project add", run: func() error {
+			return runProjectAdd(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "p", "", "")
+		}},
 		{name: "project archive", run: func() error { _, err := runArchiveProjectForTest("p"); return err }},
 		{name: "project restore", run: func() error { return runProjectRestore(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "p") }},
 		{name: "device list", run: func() error { return runDeviceList(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, false) }},
@@ -193,7 +316,7 @@ func TestProjectAndDeviceRegistryCommandBranches(t *testing.T) {
 		})
 	}
 
-	if err := runProjectAdd(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "archived-project"); err != nil {
+	if err := runProjectAdd(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "archived-project", "", ""); err != nil {
 		t.Fatalf("runProjectAdd: %v", err)
 	}
 	if _, err := runArchiveProjectForTest("archived-project"); err != nil {

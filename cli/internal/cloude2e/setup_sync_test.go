@@ -26,7 +26,7 @@ func TestCloudOnboardingFirstSyncAndDoctor(t *testing.T) {
 
 	// Add a record before cloud setup so sync has something to push.
 	inputDir := createInputFolder(t, "<html>Pre-cloud record</html>", "Pre-cloud notes", nil, nil)
-	preCloudID := strings.TrimSpace(runPCSuccess(t, homeDir, fakeUserHome, "add", inputDir))
+	preCloudID := strings.TrimSpace(runPCSuccess(t, homeDir, fakeUserHome, "records", "add", inputDir))
 	if preCloudID == "" {
 		t.Fatal("expected record ID from add")
 	}

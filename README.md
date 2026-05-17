@@ -1,6 +1,6 @@
 # Personal Context (`pc`)
 
-Personal Context is a local-first engineering notebook system that stores work as HTML records, attached figures, and data files, organized by date and project.
+Personal Context is a local-first engineering notebook system that stores work as HTML records, imported agent chats, attached figures, and data files, organized by date and project.
 
 ## Status
 
@@ -46,6 +46,7 @@ personal-context/
 - Node.js 22+
 - pnpm (`npm i -g pnpm`)
 - Docker running for the Postgres and S3 integration suites (`testcontainers-go`)
+- PostgreSQL 15+ for cloud mode — the `chat_session` schema uses the `ON DELETE SET NULL (column_list)` per-column form, which was added in Postgres 15. Neon defaults to 16+; self-hosted deployments must be on 15 or later.
 
 ### Release Installation
 
@@ -149,24 +150,27 @@ above with `--api-key`.
 
 - `pc --help`, `pc --version`
 - `pc setup` — initialize local environment (directories, SQLite, templates)
-- `pc add <path>` — create record from folder (`record.html` optional; `metadata.json` or flags must provide registered `project_id` and `source_device_id`)
-- `pc show <id>` — display record metadata, notes, figures, data files (`--format text|json`)
-- `pc edit <id> <path>` — full replacement of content, notes, figures, data files
-- `pc delete <id>` — soft-delete a record
-- `pc restore <id>` — un-delete a record
-- `pc move <id>` — change date and/or position (`--date`, `--first`, `--last`, `--after`, `--before`)
-- `pc search <query>` — search records by content, notes, project, source device, or source ref (`--format table|ids|json`, `--limit` defaults to 50, `--limit 0` is unlimited, table/ids show truncation, JSON returns `{items,total,next_cursor}`, `--project`, `--deleted`)
-- `pc list` — list bounded record summaries newest-first (`--limit`, `--cursor`, `--from`, `--to`, `--project`, `--deleted`, `--has-html`, `--has-data`, `--all`, `--format table|ids|json`; JSON returns `{items,total,next_cursor}`)
-- `pc stats` — show local record counts, attachment counts, date range, and explicit size components (`--from`, `--to`, `--project`, `--deleted`, `--format text|json`)
-- `pc files list` — inventory record attachments with local path/status (`--record`, `--from`, `--to`, `--project`, `--deleted`, `--format table|json`)
-- `pc trash` — list soft-deleted records
-- `pc gc` — hard-delete trash older than 30 days (cascades child rows, removes files; cloud-aware: deletes from cloud first to prevent sync re-creation)
-- `pc project list|add|archive|restore` — manage the project registry
+- `pc records add <path>` — create record from folder (`record.html` optional; `metadata.json` or flags must provide registered `project_id` and `source_device_id`)
+- `pc show <id>` — display record or chat details (`--format text|json`)
+- `pc records show <id>` — display record metadata, notes, figures, data files (`--format text|json`)
+- `pc records edit <id> <path>` — full replacement of content, notes, figures, data files
+- `pc records delete <id>` — soft-delete a record
+- `pc records restore <id>` — un-delete a record
+- `pc records move <id>` — change date and/or position (`--date`, `--first`, `--last`, `--after`, `--before`)
+- `pc search <query>` — cross-domain record/chat search (`--json`, `--domain records|chats`, `--format table|ids|json`, `--limit`, `--offset`, `--project`, `--deleted`, `--include-tool-outputs`); JSON returns a flat array with `domain` on each item
+- `pc records list` — list bounded record summaries newest-first (`--query`, `--limit`, `--cursor`, `--from`, `--to`, `--project`, `--deleted`, `--has-html`, `--has-data`, `--all`, `--format table|ids|json`; JSON returns `{items,total,next_cursor}`)
+- `pc records stats` — show local record counts, attachment counts, date range, and explicit size components (`--from`, `--to`, `--project`, `--deleted`, `--format text|json`)
+- `pc records files list` — inventory record attachments with local path/status (`--record`, `--from`, `--to`, `--project`, `--deleted`, `--format table|json`)
+- `pc chat import --device <id>` — import Codex, Claude Code, and Gemini transcript files; copies each raw transcript into `<PC_HOME>/personal-context/chats/raw/{chat_session_id}/source.{ext}` and records the original imported path as `original_source_path`. `--agent` narrows the scan, `--root` overrides default roots and requires `--agent`, and `--delete-source` removes each original transcript file only after the managed copy and DB writes succeed.
+- `pc chat list|search|show|delete|restore` — browse, search, render, soft-delete, and restore imported chat sessions; `show` uses `$PAGER` when stdout is a TTY
+- `pc trash` — list soft-deleted records and chats
+- `pc gc` — hard-delete trash older than 30 days (cascades child rows, removes files including chat raw sources; cloud-aware: deletes from cloud first to prevent sync re-creation)
+- `pc project list|add|archive|restore` — manage the project registry; `pc project add <id> [path] --device <id>` registers a source path for chat project assignment
 - `pc device list|register|archive|restore` — manage the source-device registry
 - `pc doctor` — check system health (DB, orphans, missing files; cloud connectivity if configured)
 - `pc sync` — bidirectional sync between local SQLite and cloud Postgres/S3 (requires cloud configuration)
 - `pc fetch` — download data files from cloud S3. Pick one of: `<record_id>` (single record), `--all` (every non-deleted cloud record), `--project <pid>` (one project), or `--recent 3d/2w/1m/1y` (relative time window). `--output` overrides the destination for record/project/recent modes; `--all` always writes to the canonical local data path and verifies size/hash.
-- `pc export --path <dir>` — write deterministic git snapshot state (`projects.json`, `devices.json`, `templates/`, `records/`); `--from-cloud` reads record rows and assets from Postgres/S3; `--project`, `--from`, and `--to` scope exported active records
+- `pc export --path <dir>` — write deterministic git snapshot state (`projects.json`, `devices.json`, `templates/`, `records/`, `chats/`); `--from-cloud` reads record rows and assets from Postgres/S3; `--project`, `--from`, and `--to` scope exported active records
 - `pc import <path>` — merge a git snapshot into local SQLite using `updated_at` rules (`same/older -> skip`, `newer -> replace`)
 - `pc restore-db <path>` — replace local SQLite state from a git snapshot and create an auto-backup snapshot first under `~/personal-context/.pc/backups/`
 - `pc verify` — run a local Tier 2 round-trip verification; `pc verify --from-cloud` verifies the cloud-rooted round-trip path
@@ -277,7 +281,7 @@ The three `-tags integration` commands require Docker because testcontainers-go 
 
 `go test -tags integration ./internal/cloude2e/ -v -timeout 420s` is the self-contained cloud CLI e2e suite: it drives the compiled `pc` binary through cloud onboarding, first sync plus doctor, two-home auto-sync conflict resolution, and `fetch --project --output` / `fetch --all` using testcontainers-backed Postgres and MinIO plus temp homes for isolated AWS credentials.
 
-`./scripts/verify_phase3_manual.sh` runs the full Phase 3 local flow (`setup/add/show/edit/move/delete/restore`), creates a standalone record preview, and opens it in your default browser. Use `--no-open` for headless runs.
+`./scripts/verify_phase3_manual.sh` runs the full Phase 3 local flow (`setup/records add/show/records edit/records move/records delete/records restore`), creates a standalone record preview, and opens it in your default browser. Use `--no-open` for headless runs.
 
 `./scripts/verify_local_demo.sh` runs a generalized local demo flow: it creates 10 numbered records, deletes 5, restores 1, moves 1, verifies the final state through the real CLI, and opens a generated summary page with persisted previews for the first and last active records. Use `--no-open` for headless runs.
 

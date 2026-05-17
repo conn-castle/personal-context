@@ -33,6 +33,7 @@ type recordListOptions struct {
 	recordFilterOptions
 	Limit   int
 	Cursor  string
+	Query   string
 	HasHTML bool
 	HasData bool
 	All     bool
@@ -53,6 +54,27 @@ type recordListItem struct {
 	DataFileCount  int     `json:"data_file_count"`
 }
 
+func newRecordsCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "records",
+		Short: "Manage records",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
+	}
+	cmd.AddCommand(newAddCommand(stdout, stderr))
+	cmd.AddCommand(newListCommand(stdout, stderr))
+	cmd.AddCommand(newShowRecordCommand(stdout, stderr))
+	cmd.AddCommand(newEditCommand(stdout, stderr))
+	cmd.AddCommand(newDeleteCommand(stdout, stderr))
+	cmd.AddCommand(newRestoreCommand(stdout, stderr))
+	cmd.AddCommand(newMoveCommand(stdout, stderr))
+	cmd.AddCommand(newStatsCommand(stdout, stderr))
+	cmd.AddCommand(newFilesCommand(stdout, stderr))
+	return cmd
+}
+
 func newListCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	opts := recordListOptions{Limit: defaultRecordListLimit, Format: "table"}
 	cmd := &cobra.Command{
@@ -66,6 +88,7 @@ func newListCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	addRecordFilterFlags(cmd, &opts.recordFilterOptions)
 	cmd.Flags().IntVar(&opts.Limit, "limit", defaultRecordListLimit, "Maximum records to return")
 	cmd.Flags().StringVar(&opts.Cursor, "cursor", "", "Cursor from a previous page")
+	cmd.Flags().StringVar(&opts.Query, "query", "", "Filter records by full-text query")
 	cmd.Flags().BoolVar(&opts.HasHTML, "has-html", false, "Show only records with HTML content")
 	cmd.Flags().BoolVar(&opts.HasData, "has-data", false, "Show only records with data files")
 	cmd.Flags().BoolVar(&opts.All, "all", false, "Return all matching records")
@@ -95,6 +118,10 @@ func runList(ctx context.Context, stdout io.Writer, stderr io.Writer, opts recor
 	}
 	filter.HasHTML = opts.HasHTML
 	filter.HasData = opts.HasData
+	if strings.TrimSpace(opts.Query) != "" {
+		query := strings.TrimSpace(opts.Query)
+		filter.Query = &query
+	}
 	cursor, err := listpage.DecodeCursor(strings.TrimSpace(opts.Cursor))
 	if err != nil {
 		return err

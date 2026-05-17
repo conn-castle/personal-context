@@ -1,0 +1,798 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/conn-castle/personal-context/cli/internal/chatimport"
+	"github.com/conn-castle/personal-context/cli/internal/filesystem"
+	"github.com/conn-castle/personal-context/cli/internal/listpage"
+	"github.com/conn-castle/personal-context/cli/internal/recordid"
+	"github.com/conn-castle/personal-context/cli/internal/repository"
+	"github.com/conn-castle/personal-context/cli/internal/timeutil"
+	"github.com/mattn/go-isatty"
+	"github.com/spf13/cobra"
+)
+
+const (
+	defaultChatListLimit = 50
+	maxChatListLimit     = 500
+)
+
+type chatShowOptions struct {
+	Format          string
+	Full            bool
+	Raw             bool
+	SourceSessionID bool
+}
+
+var chatStdoutIsTerminal = func(w io.Writer) bool {
+	file, ok := w.(interface{ Fd() uintptr })
+	return ok && isatty.IsTerminal(file.Fd())
+}
+
+var runChatPager = func(content string) error {
+	pager := strings.TrimSpace(os.Getenv("PAGER"))
+	if pager == "" {
+		return nil
+	}
+	fields := strings.Fields(pager)
+	if len(fields) == 0 {
+		return nil
+	}
+	cmd := exec.Command(fields[0], fields[1:]...)
+	cmd.Stdin = strings.NewReader(content)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func newChatCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "chat",
+		Short: "Import and browse agent chats",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
+	}
+	cmd.AddCommand(newChatImportCommand(stdout, stderr))
+	cmd.AddCommand(newChatListCommand(stdout, stderr))
+	cmd.AddCommand(newChatSearchCommand(stdout, stderr))
+	cmd.AddCommand(newChatShowCommand(stdout, stderr))
+	cmd.AddCommand(newChatDeleteCommand(stdout, stderr))
+	cmd.AddCommand(newChatRestoreCommand(stdout, stderr))
+	return cmd
+}
+
+func newChatImportCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+	var deviceID string
+	var agent string
+	var roots []string
+	var deleteSource bool
+	cmd := &cobra.Command{
+		Use:   "import",
+		Short: "Import agent chat transcripts",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runChatImport(cmd.Context(), stdout, stderr, chatImportOptions{DeviceID: deviceID, Agent: agent, Roots: roots, DeleteSource: deleteSource})
+		},
+	}
+	cmd.Flags().StringVar(&deviceID, "device", "", "Registered source device for imported chats")
+	cmd.Flags().StringVar(&agent, "agent", "", "Import only one agent (codex|claude|gemini)")
+	cmd.Flags().StringArrayVar(&roots, "root", nil, "Transcript root to scan (overrides default agent roots; requires --agent)")
+	cmd.Flags().BoolVar(&deleteSource, "delete-source", false, "Delete each original transcript file after Personal Context safely owns a managed copy")
+	return cmd
+}
+
+type chatImportOptions struct {
+	DeviceID     string
+	Agent        string
+	Roots        []string
+	DeleteSource bool
+}
+
+type chatImportSummary struct {
+	SessionsCreated      int      `json:"sessions_created"`
+	SessionsUpdated      int      `json:"sessions_updated"`
+	ItemsCreated         int      `json:"items_created"`
+	FilesScanned         int      `json:"files_scanned"`
+	RawSourcesCopied     int      `json:"raw_sources_copied"`
+	SourcesDeleted       int      `json:"sources_deleted,omitempty"`
+	SourceDeleteWarnings []string `json:"source_delete_warnings,omitempty"`
+}
+
+func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts chatImportOptions) error {
+	deviceID := strings.TrimSpace(opts.DeviceID)
+	if deviceID == "" {
+		return fmt.Errorf("--device is required")
+	}
+	sourceFilter, err := chatimport.NormalizeAgentName(opts.Agent)
+	if err != nil {
+		return err
+	}
+	// Each explicit --root is treated as a transcript directory for a single
+	// agent: pairing it with every source produces duplicate imports of the
+	// same file (one chat session per source) and breaks --delete-source on
+	// the second pass. Require --agent when --root is set so the importer
+	// knows which source the transcripts belong to.
+	if len(opts.Roots) > 0 && sourceFilter == "" {
+		return fmt.Errorf("--agent is required when --root is set (codex, claude, or gemini)")
+	}
+	stack, err := openLocalStackFromHome()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stack.Close() }()
+	if stack.FS == nil {
+		return fmt.Errorf("filesystem client is not configured")
+	}
+	if err := validateActiveDevice(ctx, stack.Repo, deviceID); err != nil {
+		return err
+	}
+	projectPaths, err := stack.Repo.ListProjectPaths(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("list project paths: %w", err)
+	}
+	roots, err := chatimport.Roots(opts.Roots, sourceFilter, projectPaths)
+	if err != nil {
+		return err
+	}
+	summary := chatImportSummary{}
+	hadMutations := false
+	for source, sourceRoots := range roots {
+		for _, root := range sourceRoots {
+			files, err := chatimport.TranscriptFiles(root)
+			if err != nil {
+				return err
+			}
+			for _, file := range files {
+				summary.FilesScanned++
+				session, items, err := chatimport.ParseTranscriptFile(source, file)
+				if err != nil {
+					return fmt.Errorf("parse %s: %w", file, err)
+				}
+				session.SourceDeviceID = deviceID
+				session.ProjectID = chatimport.MatchProjectPath(projectPaths, session.CWD, deviceID)
+				if session.ID == "" {
+					if existing, err := stack.Repo.GetChatSessionBySource(ctx, session.Source, session.SourceSessionID); err == nil {
+						session.ID = existing.ID
+					} else if !errors.Is(err, repository.ErrNotFound) {
+						return fmt.Errorf("look up existing chat session: %w", err)
+					} else {
+						id, err := generateUniqueChatID(ctx, stack.Repo, session.LastActivityAt)
+						if err != nil {
+							return err
+						}
+						session.ID = id
+					}
+				}
+				stage, err := stack.FS.CopyChatSourceToStage(session.ID, file)
+				if err != nil {
+					return fmt.Errorf("stage chat source %s: %w", file, err)
+				}
+				rollbackState, err := captureChatImportRollback(ctx, stack, session.Source, session.SourceSessionID)
+				if err != nil {
+					_ = stack.FS.DeleteChatSourceStage(stage)
+					return err
+				}
+				stagedKey := stage.RawSourceKey
+				session.RawSourceKey = &stagedKey
+				stored, created, err := stack.Repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+					CreateChatSessionInput: session,
+					ClearDeleted:           true,
+				})
+				if err != nil {
+					_ = stack.FS.DeleteChatSourceStage(stage)
+					rollbackState.cleanup(stack)
+					return fmt.Errorf("upsert chat session %s/%s: %w", session.Source, session.SourceSessionID, err)
+				}
+				if !rollbackState.existed {
+					rollbackState.session = stored
+				}
+				if _, err := stack.FS.PromoteChatSourceStage(stage); err != nil {
+					// Promote restores any previous active dir from its backup,
+					// but it does not delete the staged dir on failure — clean
+					// it up here so re-running `pc chat import` does not leave
+					// behind an ever-growing pile of .staging-* directories.
+					_ = stack.FS.DeleteChatSourceStage(stage)
+					rollbackState.restore(ctx, stack)
+					return fmt.Errorf("promote chat source for %s: %w", stored.ID, err)
+				}
+				summary.RawSourcesCopied++
+				hadMutations = true
+				if created {
+					summary.SessionsCreated++
+				} else {
+					summary.SessionsUpdated++
+				}
+				if err := replaceChatItems(ctx, stack.Repo, stored.ID, items); err != nil {
+					rollbackState.restore(ctx, stack)
+					return fmt.Errorf("replace chat items: %w", err)
+				}
+				rollbackState.cleanup(stack)
+				if created {
+					summary.ItemsCreated += len(items)
+				} else if len(items) > len(rollbackState.items) {
+					summary.ItemsCreated += len(items) - len(rollbackState.items)
+				}
+				if opts.DeleteSource {
+					if !isSameAsManagedFile(stack.FS, stored.ID, stagedKey, file) {
+						if err := os.Remove(file); err != nil {
+							summary.SourceDeleteWarnings = append(summary.SourceDeleteWarnings, fmt.Sprintf("%s: %v", file, err))
+						} else {
+							summary.SourcesDeleted++
+						}
+					}
+				}
+			}
+		}
+	}
+	if hadMutations {
+		_ = runAutoSyncFn(ctx, stderr)
+	}
+	for _, warning := range summary.SourceDeleteWarnings {
+		_, _ = fmt.Fprintf(stderr, "warning: failed to delete source after import: %s\n", warning)
+	}
+	return writeIndentedJSON(stdout, summary)
+}
+
+type chatImportRollbackState struct {
+	existed   bool
+	session   repository.ChatSession
+	items     []repository.ChatItem
+	rawBackup *filesystem.ChatSourceStage
+}
+
+func captureChatImportRollback(ctx context.Context, stack *localStack, source string, sourceSessionID string) (chatImportRollbackState, error) {
+	existing, err := stack.Repo.GetChatSessionBySource(ctx, source, sourceSessionID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return chatImportRollbackState{}, nil
+		}
+		return chatImportRollbackState{}, fmt.Errorf("look up existing chat rollback state: %w", err)
+	}
+	items, err := stack.Repo.ListChatItems(ctx, existing.ID)
+	if err != nil {
+		return chatImportRollbackState{}, fmt.Errorf("list existing chat items for rollback: %w", err)
+	}
+	state := chatImportRollbackState{existed: true, session: existing, items: items}
+	if existing.RawSourceKey != nil && stack.FS != nil {
+		rawPath, err := stack.FS.ResolveChatSourcePath(existing.ID, *existing.RawSourceKey)
+		if err != nil {
+			return chatImportRollbackState{}, fmt.Errorf("resolve existing chat raw source for rollback: %w", err)
+		}
+		backup, err := stack.FS.CopyChatSourceToStage(existing.ID, rawPath)
+		if err == nil {
+			state.rawBackup = &backup
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return chatImportRollbackState{}, fmt.Errorf("back up existing chat raw source for rollback: %w", err)
+		}
+	}
+	return state, nil
+}
+
+func (s chatImportRollbackState) restore(ctx context.Context, stack *localStack) {
+	if stack == nil || stack.Repo == nil {
+		return
+	}
+	if s.existed {
+		_ = stack.Repo.DeleteChatSession(ctx, s.session.ID)
+		createdAt := s.session.CreatedAt
+		updatedAt := s.session.UpdatedAt
+		_, _, _ = stack.Repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:                 s.session.ID,
+				Source:             s.session.Source,
+				SourceSessionID:    s.session.SourceSessionID,
+				SourceDeviceID:     s.session.SourceDeviceID,
+				ProjectID:          s.session.ProjectID,
+				CWD:                s.session.CWD,
+				Title:              s.session.Title,
+				StartedAt:          s.session.StartedAt,
+				LastActivityAt:     s.session.LastActivityAt,
+				OriginalSourcePath: s.session.OriginalSourcePath,
+				RawSourceKey:       s.session.RawSourceKey,
+				CreatedAt:          &createdAt,
+				UpdatedAt:          &updatedAt,
+				DeletedAt:          s.session.DeletedAt,
+			},
+			ClearDeleted: s.session.DeletedAt == nil,
+		})
+		_ = replaceChatItems(ctx, stack.Repo, s.session.ID, chatItemInputs(s.items))
+		if stack.FS != nil {
+			if s.rawBackup != nil {
+				_, _ = stack.FS.PromoteChatSourceStage(*s.rawBackup)
+			} else {
+				_ = stack.FS.DeleteChatSource(s.session.ID)
+			}
+		}
+		return
+	}
+	if stack.FS != nil && s.session.ID != "" {
+		_ = stack.FS.DeleteChatSource(s.session.ID)
+	}
+	if s.session.ID != "" {
+		_ = stack.Repo.DeleteChatSession(ctx, s.session.ID)
+	}
+}
+
+func (s chatImportRollbackState) cleanup(stack *localStack) {
+	if stack == nil || stack.FS == nil || s.rawBackup == nil {
+		return
+	}
+	_ = stack.FS.DeleteChatSourceStage(*s.rawBackup)
+}
+
+func replaceChatItems(ctx context.Context, repo repository.Repository, sessionID string, items []repository.CreateChatItemInput) error {
+	inputs := make([]repository.CreateChatItemInput, len(items))
+	for i, item := range items {
+		item.SessionID = sessionID
+		inputs[i] = item
+	}
+	return repo.ReplaceChatItems(ctx, sessionID, inputs)
+}
+
+func chatItemInputs(items []repository.ChatItem) []repository.CreateChatItemInput {
+	inputs := make([]repository.CreateChatItemInput, 0, len(items))
+	for _, item := range items {
+		createdAt := item.CreatedAt
+		inputs = append(inputs, repository.CreateChatItemInput{
+			SessionID:  item.SessionID,
+			Ordinal:    item.Ordinal,
+			Role:       item.Role,
+			ItemType:   item.ItemType,
+			Text:       item.Text,
+			SearchText: item.SearchText,
+			RawJSON:    item.RawJSON,
+			CreatedAt:  &createdAt,
+		})
+	}
+	return inputs
+}
+
+// isSameAsManagedFile reports whether the imported source path resolves to
+// the same on-disk file Personal Context just took ownership of. Used to
+// short-circuit --delete-source when the user pointed pc chat import at a
+// path already inside the managed chats/raw/ tree.
+func isSameAsManagedFile(fs *filesystem.Client, chatID string, rawSourceKey string, sourcePath string) bool {
+	managed, err := fs.ResolveChatSourcePath(chatID, rawSourceKey)
+	if err != nil {
+		return false
+	}
+	managedAbs, err := filepath.Abs(managed)
+	if err != nil {
+		return false
+	}
+	sourceAbs, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return false
+	}
+	return managedAbs == sourceAbs
+}
+
+func newChatListCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+	var format string
+	var source string
+	var project string
+	var unassigned bool
+	var limit int
+	var offset int
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List chat sessions",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runChatList(cmd.Context(), stdout, stderr, chatListOptions{Format: format, Source: source, ProjectID: project, Unassigned: unassigned, Limit: limit, Offset: offset})
+		},
+	}
+	cmd.Flags().StringVar(&format, "format", "table", "Output format (table|json|ids)")
+	cmd.Flags().StringVar(&source, "agent", "", "Filter by agent (codex|claude|gemini)")
+	cmd.Flags().StringVar(&project, "project", "", "Filter by project ID")
+	cmd.Flags().BoolVar(&unassigned, "unassigned", false, "Show only sessions without a project")
+	cmd.Flags().IntVar(&limit, "limit", defaultChatListLimit, "Maximum sessions to return")
+	cmd.Flags().IntVar(&offset, "offset", 0, "Offset for pagination")
+	return cmd
+}
+
+type chatListOptions struct {
+	Format     string
+	Source     string
+	ProjectID  string
+	Unassigned bool
+	Limit      int
+	Offset     int
+}
+
+type chatSessionJSON struct {
+	ID                 string  `json:"id"`
+	Source             string  `json:"source"`
+	SourceSessionID    string  `json:"source_session_id"`
+	SourceDeviceID     string  `json:"source_device_id"`
+	ProjectID          *string `json:"project_id"`
+	CWD                *string `json:"cwd"`
+	Title              *string `json:"title"`
+	StartedAt          string  `json:"started_at"`
+	LastActivityAt     string  `json:"last_activity_at"`
+	OriginalSourcePath *string `json:"original_source_path"`
+	RawSourceKey       *string `json:"raw_source_key"`
+	DeletedAt          *string `json:"deleted_at"`
+}
+
+func runChatList(ctx context.Context, stdout io.Writer, _ io.Writer, opts chatListOptions) error {
+	if opts.Limit < 1 || opts.Limit > maxChatListLimit {
+		return fmt.Errorf("limit must be between 1 and %d", maxChatListLimit)
+	}
+	if opts.Offset < 0 {
+		return fmt.Errorf("offset must be >= 0")
+	}
+	source, err := chatimport.NormalizeAgentName(opts.Source)
+	if err != nil {
+		return err
+	}
+	stack, err := openLocalStackFromHome()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stack.Close() }()
+	filter := repository.ListChatSessionsFilter{Limit: opts.Limit, Offset: opts.Offset, Unassigned: opts.Unassigned}
+	if source != "" {
+		filter.Source = &source
+	}
+	if strings.TrimSpace(opts.ProjectID) != "" {
+		project := strings.TrimSpace(opts.ProjectID)
+		filter.ProjectID = &project
+	}
+	total, err := stack.Repo.CountChatSessions(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("count chats: %w", err)
+	}
+	sessions, err := stack.Repo.ListChatSessions(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("list chats: %w", err)
+	}
+	switch opts.Format {
+	case "table":
+		return writeChatListTable(stdout, sessions)
+	case "ids":
+		for _, session := range sessions {
+			_, _ = fmt.Fprintln(stdout, session.ID)
+		}
+		return nil
+	case "json":
+		items := make([]chatSessionJSON, 0, len(sessions))
+		for _, session := range sessions {
+			items = append(items, chatSessionToJSON(session))
+		}
+		return listpage.WriteJSON(stdout, listpage.Response[chatSessionJSON]{Items: items, Total: total, NextCursor: nil})
+	default:
+		return fmt.Errorf("unknown format %q: expected table, ids, or json", opts.Format)
+	}
+}
+
+func newChatSearchCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+	var format string
+	var source string
+	var project string
+	var includeTools bool
+	var limit int
+	var offset int
+	cmd := &cobra.Command{
+		Use:   "search <query>",
+		Short: "Search chat transcripts",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChatSearch(cmd.Context(), stdout, stderr, args[0], chatSearchOptions{Format: format, Source: source, ProjectID: project, IncludeTools: includeTools, Limit: limit, Offset: offset})
+		},
+	}
+	cmd.Flags().StringVar(&format, "format", "table", "Output format (table|json)")
+	cmd.Flags().StringVar(&source, "agent", "", "Filter by agent (codex|claude|gemini)")
+	cmd.Flags().StringVar(&project, "project", "", "Filter by project ID")
+	cmd.Flags().BoolVar(&includeTools, "include-tool-outputs", false, "Include tool output items")
+	cmd.Flags().IntVar(&limit, "limit", defaultChatListLimit, "Maximum results to return")
+	cmd.Flags().IntVar(&offset, "offset", 0, "Offset for pagination")
+	return cmd
+}
+
+type chatSearchOptions struct {
+	Format       string
+	Source       string
+	ProjectID    string
+	IncludeTools bool
+	Limit        int
+	Offset       int
+}
+
+type chatSearchJSON struct {
+	Session chatSessionJSON `json:"session"`
+	Ordinal int             `json:"ordinal"`
+	Role    string          `json:"role"`
+	Type    string          `json:"type"`
+	Text    *string         `json:"text"`
+	Snippet string          `json:"snippet"`
+}
+
+func runChatSearch(ctx context.Context, stdout io.Writer, _ io.Writer, query string, opts chatSearchOptions) error {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return fmt.Errorf("query must not be empty")
+	}
+	if opts.Limit < 1 || opts.Limit > maxChatListLimit {
+		return fmt.Errorf("limit must be between 1 and %d", maxChatListLimit)
+	}
+	if opts.Offset < 0 {
+		return fmt.Errorf("offset must be >= 0")
+	}
+	source, err := chatimport.NormalizeAgentName(opts.Source)
+	if err != nil {
+		return err
+	}
+	stack, err := openLocalStackFromHome()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stack.Close() }()
+	filter := repository.SearchChatItemsFilter{Query: query, IncludeToolOutputs: opts.IncludeTools, Limit: opts.Limit, Offset: opts.Offset}
+	if source != "" {
+		filter.Source = &source
+	}
+	if strings.TrimSpace(opts.ProjectID) != "" {
+		project := strings.TrimSpace(opts.ProjectID)
+		filter.ProjectID = &project
+	}
+	results, err := stack.Repo.SearchChatItems(ctx, filter)
+	if err != nil {
+		return fmt.Errorf("search chats: %w", err)
+	}
+	switch opts.Format {
+	case "table":
+		return writeChatSearchTable(stdout, results)
+	case "json":
+		items := make([]chatSearchJSON, 0, len(results))
+		for _, result := range results {
+			items = append(items, chatSearchJSON{Session: chatSessionToJSON(result.Session), Ordinal: result.Item.Ordinal, Role: result.Item.Role, Type: result.Item.ItemType, Text: result.Item.Text, Snippet: result.Snippet})
+		}
+		return listpage.WriteJSON(stdout, listpage.Response[chatSearchJSON]{Items: items, Total: len(items), NextCursor: nil})
+	default:
+		return fmt.Errorf("unknown format %q: expected table or json", opts.Format)
+	}
+}
+
+func newChatShowCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+	opts := chatShowOptions{Format: "text"}
+	cmd := &cobra.Command{
+		Use:   "show <id>",
+		Short: "Display a chat transcript",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChatShow(cmd.Context(), stdout, stderr, args[0], opts)
+		},
+	}
+	cmd.Flags().StringVar(&opts.Format, "format", "text", "Output format (text|json)")
+	cmd.Flags().BoolVar(&opts.Full, "full", false, "Show full tool outputs")
+	cmd.Flags().BoolVar(&opts.Raw, "raw", false, "Show raw JSON item payloads")
+	cmd.Flags().BoolVar(&opts.SourceSessionID, "source-session-id", false, "Resolve id as a source session ID")
+	return cmd
+}
+
+func runChatShow(ctx context.Context, stdout io.Writer, _ io.Writer, id string, opts chatShowOptions) error {
+	stack, err := openLocalStackFromHome()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stack.Close() }()
+	var session repository.ChatSession
+	if opts.SourceSessionID {
+		sessions, err := stack.Repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{IncludeDeleted: true})
+		if err != nil {
+			return fmt.Errorf("list chats: %w", err)
+		}
+		var matches []repository.ChatSession
+		for _, candidate := range sessions {
+			if candidate.SourceSessionID == id {
+				matches = append(matches, candidate)
+			}
+		}
+		switch len(matches) {
+		case 0:
+			return fmt.Errorf("chat source session %q not found", id)
+		case 1:
+			session = matches[0]
+		default:
+			return fmt.Errorf("chat source session %q is ambiguous across %d chats; use the Personal Context chat ID", id, len(matches))
+		}
+	} else {
+		session, err = stack.Repo.GetChatSessionByID(ctx, id)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return fmt.Errorf("chat %q not found", id)
+			}
+			return fmt.Errorf("get chat: %w", err)
+		}
+	}
+	return showChatFromStack(ctx, stdout, stack, session, opts)
+}
+
+func showChatFromStack(ctx context.Context, stdout io.Writer, stack *localStack, session repository.ChatSession, opts chatShowOptions) error {
+	items, err := stack.Repo.ListChatItems(ctx, session.ID)
+	if err != nil {
+		return fmt.Errorf("list chat items: %w", err)
+	}
+	switch opts.Format {
+	case "json":
+		return writeIndentedJSON(stdout, struct {
+			Session chatSessionJSON       `json:"session"`
+			Items   []repository.ChatItem `json:"items"`
+		}{Session: chatSessionToJSON(session), Items: items})
+	case "text":
+		return writeChatTranscript(stdout, session, items, opts)
+	default:
+		return fmt.Errorf("unknown format %q: expected text or json", opts.Format)
+	}
+}
+
+func newChatDeleteCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "delete <id>",
+		Short: "Soft-delete a chat session",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			stack, err := openLocalStackFromHome()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = stack.Close() }()
+			if err := stack.Repo.SoftDeleteChatSession(cmd.Context(), args[0]); err != nil {
+				return fmt.Errorf("delete chat: %w", err)
+			}
+			_, _ = fmt.Fprintf(stdout, "%s deleted\n", args[0])
+			_ = runAutoSyncFn(cmd.Context(), stderr)
+			return nil
+		},
+	}
+	return cmd
+}
+
+func newChatRestoreCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "restore <id>",
+		Short: "Restore a soft-deleted chat session",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			stack, err := openLocalStackFromHome()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = stack.Close() }()
+			if err := stack.Repo.RestoreChatSession(cmd.Context(), args[0]); err != nil {
+				return fmt.Errorf("restore chat: %w", err)
+			}
+			_, _ = fmt.Fprintf(stdout, "%s restored\n", args[0])
+			_ = runAutoSyncFn(cmd.Context(), stderr)
+			return nil
+		},
+	}
+	return cmd
+}
+
+func generateUniqueChatID(ctx context.Context, repo repository.Repository, at time.Time) (string, error) {
+	for i := 0; i < 16; i++ {
+		id, err := recordid.GenerateForDate(at)
+		if err != nil {
+			return "", err
+		}
+		_, recordErr := repo.GetRecordByID(ctx, id)
+		if recordErr != nil && !errors.Is(recordErr, repository.ErrNotFound) {
+			return "", fmt.Errorf("generate unique chat id: check record %s: %w", id, recordErr)
+		}
+		_, chatErr := repo.GetChatSessionByID(ctx, id)
+		if chatErr != nil && !errors.Is(chatErr, repository.ErrNotFound) {
+			return "", fmt.Errorf("generate unique chat id: check chat %s: %w", id, chatErr)
+		}
+		if errors.Is(recordErr, repository.ErrNotFound) && errors.Is(chatErr, repository.ErrNotFound) {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("generate unique chat id: exhausted retries")
+}
+
+func chatSessionToJSON(session repository.ChatSession) chatSessionJSON {
+	return chatSessionJSON{
+		ID: session.ID, Source: session.Source, SourceSessionID: session.SourceSessionID,
+		SourceDeviceID: session.SourceDeviceID, ProjectID: session.ProjectID, CWD: session.CWD,
+		Title: session.Title, StartedAt: timeutil.FormatUTCMillis(session.StartedAt),
+		LastActivityAt:     timeutil.FormatUTCMillis(session.LastActivityAt),
+		OriginalSourcePath: session.OriginalSourcePath,
+		RawSourceKey:       session.RawSourceKey,
+		DeletedAt:          timeutil.FormatUTCMillisPtr(session.DeletedAt),
+	}
+}
+
+func writeChatListTable(w io.Writer, sessions []repository.ChatSession) error {
+	if len(sessions) == 0 {
+		_, _ = fmt.Fprintln(w, "No chat sessions found.")
+		return nil
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "ID\tAgent\tProject\tLast Activity\tTitle")
+	for _, session := range sessions {
+		project := ""
+		if session.ProjectID != nil {
+			project = *session.ProjectID
+		}
+		title := ""
+		if session.Title != nil {
+			title = truncate(*session.Title, 60)
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", session.ID, session.Source, project, timeutil.FormatUTCMillis(session.LastActivityAt), title)
+	}
+	return tw.Flush()
+}
+
+func writeChatSearchTable(w io.Writer, results []repository.ChatSearchResult) error {
+	if len(results) == 0 {
+		_, _ = fmt.Fprintln(w, "No matching chats found.")
+		return nil
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	_, _ = fmt.Fprintln(tw, "CHAT\tORD\tROLE\tSNIPPET")
+	for _, result := range results {
+		snippet := result.Snippet
+		if snippet == "" {
+			snippet = result.Item.SearchText
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", result.Session.ID, result.Item.Ordinal, result.Item.Role, truncate(strings.ReplaceAll(snippet, "\n", " "), 100))
+	}
+	return tw.Flush()
+}
+
+func writeChatTranscript(w io.Writer, session repository.ChatSession, items []repository.ChatItem, opts chatShowOptions) error {
+	if chatStdoutIsTerminal(w) {
+		buffer := &bytes.Buffer{}
+		if err := renderChatTranscript(buffer, session, items, opts); err != nil {
+			return err
+		}
+		if err := runChatPager(buffer.String()); err != nil {
+			return fmt.Errorf("page chat transcript: %w", err)
+		}
+		if strings.TrimSpace(os.Getenv("PAGER")) != "" {
+			return nil
+		}
+		_, err := io.WriteString(w, buffer.String())
+		return err
+	}
+	return renderChatTranscript(w, session, items, opts)
+}
+
+func renderChatTranscript(w io.Writer, session repository.ChatSession, items []repository.ChatItem, opts chatShowOptions) error {
+	_, _ = fmt.Fprintf(w, "ID:              %s\n", session.ID)
+	_, _ = fmt.Fprintf(w, "Agent:           %s\n", session.Source)
+	_, _ = fmt.Fprintf(w, "Source Session:  %s\n", session.SourceSessionID)
+	if session.ProjectID != nil {
+		_, _ = fmt.Fprintf(w, "Project:         %s\n", *session.ProjectID)
+	}
+	_, _ = fmt.Fprintf(w, "Last Activity:   %s\n\n", timeutil.FormatUTCMillis(session.LastActivityAt))
+	for _, item := range items {
+		_, _ = fmt.Fprintf(w, "[%d] %s/%s\n", item.Ordinal, item.Role, item.ItemType)
+		if opts.Raw && item.RawJSON != nil {
+			_, _ = fmt.Fprintln(w, *item.RawJSON)
+		} else if item.Text != nil {
+			text := *item.Text
+			if item.ItemType == "tool_output" && !opts.Full {
+				text = truncate(text, 240)
+			}
+			_, _ = fmt.Fprintln(w, text)
+		}
+		_, _ = fmt.Fprintln(w)
+	}
+	return nil
+}

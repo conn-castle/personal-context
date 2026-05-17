@@ -1,6 +1,7 @@
 package gitsnapshot
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -15,6 +16,14 @@ func TestWriteReadAndManifestRoundTrip(t *testing.T) {
 	notes := "snapshot notes"
 	altText := "alt text"
 	description := "data description"
+	chatProjectID := "phase7/unit"
+	chatCWD := "/tmp/phase7/unit"
+	chatTitle := "Snapshot chat"
+	chatSourcePath := "/tmp/phase7/unit/session.jsonl"
+	chatRawSourceKey := "chats/raw/20260309-ddddeeee/source.jsonl"
+	chatRawSourceContent := []byte(`{"session_id":"session-jsonl","role":"user","content":"chat snapshot text"}`)
+	chatText := "chat snapshot text"
+	chatRaw := `{"role":"user","content":"chat snapshot text"}`
 	snapshot := Snapshot{
 		Templates: []Template{
 			{Name: "single-image", HTMLContent: "<html>single-image</html>"},
@@ -70,6 +79,46 @@ func TestWriteReadAndManifestRoundTrip(t *testing.T) {
 				UpdatedAt:      time.Date(2026, 3, 9, 13, 0, 0, 0, time.UTC),
 			},
 		},
+		Chats: []ChatSession{{
+			ID:                 "20260309-ddddeeee",
+			Source:             "codex",
+			SourceSessionID:    "session-jsonl",
+			SourceDeviceID:     "device/unit",
+			ProjectID:          &chatProjectID,
+			CWD:                &chatCWD,
+			Title:              &chatTitle,
+			StartedAt:          time.Date(2026, 3, 9, 14, 0, 0, 0, time.UTC),
+			LastActivityAt:     time.Date(2026, 3, 9, 14, 5, 0, 0, time.UTC),
+			OriginalSourcePath: &chatSourcePath,
+			RawSourceKey:       &chatRawSourceKey,
+			RawSourceContent:   chatRawSourceContent,
+			CreatedAt:          time.Date(2026, 3, 9, 14, 0, 0, 0, time.UTC),
+			UpdatedAt:          time.Date(2026, 3, 9, 14, 5, 0, 0, time.UTC),
+			Items: []ChatItem{{
+				Ordinal:    0,
+				Role:       "user",
+				ItemType:   "message",
+				Text:       &chatText,
+				SearchText: chatText,
+				RawJSON:    &chatRaw,
+				CreatedAt:  time.Date(2026, 3, 9, 14, 1, 0, 0, time.UTC),
+			}, {
+				Ordinal:    1,
+				Role:       "assistant",
+				ItemType:   "message",
+				SearchText: "assistant second",
+				CreatedAt:  time.Date(2026, 3, 9, 14, 5, 0, 0, time.UTC),
+			}},
+		}, {
+			ID:              "20260309-eeeeffff",
+			Source:          "gemini",
+			SourceSessionID: "session-two",
+			SourceDeviceID:  "device/unit",
+			StartedAt:       time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
+			LastActivityAt:  time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
+			CreatedAt:       time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
+			UpdatedAt:       time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
+		}},
 	}
 
 	firstDir := t.TempDir()
@@ -111,6 +160,273 @@ func TestWriteReadAndManifestRoundTrip(t *testing.T) {
 	}
 	if metadata["format_version"].(float64) != 1 {
 		t.Fatalf("format_version = %v, want 1", metadata["format_version"])
+	}
+
+	chatItemsBytes, err := os.ReadFile(filepath.Join(firstDir, "chats", "20260309-ddddeeee", "items.jsonl"))
+	if err != nil {
+		t.Fatalf("read chat items.jsonl: %v", err)
+	}
+	if firstLine := strings.Split(strings.TrimSpace(string(chatItemsBytes)), "\n")[0]; !strings.Contains(firstLine, `"ordinal":0`) {
+		t.Fatalf("expected chat items to be sorted by ordinal, got %q", firstLine)
+	}
+}
+
+func TestReadChatsRejectsMalformedChatExports(t *testing.T) {
+	if chats, err := readChats(filepath.Join(t.TempDir(), "missing")); err != nil || len(chats) != 0 {
+		t.Fatalf("readChats(missing) = %+v, %v; want empty nil", chats, err)
+	}
+	readDirFile := filepath.Join(t.TempDir(), "not-dir")
+	if err := os.WriteFile(readDirFile, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write read dir file: %v", err)
+	}
+	if _, err := readChats(readDirFile); err == nil || !strings.Contains(err.Error(), "read chats dir") {
+		t.Fatalf("expected read chats dir error, got %v", err)
+	}
+	if _, err := readChat(t.TempDir(), "../bad"); err == nil {
+		t.Fatal("expected invalid chat id to fail")
+	}
+	if _, err := readChatItems(filepath.Join(t.TempDir(), "missing.jsonl"), "20260309-eeeeffff"); err == nil {
+		t.Fatal("expected missing chat items file to fail")
+	}
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "unexpected.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write unexpected file: %v", err)
+	}
+	if _, err := readChats(root); err == nil {
+		t.Fatal("expected unexpected file in chats export to fail")
+	}
+
+	root = t.TempDir()
+	chatDir := filepath.Join(root, "20260309-eeeeffff")
+	if err := os.MkdirAll(chatDir, 0o755); err != nil {
+		t.Fatalf("mkdir chat dir: %v", err)
+	}
+	metadata := `{
+  "format_version": 2,
+  "id": "20260309-eeeeffff",
+  "source": "codex",
+  "source_session_id": "source",
+  "source_device_id": "device/unit",
+  "started_at": "2026-03-09T14:00:00Z",
+  "last_activity_at": "2026-03-09T14:05:00Z",
+  "created_at": "2026-03-09T14:00:00Z",
+  "updated_at": "2026-03-09T14:05:00Z"
+}`
+	if err := os.WriteFile(filepath.Join(chatDir, "metadata.json"), []byte(metadata), 0o644); err != nil {
+		t.Fatalf("write metadata: %v", err)
+	}
+	items := strings.Join([]string{
+		`{"ordinal":0,"role":"user","item_type":"message","search_text":"one","created_at":"2026-03-09T14:01:00Z"}`,
+		`{"ordinal":0,"role":"assistant","item_type":"message","search_text":"duplicate","created_at":"2026-03-09T14:02:00Z"}`,
+		``,
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(chatDir, "items.jsonl"), []byte(items), 0o644); err != nil {
+		t.Fatalf("write items: %v", err)
+	}
+	if _, err := readChats(root); err == nil || !strings.Contains(err.Error(), "duplicate chat item ordinal") {
+		t.Fatalf("expected duplicate ordinal error, got %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(chatDir, "metadata.json"), []byte(strings.Replace(metadata, `"format_version": 2`, `"format_version": 99`, 1)), 0o644); err != nil {
+		t.Fatalf("write bad metadata: %v", err)
+	}
+	if _, err := readChat(chatDir, "20260309-eeeeffff"); err == nil || !strings.Contains(err.Error(), "unsupported chat format_version") {
+		t.Fatalf("expected format version error, got %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(chatDir, "metadata.json"), []byte(strings.Replace(metadata, `"id": "20260309-eeeeffff"`, `"id": "20260309-aaaabbbb"`, 1)), 0o644); err != nil {
+		t.Fatalf("write mismatched metadata: %v", err)
+	}
+	if _, err := readChat(chatDir, "20260309-eeeeffff"); err == nil || !strings.Contains(err.Error(), "does not match dir") {
+		t.Fatalf("expected metadata id mismatch error, got %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(chatDir, "metadata.json"), []byte(strings.Replace(metadata, `"started_at": "2026-03-09T14:00:00Z"`, `"started_at": "bad"`, 1)), 0o644); err != nil {
+		t.Fatalf("write bad time metadata: %v", err)
+	}
+	if _, err := readChat(chatDir, "20260309-eeeeffff"); err == nil || !strings.Contains(err.Error(), "parse started_at") {
+		t.Fatalf("expected started_at parse error, got %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		from string
+		to   string
+		want string
+	}{
+		{name: "last_activity_at", from: `"last_activity_at": "2026-03-09T14:05:00Z"`, to: `"last_activity_at": "bad"`, want: "parse last_activity_at"},
+		{name: "created_at", from: `"created_at": "2026-03-09T14:00:00Z"`, to: `"created_at": "bad"`, want: "parse created_at"},
+		{name: "updated_at", from: `"updated_at": "2026-03-09T14:05:00Z"`, to: `"updated_at": "bad"`, want: "parse updated_at"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(filepath.Join(chatDir, "metadata.json"), []byte(strings.Replace(metadata, tc.from, tc.to, 1)), 0o644); err != nil {
+				t.Fatalf("write bad metadata: %v", err)
+			}
+			if _, err := readChat(chatDir, "20260309-eeeeffff"); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected %s error, got %v", tc.want, err)
+			}
+		})
+	}
+
+	if err := os.WriteFile(filepath.Join(chatDir, "metadata.json"), []byte(metadata), 0o644); err != nil {
+		t.Fatalf("restore metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chatDir, "metadata.json"), []byte("{bad"), 0o644); err != nil {
+		t.Fatalf("write malformed metadata: %v", err)
+	}
+	if _, err := readChat(chatDir, "20260309-eeeeffff"); err == nil || !strings.Contains(err.Error(), "parse chat metadata") {
+		t.Fatalf("expected malformed metadata error, got %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chatDir, "metadata.json"), []byte(metadata), 0o644); err != nil {
+		t.Fatalf("restore metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chatDir, "items.jsonl"), []byte(`{"ordinal":0,"role":"user","item_type":"message","search_text":"bad time","created_at":"bad"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write bad item time: %v", err)
+	}
+	if _, err := readChat(chatDir, "20260309-eeeeffff"); err == nil || !strings.Contains(err.Error(), "parse chat item created_at") {
+		t.Fatalf("expected chat item timestamp error, got %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(chatDir, "items.jsonl"), []byte("{bad\n"), 0o644); err != nil {
+		t.Fatalf("write bad item json: %v", err)
+	}
+	if _, err := readChat(chatDir, "20260309-eeeeffff"); err == nil || !strings.Contains(err.Error(), "parse chat item") {
+		t.Fatalf("expected chat item json error, got %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chatDir, "items.jsonl"), []byte("\n"+`{"ordinal":0,"role":"user","item_type":"message","search_text":"ok","created_at":"2026-03-09T14:01:00Z"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write item with blank line: %v", err)
+	}
+	if items, err := readChatItems(filepath.Join(chatDir, "items.jsonl"), "20260309-eeeeffff"); err != nil || len(items) != 1 {
+		t.Fatalf("expected item with blank line to parse, items=%+v err=%v", items, err)
+	}
+
+	if err := Write("", Snapshot{}); err == nil {
+		t.Fatal("expected empty root write to fail")
+	}
+	if _, err := Read(""); err == nil {
+		t.Fatal("expected empty root read to fail")
+	}
+	if err := Write(t.TempDir(), Snapshot{Chats: []ChatSession{{ID: "../bad"}}}); err == nil {
+		t.Fatal("expected invalid chat id write to fail")
+	}
+	rawKey := "chats/raw/20260309-eeeeffff/source.jsonl"
+	if err := Write(t.TempDir(), Snapshot{Chats: []ChatSession{{
+		ID:              "20260309-eeeeffff",
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		StartedAt:       time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		LastActivityAt:  time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		RawSourceKey:    &rawKey,
+		CreatedAt:       time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+		UpdatedAt:       time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC),
+	}}}); err == nil || !strings.Contains(err.Error(), "raw_source_key is set") {
+		t.Fatalf("expected empty raw source content error, got %v", err)
+	}
+	if got, err := rawSourceExportFilename("20260309-eeeeffff", rawKey); err != nil || got != "source.jsonl" {
+		t.Fatalf("rawSourceExportFilename() = %q, %v", got, err)
+	}
+	for _, badKey := range []string{
+		"bad/raw/20260309-eeeeffff/source.jsonl",
+		"chats/raw/20260309-deadbeef/source.jsonl",
+		"chats/raw/20260309-eeeeffff/source.txt",
+	} {
+		if _, err := rawSourceExportFilename("20260309-eeeeffff", badKey); err == nil {
+			t.Fatalf("expected rawSourceExportFilename(%q) to fail", badKey)
+		}
+	}
+}
+
+func TestReadChatsAndItemsSortTieBreakers(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	snapshot := Snapshot{Chats: []ChatSession{{
+		ID:              "20260309-ffff0000",
+		Source:          "codex",
+		SourceSessionID: "source-z",
+		SourceDeviceID:  "device/unit",
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}, {
+		ID:              "20260309-aaaa0000",
+		Source:          "codex",
+		SourceSessionID: "source-a",
+		SourceDeviceID:  "device/unit",
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}}}
+	if err := Write(root, snapshot); err != nil {
+		t.Fatalf("Write(root) error = %v", err)
+	}
+	chats, err := readChats(filepath.Join(root, "chats"))
+	if err != nil {
+		t.Fatalf("readChats() error = %v", err)
+	}
+	if len(chats) != 2 || chats[0].ID != "20260309-aaaa0000" || chats[1].ID != "20260309-ffff0000" {
+		t.Fatalf("chat tie-break order = %+v, want ids ascending", chats)
+	}
+
+	itemsPath := filepath.Join(t.TempDir(), "items.jsonl")
+	lines := strings.Join([]string{
+		`{"ordinal":2,"role":"assistant","item_type":"message","search_text":"second","created_at":"2026-03-09T12:02:00Z"}`,
+		`{"ordinal":0,"role":"user","item_type":"message","search_text":"first","created_at":"2026-03-09T12:01:00Z"}`,
+		``,
+	}, "\n")
+	if err := os.WriteFile(itemsPath, []byte(lines), 0o644); err != nil {
+		t.Fatalf("write item fixture: %v", err)
+	}
+	items, err := readChatItems(itemsPath, "20260309-aaaa0000")
+	if err != nil {
+		t.Fatalf("readChatItems() error = %v", err)
+	}
+	if len(items) != 2 || items[0].Ordinal != 0 || items[1].Ordinal != 2 {
+		t.Fatalf("item order = %+v, want ordinal ascending", items)
+	}
+}
+
+func TestReadChatRequiresRawSourceFileWhenKeyIsSet(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	rawKey := "chats/raw/20260309-abcddcba/source.jsonl"
+	snapshot := Snapshot{Chats: []ChatSession{{
+		ID:               "20260309-abcddcba",
+		Source:           "codex",
+		SourceSessionID:  "source",
+		SourceDeviceID:   "device",
+		RawSourceKey:     &rawKey,
+		RawSourceContent: []byte("{}\n"),
+		StartedAt:        now,
+		LastActivityAt:   now,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}}}
+	if err := Write(root, snapshot); err != nil {
+		t.Fatalf("Write(root) error = %v", err)
+	}
+	if err := os.Remove(filepath.Join(root, "chats", "20260309-abcddcba", "source.jsonl")); err != nil {
+		t.Fatalf("remove raw source: %v", err)
+	}
+	if _, err := Read(root); err == nil || !strings.Contains(err.Error(), "read chat raw source") {
+		t.Fatalf("expected missing chat raw source error, got %v", err)
+	}
+}
+
+func TestPathSegmentAndLFSPointerBranches(t *testing.T) {
+	for _, value := range []string{"", "   ", ".", "..", "dir/name", `dir\name`} {
+		if err := validatePathSegment("field", value); err == nil {
+			t.Fatalf("expected validatePathSegment(%q) to fail", value)
+		}
+	}
+	if err := validatePathSegment("field", "valid-name"); err != nil {
+		t.Fatalf("validatePathSegment(valid-name) error = %v", err)
+	}
+	if isLFSPointer(bytes.Repeat([]byte("x"), 513)) {
+		t.Fatal("expected oversized content not to be treated as an LFS pointer")
 	}
 }
 
@@ -776,6 +1092,10 @@ func TestRegistryFilesReadWriteAndValidation(t *testing.T) {
 		{name: "bad created", content: `[{"id":"x","created_at":"bad","updated_at":"2026-03-09T12:00:00Z"}]`, want: "parse created_at"},
 		{name: "bad updated", content: `[{"id":"x","created_at":"2026-03-09T12:00:00Z","updated_at":"bad"}]`, want: "parse updated_at"},
 		{name: "bad archived", content: `[{"id":"x","created_at":"2026-03-09T12:00:00Z","updated_at":"2026-03-09T12:00:00Z","archived_at":"bad"}]`, want: "parse archived_at"},
+		{name: "duplicate id", content: `[
+			{"id":"x","created_at":"2026-03-09T12:00:00Z","updated_at":"2026-03-09T12:00:00Z"},
+			{"id":"x","created_at":"2026-03-09T12:00:00Z","updated_at":"2026-03-09T12:00:00Z"}
+		]`, want: "duplicate registry id"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			testPath := filepath.Join(t.TempDir(), "devices.json")
@@ -814,39 +1134,7 @@ func TestRegistryFilesReadWriteAndValidation(t *testing.T) {
 }
 
 func TestWriteRejectsFilesystemFailures(t *testing.T) {
-	t.Run("reset templates dir", func(t *testing.T) {
-		root := t.TempDir()
-		mustWriteFileSnapshot(t, filepath.Join(root, "templates", "old.html"), "<html>old</html>")
-		if err := os.Chmod(root, 0o555); err != nil {
-			t.Fatalf("chmod root: %v", err)
-		}
-		defer func() {
-			if err := os.Chmod(root, 0o755); err != nil {
-				t.Fatalf("restore root permissions: %v", err)
-			}
-		}()
-		if err := Write(root, Snapshot{}); err == nil || !strings.Contains(err.Error(), "reset templates dir") {
-			t.Fatalf("Write(root) error = %v, want reset templates dir failure", err)
-		}
-	})
-
-	t.Run("reset records dir", func(t *testing.T) {
-		root := t.TempDir()
-		mustWriteFileSnapshot(t, filepath.Join(root, "records", "existing", "metadata.json"), "{}\n")
-		if err := os.Chmod(root, 0o555); err != nil {
-			t.Fatalf("chmod root: %v", err)
-		}
-		defer func() {
-			if err := os.Chmod(root, 0o755); err != nil {
-				t.Fatalf("restore root permissions: %v", err)
-			}
-		}()
-		if err := Write(root, Snapshot{}); err == nil || !strings.Contains(err.Error(), "reset records dir") {
-			t.Fatalf("Write(root) error = %v, want reset records dir failure", err)
-		}
-	})
-
-	t.Run("create templates dir", func(t *testing.T) {
+	t.Run("create staging dir", func(t *testing.T) {
 		root := t.TempDir()
 		if err := os.Chmod(root, 0o555); err != nil {
 			t.Fatalf("chmod root: %v", err)
@@ -856,8 +1144,8 @@ func TestWriteRejectsFilesystemFailures(t *testing.T) {
 				t.Fatalf("restore root permissions: %v", err)
 			}
 		}()
-		if err := Write(root, Snapshot{}); err == nil || !strings.Contains(err.Error(), "create templates dir") {
-			t.Fatalf("Write(root) error = %v, want create templates dir failure", err)
+		if err := Write(root, Snapshot{}); err == nil || !strings.Contains(err.Error(), "create staging snapshot dir") {
+			t.Fatalf("Write(root) error = %v, want staging dir failure", err)
 		}
 	})
 
@@ -908,6 +1196,196 @@ func TestWriteRejectsFilesystemFailures(t *testing.T) {
 		})
 		if err == nil || !strings.Contains(err.Error(), "write figure") {
 			t.Fatalf("Write(root) error = %v, want write figure failure", err)
+		}
+	})
+}
+
+func TestWritePreservesExistingSnapshotOnFailure(t *testing.T) {
+	now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	oldSnapshot := Snapshot{
+		Templates: []Template{{Name: "old", HTMLContent: "<html>old</html>"}},
+		Projects:  []RegistryEntry{{ID: "phase7/old", CreatedAt: now, UpdatedAt: now}},
+		Devices:   []RegistryEntry{{ID: "device/old", CreatedAt: now, UpdatedAt: now}},
+		Records: []Record{{
+			ID:             "20260309-aaaabbbb",
+			Date:           "2026-03-09",
+			DayOrder:       "a0",
+			ProjectID:      "phase7/old",
+			SourceDeviceID: "device/old",
+			HTMLContent:    strPtrSnapshot("<html>old record</html>"),
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}},
+	}
+	newSnapshot := Snapshot{
+		Templates: []Template{{Name: "new", HTMLContent: "<html>new</html>"}},
+		Projects:  []RegistryEntry{{ID: "phase7/new", CreatedAt: now, UpdatedAt: now}},
+		Devices:   []RegistryEntry{{ID: "device/new", CreatedAt: now, UpdatedAt: now}},
+	}
+
+	t.Run("staged write failure", func(t *testing.T) {
+		root := t.TempDir()
+		if err := Write(root, oldSnapshot); err != nil {
+			t.Fatalf("Write(oldSnapshot): %v", err)
+		}
+		oldManifest, err := Manifest(root)
+		if err != nil {
+			t.Fatalf("Manifest(old): %v", err)
+		}
+
+		origCreateTemp := createTempFileFn
+		createTempFileFn = func(string, string) (tempFile, error) {
+			return &stubTempFile{name: filepath.Join(t.TempDir(), "template.tmp"), writeErr: errors.New("write failed")}, nil
+		}
+		t.Cleanup(func() {
+			createTempFileFn = origCreateTemp
+		})
+
+		err = Write(root, newSnapshot)
+		if err == nil || !strings.Contains(err.Error(), "write template new") {
+			t.Fatalf("Write(newSnapshot) error = %v, want staged write failure", err)
+		}
+		currentManifest, err := Manifest(root)
+		if err != nil {
+			t.Fatalf("Manifest(current): %v", err)
+		}
+		if !reflect.DeepEqual(currentManifest, oldManifest) {
+			t.Fatalf("snapshot changed after staged write failure\nold=%v\ncurrent=%v", oldManifest, currentManifest)
+		}
+	})
+
+	t.Run("promotion failure", func(t *testing.T) {
+		root := t.TempDir()
+		if err := Write(root, oldSnapshot); err != nil {
+			t.Fatalf("Write(oldSnapshot): %v", err)
+		}
+		oldManifest, err := Manifest(root)
+		if err != nil {
+			t.Fatalf("Manifest(old): %v", err)
+		}
+
+		origRename := renameFileFn
+		renameFileFn = func(from string, to string) error {
+			fromDir := filepath.Base(filepath.Dir(from))
+			if filepath.Base(from) == "devices.json" && strings.HasPrefix(fromDir, ".snapshot-staging-") {
+				return errors.New("promote failed")
+			}
+			return origRename(from, to)
+		}
+		t.Cleanup(func() {
+			renameFileFn = origRename
+		})
+
+		err = Write(root, newSnapshot)
+		if err == nil || !strings.Contains(err.Error(), "promote staged devices.json") {
+			t.Fatalf("Write(newSnapshot) error = %v, want promotion failure", err)
+		}
+		currentManifest, err := Manifest(root)
+		if err != nil {
+			t.Fatalf("Manifest(current): %v", err)
+		}
+		if !reflect.DeepEqual(currentManifest, oldManifest) {
+			t.Fatalf("snapshot changed after promotion failure\nold=%v\ncurrent=%v", oldManifest, currentManifest)
+		}
+	})
+}
+
+func TestReplaceSnapshotContentsErrorPaths(t *testing.T) {
+	now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	oldSnapshot := Snapshot{
+		Templates: []Template{{Name: "old", HTMLContent: "<html>old</html>"}},
+		Projects:  []RegistryEntry{{ID: "phase7/old", CreatedAt: now, UpdatedAt: now}},
+		Devices:   []RegistryEntry{{ID: "device/old", CreatedAt: now, UpdatedAt: now}},
+	}
+	newSnapshot := Snapshot{
+		Templates: []Template{{Name: "new", HTMLContent: "<html>new</html>"}},
+		Projects:  []RegistryEntry{{ID: "phase7/new", CreatedAt: now, UpdatedAt: now}},
+		Devices:   []RegistryEntry{{ID: "device/new", CreatedAt: now, UpdatedAt: now}},
+	}
+
+	t.Run("backup dir creation failure", func(t *testing.T) {
+		rootFile := filepath.Join(t.TempDir(), "snapshot-root")
+		if err := os.WriteFile(rootFile, []byte("not a directory"), 0o644); err != nil {
+			t.Fatalf("write root file: %v", err)
+		}
+		if err := replaceSnapshotContents(rootFile, t.TempDir()); err == nil || !strings.Contains(err.Error(), "create snapshot backup dir") {
+			t.Fatalf("replaceSnapshotContents() error = %v, want backup dir creation failure", err)
+		}
+	})
+
+	t.Run("backup existing failure restores moved entries", func(t *testing.T) {
+		root := t.TempDir()
+		stagingRoot := t.TempDir()
+		if err := writeSnapshotContents(root, oldSnapshot); err != nil {
+			t.Fatalf("writeSnapshotContents(old): %v", err)
+		}
+		oldManifest, err := Manifest(root)
+		if err != nil {
+			t.Fatalf("Manifest(old): %v", err)
+		}
+		if err := writeSnapshotContents(stagingRoot, newSnapshot); err != nil {
+			t.Fatalf("writeSnapshotContents(new): %v", err)
+		}
+
+		origRename := renameFileFn
+		renameFileFn = func(from string, to string) error {
+			toDir := filepath.Base(filepath.Dir(to))
+			if filepath.Base(from) == "devices.json" && strings.HasPrefix(toDir, ".snapshot-backup-") {
+				return errors.New("backup failed")
+			}
+			return origRename(from, to)
+		}
+		t.Cleanup(func() {
+			renameFileFn = origRename
+		})
+
+		err = replaceSnapshotContents(root, stagingRoot)
+		if err == nil || !strings.Contains(err.Error(), "backup existing devices.json") {
+			t.Fatalf("replaceSnapshotContents() error = %v, want backup failure", err)
+		}
+		currentManifest, err := Manifest(root)
+		if err != nil {
+			t.Fatalf("Manifest(current): %v", err)
+		}
+		if !reflect.DeepEqual(currentManifest, oldManifest) {
+			t.Fatalf("snapshot changed after backup failure\nold=%v\ncurrent=%v", oldManifest, currentManifest)
+		}
+	})
+
+	t.Run("restore failure reports backup path", func(t *testing.T) {
+		root := t.TempDir()
+		stagingRoot, err := os.MkdirTemp(root, ".snapshot-staging-*")
+		if err != nil {
+			t.Fatalf("create staging root: %v", err)
+		}
+		if err := writeSnapshotContents(root, oldSnapshot); err != nil {
+			t.Fatalf("writeSnapshotContents(old): %v", err)
+		}
+		if err := writeSnapshotContents(stagingRoot, newSnapshot); err != nil {
+			t.Fatalf("writeSnapshotContents(new): %v", err)
+		}
+
+		origRename := renameFileFn
+		renameFileFn = func(from string, to string) error {
+			fromDir := filepath.Base(filepath.Dir(from))
+			if filepath.Base(from) == "devices.json" && strings.HasPrefix(fromDir, ".snapshot-staging-") {
+				return errors.New("promote failed")
+			}
+			if filepath.Base(from) == "projects.json" && strings.HasPrefix(fromDir, ".snapshot-backup-") {
+				return errors.New("restore failed")
+			}
+			return origRename(from, to)
+		}
+		t.Cleanup(func() {
+			renameFileFn = origRename
+		})
+
+		err = replaceSnapshotContents(root, stagingRoot)
+		if err == nil || !strings.Contains(err.Error(), "failed to restore previous snapshot state") {
+			t.Fatalf("replaceSnapshotContents() error = %v, want restore failure detail", err)
+		}
+		if !strings.Contains(err.Error(), ".snapshot-backup-") {
+			t.Fatalf("replaceSnapshotContents() error = %v, want backup path", err)
 		}
 	})
 }
@@ -1438,6 +1916,139 @@ func TestWriteFaultInjectionErrorPaths(t *testing.T) {
 		})
 		if err == nil || !strings.Contains(err.Error(), "write record.html for 20260309-beadfeed") {
 			t.Fatalf("Write() error = %v, want wrapped record close failure", err)
+		}
+	})
+
+	t.Run("record notes write failure", func(t *testing.T) {
+		call := 0
+		createTempFileFn = func(string, string) (tempFile, error) {
+			call++
+			if call == 2 {
+				return &stubTempFile{name: filepath.Join(t.TempDir(), "notes.tmp"), writeErr: errors.New("notes failed")}, nil
+			}
+			return origCreateTemp(t.TempDir(), ".snapshot-*.tmp")
+		}
+
+		notes := "notes"
+		err := Write(t.TempDir(), Snapshot{
+			Records: []Record{{
+				ID:          "20260309-badnotes",
+				Date:        "2026-03-09",
+				DayOrder:    "a0",
+				HTMLContent: strPtrSnapshot("<html>record</html>"),
+				Notes:       &notes,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "write notes.md for 20260309-badnotes") {
+			t.Fatalf("Write() error = %v, want wrapped notes write failure", err)
+		}
+	})
+
+	t.Run("record metadata write failure", func(t *testing.T) {
+		call := 0
+		createTempFileFn = func(string, string) (tempFile, error) {
+			call++
+			if call == 2 {
+				return &stubTempFile{name: filepath.Join(t.TempDir(), "metadata.tmp"), writeErr: errors.New("metadata failed")}, nil
+			}
+			return origCreateTemp(t.TempDir(), ".snapshot-*.tmp")
+		}
+
+		err := Write(t.TempDir(), Snapshot{
+			Records: []Record{{
+				ID:          "20260309-badmeta0",
+				Date:        "2026-03-09",
+				DayOrder:    "a0",
+				HTMLContent: strPtrSnapshot("<html>record</html>"),
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "write metadata.json for 20260309-badmeta0") {
+			t.Fatalf("Write() error = %v, want wrapped record metadata write failure", err)
+		}
+	})
+
+	t.Run("chat metadata write failure", func(t *testing.T) {
+		createTempFileFn = func(string, string) (tempFile, error) {
+			return &stubTempFile{name: filepath.Join(t.TempDir(), "chat.tmp"), writeErr: errors.New("chat write failed")}, nil
+		}
+
+		err := Write(t.TempDir(), Snapshot{
+			Chats: []ChatSession{{
+				ID:              "20260309-c0ffee00",
+				Source:          "codex",
+				SourceSessionID: "source",
+				SourceDeviceID:  "device/unit",
+				StartedAt:       now,
+				LastActivityAt:  now,
+				CreatedAt:       now,
+				UpdatedAt:       now,
+			}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "write chat metadata for 20260309-c0ffee00") {
+			t.Fatalf("Write() error = %v, want wrapped chat metadata write failure", err)
+		}
+	})
+
+	t.Run("chat items write failure", func(t *testing.T) {
+		call := 0
+		createTempFileFn = func(string, string) (tempFile, error) {
+			call++
+			if call == 2 {
+				return &stubTempFile{name: filepath.Join(t.TempDir(), "chat-items.tmp"), writeErr: errors.New("items failed")}, nil
+			}
+			return origCreateTemp(t.TempDir(), ".snapshot-*.tmp")
+		}
+
+		text := "item"
+		err := Write(t.TempDir(), Snapshot{
+			Chats: []ChatSession{{
+				ID:              "20260309-c0ffee01",
+				Source:          "codex",
+				SourceSessionID: "source",
+				SourceDeviceID:  "device/unit",
+				StartedAt:       now,
+				LastActivityAt:  now,
+				CreatedAt:       now,
+				UpdatedAt:       now,
+				Items:           []ChatItem{{Ordinal: 0, Role: "user", ItemType: "message", Text: &text, SearchText: text, CreatedAt: now}},
+			}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "write chat items for 20260309-c0ffee01") {
+			t.Fatalf("Write() error = %v, want wrapped chat items write failure", err)
+		}
+	})
+
+	t.Run("projects registry write failure", func(t *testing.T) {
+		createTempFileFn = func(string, string) (tempFile, error) {
+			return &stubTempFile{name: filepath.Join(t.TempDir(), "projects.tmp"), writeErr: errors.New("projects failed")}, nil
+		}
+
+		err := Write(t.TempDir(), Snapshot{Projects: []RegistryEntry{{ID: "phase7/unit", CreatedAt: now, UpdatedAt: now}}})
+		if err == nil || !strings.Contains(err.Error(), "write projects.json") {
+			t.Fatalf("Write() error = %v, want wrapped projects registry write failure", err)
+		}
+	})
+
+	t.Run("devices registry write failure", func(t *testing.T) {
+		call := 0
+		createTempFileFn = func(string, string) (tempFile, error) {
+			call++
+			if call == 2 {
+				return &stubTempFile{name: filepath.Join(t.TempDir(), "devices.tmp"), writeErr: errors.New("devices failed")}, nil
+			}
+			return origCreateTemp(t.TempDir(), ".snapshot-*.tmp")
+		}
+
+		err := Write(t.TempDir(), Snapshot{
+			Projects: []RegistryEntry{{ID: "phase7/unit", CreatedAt: now, UpdatedAt: now}},
+			Devices:  []RegistryEntry{{ID: "device/unit", CreatedAt: now, UpdatedAt: now}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "write devices.json") {
+			t.Fatalf("Write() error = %v, want wrapped devices registry write failure", err)
 		}
 	})
 

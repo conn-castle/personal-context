@@ -226,6 +226,11 @@ func mapS3Error(err error) error {
 	return err
 }
 
+// IsNotFound reports whether the error indicates a missing S3 object (key).
+// It returns false for NoSuchBucket so that misconfigured buckets propagate
+// as real errors instead of being silently treated as "key not found".
+func IsNotFound(err error) bool { return isNotFoundError(err) }
+
 // isNotFoundError checks if the error indicates the object does not exist.
 // It returns false for NoSuchBucket errors so that misconfigured buckets
 // propagate as real errors instead of being silently treated as "key not found".

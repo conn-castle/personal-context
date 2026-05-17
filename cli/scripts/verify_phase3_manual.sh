@@ -7,12 +7,12 @@ Usage: ./scripts/verify_phase3_manual.sh [options]
 
 Runs a full local Phase 3 verification flow:
 - setup
-- add
+- records add
 - show (text + json)
-- edit
-- move
-- delete
-- restore
+- records edit
+- records move
+- records delete
+- records restore
 
 Then prepares a previewable HTML record bundle and opens it in the default browser.
 
@@ -176,10 +176,10 @@ run_pc device register "${device_id}" >/dev/null
 run_pc project add "phase3/manual" >/dev/null
 run_pc project add "phase3/edited" >/dev/null
 
-id1="$(run_pc add --date 2025-03-01 --device "${device_id}" "${input_a}" | tr -d '\r\n')"
+id1="$(run_pc records add --date 2025-03-01 --device "${device_id}" "${input_a}" | tr -d '\r\n')"
 [[ "${id1}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected record ID format from first add: ${id1}"
 
-id2="$(run_pc add --date 2025-03-01 --device "${device_id}" --project "phase3/manual" "${input_b}" | tr -d '\r\n')"
+id2="$(run_pc records add --date 2025-03-01 --device "${device_id}" --project "phase3/manual" "${input_b}" | tr -d '\r\n')"
 [[ "${id2}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected record ID format from second add: ${id2}"
 
 show_text="$(run_pc show "${id1}")"
@@ -192,7 +192,7 @@ for expected in '"project_id": "phase3/manual"' '"filename": "plot.svg"' '"filen
 	[[ "${show_json}" == *"${expected}"* ]] || fail "show json output missing: ${expected}"
 done
 
-run_pc edit "${id1}" "${input_edit}" >/dev/null
+run_pc records edit "${id1}" "${input_edit}" >/dev/null
 
 edited_text="$(run_pc show "${id1}")"
 for expected in "Project:" "phase3/edited" "Notes:" "Edited notes" "plot2.svg" "metrics2.csv"; do
@@ -201,7 +201,7 @@ done
 [[ "${edited_text}" != *"plot.svg"* ]] || fail "edited record still lists old figure plot.svg"
 [[ "${edited_text}" != *"metrics.csv"* ]] || fail "edited record still lists old data file metrics.csv"
 
-move_out="$(run_pc move "${id2}" --first)"
+move_out="$(run_pc records move "${id2}" --first)"
 [[ "${move_out}" == *"moved"* ]] || fail "move output did not include success message"
 
 extract_day_order() {
@@ -223,7 +223,7 @@ order_2="$(extract_day_order "${id2}")"
 [[ -n "${order_2}" ]] || fail "missing day order for ${id2}"
 day_order_lt "${order_2}" "${order_1}" || fail "move --first did not reorder records (${id2} day_order=${order_2}, ${id1} day_order=${order_1})"
 
-delete_out="$(run_pc delete "${id1}")"
+delete_out="$(run_pc records delete "${id1}")"
 [[ "${delete_out}" == *"deleted"* ]] || fail "delete output did not include success message"
 
 deleted_text="$(run_pc show "${id1}")"
@@ -231,7 +231,7 @@ if ! grep -qi 'deleted' <<<"${deleted_text}"; then
 	fail "show output did not indicate deleted state after delete"
 fi
 
-restore_out="$(run_pc restore "${id1}")"
+restore_out="$(run_pc records restore "${id1}")"
 [[ "${restore_out}" == *"restored"* ]] || fail "restore output did not include success message"
 
 restored_json="$(run_pc show --format json "${id1}")"

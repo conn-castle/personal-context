@@ -14,7 +14,7 @@ func TestAddMinimalRecord(t *testing.T) {
 	runPCSuccess(t, homeDir, "device", "register", "test-device")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 
 	recordID := strings.TrimSpace(stdout)
 	if len(recordID) == 0 {
@@ -40,7 +40,7 @@ func TestAddMissingRecordHTML(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(emptyDir, "metadata.json"), []byte(`{"project_id":"test/default-project","source_device_id":"test-device"}`), 0o644); err != nil {
 		t.Fatalf("write metadata: %v", err)
 	}
-	stdout := runPCSuccess(t, homeDir, "add", emptyDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", emptyDir)
 	if strings.TrimSpace(stdout) == "" {
 		t.Fatal("expected record ID for folder without record.html")
 	}
@@ -53,7 +53,7 @@ func TestAddWithMetadataJSON(t *testing.T) {
 	inputDir := createInputFolder(t, inputFolderOpts{
 		MetadataJSON: `{"project_id":"test/proj","git_remote_url":"https://github.com/org/repo","git_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	db := openTestDB(t, homeDir)
@@ -79,7 +79,7 @@ func TestAddProjectFlagMustMatchMetadata(t *testing.T) {
 	inputDir := createInputFolder(t, inputFolderOpts{
 		MetadataJSON: `{"project_id":"from-metadata"}`,
 	})
-	stderr := runPCFailure(t, homeDir, "add", "--project", "from-flag", inputDir)
+	stderr := runPCFailure(t, homeDir, "records", "add", "--project", "from-flag", inputDir)
 	if !strings.Contains(stderr, "project_id conflict") {
 		t.Fatalf("expected project conflict, got %q", stderr)
 	}
@@ -92,7 +92,7 @@ func TestAddWithDateFlag(t *testing.T) {
 	runPCSuccess(t, homeDir, "device", "register", "test-device")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", "--date", "2025-06-15", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", "--date", "2025-06-15", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	db := openTestDB(t, homeDir)
@@ -113,7 +113,7 @@ func TestAddWithFigures(t *testing.T) {
 		HTMLContent: `<html><img src="figures/plot.png"></html>`,
 		Figures:     map[string][]byte{"plot.png": []byte("fake-png-data")},
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Verify figure file on disk
@@ -144,7 +144,7 @@ func TestAddWithDataFiles(t *testing.T) {
 	inputDir := createInputFolder(t, inputFolderOpts{
 		DataFiles: map[string][]byte{"metrics.csv": []byte("col1,col2\n1,2\n")},
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Verify data file on disk
@@ -170,11 +170,11 @@ func TestAddDayOrderIncreases(t *testing.T) {
 
 	date := "2025-03-05"
 	inputDir1 := createInputFolder(t, inputFolderOpts{})
-	stdout1 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir1)
+	stdout1 := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir1)
 	id1 := strings.TrimSpace(stdout1)
 
 	inputDir2 := createInputFolder(t, inputFolderOpts{})
-	stdout2 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir2)
+	stdout2 := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir2)
 	id2 := strings.TrimSpace(stdout2)
 
 	db := openTestDB(t, homeDir)
@@ -197,10 +197,10 @@ func TestAddPositionFirst(t *testing.T) {
 
 	date := "2025-03-05"
 	inputDir1 := createInputFolder(t, inputFolderOpts{})
-	runPCSuccess(t, homeDir, "add", "--date", date, inputDir1)
+	runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir1)
 
 	inputDir2 := createInputFolder(t, inputFolderOpts{})
-	stdout2 := runPCSuccess(t, homeDir, "add", "--date", date, "--first", inputDir2)
+	stdout2 := runPCSuccess(t, homeDir, "records", "add", "--date", date, "--first", inputDir2)
 	id2 := strings.TrimSpace(stdout2)
 
 	// Verify id2 has the smallest day_order
@@ -221,7 +221,7 @@ func TestAddInvalidDate(t *testing.T) {
 	runPCSuccess(t, homeDir, "device", "register", "test-device")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stderr := runPCFailure(t, homeDir, "add", "--date", "not-a-date", inputDir)
+	stderr := runPCFailure(t, homeDir, "records", "add", "--date", "not-a-date", inputDir)
 	if !strings.Contains(stderr, "invalid date") {
 		t.Fatalf("expected invalid date error, got %q", stderr)
 	}
@@ -232,7 +232,7 @@ func TestAddMutuallyExclusivePositionFlags(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stderr := runPCFailure(t, homeDir, "add", "--first", "--last", inputDir)
+	stderr := runPCFailure(t, homeDir, "records", "add", "--first", "--last", inputDir)
 	if !strings.Contains(stderr, "only one position flag") {
 		t.Fatalf("expected position flag error, got %q", stderr)
 	}

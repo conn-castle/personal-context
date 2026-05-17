@@ -74,7 +74,7 @@ func TestAddRequiresRegisteredProjectAndDevice(t *testing.T) {
 	inputDir := createInputFolder(t, inputFolderOpts{
 		MetadataJSON: `{"project_id":"missing-project","source_device_id":"missing-device"}`,
 	})
-	stderr := runPCFailure(t, homeDir, "add", inputDir)
+	stderr := runPCFailure(t, homeDir, "records", "add", inputDir)
 	if !strings.Contains(stderr, "project") || !strings.Contains(stderr, "not registered") {
 		t.Fatalf("expected missing project error, got %q", stderr)
 	}
@@ -87,7 +87,7 @@ func TestAddUsesExplicitMetadataProjectAndDevice(t *testing.T) {
 	inputDir := createInputFolder(t, inputFolderOpts{
 		MetadataJSON: `{"project_id":"alpha","source_device_id":"laptop"}`,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	db := openTestDB(t, homeDir)
@@ -108,7 +108,7 @@ func TestProjectFlagMustMatchMetadata(t *testing.T) {
 	inputDir := createInputFolder(t, inputFolderOpts{
 		MetadataJSON: `{"project_id":"from-metadata","source_device_id":"test-device"}`,
 	})
-	stderr := runPCFailure(t, homeDir, "add", "--project", "from-flag", inputDir)
+	stderr := runPCFailure(t, homeDir, "records", "add", "--project", "from-flag", inputDir)
 	if !strings.Contains(stderr, "project_id conflict") {
 		t.Fatalf("expected metadata conflict, got %q", stderr)
 	}
@@ -124,7 +124,7 @@ func TestArchivedProjectRejectedForNewAdd(t *testing.T) {
 	inputDir := createInputFolder(t, inputFolderOpts{
 		MetadataJSON: `{"project_id":"archived-proj","source_device_id":"test-device"}`,
 	})
-	stderr := runPCFailure(t, homeDir, "add", inputDir)
+	stderr := runPCFailure(t, homeDir, "records", "add", inputDir)
 	if !strings.Contains(stderr, "archived") {
 		t.Fatalf("expected archived project error, got %q", stderr)
 	}
@@ -141,7 +141,7 @@ func TestStaleActiveProjectConfigIsIgnored(t *testing.T) {
 	writeStaleActiveProjectConfig(t, homeDir)
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	var projectID string

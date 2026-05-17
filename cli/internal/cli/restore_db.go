@@ -51,6 +51,7 @@ func runRestoreDB(ctx context.Context, stdout io.Writer, _ io.Writer, path strin
 	if err := gitsnapshot.Write(backupPath, currentSnapshot); err != nil {
 		return fmt.Errorf("write restore backup: %w", err)
 	}
+	_, _ = fmt.Fprintf(stdout, "Backup created at %s\n", backupPath)
 
 	if err := wipeLocalState(homeDir); err != nil {
 		return err
@@ -68,7 +69,6 @@ func runRestoreDB(ctx context.Context, stdout io.Writer, _ io.Writer, path strin
 		return err
 	}
 
-	_, _ = fmt.Fprintf(stdout, "Backup created at %s\n", backupPath)
 	_, _ = fmt.Fprintf(stdout, "Restore complete: created %d, updated %d, skipped %d\n", stats.Created, stats.Updated, stats.Skipped)
 	return nil
 }

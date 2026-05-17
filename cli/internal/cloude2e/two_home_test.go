@@ -39,7 +39,7 @@ func TestTwoHomeRoundTripWithAutoSyncConflictResolution(t *testing.T) {
 		map[string][]byte{"plot.png": []byte(originalFigure)},
 		map[string][]byte{"metrics.csv": []byte(originalData)},
 	)
-	recordID := strings.TrimSpace(runPCSuccessNoStderr(t, homeA, userHomeA, "add", inputDir))
+	recordID := strings.TrimSpace(runPCSuccessNoStderr(t, homeA, userHomeA, "records", "add", inputDir))
 	if recordID == "" {
 		t.Fatal("expected record ID from add")
 	}
@@ -79,7 +79,7 @@ func TestTwoHomeRoundTripWithAutoSyncConflictResolution(t *testing.T) {
 		map[string][]byte{"plot.png": []byte(homeAFigure)},
 		map[string][]byte{"metrics.csv": []byte(homeAData)},
 	)
-	editOutA := runPCSuccessNoStderr(t, homeA, userHomeA, "edit", recordID, editDirA)
+	editOutA := runPCSuccessNoStderr(t, homeA, userHomeA, "records", "edit", recordID, editDirA)
 	if !strings.Contains(editOutA, "Record "+recordID+" updated") {
 		t.Fatalf("expected homeA edit success output, got:\n%s", editOutA)
 	}
@@ -91,7 +91,7 @@ func TestTwoHomeRoundTripWithAutoSyncConflictResolution(t *testing.T) {
 		map[string][]byte{"plot.png": []byte(homeBFigure)},
 		map[string][]byte{"metrics.csv": []byte(homeBData)},
 	)
-	editOutB := runPCSuccessNoStderr(t, homeB, userHomeB, "edit", recordID, editDirB)
+	editOutB := runPCSuccessNoStderr(t, homeB, userHomeB, "records", "edit", recordID, editDirB)
 	if !strings.Contains(editOutB, "Record "+recordID+" updated") {
 		t.Fatalf("expected homeB edit success output, got:\n%s", editOutB)
 	}

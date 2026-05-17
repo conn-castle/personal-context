@@ -13,7 +13,7 @@ func TestSearchMatchesHTMLContent(t *testing.T) {
 	folder := createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>neural network training</body></html>",
 	})
-	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-01-15")
+	stdout := runPCSuccess(t, homeDir, "records", "add", folder, "--date", "2025-01-15")
 	recordID := strings.TrimSpace(stdout)
 
 	searchOut := runPCSuccess(t, homeDir, "search", "neural")
@@ -29,7 +29,7 @@ func TestSearchMatchesNotes(t *testing.T) {
 	folder := createInputFolder(t, inputFolderOpts{
 		Notes: "experiment alpha",
 	})
-	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-01-16")
+	stdout := runPCSuccess(t, homeDir, "records", "add", folder, "--date", "2025-01-16")
 	recordID := strings.TrimSpace(stdout)
 
 	searchOut := runPCSuccess(t, homeDir, "search", "alpha")
@@ -43,12 +43,13 @@ func TestSearchMatchesProjectID(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	folder := createInputFolder(t, inputFolderOpts{
+		HTMLContent:  "<html><body>sleep project marker</body></html>",
 		MetadataJSON: `{"project_id": "happy-ai/sleep"}`,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-01-17")
+	stdout := runPCSuccess(t, homeDir, "records", "add", folder, "--date", "2025-01-17")
 	recordID := strings.TrimSpace(stdout)
 
-	searchOut := runPCSuccess(t, homeDir, "search", "sleep")
+	searchOut := runPCSuccess(t, homeDir, "search", "--project", "happy-ai/sleep", "sleep")
 	if !strings.Contains(searchOut, recordID) {
 		t.Fatalf("expected search output to contain record ID %q, got:\n%s", recordID, searchOut)
 	}
@@ -61,7 +62,7 @@ func TestSearchCaseInsensitive(t *testing.T) {
 	folder := createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>MachineLearning</body></html>",
 	})
-	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-01-18")
+	stdout := runPCSuccess(t, homeDir, "records", "add", folder, "--date", "2025-01-18")
 	recordID := strings.TrimSpace(stdout)
 
 	searchOut := runPCSuccess(t, homeDir, "search", "machinelearning")
@@ -78,14 +79,14 @@ func TestSearchProjectFilter(t *testing.T) {
 		HTMLContent:  "<html><body>shared keyword</body></html>",
 		MetadataJSON: `{"project_id": "proj-alpha"}`,
 	})
-	stdout1 := runPCSuccess(t, homeDir, "add", folder1, "--date", "2025-03-02")
+	stdout1 := runPCSuccess(t, homeDir, "records", "add", folder1, "--date", "2025-03-02")
 	id1 := strings.TrimSpace(stdout1)
 
 	folder2 := createInputFolder(t, inputFolderOpts{
 		HTMLContent:  "<html><body>shared keyword</body></html>",
 		MetadataJSON: `{"project_id": "proj-beta"}`,
 	})
-	stdout2 := runPCSuccess(t, homeDir, "add", folder2, "--date", "2025-03-02")
+	stdout2 := runPCSuccess(t, homeDir, "records", "add", folder2, "--date", "2025-03-02")
 	id2 := strings.TrimSpace(stdout2)
 
 	searchOut := runPCSuccess(t, homeDir, "search", "--format", "ids", "--project", "proj-alpha", "shared keyword")
@@ -104,10 +105,10 @@ func TestSearchDeletedFlagIncludesSoftDeleted(t *testing.T) {
 	folder := createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>recoverable record data</body></html>",
 	})
-	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-03-04")
+	stdout := runPCSuccess(t, homeDir, "records", "add", folder, "--date", "2025-03-04")
 	recordID := strings.TrimSpace(stdout)
 
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 
 	searchOut := runPCSuccess(t, homeDir, "search", "--format", "ids", "--deleted", "recoverable record data")
 	if !strings.Contains(searchOut, recordID) {
@@ -123,25 +124,24 @@ func TestSearchFormatJSON(t *testing.T) {
 		HTMLContent:  "<html><body>json output test</body></html>",
 		MetadataJSON: `{"project_id": "json-proj"}`,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", folder, "--date", "2025-02-03")
+	stdout := runPCSuccess(t, homeDir, "records", "add", folder, "--date", "2025-02-03")
 	recordID := strings.TrimSpace(stdout)
 
-	searchOut := runPCSuccess(t, homeDir, "search", "--format", "json", "json output")
+	searchOut := runPCSuccess(t, homeDir, "search", "--json", "json output")
 
-	var page struct {
-		Items      []map[string]interface{} `json:"items"`
-		Total      int                      `json:"total"`
-		NextCursor *string                  `json:"next_cursor"`
-	}
-	if err := json.Unmarshal([]byte(searchOut), &page); err != nil {
+	var results []map[string]interface{}
+	if err := json.Unmarshal([]byte(searchOut), &results); err != nil {
 		t.Fatalf("failed to parse JSON: %v\noutput: %s", err, searchOut)
 	}
 
-	if page.Total != 1 || len(page.Items) != 1 || page.NextCursor != nil {
-		t.Fatalf("expected 1-result envelope, got %+v", page)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 JSON result, got %+v", results)
 	}
 
-	r := page.Items[0]
+	r := results[0]
+	if r["domain"] != "records" {
+		t.Fatalf("expected domain=records, got %v", r["domain"])
+	}
 	if r["id"] != recordID {
 		t.Fatalf("expected id=%s, got %v", recordID, r["id"])
 	}

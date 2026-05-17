@@ -9,8 +9,8 @@ import (
 
 	"github.com/conn-castle/personal-context/cli/internal/fractionalindex"
 	"github.com/conn-castle/personal-context/cli/internal/notes"
-	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/conn-castle/personal-context/cli/internal/recordid"
+	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/spf13/cobra"
 )
 

@@ -10,10 +10,19 @@ import (
 	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
+	"github.com/conn-castle/personal-context/cli/internal/s3client"
 	"github.com/conn-castle/personal-context/cli/internal/syncengine"
 )
 
-const syncedFilePermission = 0o644
+// defaultWarnWriter is the destination used when callers do not provide one.
+// Wrapped in a function variable so tests can capture warnings without
+// reaching into the process-global os.Stderr.
+var defaultWarnWriter io.Writer = os.Stderr
+
+const (
+	syncedFilePermission        = 0o644
+	syncedChatRawFilePermission = 0o600
+)
 
 // osFileChmod wraps *os.File.Chmod so tests can inject I/O failures without
 // modifying the filesystem. Production code never reassigns this variable.
@@ -23,6 +32,7 @@ var osFileChmod = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode
 type LocalFiles interface {
 	ResolveFigurePath(recordID string, filename string) (string, error)
 	ResolveDataFilePath(recordID string, filename string) (string, error)
+	ResolveChatSourcePath(chatSessionID string, rawSourceKey string) (string, error)
 }
 
 // ObjectStore provides the cloud object operations required by sync.
@@ -46,6 +56,7 @@ type Service struct {
 	localFS      LocalFiles
 	cloudObjects ObjectStore
 	session      SessionManager
+	warnWriter   io.Writer
 }
 
 // syncDirection describes one source-to-target reconciliation pass.
@@ -85,8 +96,20 @@ func NewService(
 			localFS:      localFS,
 			cloudObjects: objects,
 			session:      session,
+			warnWriter:   defaultWarnWriter,
 		}, nil
 	}
+}
+
+// SetWarnWriter overrides where degraded-durability and similar non-fatal
+// sync warnings are written. nil restores the package default. Callers who
+// want warnings captured by their own logger should call this before Sync.
+func (s *Service) SetWarnWriter(w io.Writer) {
+	if w == nil {
+		s.warnWriter = defaultWarnWriter
+		return
+	}
+	s.warnWriter = w
 }
 
 // Sync performs a full push-then-pull cycle and advances the cursor only after success.
@@ -109,7 +132,13 @@ func (s *Service) Sync(ctx context.Context) (err error) {
 	if err := s.pushChangedRecords(ctx, window.LastSync); err != nil {
 		return err
 	}
+	if err := s.pushChangedChats(ctx, window.LastSync); err != nil {
+		return err
+	}
 	if err := s.pullChangedRecords(ctx, window.LastSync); err != nil {
+		return err
+	}
+	if err := s.pullChangedChats(ctx, window.LastSync); err != nil {
 		return err
 	}
 	if err := s.updateCloudVersion(ctx); err != nil {
@@ -143,6 +172,256 @@ func (s *Service) pullChangedRecords(ctx context.Context, since time.Time) error
 		winningSide: WinnerCloud,
 		apply:       s.applyBundleToLocal,
 	})
+}
+
+func (s *Service) pushChangedChats(ctx context.Context, since time.Time) error {
+	return syncChangedChatsDirected(ctx, since, "push", s.localRepo, s.cloudRepo, WinnerLocal, s.transferChatRawSource, s.warnWriter)
+}
+
+func (s *Service) pullChangedChats(ctx context.Context, since time.Time) error {
+	return syncChangedChatsDirected(ctx, since, "pull", s.cloudRepo, s.localRepo, WinnerCloud, s.transferChatRawSource, s.warnWriter)
+}
+
+// chatRawSyncReport aggregates degraded-durability warnings observed during
+// raw chat source push/pull. Sync continues on missing local files (push) or
+// missing cloud objects (pull); doctor is the failing integrity gate.
+type chatRawSyncReport struct {
+	MissingLocal []string
+	MissingCloud []string
+}
+
+// chatRawTransferFn is the optional raw-source push/pull hook installed by
+// Service. Unit tests that call syncChangedChats directly pass nil to skip
+// raw transfer.
+type chatRawTransferFn func(ctx context.Context, name string, session repository.ChatSession, report *chatRawSyncReport) error
+
+func syncChangedChats(ctx context.Context, since time.Time, name string, source repository.Repository, target repository.Repository, rawTransfer chatRawTransferFn, warnWriter io.Writer) error {
+	return syncChangedChatsDirected(ctx, since, name, source, target, WinnerLocal, rawTransfer, warnWriter)
+}
+
+func syncChangedChatsDirected(ctx context.Context, since time.Time, name string, source repository.Repository, target repository.Repository, winningSide Winner, rawTransfer chatRawTransferFn, warnWriter io.Writer) error {
+	sessions, err := source.ListChatSessions(ctx, repository.ListChatSessionsFilter{IncludeDeleted: true, UpdatedAfter: &since})
+	if err != nil {
+		return fmt.Errorf("list %s chat changes: %w", name, err)
+	}
+	report := chatRawSyncReport{}
+	for _, session := range sessions {
+		targetSession, targetExists, err := loadChatSession(ctx, target, session.ID)
+		if err != nil {
+			return fmt.Errorf("load target chat session %s: %w", session.ID, err)
+		}
+		targetSourceSession, targetSourceExists, err := loadChatSessionBySource(ctx, target, session.Source, session.SourceSessionID)
+		if err != nil {
+			return fmt.Errorf("load target chat source %s/%s: %w", session.Source, session.SourceSessionID, err)
+		}
+		if targetSourceExists && targetSourceSession.ID != session.ID {
+			return fmt.Errorf(
+				"%s chat source %s/%s already exists with id %s; source id %s cannot be synced without manual resolution",
+				name,
+				session.Source,
+				session.SourceSessionID,
+				targetSourceSession.ID,
+				session.ID,
+			)
+		}
+		if targetExists {
+			winner, err := resolveChatWinnerForDirection(session, targetSession, winningSide)
+			if err != nil {
+				return fmt.Errorf("resolve %s chat session %s: %w", name, session.ID, err)
+			}
+			if winner != winningSide {
+				continue
+			}
+		}
+		// Transfer raw source bytes BEFORE the metadata upsert so a partially
+		// committed metadata row does not advertise a key whose object/local
+		// file is missing. Missing bytes are degraded durability, not a
+		// hard failure: leave raw_source_key intact and aggregate a warning.
+		if rawTransfer != nil && session.RawSourceKey != nil && session.DeletedAt == nil {
+			if err := rawTransfer(ctx, name, session, &report); err != nil {
+				return err
+			}
+		}
+		createdAt := session.CreatedAt
+		updatedAt := session.UpdatedAt
+		stored, _, err := target.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:                 session.ID,
+				Source:             session.Source,
+				SourceSessionID:    session.SourceSessionID,
+				SourceDeviceID:     session.SourceDeviceID,
+				ProjectID:          session.ProjectID,
+				CWD:                session.CWD,
+				Title:              session.Title,
+				StartedAt:          session.StartedAt,
+				LastActivityAt:     session.LastActivityAt,
+				OriginalSourcePath: session.OriginalSourcePath,
+				RawSourceKey:       session.RawSourceKey,
+				CreatedAt:          &createdAt,
+				UpdatedAt:          &updatedAt,
+				DeletedAt:          session.DeletedAt,
+			},
+			ClearDeleted: session.DeletedAt == nil,
+		})
+		if err != nil {
+			return fmt.Errorf("%s chat session %s: %w", name, session.ID, err)
+		}
+		items, err := source.ListChatItems(ctx, session.ID)
+		if err != nil {
+			return fmt.Errorf("list %s chat items %s: %w", name, session.ID, err)
+		}
+		inputs := make([]repository.CreateChatItemInput, 0, len(items))
+		for _, item := range items {
+			createdAt := item.CreatedAt
+			inputs = append(inputs, repository.CreateChatItemInput{
+				SessionID:  stored.ID,
+				Ordinal:    item.Ordinal,
+				Role:       item.Role,
+				ItemType:   item.ItemType,
+				Text:       item.Text,
+				SearchText: item.SearchText,
+				RawJSON:    item.RawJSON,
+				CreatedAt:  &createdAt,
+			})
+		}
+		if err := target.ReplaceChatItems(ctx, stored.ID, inputs); err != nil {
+			return fmt.Errorf("%s chat items %s: %w", name, stored.ID, err)
+		}
+	}
+	if warnWriter == nil {
+		warnWriter = defaultWarnWriter
+	}
+	if total := len(report.MissingLocal); total > 0 {
+		if _, err := fmt.Fprintf(warnWriter, "%d raw chat source files missing locally; run pc doctor --verbose for details\n", total); err != nil {
+			return fmt.Errorf("write local chat raw source warning: %w", err)
+		}
+	}
+	if total := len(report.MissingCloud); total > 0 {
+		if _, err := fmt.Fprintf(warnWriter, "%d raw chat source objects missing in cloud; run pc doctor --verbose for details\n", total); err != nil {
+			return fmt.Errorf("write cloud chat raw source warning: %w", err)
+		}
+	}
+	return nil
+}
+
+func loadChatSession(ctx context.Context, repo repository.Repository, id string) (repository.ChatSession, bool, error) {
+	session, err := repo.GetChatSessionByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return repository.ChatSession{}, false, nil
+		}
+		return repository.ChatSession{}, false, err
+	}
+	return session, true, nil
+}
+
+func loadChatSessionBySource(ctx context.Context, repo repository.Repository, source string, sourceSessionID string) (repository.ChatSession, bool, error) {
+	session, err := repo.GetChatSessionBySource(ctx, source, sourceSessionID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return repository.ChatSession{}, false, nil
+		}
+		return repository.ChatSession{}, false, err
+	}
+	return session, true, nil
+}
+
+func resolveChatWinnerForDirection(source repository.ChatSession, target repository.ChatSession, winningSide Winner) (Winner, error) {
+	local := source
+	cloud := target
+	if winningSide == WinnerCloud {
+		local = target
+		cloud = source
+	}
+	outcome, err := syncengine.ResolveRecordWinner(
+		&repository.Record{ID: local.ID, UpdatedAt: local.UpdatedAt, DeletedAt: local.DeletedAt},
+		&repository.Record{ID: cloud.ID, UpdatedAt: cloud.UpdatedAt, DeletedAt: cloud.DeletedAt},
+	)
+	if err != nil {
+		return "", err
+	}
+	switch outcome {
+	case syncengine.OutcomeLocal:
+		return WinnerLocal, nil
+	case syncengine.OutcomeRemote:
+		return WinnerCloud, nil
+	default:
+		return WinnerNone, nil
+	}
+}
+
+// transferChatRawSource uploads (push) or downloads (pull) the managed raw
+// chat source object for one chat session. Missing files at either end are
+// recorded as warnings without halting sync.
+func (s *Service) transferChatRawSource(ctx context.Context, name string, session repository.ChatSession, report *chatRawSyncReport) error {
+	if session.RawSourceKey == nil {
+		return nil
+	}
+	key := *session.RawSourceKey
+	localPath, err := s.localFS.ResolveChatSourcePath(session.ID, key)
+	if err != nil {
+		return fmt.Errorf("%s chat raw source path %s: %w", name, session.ID, err)
+	}
+	switch name {
+	case "push":
+		uploaded, err := s.uploadChatSourceIfPresent(ctx, key, localPath)
+		if err != nil {
+			return fmt.Errorf("upload chat raw source %s: %w", session.ID, err)
+		}
+		if !uploaded {
+			report.MissingLocal = append(report.MissingLocal, session.ID)
+		}
+	case "pull":
+		if err := s.downloadChatSourceIfPresent(ctx, key, localPath); err != nil {
+			if errors.Is(err, errObjectNotFound) {
+				report.MissingCloud = append(report.MissingCloud, session.ID)
+				return nil
+			}
+			return fmt.Errorf("download chat raw source %s: %w", session.ID, err)
+		}
+	}
+	return nil
+}
+
+// errObjectNotFound signals a confirmed cloud object miss as distinct from
+// auth or network errors that the caller should still surface.
+var errObjectNotFound = errors.New("cloud object not found")
+
+func (s *Service) uploadChatSourceIfPresent(ctx context.Context, key string, path string) (bool, error) {
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat local chat source %s: %w", path, err)
+	}
+	if err := s.uploadFile(ctx, key, path); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Service) downloadChatSourceIfPresent(ctx context.Context, key string, path string) error {
+	body, err := s.cloudObjects.Download(ctx, key)
+	if err != nil {
+		if isCloudObjectNotFound(err) {
+			return errObjectNotFound
+		}
+		return fmt.Errorf("download %s: %w", key, err)
+	}
+	defer func() { _ = body.Close() }()
+	if err := writeReaderToPathWithPerm(path, body, syncedChatRawFilePermission); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+// isCloudObjectNotFound reports whether an ObjectStore.Download error is a
+// confirmed object miss as opposed to auth/network or missing-bucket failure.
+// Delegating to s3client.IsNotFound keeps detection rooted in typed AWS errors
+// rather than fragile error-message substrings that could match unrelated
+// failures (e.g., "bucket not found", "endpoint not found").
+func isCloudObjectNotFound(err error) bool {
+	return s3client.IsNotFound(err)
 }
 
 // syncChangedRecords runs one mirrored push/pull pass with consistent error labels.
@@ -221,6 +500,23 @@ func syncRegistries(ctx context.Context, source repository.Repository, target re
 	for _, device := range devices {
 		if _, err := target.UpsertDeviceForImport(ctx, device); err != nil {
 			return fmt.Errorf("upsert device %s: %w", device.ID, err)
+		}
+	}
+	projectPaths, err := source.ListProjectPaths(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("list project paths: %w", err)
+	}
+	for _, path := range projectPaths {
+		createdAt := path.CreatedAt
+		updatedAt := path.UpdatedAt
+		if _, _, err := target.UpsertProjectPath(ctx, repository.CreateProjectPathInput{
+			ProjectID: path.ProjectID,
+			Path:      path.Path,
+			DeviceID:  path.DeviceID,
+			CreatedAt: &createdAt,
+			UpdatedAt: &updatedAt,
+		}); err != nil {
+			return fmt.Errorf("upsert project path %s: %w", path.Path, err)
 		}
 	}
 	return nil
@@ -645,6 +941,10 @@ func (s *Service) downloadFile(ctx context.Context, key string, path string) err
 }
 
 func writeReaderToPath(path string, body io.Reader) error {
+	return writeReaderToPathWithPerm(path, body, syncedFilePermission)
+}
+
+func writeReaderToPathWithPerm(path string, body io.Reader, filePerm os.FileMode) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create directory %s: %w", dir, err)
@@ -662,7 +962,7 @@ func writeReaderToPath(path string, body io.Reader) error {
 		}
 	}()
 
-	if err := osFileChmod(tempFile, syncedFilePermission); err != nil {
+	if err := osFileChmod(tempFile, filePerm); err != nil {
 		_ = tempFile.Close()
 		return fmt.Errorf("chmod temp file %s: %w", tempPath, err)
 	}

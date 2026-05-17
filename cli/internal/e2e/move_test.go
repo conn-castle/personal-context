@@ -10,10 +10,10 @@ func TestMoveChangesDate(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", "--date", "2025-01-01", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", "--date", "2025-01-01", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
-	runPCSuccess(t, homeDir, "move", recordID, "--date", "2025-02-15")
+	runPCSuccess(t, homeDir, "records", "move", recordID, "--date", "2025-02-15")
 
 	db := openTestDB(t, homeDir)
 	var date, dayOrder string
@@ -39,10 +39,10 @@ func TestMovePreservesContent(t *testing.T) {
 		Notes:        notes,
 		MetadataJSON: `{"project_id":"test/preserve"}`,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", "--date", "2025-01-01", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", "--date", "2025-01-01", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
-	runPCSuccess(t, homeDir, "move", recordID, "--date", "2025-06-01")
+	runPCSuccess(t, homeDir, "records", "move", recordID, "--date", "2025-06-01")
 
 	db := openTestDB(t, homeDir)
 	var gotHTML, gotNotes, gotProject string
@@ -66,15 +66,15 @@ func TestMovePositionFirst(t *testing.T) {
 
 	date := "2025-04-10"
 	inputDir1 := createInputFolder(t, inputFolderOpts{})
-	stdout1 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir1)
+	stdout1 := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir1)
 	id1 := strings.TrimSpace(stdout1)
 
 	inputDir2 := createInputFolder(t, inputFolderOpts{})
-	stdout2 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir2)
+	stdout2 := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir2)
 	id2 := strings.TrimSpace(stdout2)
 
 	// id1 is first, id2 is second. Move id2 to --first.
-	runPCSuccess(t, homeDir, "move", id2, "--first")
+	runPCSuccess(t, homeDir, "records", "move", id2, "--first")
 
 	db := openTestDB(t, homeDir)
 	var order1, order2 string
@@ -95,15 +95,15 @@ func TestMovePositionLast(t *testing.T) {
 
 	date := "2025-04-10"
 	inputDir1 := createInputFolder(t, inputFolderOpts{})
-	stdout1 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir1)
+	stdout1 := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir1)
 	id1 := strings.TrimSpace(stdout1)
 
 	inputDir2 := createInputFolder(t, inputFolderOpts{})
-	stdout2 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir2)
+	stdout2 := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir2)
 	id2 := strings.TrimSpace(stdout2)
 
 	// id1 is first, id2 is second. Move id1 to --last.
-	runPCSuccess(t, homeDir, "move", id1, "--last")
+	runPCSuccess(t, homeDir, "records", "move", id1, "--last")
 
 	db := openTestDB(t, homeDir)
 	var order1, order2 string
@@ -124,19 +124,19 @@ func TestMovePositionAfter(t *testing.T) {
 
 	date := "2025-04-10"
 	inputDirA := createInputFolder(t, inputFolderOpts{})
-	stdoutA := runPCSuccess(t, homeDir, "add", "--date", date, inputDirA)
+	stdoutA := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDirA)
 	idA := strings.TrimSpace(stdoutA)
 
 	inputDirB := createInputFolder(t, inputFolderOpts{})
-	stdoutB := runPCSuccess(t, homeDir, "add", "--date", date, inputDirB)
+	stdoutB := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDirB)
 	idB := strings.TrimSpace(stdoutB)
 
 	inputDirC := createInputFolder(t, inputFolderOpts{})
-	stdoutC := runPCSuccess(t, homeDir, "add", "--date", date, inputDirC)
+	stdoutC := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDirC)
 	idC := strings.TrimSpace(stdoutC)
 
 	// Initial order: A, B, C. Move C to --after A. Expected: A, C, B.
-	runPCSuccess(t, homeDir, "move", idC, "--after", idA)
+	runPCSuccess(t, homeDir, "records", "move", idC, "--after", idA)
 
 	db := openTestDB(t, homeDir)
 	rows, err := db.Query("SELECT id FROM records WHERE date = ? ORDER BY day_order ASC", date)
@@ -174,19 +174,19 @@ func TestMovePositionBefore(t *testing.T) {
 
 	date := "2025-04-10"
 	inputDirA := createInputFolder(t, inputFolderOpts{})
-	stdoutA := runPCSuccess(t, homeDir, "add", "--date", date, inputDirA)
+	stdoutA := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDirA)
 	idA := strings.TrimSpace(stdoutA)
 
 	inputDirB := createInputFolder(t, inputFolderOpts{})
-	stdoutB := runPCSuccess(t, homeDir, "add", "--date", date, inputDirB)
+	stdoutB := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDirB)
 	idB := strings.TrimSpace(stdoutB)
 
 	inputDirC := createInputFolder(t, inputFolderOpts{})
-	stdoutC := runPCSuccess(t, homeDir, "add", "--date", date, inputDirC)
+	stdoutC := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDirC)
 	idC := strings.TrimSpace(stdoutC)
 
 	// Initial order: A, B, C. Move A to --before C. Expected: B, A, C.
-	runPCSuccess(t, homeDir, "move", idA, "--before", idC)
+	runPCSuccess(t, homeDir, "records", "move", idA, "--before", idC)
 
 	db := openTestDB(t, homeDir)
 	rows, err := db.Query("SELECT id FROM records WHERE date = ? ORDER BY day_order ASC", date)
@@ -223,10 +223,10 @@ func TestMoveNoFlagsError(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
-	stderr := runPCFailure(t, homeDir, "move", recordID)
+	stderr := runPCFailure(t, homeDir, "records", "move", recordID)
 	if !strings.Contains(stderr, "--date") || !strings.Contains(stderr, "position flag") {
 		t.Fatalf("expected error about --date or position flag, got %q", stderr)
 	}
@@ -236,7 +236,7 @@ func TestMoveNonexistentID(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	stderr := runPCFailure(t, homeDir, "move", "nonexistent-id", "--first")
+	stderr := runPCFailure(t, homeDir, "records", "move", "nonexistent-id", "--first")
 	if !strings.Contains(stderr, "not found") {
 		t.Fatalf("expected 'not found' error, got %q", stderr)
 	}
@@ -247,10 +247,10 @@ func TestMoveInvalidDate(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
-	stderr := runPCFailure(t, homeDir, "move", recordID, "--date", "bad-date")
+	stderr := runPCFailure(t, homeDir, "records", "move", recordID, "--date", "bad-date")
 	if !strings.Contains(stderr, "invalid date") {
 		t.Fatalf("expected 'invalid date' error, got %q", stderr)
 	}
@@ -262,11 +262,11 @@ func TestMoveOnlyPositionSameDate(t *testing.T) {
 
 	date := "2025-05-20"
 	inputDir1 := createInputFolder(t, inputFolderOpts{})
-	stdout1 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir1)
+	stdout1 := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir1)
 	id1 := strings.TrimSpace(stdout1)
 
 	inputDir2 := createInputFolder(t, inputFolderOpts{})
-	stdout2 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir2)
+	stdout2 := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir2)
 	id2 := strings.TrimSpace(stdout2)
 
 	// Record original day_order for id2
@@ -277,7 +277,7 @@ func TestMoveOnlyPositionSameDate(t *testing.T) {
 	}
 
 	// Move id2 to --first without --date; date should stay the same.
-	runPCSuccess(t, homeDir, "move", id2, "--first")
+	runPCSuccess(t, homeDir, "records", "move", id2, "--first")
 
 	var gotDate, newOrder string
 	if err := db.QueryRow("SELECT date, day_order FROM records WHERE id = ?", id2).Scan(&gotDate, &newOrder); err != nil {
@@ -306,7 +306,7 @@ func TestMoveUpdatesUpdatedAt(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", "--date", "2025-01-01", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", "--date", "2025-01-01", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	db := openTestDB(t, homeDir)
@@ -315,7 +315,7 @@ func TestMoveUpdatesUpdatedAt(t *testing.T) {
 		t.Fatalf("query original updated_at: %v", err)
 	}
 
-	runPCSuccess(t, homeDir, "move", recordID, "--date", "2025-03-01")
+	runPCSuccess(t, homeDir, "records", "move", recordID, "--date", "2025-03-01")
 
 	var newUpdatedAt string
 	if err := db.QueryRow("SELECT updated_at FROM records WHERE id = ?", recordID).Scan(&newUpdatedAt); err != nil {
@@ -331,10 +331,10 @@ func TestMovePreservesDeletedAtForSoftDeletedRecord(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", "--date", "2025-01-01", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", "--date", "2025-01-01", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 
 	db := openTestDB(t, homeDir)
 	before := queryDeletedAt(t, db, recordID)
@@ -342,7 +342,7 @@ func TestMovePreservesDeletedAtForSoftDeletedRecord(t *testing.T) {
 		t.Fatal("expected deleted_at to be set before move")
 	}
 
-	runPCSuccess(t, homeDir, "move", recordID, "--date", "2025-03-01")
+	runPCSuccess(t, homeDir, "records", "move", recordID, "--date", "2025-03-01")
 
 	after := queryDeletedAt(t, db, recordID)
 	if !after.Valid {
@@ -359,11 +359,11 @@ func TestMoveDateMatchingCurrentDatePreservesPosition(t *testing.T) {
 
 	date := "2025-05-10"
 	inputDir1 := createInputFolder(t, inputFolderOpts{})
-	stdout1 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir1)
+	stdout1 := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir1)
 	id1 := strings.TrimSpace(stdout1)
 
 	inputDir2 := createInputFolder(t, inputFolderOpts{})
-	stdout2 := runPCSuccess(t, homeDir, "add", "--date", date, inputDir2)
+	stdout2 := runPCSuccess(t, homeDir, "records", "add", "--date", date, inputDir2)
 	id2 := strings.TrimSpace(stdout2)
 
 	db := openTestDB(t, homeDir)
@@ -375,7 +375,7 @@ func TestMoveDateMatchingCurrentDatePreservesPosition(t *testing.T) {
 	// Re-run move on id1 with the same date and no position flag. Its existing
 	// day_order must be preserved (no implicit "last"), even though id2 was
 	// added after id1.
-	runPCSuccess(t, homeDir, "move", id1, "--date", date)
+	runPCSuccess(t, homeDir, "records", "move", id1, "--date", date)
 
 	var orderAfter string
 	if err := db.QueryRow("SELECT day_order FROM records WHERE id = ?", id1).Scan(&orderAfter); err != nil {

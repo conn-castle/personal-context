@@ -21,17 +21,17 @@ const (
 )
 
 type recordDetailsJSON struct {
-	ID           string              `json:"id"`
-	Date         string              `json:"date"`
-	DayOrder     string              `json:"day_order"`
-	HTMLContent  string              `json:"html_content"`
-	Notes        *string             `json:"notes"`
-	ProjectID    *string             `json:"project_id"`
-	GitRemoteURL *string             `json:"git_remote_url"`
-	GitHash      *string             `json:"git_hash"`
-	CreatedAt    string              `json:"created_at"`
-	UpdatedAt    string              `json:"updated_at"`
-	DeletedAt    *string             `json:"deleted_at"`
+	ID           string               `json:"id"`
+	Date         string               `json:"date"`
+	DayOrder     string               `json:"day_order"`
+	HTMLContent  string               `json:"html_content"`
+	Notes        *string              `json:"notes"`
+	ProjectID    *string              `json:"project_id"`
+	GitRemoteURL *string              `json:"git_remote_url"`
+	GitHash      *string              `json:"git_hash"`
+	CreatedAt    string               `json:"created_at"`
+	UpdatedAt    string               `json:"updated_at"`
+	DeletedAt    *string              `json:"deleted_at"`
 	Figures      []recordFigureJSON   `json:"figures"`
 	DataFiles    []recordDataFileJSON `json:"data_files"`
 }
@@ -51,19 +51,19 @@ type recordDataFileJSON struct {
 }
 
 type recordExportJSON struct {
-	FormatVersion  int                 `json:"format_version"`
-	ID             string              `json:"id"`
-	Date           string              `json:"date"`
-	DayOrder       string              `json:"day_order"`
-	ProjectID      *string             `json:"project_id,omitempty"`
-	SourceDeviceID string              `json:"source_device_id"`
-	GitRemoteURL   *string             `json:"git_remote_url,omitempty"`
-	GitHash        *string             `json:"git_hash,omitempty"`
-	HasNotes       bool                `json:"has_notes"`
+	FormatVersion  int                  `json:"format_version"`
+	ID             string               `json:"id"`
+	Date           string               `json:"date"`
+	DayOrder       string               `json:"day_order"`
+	ProjectID      *string              `json:"project_id,omitempty"`
+	SourceDeviceID string               `json:"source_device_id"`
+	GitRemoteURL   *string              `json:"git_remote_url,omitempty"`
+	GitHash        *string              `json:"git_hash,omitempty"`
+	HasNotes       bool                 `json:"has_notes"`
 	Figures        []recordFigureJSON   `json:"figures"`
 	DataFiles      []recordDataFileJSON `json:"data_files"`
-	CreatedAt      string              `json:"created_at"`
-	UpdatedAt      string              `json:"updated_at"`
+	CreatedAt      string               `json:"created_at"`
+	UpdatedAt      string               `json:"updated_at"`
 }
 
 type manualExportRecord struct {
@@ -77,7 +77,7 @@ func TestExportWritesDeterministicGitTreeAndSkipsDeletedRecords(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	minimalID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", createInputFolder(t, inputFolderOpts{
+	minimalID := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body><p>Minimal export record</p></body></html>",
 	})))
 
@@ -95,7 +95,7 @@ func TestExportWritesDeterministicGitTreeAndSkipsDeletedRecords(t *testing.T) {
 		"results (final).csv": []byte("metric,value\naccuracy,0.99\n"),
 	}
 	largeMetadata := `{"project_id":"phase7/export","git_remote_url":"https://github.com/org/repo","git_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
-	largeID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", createInputFolder(t, inputFolderOpts{
+	largeID := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", createInputFolder(t, inputFolderOpts{
 		HTMLContent:  largeHTML,
 		Notes:        largeNotes,
 		MetadataJSON: largeMetadata,
@@ -104,17 +104,17 @@ func TestExportWritesDeterministicGitTreeAndSkipsDeletedRecords(t *testing.T) {
 	})))
 
 	sameDate := "2020-05-01"
-	sameDateA := strings.TrimSpace(runPCSuccess(t, homeDir, "add", "--date", sameDate, createInputFolder(t, inputFolderOpts{
+	sameDateA := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", "--date", sameDate, createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>same-date-a</body></html>",
 	})))
-	sameDateB := strings.TrimSpace(runPCSuccess(t, homeDir, "add", "--date", sameDate, createInputFolder(t, inputFolderOpts{
+	sameDateB := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", "--date", sameDate, createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>same-date-b</body></html>",
 	})))
 
-	deletedID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", createInputFolder(t, inputFolderOpts{
+	deletedID := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>deleted export record</body></html>",
 	})))
-	runPCSuccess(t, homeDir, "delete", deletedID)
+	runPCSuccess(t, homeDir, "records", "delete", deletedID)
 
 	firstExportDir := t.TempDir()
 	runPCSuccess(t, homeDir, "export", "--path", firstExportDir)
@@ -231,19 +231,19 @@ func TestImportUsesUpdatedAtMergeRulesAndReplacesChildRows(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	sameID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", createInputFolder(t, inputFolderOpts{
+	sameID := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>same-updated-at local</body></html>",
 		Notes:       "same-local-notes",
 		Figures:     map[string][]byte{"same.png": []byte("same-local-figure")},
 		DataFiles:   map[string][]byte{"same.csv": []byte("a,b\n1,2\n")},
 	})))
-	olderID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", createInputFolder(t, inputFolderOpts{
+	olderID := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>older local</body></html>",
 		Notes:       "older-local-notes",
 		Figures:     map[string][]byte{"older.png": []byte("older-local-figure")},
 		DataFiles:   map[string][]byte{"older.csv": []byte("x,y\n3,4\n")},
 	})))
-	newerID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", createInputFolder(t, inputFolderOpts{
+	newerID := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", createInputFolder(t, inputFolderOpts{
 		HTMLContent:  "<html><body>newer local</body></html>",
 		Notes:        "newer-local-notes",
 		MetadataJSON: `{"project_id":"phase7/local-before","git_remote_url":"https://github.com/org/before","git_hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`,
@@ -443,7 +443,7 @@ func TestRestoreDBCreatesRecoverableBackupBeforeReplacingLocalState(t *testing.T
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	originalID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", createInputFolder(t, inputFolderOpts{
+	originalID := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>original restore-db record</body></html>",
 		Notes:       "original-restore-notes",
 	})))
@@ -513,7 +513,7 @@ func TestVerifyRoundTripLocal(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	runPCSuccess(t, homeDir, "add", createInputFolder(t, inputFolderOpts{
+	runPCSuccess(t, homeDir, "records", "add", createInputFolder(t, inputFolderOpts{
 		HTMLContent:  "<html><body>verify local</body></html>",
 		Notes:        "verify-local-notes",
 		MetadataJSON: `{"project_id":"phase7/verify-local"}`,

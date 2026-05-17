@@ -454,10 +454,40 @@ func TestRowModelConversionAndScanErrorBranches(t *testing.T) {
 	if _, err := (templateRow{CreatedAt: "bad", UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}).toModel(); err == nil {
 		t.Fatal("expected templateRow.toModel() to fail on bad created_at")
 	}
+	if _, err := (projectPathRow{CreatedAt: "bad", UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano)}).toModel(); err == nil {
+		t.Fatal("expected projectPathRow.toModel() to fail on bad created_at")
+	}
+	if _, err := (chatSessionRow{StartedAt: "bad"}).toModel(); err == nil {
+		t.Fatal("expected chatSessionRow.toModel() to fail on bad started_at")
+	}
+	if _, err := (chatSessionRow{StartedAt: time.Now().UTC().Format(time.RFC3339Nano), LastActivityAt: "bad"}).toModel(); err == nil {
+		t.Fatal("expected chatSessionRow.toModel() to fail on bad last_activity_at")
+	}
+	if _, err := (chatSessionRow{StartedAt: time.Now().UTC().Format(time.RFC3339Nano), LastActivityAt: time.Now().UTC().Format(time.RFC3339Nano), CreatedAt: "bad"}).toModel(); err == nil {
+		t.Fatal("expected chatSessionRow.toModel() to fail on bad created_at")
+	}
+	if _, err := (chatSessionRow{StartedAt: time.Now().UTC().Format(time.RFC3339Nano), LastActivityAt: time.Now().UTC().Format(time.RFC3339Nano), CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), UpdatedAt: "bad"}).toModel(); err == nil {
+		t.Fatal("expected chatSessionRow.toModel() to fail on bad updated_at")
+	}
+	if _, err := (chatItemRow{CreatedAt: "bad"}).toModel(); err == nil {
+		t.Fatal("expected chatItemRow.toModel() to fail on bad created_at")
+	}
 
 	row := db.QueryRow(`SELECT 1;`)
 	if _, err := scanRecord(row); err == nil {
 		t.Fatal("expected scanRecord() to fail for wrong column count")
+	}
+	row = db.QueryRow(`SELECT 1;`)
+	if _, err := scanProjectPath(row); err == nil {
+		t.Fatal("expected scanProjectPath() to fail for wrong column count")
+	}
+	row = db.QueryRow(`SELECT 1;`)
+	if _, err := scanChatSession(row); err == nil {
+		t.Fatal("expected scanChatSession() to fail for wrong column count")
+	}
+	row = db.QueryRow(`SELECT 1;`)
+	if _, err := scanChatItem(row); err == nil {
+		t.Fatal("expected scanChatItem() to fail for wrong column count")
 	}
 	row = db.QueryRow(`SELECT 1;`)
 	if _, err := scanFigure(row); err == nil {
@@ -482,6 +512,63 @@ func TestRowModelConversionAndScanErrorBranches(t *testing.T) {
 	}
 	if _, err := scanRecordRows(rows); err == nil {
 		t.Fatal("expected scanRecordRows() to fail for wrong column count")
+	}
+
+	rows, err = db.Query(`SELECT 1;`)
+	if err != nil {
+		t.Fatalf("query rows failed: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		t.Fatal("expected rows.Next() to be true")
+	}
+	if _, err := scanProjectPathRows(rows); err == nil {
+		t.Fatal("expected scanProjectPathRows() to fail for wrong column count")
+	}
+
+	rows, err = db.Query(`SELECT 1;`)
+	if err != nil {
+		t.Fatalf("query rows failed: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		t.Fatal("expected rows.Next() to be true")
+	}
+	if _, err := scanChatSessionRows(rows); err == nil {
+		t.Fatal("expected scanChatSessionRows() to fail for wrong column count")
+	}
+
+	rows, err = db.Query(`SELECT 1;`)
+	if err != nil {
+		t.Fatalf("query rows failed: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		t.Fatal("expected rows.Next() to be true")
+	}
+	if _, err := scanChatItemRows(rows); err == nil {
+		t.Fatal("expected scanChatItemRows() to fail for wrong column count")
+	}
+
+	rows, err = db.Query(`SELECT 1;`)
+	if err != nil {
+		t.Fatalf("query rows failed: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		t.Fatal("expected rows.Next() to be true")
+	}
+	if _, _, err := scanRecordSearchRows(rows); err == nil {
+		t.Fatal("expected scanRecordSearchRows() to fail for wrong column count")
+	}
+
+	rows, err = db.Query(`SELECT 1 WHERE 0;`)
+	if err != nil {
+		t.Fatalf("query rows failed: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if results, err := scanChatSearchRows(rows); err != nil || len(results) != 0 {
+		t.Fatalf("expected empty chat search rows to succeed, got results=%+v err=%v", results, err)
 	}
 
 	rows, err = db.Query(`SELECT 1;`)
@@ -626,6 +713,44 @@ func TestAdditionalModelTimestampFailureBranches(t *testing.T) {
 		ArchivedAt: sql.NullString{Valid: true, String: "bad"},
 	}).toProject(); err == nil {
 		t.Fatal("expected project row to fail on bad archived_at")
+	}
+}
+
+func TestChatRowModelTimestampFailureBranches(t *testing.T) {
+	if _, err := (projectPathRow{CreatedAt: "bad", UpdatedAt: "2026-05-14T12:00:00.000Z"}).toModel(); err == nil {
+		t.Fatal("expected project path created_at parse error")
+	}
+	if _, err := (projectPathRow{CreatedAt: "2026-05-14T12:00:00.000Z", UpdatedAt: "bad"}).toModel(); err == nil {
+		t.Fatal("expected project path updated_at parse error")
+	}
+
+	validTime := "2026-05-14T12:00:00.000Z"
+	baseSession := chatSessionRow{
+		ID:             "20260514-aabbccdd",
+		StartedAt:      validTime,
+		LastActivityAt: validTime,
+		CreatedAt:      validTime,
+		UpdatedAt:      validTime,
+	}
+	sessionCases := []chatSessionRow{
+		func() chatSessionRow { row := baseSession; row.StartedAt = "bad"; return row }(),
+		func() chatSessionRow { row := baseSession; row.LastActivityAt = "bad"; return row }(),
+		func() chatSessionRow { row := baseSession; row.CreatedAt = "bad"; return row }(),
+		func() chatSessionRow { row := baseSession; row.UpdatedAt = "bad"; return row }(),
+		func() chatSessionRow {
+			row := baseSession
+			row.DeletedAt = sql.NullString{String: "bad", Valid: true}
+			return row
+		}(),
+	}
+	for _, row := range sessionCases {
+		if _, err := row.toModel(); err == nil {
+			t.Fatalf("expected chat session timestamp error for %+v", row)
+		}
+	}
+
+	if _, err := (chatItemRow{CreatedAt: "bad"}).toModel(); err == nil {
+		t.Fatal("expected chat item created_at parse error")
 	}
 }
 
@@ -783,6 +908,10 @@ func TestSQLiteCountsAndPurgeBranches(t *testing.T) {
 	if trashedCount != 1 {
 		t.Fatalf("trashed count = %d", trashedCount)
 	}
+	blankQuery := " "
+	if _, err := repo.CountRecords(ctx, repository.ListRecordsFilter{Query: &blankQuery}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid count query error, got %v", err)
+	}
 	deletedAt := time.Now().UTC().Add(-48 * time.Hour).Format("2006-01-02T15:04:05.000Z")
 	if _, err := db.ExecContext(ctx, `UPDATE records SET deleted_at = ? WHERE id = ?`, deletedAt, trashed.ID); err != nil {
 		t.Fatalf("backdate deleted_at: %v", err)
@@ -796,6 +925,20 @@ func TestSQLiteCountsAndPurgeBranches(t *testing.T) {
 	}
 	if _, err := repo.GetRecordByID(ctx, active.ID); err != nil {
 		t.Fatalf("active record should remain: %v", err)
+	}
+	if counts, err := repo.CountRecordChildren(ctx, nil); err != nil || len(counts) != 0 {
+		t.Fatalf("CountRecordChildren(empty) = %+v, %v; want empty nil", counts, err)
+	}
+	if _, err := repo.CountRecordChildren(ctx, []string{" "}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid child-count id error, got %v", err)
+	}
+	updatedBefore := time.Now().UTC().Add(time.Hour)
+	withHTML, err := repo.ListRecords(ctx, repository.ListRecordsFilter{HasHTML: true, UpdatedBefore: &updatedBefore, IncludeDeleted: true})
+	if err != nil {
+		t.Fatalf("ListRecords(HasHTML UpdatedBefore) error = %v", err)
+	}
+	if len(withHTML) != 1 || withHTML[0].ID != active.ID {
+		t.Fatalf("expected active HTML record after purge, got %+v", withHTML)
 	}
 	purged, err = repo.PurgeDeletedRecords(ctx)
 	if err != nil {
@@ -857,6 +1000,460 @@ func TestSQLiteListChildAndTemplateBranches(t *testing.T) {
 	}
 	if len(templates) != 1 {
 		t.Fatalf("templates = %#v", templates)
+	}
+}
+
+func TestSQLiteProjectPathChatAndUnifiedSearchBranches(t *testing.T) {
+	repo, _ := newConcreteRepo(t)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	projectID := "sqlite/chat-project"
+	deviceID := "sqlite-chat-device"
+	if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: projectID, CreatedAt: &now, UpdatedAt: &now}); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: deviceID, CreatedAt: &now, UpdatedAt: &now}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+	if _, _, err := repo.UpsertProjectPath(ctx, repository.CreateProjectPathInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid project path input error, got %v", err)
+	}
+	path, created, err := repo.UpsertProjectPath(ctx, repository.CreateProjectPathInput{ProjectID: projectID, Path: "/tmp/sqlite-chat", DeviceID: deviceID, CreatedAt: &now, UpdatedAt: &now})
+	if err != nil {
+		t.Fatalf("UpsertProjectPath() error = %v", err)
+	}
+	if !created || path.ProjectID != projectID {
+		t.Fatalf("unexpected project path result: created=%v path=%+v", created, path)
+	}
+	if _, created, err = repo.UpsertProjectPath(ctx, repository.CreateProjectPathInput{ProjectID: projectID, Path: "/tmp/sqlite-chat", DeviceID: deviceID}); err != nil || created {
+		t.Fatalf("expected idempotent path upsert, created=%v err=%v", created, err)
+	}
+	paths, err := repo.ListProjectPaths(ctx, &projectID)
+	if err != nil {
+		t.Fatalf("ListProjectPaths() error = %v", err)
+	}
+	if len(paths) != 1 || paths[0].Path != "/tmp/sqlite-chat" {
+		t.Fatalf("unexpected project paths: %+v", paths)
+	}
+	allPaths, err := repo.ListProjectPaths(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListProjectPaths(all) error = %v", err)
+	}
+	if len(allPaths) != 1 {
+		t.Fatalf("unexpected all project paths: %+v", allPaths)
+	}
+
+	cwd := "/tmp/sqlite-chat/nested"
+	title := "SQLite chat"
+	sourcePath := "/tmp/sqlite-chat/session.json"
+	session, created, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:                 "20260514-c0ffee00",
+			Source:             "codex",
+			SourceSessionID:    "source-1",
+			SourceDeviceID:     deviceID,
+			CWD:                &cwd,
+			Title:              &title,
+			StartedAt:          now,
+			LastActivityAt:     now.Add(time.Minute),
+			OriginalSourcePath: &sourcePath,
+			CreatedAt:          &now,
+			UpdatedAt:          &now,
+		},
+		ClearDeleted: true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertChatSession() error = %v", err)
+	}
+	if !created {
+		t.Fatal("expected new chat session")
+	}
+	updatedSession, created, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260514-c0ffee99",
+			Source:          "codex",
+			SourceSessionID: "source-1",
+			SourceDeviceID:  deviceID,
+			CWD:             &cwd,
+			StartedAt:       now.Add(-time.Minute),
+			LastActivityAt:  now.Add(2 * time.Minute),
+			CreatedAt:       &now,
+			UpdatedAt:       &now,
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertChatSession(update) error = %v", err)
+	}
+	if created || updatedSession.ID != session.ID {
+		t.Fatalf("expected existing chat update, created=%v session=%+v", created, updatedSession)
+	}
+	if _, _, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid chat session input error, got %v", err)
+	}
+	if _, err := repo.GetChatSessionByID(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid chat id lookup error, got %v", err)
+	}
+	if assigned, err := repo.BackfillChatProjects(ctx); err != nil || assigned != 1 {
+		t.Fatalf("BackfillChatProjects() assigned=%d err=%v", assigned, err)
+	}
+	if assigned, err := repo.BackfillChatProjects(ctx); err != nil || assigned != 0 {
+		t.Fatalf("second BackfillChatProjects() assigned=%d err=%v", assigned, err)
+	}
+	session, err = repo.GetChatSessionByID(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetChatSessionByID() error = %v", err)
+	}
+	if session.ProjectID == nil || *session.ProjectID != projectID {
+		t.Fatalf("expected backfilled project id, got %+v", session.ProjectID)
+	}
+	if _, err := repo.GetChatSessionBySource(ctx, "", "source-1"); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid source lookup error, got %v", err)
+	}
+	bySource, err := repo.GetChatSessionBySource(ctx, "codex", "source-1")
+	if err != nil {
+		t.Fatalf("GetChatSessionBySource() error = %v", err)
+	}
+	if bySource.ID != session.ID {
+		t.Fatalf("GetChatSessionBySource() id = %q, want %q", bySource.ID, session.ID)
+	}
+	count, err := repo.CountChatSessions(ctx, repository.ListChatSessionsFilter{ProjectID: &projectID})
+	if err != nil {
+		t.Fatalf("CountChatSessions() error = %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("chat count = %d, want 1", count)
+	}
+	if _, err := repo.CountChatSessions(ctx, repository.ListChatSessionsFilter{Offset: -1}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid count filter error, got %v", err)
+	}
+	if _, err := repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{Limit: -1}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid list filter error, got %v", err)
+	}
+	source := "codex"
+	sessions, err := repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{ProjectID: &projectID, Source: &source, DeviceID: &deviceID})
+	if err != nil {
+		t.Fatalf("ListChatSessions() error = %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected one filtered chat, got %+v", sessions)
+	}
+	dateFrom := now.Add(-time.Hour)
+	dateTo := now.Add(2 * time.Hour)
+	updatedAfter := now.Add(-time.Minute)
+	sessions, err = repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{
+		DateFrom:     &dateFrom,
+		DateTo:       &dateTo,
+		UpdatedAfter: &updatedAfter,
+		Limit:        1,
+		Offset:       0,
+	})
+	if err != nil {
+		t.Fatalf("ListChatSessions(date filters) error = %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Fatalf("expected one date-filtered chat, got %+v", sessions)
+	}
+	sessionTwo, created, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260514-c0ffee01",
+			Source:          "codex",
+			SourceSessionID: "source-2",
+			SourceDeviceID:  deviceID,
+			ProjectID:       &projectID,
+			StartedAt:       now.Add(2 * time.Minute),
+			LastActivityAt:  now.Add(2 * time.Minute),
+			CreatedAt:       &now,
+			UpdatedAt:       &now,
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertChatSession(second) error = %v", err)
+	}
+	if !created {
+		t.Fatal("expected second chat session")
+	}
+	sessions, err = repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{ProjectID: &projectID, Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("ListChatSessions(offset) error = %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].ID != session.ID {
+		t.Fatalf("expected second page to contain first session, got %+v", sessions)
+	}
+	sessions, err = repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{Unassigned: true})
+	if err != nil {
+		t.Fatalf("ListChatSessions(unassigned) error = %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("expected no unassigned chats after backfill, got %+v", sessions)
+	}
+	if maxOrdinal, err := repo.MaxChatItemOrdinal(ctx, session.ID); err != nil || maxOrdinal != -1 {
+		t.Fatalf("initial max ordinal = %d err=%v, want -1", maxOrdinal, err)
+	}
+	if _, err := repo.ListChatItems(ctx, ""); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid chat item list error, got %v", err)
+	}
+	if missingItems, err := repo.ListChatItems(ctx, "20260514-deadbeef"); err != nil || len(missingItems) != 0 {
+		t.Fatalf("expected missing chat item list to be empty, got %+v err=%v", missingItems, err)
+	}
+	userText := "sqlite chat needle"
+	if _, err := repo.CreateChatItem(ctx, repository.CreateChatItemInput{}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid chat item error, got %v", err)
+	}
+	if _, err := repo.CreateChatItem(ctx, repository.CreateChatItemInput{SessionID: session.ID, Ordinal: 0, Role: "user", ItemType: "message", Text: &userText, CreatedAt: &now}); err != nil {
+		t.Fatalf("CreateChatItem(user) error = %v", err)
+	}
+	if _, err := repo.CreateChatItem(ctx, repository.CreateChatItemInput{SessionID: session.ID, Ordinal: 0, Role: "user", ItemType: "message", Text: &userText, CreatedAt: &now}); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected duplicate chat item conflict, got %v", err)
+	}
+	toolText := "sqlite chat hidden tool needle"
+	if _, err := repo.CreateChatItem(ctx, repository.CreateChatItemInput{SessionID: session.ID, Ordinal: 1, Role: "tool", ItemType: "tool_output", Text: &toolText, SearchText: toolText, CreatedAt: &now}); err != nil {
+		t.Fatalf("CreateChatItem(tool) error = %v", err)
+	}
+	items, err := repo.ListChatItems(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems() error = %v", err)
+	}
+	if len(items) != 2 || items[0].SearchText != userText {
+		t.Fatalf("unexpected chat items: %+v", items)
+	}
+	emptyItems, err := repo.ListChatItems(ctx, sessionTwo.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems(empty session) error = %v", err)
+	}
+	if len(emptyItems) != 0 {
+		t.Fatalf("expected no items for second session, got %+v", emptyItems)
+	}
+	if err := repo.ReplaceChatItems(ctx, "", nil); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid replace chat items session error, got %v", err)
+	}
+	if err := repo.ReplaceChatItems(ctx, "20260514-deadbeef", nil); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected missing replace chat items session error, got %v", err)
+	}
+	if err := repo.ReplaceChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: -1, Role: "user", ItemType: "message"}}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid replace chat item error, got %v", err)
+	}
+	replacementText := "replacement text fallback"
+	if err := repo.ReplaceChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{
+		{Ordinal: 0, Role: "assistant", ItemType: "message", Text: &replacementText, CreatedAt: &now},
+		{Ordinal: 0, Role: "assistant", ItemType: "message", Text: &replacementText, CreatedAt: &now},
+	}); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected duplicate replace chat item conflict, got %v", err)
+	}
+	if err := repo.ReplaceChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: 0, Role: "assistant", ItemType: "message", Text: &replacementText, CreatedAt: &now}}); err != nil {
+		t.Fatalf("ReplaceChatItems() error = %v", err)
+	}
+	replacedItems, err := repo.ListChatItems(ctx, sessionTwo.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems(replaced) error = %v", err)
+	}
+	if len(replacedItems) != 1 || replacedItems[0].SearchText != replacementText {
+		t.Fatalf("unexpected replaced items: %+v", replacedItems)
+	}
+	if maxOrdinal, err := repo.MaxChatItemOrdinal(ctx, session.ID); err != nil || maxOrdinal != 1 {
+		t.Fatalf("max ordinal after inserts = %d err=%v, want 1", maxOrdinal, err)
+	}
+	results, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle"})
+	if err != nil {
+		t.Fatalf("SearchChatItems() error = %v", err)
+	}
+	if len(results) != 1 || results[0].Item.ItemType == "tool_output" {
+		t.Fatalf("expected default search to exclude tool output, got %+v", results)
+	}
+	results, err = repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle", IncludeToolOutputs: true, ProjectID: &projectID, Source: &source})
+	if err != nil {
+		t.Fatalf("SearchChatItems(include tools) error = %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected two chat search results with tool outputs, got %+v", results)
+	}
+	results, err = repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle", IncludeToolOutputs: true, DateFrom: &dateFrom, DateTo: &dateTo, Limit: 1, Offset: 1})
+	if err != nil {
+		t.Fatalf("SearchChatItems(date page) error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one paged chat search result, got %+v", results)
+	}
+	if _, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle", Offset: -1}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid chat search offset error, got %v", err)
+	}
+	if _, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: " "}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid chat search error, got %v", err)
+	}
+
+	notes := "record sqlite needle"
+	mustCreateRecord(t, repo, repository.CreateRecordInput{
+		ID:             "20260514-aabbccdd",
+		Date:           "2026-05-14",
+		DayOrder:       "a0",
+		HTMLContent:    strPtr("<p>record</p>"),
+		Notes:          &notes,
+		ProjectID:      projectID,
+		SourceDeviceID: deviceID,
+		CreatedAt:      &now,
+		UpdatedAt:      &now,
+	})
+	if _, _, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{
+		ID:              "20260514-aabbccdd",
+		Source:          "codex",
+		SourceSessionID: "record-id-conflict",
+		SourceDeviceID:  deviceID,
+		StartedAt:       now,
+		LastActivityAt:  now,
+	}}); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected chat id collision with record to conflict, got %v", err)
+	}
+	all, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", IncludeToolOutputs: true, ProjectID: &projectID})
+	if err != nil {
+		t.Fatalf("SearchAll() error = %v", err)
+	}
+	seenDomains := map[string]bool{}
+	for _, result := range all {
+		seenDomains[result.Domain] = true
+	}
+	if !seenDomains["records"] || !seenDomains["chats"] {
+		t.Fatalf("expected record and chat search domains, got %+v", all)
+	}
+	chatDomain := "chats"
+	chatOnly, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", Domain: &chatDomain, Limit: 1, Offset: 1, IncludeToolOutputs: true})
+	if err != nil {
+		t.Fatalf("SearchAll(chat domain) error = %v", err)
+	}
+	if len(chatOnly) != 1 || chatOnly[0].Domain != "chats" {
+		t.Fatalf("unexpected chat-only search page: %+v", chatOnly)
+	}
+	firstChatOnly, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", Domain: &chatDomain, Limit: 1, IncludeToolOutputs: true})
+	if err != nil {
+		t.Fatalf("SearchAll(chat domain first page) error = %v", err)
+	}
+	if len(firstChatOnly) != 1 || firstChatOnly[0].Domain != "chats" {
+		t.Fatalf("unexpected first chat-only search page: %+v", firstChatOnly)
+	}
+	if emptyPage, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", Offset: 99}); err != nil || len(emptyPage) != 0 {
+		t.Fatalf("expected empty high-offset search page, got %+v err=%v", emptyPage, err)
+	}
+	if _, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: ""}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid unified search error, got %v", err)
+	}
+	recordDomain := "records"
+	recordOnly, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", Domain: &recordDomain, Limit: 1})
+	if err != nil {
+		t.Fatalf("SearchAll(record domain) error = %v", err)
+	}
+	if len(recordOnly) != 1 || recordOnly[0].Domain != "records" {
+		t.Fatalf("unexpected record-only search: %+v", recordOnly)
+	}
+	if _, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", Limit: -1}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid unified search limit error, got %v", err)
+	}
+	unknownDomain := "unknown"
+	unknownResults, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", Domain: &unknownDomain})
+	if err != nil {
+		t.Fatalf("SearchAll(unknown domain) error = %v", err)
+	}
+	if len(unknownResults) != 0 {
+		t.Fatalf("expected no unknown-domain search results, got %+v", unknownResults)
+	}
+	if err := repo.SoftDeleteChatSession(ctx, "20260514-deadbeef"); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected missing soft-delete error, got %v", err)
+	}
+	if err := repo.DeleteChatSession(ctx, "20260514-deadbeef"); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected missing delete error, got %v", err)
+	}
+	if err := repo.SoftDeleteChatSession(ctx, session.ID); err != nil {
+		t.Fatalf("SoftDeleteChatSession() error = %v", err)
+	}
+	sessions, err = repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{IncludeDeleted: true, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListChatSessions(IncludeDeleted) error = %v", err)
+	}
+	if len(sessions) != 2 {
+		t.Fatalf("expected active and deleted chats, got %+v", sessions)
+	}
+	deleted, err := repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{OnlyDeleted: true})
+	if err != nil {
+		t.Fatalf("ListChatSessions(OnlyDeleted) error = %v", err)
+	}
+	if len(deleted) != 1 {
+		t.Fatalf("expected one deleted chat, got %+v", deleted)
+	}
+	deletedResults, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle", IncludeDeleted: true, IncludeToolOutputs: true})
+	if err != nil {
+		t.Fatalf("SearchChatItems(IncludeDeleted) error = %v", err)
+	}
+	if len(deletedResults) != 2 {
+		t.Fatalf("expected deleted chat search results when IncludeDeleted=true, got %+v", deletedResults)
+	}
+	deletedAll, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", Domain: &chatDomain, IncludeDeleted: true, IncludeToolOutputs: true})
+	if err != nil {
+		t.Fatalf("SearchAll(chats IncludeDeleted) error = %v", err)
+	}
+	if len(deletedAll) != 2 {
+		t.Fatalf("expected deleted chats in unified search, got %+v", deletedAll)
+	}
+	if err := repo.RestoreChatSession(ctx, session.ID); err != nil {
+		t.Fatalf("RestoreChatSession() error = %v", err)
+	}
+	restored, err := repo.GetChatSessionByID(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetChatSessionByID(restored) error = %v", err)
+	}
+	if restored.DeletedAt != nil {
+		t.Fatalf("expected restored chat deleted_at nil, got %+v", restored.DeletedAt)
+	}
+	if err := repo.RestoreChatSession(ctx, "20260514-deadbeef"); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected missing restore chat error, got %v", err)
+	}
+	if err := repo.RestoreChatSession(ctx, ""); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected empty restore chat id to miss, got %v", err)
+	}
+	if err := repo.SoftDeleteChatSession(ctx, session.ID); err != nil {
+		t.Fatalf("SoftDeleteChatSession(second) error = %v", err)
+	}
+	if err := repo.DeleteChatSession(ctx, session.ID); err != nil {
+		t.Fatalf("DeleteChatSession() error = %v", err)
+	}
+	if err := repo.DeleteChatSession(ctx, sessionTwo.ID); err != nil {
+		t.Fatalf("DeleteChatSession(second) error = %v", err)
+	}
+	if _, err := repo.GetChatSessionByID(ctx, session.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected deleted chat to be missing, got %v", err)
+	}
+}
+
+func TestSQLiteChatSmallHelperBranches(t *testing.T) {
+	if got := sqliteFTSQuery(`quoted "needle"`); got != `"quoted" """needle"""` {
+		t.Fatalf("sqliteFTSQuery() = %q", got)
+	}
+	recordID := domainResultID(repository.DomainSearchResult{Record: &repository.Record{ID: "record-id"}})
+	if recordID != "record-id" {
+		t.Fatalf("domainResultID(record) = %q", recordID)
+	}
+	chatID := domainResultID(repository.DomainSearchResult{Chat: &repository.ChatSearchResult{
+		Session: repository.ChatSession{ID: "chat-id"},
+		Item:    repository.ChatItem{Ordinal: 7},
+	}})
+	if chatID != "chat-id/000007" {
+		t.Fatalf("domainResultID(chat) = %q", chatID)
+	}
+	if empty := domainResultID(repository.DomainSearchResult{}); empty != "" {
+		t.Fatalf("domainResultID(empty) = %q", empty)
+	}
+	where, args, err := listRecordsPredicateSQL(repository.ListRecordsFilter{Query: strPtr("needle")}, "", true)
+	if err != nil {
+		t.Fatalf("listRecordsPredicateSQL(include query) error = %v", err)
+	}
+	if !strings.Contains(where, "html_content LIKE") || len(args) != 2 {
+		t.Fatalf("unexpected LIKE predicate branch where=%q args=%+v", where, args)
+	}
+	validTime := "2026-05-14T12:00:00.000Z"
+	if project, err := (registryRow{ID: "p", CreatedAt: validTime, UpdatedAt: validTime}).toProject(); err != nil || project.ID != "p" {
+		t.Fatalf("registryRow.toProject() = %+v, %v", project, err)
+	}
+	if _, err := (registryRow{CreatedAt: "bad", UpdatedAt: validTime}).toDevice(); err == nil {
+		t.Fatal("expected device row to fail on bad created_at")
+	}
+	if _, err := (registryRow{CreatedAt: validTime, UpdatedAt: validTime, ArchivedAt: sql.NullString{String: "bad", Valid: true}}).toDevice(); err == nil {
+		t.Fatal("expected device row to fail on bad archived_at")
 	}
 }
 
@@ -995,6 +1592,44 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 			_, err := repo.UpsertDeviceForImport(ctx, repository.Device{ID: "d", CreatedAt: time.Now(), UpdatedAt: time.Now()})
 			return err
 		}},
+		{name: "UpsertProjectPath", run: func() error {
+			_, _, err := repo.UpsertProjectPath(ctx, repository.CreateProjectPathInput{ProjectID: projectID, Path: "/tmp/project", DeviceID: deviceID})
+			return err
+		}},
+		{name: "ListProjectPaths", run: func() error { _, err := repo.ListProjectPaths(ctx, nil); return err }},
+		{name: "BackfillChatProjects", run: func() error { _, err := repo.BackfillChatProjects(ctx); return err }},
+		{name: "UpsertChatSession", run: func() error {
+			_, _, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              "20260320-abcd5678",
+				Source:          "codex",
+				SourceSessionID: "closed-db-session",
+				SourceDeviceID:  deviceID,
+				StartedAt:       time.Now().UTC(),
+				LastActivityAt:  time.Now().UTC(),
+			}})
+			return err
+		}},
+		{name: "GetChatSessionByID", run: func() error { _, err := repo.GetChatSessionByID(ctx, "20260320-abcd5678"); return err }},
+		{name: "GetChatSessionBySource", run: func() error { _, err := repo.GetChatSessionBySource(ctx, "codex", "closed-db-session"); return err }},
+		{name: "ListChatSessions", run: func() error { _, err := repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{}); return err }},
+		{name: "CountChatSessions", run: func() error { _, err := repo.CountChatSessions(ctx, repository.ListChatSessionsFilter{}); return err }},
+		{name: "SoftDeleteChatSession", run: func() error { return repo.SoftDeleteChatSession(ctx, "20260320-abcd5678") }},
+		{name: "RestoreChatSession", run: func() error { return repo.RestoreChatSession(ctx, "20260320-abcd5678") }},
+		{name: "DeleteChatSession", run: func() error { return repo.DeleteChatSession(ctx, "20260320-abcd5678") }},
+		{name: "MaxChatItemOrdinal", run: func() error { _, err := repo.MaxChatItemOrdinal(ctx, "20260320-abcd5678"); return err }},
+		{name: "CreateChatItem", run: func() error {
+			_, err := repo.CreateChatItem(ctx, repository.CreateChatItemInput{SessionID: "20260320-abcd5678", Ordinal: 0, Role: "user", ItemType: "message"})
+			return err
+		}},
+		{name: "ReplaceChatItems", run: func() error {
+			return repo.ReplaceChatItems(ctx, "20260320-abcd5678", []repository.CreateChatItemInput{{Ordinal: 0, Role: "user", ItemType: "message"}})
+		}},
+		{name: "ListChatItems", run: func() error { _, err := repo.ListChatItems(ctx, "20260320-abcd5678"); return err }},
+		{name: "SearchChatItems", run: func() error {
+			_, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "x"})
+			return err
+		}},
+		{name: "SearchAll", run: func() error { _, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "x"}); return err }},
 		{name: "CountActiveRecords", run: func() error { _, err := repo.CountActiveRecords(ctx); return err }},
 		{name: "CountTrashedRecords", run: func() error { _, err := repo.CountTrashedRecords(ctx); return err }},
 		{name: "PurgeDeletedRecords", run: func() error { _, err := repo.PurgeDeletedRecords(ctx); return err }},

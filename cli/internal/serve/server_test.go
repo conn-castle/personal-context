@@ -97,6 +97,16 @@ func (m *mockRepo) UpsertProjectForImport(_ context.Context, project repository.
 	return true, nil
 }
 
+func (m *mockRepo) UpsertProjectPath(_ context.Context, input repository.CreateProjectPathInput) (repository.ProjectPath, bool, error) {
+	return repository.ProjectPath{ProjectID: input.ProjectID, Path: input.Path, DeviceID: input.DeviceID}, true, nil
+}
+
+func (m *mockRepo) ListProjectPaths(_ context.Context, _ *string) ([]repository.ProjectPath, error) {
+	return nil, nil
+}
+
+func (m *mockRepo) BackfillChatProjects(_ context.Context) (int, error) { return 0, nil }
+
 func (m *mockRepo) CreateDevice(_ context.Context, input repository.CreateRegistryInput) (repository.Device, error) {
 	return repository.Device{ID: input.ID}, nil
 }
@@ -119,6 +129,48 @@ func (m *mockRepo) RestoreDevice(_ context.Context, id string) (repository.Devic
 
 func (m *mockRepo) UpsertDeviceForImport(_ context.Context, device repository.Device) (bool, error) {
 	return true, nil
+}
+
+func (m *mockRepo) UpsertChatSession(_ context.Context, _ repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+	return repository.ChatSession{}, true, nil
+}
+
+func (m *mockRepo) GetChatSessionByID(_ context.Context, _ string) (repository.ChatSession, error) {
+	return repository.ChatSession{}, repository.ErrNotFound
+}
+
+func (m *mockRepo) GetChatSessionBySource(_ context.Context, _ string, _ string) (repository.ChatSession, error) {
+	return repository.ChatSession{}, repository.ErrNotFound
+}
+
+func (m *mockRepo) ListChatSessions(_ context.Context, _ repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+	return nil, nil
+}
+
+func (m *mockRepo) CountChatSessions(_ context.Context, _ repository.ListChatSessionsFilter) (int, error) {
+	return 0, nil
+}
+
+func (m *mockRepo) SoftDeleteChatSession(_ context.Context, _ string) error { return nil }
+func (m *mockRepo) RestoreChatSession(_ context.Context, _ string) error    { return nil }
+func (m *mockRepo) DeleteChatSession(_ context.Context, _ string) error     { return nil }
+func (m *mockRepo) MaxChatItemOrdinal(_ context.Context, _ string) (int, error) {
+	return -1, nil
+}
+func (m *mockRepo) CreateChatItem(_ context.Context, _ repository.CreateChatItemInput) (repository.ChatItem, error) {
+	return repository.ChatItem{}, nil
+}
+func (m *mockRepo) ReplaceChatItems(_ context.Context, _ string, _ []repository.CreateChatItemInput) error {
+	return nil
+}
+func (m *mockRepo) ListChatItems(_ context.Context, _ string) ([]repository.ChatItem, error) {
+	return nil, nil
+}
+func (m *mockRepo) SearchChatItems(_ context.Context, _ repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
+	return nil, nil
+}
+func (m *mockRepo) SearchAll(_ context.Context, _ repository.UnifiedSearchFilter) ([]repository.DomainSearchResult, error) {
+	return nil, nil
 }
 
 func (m *mockRepo) ListRecords(_ context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error) {

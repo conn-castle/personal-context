@@ -49,7 +49,7 @@ func addRecord(t *testing.T, extraArgs ...string) string {
 	}
 	stdout := &bytes.Buffer{}
 	extraArgs = withDefaultProvenanceArgs(t, "", extraArgs)
-	args := append([]string{"add"}, extraArgs...)
+	args := append([]string{"records", "add"}, extraArgs...)
 	args = append(args, dir)
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs(args)
@@ -103,7 +103,7 @@ func addRecordWithContent(t *testing.T, html, notes, metadata string, figures ma
 	}
 	stdout := &bytes.Buffer{}
 	extraArgs = withDefaultProvenanceArgs(t, metadata, extraArgs)
-	args := append([]string{"add"}, extraArgs...)
+	args := append([]string{"records", "add"}, extraArgs...)
 	args = append(args, dir)
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs(args)
@@ -227,5 +227,22 @@ func backdateDeletedAtUnit(t *testing.T, homeDir string, recordID string, daysAg
 	_, err = db.Exec(`UPDATE records SET deleted_at = ? WHERE id = ?`, ts, recordID)
 	if err != nil {
 		t.Fatalf("backdate deleted_at for %s: %v", recordID, err)
+	}
+}
+
+// backdateChatDeletedAtUnit updates deleted_at on a chat session to simulate aging.
+func backdateChatDeletedAtUnit(t *testing.T, homeDir string, chatID string, daysAgo int) {
+	t.Helper()
+	dbPath := filepath.Join(homeDir, "personal-context", ".pc", "pc.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	past := time.Now().UTC().Add(-time.Duration(daysAgo) * 24 * time.Hour)
+	ts := past.Format("2006-01-02T15:04:05.000Z")
+	_, err = db.Exec(`UPDATE chat_session SET deleted_at = ? WHERE id = ?`, ts, chatID)
+	if err != nil {
+		t.Fatalf("backdate chat deleted_at for %s: %v", chatID, err)
 	}
 }

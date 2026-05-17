@@ -50,6 +50,11 @@ func (r *Repository) CreateRecord(ctx context.Context, input repository.CreateRe
 	if strings.TrimSpace(input.DayOrder) == "" {
 		input.DayOrder = "n"
 	}
+	if exists, err := r.chatSessionIDExists(ctx, input.ID); err != nil {
+		return repository.Record{}, err
+	} else if exists {
+		return repository.Record{}, fmt.Errorf("%w: id %s already exists as chat session", repository.ErrConflict, input.ID)
+	}
 
 	row := r.pool.QueryRow(
 		ctx,
@@ -128,12 +133,15 @@ func (r *Repository) ListRecords(ctx context.Context, filter repository.ListReco
 		return nil, repository.ErrInvalidArgument
 	}
 
-	whereSQL, args, paramIdx, err := r.listRecordsPredicateSQL(filter)
+	whereSQL, args, paramIdx, rankOrder, err := r.listRecordsPredicateSQL(filter)
 	if err != nil {
 		return nil, err
 	}
 
 	query := `SELECT id, user_id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM records ` + whereSQL + ` ORDER BY date, day_order, id`
+	if rankOrder != "" {
+		query = `SELECT id, user_id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM records ` + whereSQL + ` ORDER BY ` + rankOrder + ` DESC, date, day_order, id`
+	}
 	if filter.Limit > 0 {
 		query += fmt.Sprintf(` LIMIT $%d`, paramIdx)
 		args = append(args, filter.Limit)
@@ -159,12 +167,12 @@ func (r *Repository) ListRecords(ctx context.Context, filter repository.ListReco
 	return records, nil
 }
 
-func (r *Repository) listRecordsPredicateSQL(filter repository.ListRecordsFilter) (string, []any, int, error) {
+func (r *Repository) listRecordsPredicateSQL(filter repository.ListRecordsFilter) (string, []any, int, string, error) {
 	trimmedQuery := ""
 	if filter.Query != nil {
 		trimmedQuery = strings.TrimSpace(*filter.Query)
 		if trimmedQuery == "" {
-			return "", nil, 0, repository.ErrInvalidArgument
+			return "", nil, 0, "", repository.ErrInvalidArgument
 		}
 	}
 
@@ -210,18 +218,18 @@ func (r *Repository) listRecordsPredicateSQL(filter repository.ListRecordsFilter
 		paramIdx++
 	}
 	if filter.Query != nil {
-		escaped := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(trimmedQuery)
-		q := "%" + escaped + "%"
-		fmt.Fprintf(&builder, ` AND (html_content ILIKE $%d ESCAPE '\' OR notes ILIKE $%d ESCAPE '\' OR project_id ILIKE $%d ESCAPE '\' OR source_device_id ILIKE $%d ESCAPE '\' OR source_ref ILIKE $%d ESCAPE '\')`, paramIdx, paramIdx+1, paramIdx+2, paramIdx+3, paramIdx+4)
-		args = append(args, q, q, q, q, q)
-		paramIdx += 5
+		queryParam := paramIdx
+		fmt.Fprintf(&builder, ` AND search_vector @@ plainto_tsquery('pg_catalog.simple'::regconfig, $%d)`, queryParam)
+		args = append(args, trimmedQuery)
+		paramIdx++
+		return builder.String(), args, paramIdx, fmt.Sprintf(`ts_rank(search_vector, plainto_tsquery('pg_catalog.simple'::regconfig, $%d))`, queryParam), nil
 	}
-	return builder.String(), args, paramIdx, nil
+	return builder.String(), args, paramIdx, "", nil
 }
 
 // CountRecords returns the number of records matching non-pagination filters.
 func (r *Repository) CountRecords(ctx context.Context, filter repository.ListRecordsFilter) (int, error) {
-	whereSQL, args, _, err := r.listRecordsPredicateSQL(filter)
+	whereSQL, args, _, _, err := r.listRecordsPredicateSQL(filter)
 	if err != nil {
 		return 0, err
 	}

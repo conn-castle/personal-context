@@ -26,7 +26,7 @@ func TestTrashWithDeletedRecords(t *testing.T) {
 
 	// Soft-delete the record
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -39,11 +39,14 @@ func TestTrashWithDeletedRecords(t *testing.T) {
 	}
 
 	out := stdout.String()
-	if !strings.Contains(out, "ID") || !strings.Contains(out, "Date") || !strings.Contains(out, "Deleted At") {
+	if !strings.Contains(out, "ID") || !strings.Contains(out, "TYPE") || !strings.Contains(out, "DATE") || !strings.Contains(out, "DELETED AT") {
 		t.Fatalf("expected table header, got %q", out)
 	}
 	if !strings.Contains(out, id) {
 		t.Fatalf("expected record ID %s in trash output, got %q", id, out)
+	}
+	if !strings.Contains(out, "\trecord\t") {
+		t.Fatalf("expected record TYPE column, got %q", out)
 	}
 }
 
@@ -65,7 +68,7 @@ func TestTrashDeletedAtFormat(t *testing.T) {
 
 	// Soft-delete the record
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}

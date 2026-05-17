@@ -49,7 +49,7 @@ h1 { font-size: 120px; }
 <body><h1>Screenshot Test</h1></body>
 </html>`,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Take a screenshot with explicit --output.
@@ -124,7 +124,7 @@ func TestScreenshot_ShortFlag(t *testing.T) {
 	inputDir := createInputFolder(t, inputFolderOpts{
 		HTMLContent: `<html><body><h1>Flag Test</h1></body></html>`,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	outputDir := t.TempDir()

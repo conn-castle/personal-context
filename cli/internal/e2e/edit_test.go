@@ -18,7 +18,7 @@ func TestEditReplacesContent(t *testing.T) {
 		HTMLContent: "<html><body>Original</body></html>",
 		Notes:       "original notes",
 	})
-	stdout := runPCSuccess(t, homeDir, "add", addDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", addDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Capture immutable fields before edit
@@ -33,7 +33,7 @@ func TestEditReplacesContent(t *testing.T) {
 		HTMLContent: "<html><body>Replaced</body></html>",
 		Notes:       "replaced notes",
 	})
-	runPCSuccess(t, homeDir, "edit", recordID, editDir)
+	runPCSuccess(t, homeDir, "records", "edit", recordID, editDir)
 
 	// Verify HTML content changed
 	var htmlContent string
@@ -74,14 +74,14 @@ func TestEditReplacesNotes(t *testing.T) {
 	addDir := createInputFolder(t, inputFolderOpts{
 		Notes: "initial notes",
 	})
-	stdout := runPCSuccess(t, homeDir, "add", addDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", addDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Edit with different notes
 	editDir := createInputFolder(t, inputFolderOpts{
 		Notes: "updated notes",
 	})
-	runPCSuccess(t, homeDir, "edit", recordID, editDir)
+	runPCSuccess(t, homeDir, "records", "edit", recordID, editDir)
 
 	db := openTestDB(t, homeDir)
 	var notes sql.NullString
@@ -94,7 +94,7 @@ func TestEditReplacesNotes(t *testing.T) {
 
 	// Edit with no notes (removes notes)
 	editDir2 := createInputFolder(t, inputFolderOpts{})
-	runPCSuccess(t, homeDir, "edit", recordID, editDir2)
+	runPCSuccess(t, homeDir, "records", "edit", recordID, editDir2)
 
 	if err := db.QueryRow("SELECT notes FROM records WHERE id = ?", recordID).Scan(&notes); err != nil {
 		t.Fatalf("query notes after removal: %v", err)
@@ -113,7 +113,7 @@ func TestEditReplacesFigures(t *testing.T) {
 		HTMLContent: `<html><img src="figures/fig1.png"></html>`,
 		Figures:     map[string][]byte{"fig1.png": []byte("fig1-data")},
 	})
-	stdout := runPCSuccess(t, homeDir, "add", addDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", addDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Verify fig1.png exists on disk
@@ -127,7 +127,7 @@ func TestEditReplacesFigures(t *testing.T) {
 		HTMLContent: `<html><img src="figures/fig2.png"></html>`,
 		Figures:     map[string][]byte{"fig2.png": []byte("fig2-data")},
 	})
-	runPCSuccess(t, homeDir, "edit", recordID, editDir)
+	runPCSuccess(t, homeDir, "records", "edit", recordID, editDir)
 
 	// Verify old figure deleted from disk (best-effort)
 	if _, err := os.Stat(fig1Path); !os.IsNotExist(err) {
@@ -167,7 +167,7 @@ func TestEditReplacesDataFiles(t *testing.T) {
 	addDir := createInputFolder(t, inputFolderOpts{
 		DataFiles: map[string][]byte{"data1.csv": []byte("a,b\n1,2\n")},
 	})
-	stdout := runPCSuccess(t, homeDir, "add", addDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", addDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Verify data1.csv exists on disk
@@ -180,7 +180,7 @@ func TestEditReplacesDataFiles(t *testing.T) {
 	editDir := createInputFolder(t, inputFolderOpts{
 		DataFiles: map[string][]byte{"data2.csv": []byte("x,y\n3,4\n")},
 	})
-	runPCSuccess(t, homeDir, "edit", recordID, editDir)
+	runPCSuccess(t, homeDir, "records", "edit", recordID, editDir)
 
 	// Verify old data file deleted from disk (best-effort)
 	if _, err := os.Stat(data1Path); !os.IsNotExist(err) {
@@ -221,7 +221,7 @@ func TestEditSameFilenameReplacementKeepsNewAssets(t *testing.T) {
 		Figures:     map[string][]byte{"same.png": []byte("old-figure")},
 		DataFiles:   map[string][]byte{"same.csv": []byte("old,data\n1,2\n")},
 	})
-	stdout := runPCSuccess(t, homeDir, "add", addDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", addDir)
 	recordID := strings.TrimSpace(stdout)
 
 	editDir := createInputFolder(t, inputFolderOpts{
@@ -229,7 +229,7 @@ func TestEditSameFilenameReplacementKeepsNewAssets(t *testing.T) {
 		Figures:     map[string][]byte{"same.png": []byte("new-figure")},
 		DataFiles:   map[string][]byte{"same.csv": []byte("new,data\n3,4\n")},
 	})
-	runPCSuccess(t, homeDir, "edit", recordID, editDir)
+	runPCSuccess(t, homeDir, "records", "edit", recordID, editDir)
 
 	figurePath := filepath.Join(homeDir, "personal-context", "figures", recordID, "same.png")
 	figureContent, err := os.ReadFile(figurePath)
@@ -274,7 +274,7 @@ func TestEditFailureDoesNotMutateExistingDataFileOnStageError(t *testing.T) {
 	addDir := createInputFolder(t, inputFolderOpts{
 		DataFiles: map[string][]byte{"x.csv": []byte("old,data\n1,2\n")},
 	})
-	stdout := runPCSuccess(t, homeDir, "add", addDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", addDir)
 	recordID := strings.TrimSpace(stdout)
 
 	db := openTestDB(t, homeDir)
@@ -301,7 +301,7 @@ func TestEditFailureDoesNotMutateExistingDataFileOnStageError(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(blockedPath, 0o644) })
 
-	stderr := runPCFailure(t, homeDir, "edit", recordID, editDir)
+	stderr := runPCFailure(t, homeDir, "records", "edit", recordID, editDir)
 	if !strings.Contains(stderr, "stage data file y.csv") {
 		t.Fatalf("expected stage error for y.csv, got %q", stderr)
 	}
@@ -331,7 +331,7 @@ func TestEditPreservesImmutableFields(t *testing.T) {
 	addDir := createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>V1</body></html>",
 	})
-	stdout := runPCSuccess(t, homeDir, "add", "--date", "2025-06-15", addDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", "--date", "2025-06-15", addDir)
 	recordID := strings.TrimSpace(stdout)
 
 	db := openTestDB(t, homeDir)
@@ -358,7 +358,7 @@ func TestEditPreservesImmutableFields(t *testing.T) {
 	editDir := createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>V2</body></html>",
 	})
-	runPCSuccess(t, homeDir, "edit", recordID, editDir)
+	runPCSuccess(t, homeDir, "records", "edit", recordID, editDir)
 
 	var dateAfter, dayOrderAfter, createdAtAfter, updatedAtAfter string
 	if err := db.QueryRow(
@@ -393,7 +393,7 @@ func TestEditNonexistentID(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	editDir := createInputFolder(t, inputFolderOpts{})
-	stderr := runPCFailure(t, homeDir, "edit", "nonexistent-id", editDir)
+	stderr := runPCFailure(t, homeDir, "records", "edit", "nonexistent-id", editDir)
 	if !strings.Contains(stderr, "not found") {
 		t.Fatalf("expected 'not found' in stderr, got %q", stderr)
 	}
@@ -407,14 +407,14 @@ func TestEditUpdatesMetadata(t *testing.T) {
 	addDir := createInputFolder(t, inputFolderOpts{
 		MetadataJSON: `{"project_id":"proj/original","git_remote_url":"https://github.com/org/repo1","git_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", addDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", addDir)
 	recordID := strings.TrimSpace(stdout)
 
 	// Edit with different metadata
 	editDir := createInputFolder(t, inputFolderOpts{
 		MetadataJSON: `{"project_id":"proj/updated","git_remote_url":"https://github.com/org/repo2","git_hash":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`,
 	})
-	runPCSuccess(t, homeDir, "edit", recordID, editDir)
+	runPCSuccess(t, homeDir, "records", "edit", recordID, editDir)
 
 	db := openTestDB(t, homeDir)
 	var projectID, gitRemoteURL, gitHash string
@@ -439,10 +439,10 @@ func TestEditPreservesDeletedAtForSoftDeletedRecord(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	addDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", addDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", addDir)
 	recordID := strings.TrimSpace(stdout)
 
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 
 	db := openTestDB(t, homeDir)
 	before := queryDeletedAt(t, db, recordID)
@@ -453,7 +453,7 @@ func TestEditPreservesDeletedAtForSoftDeletedRecord(t *testing.T) {
 	editDir := createInputFolder(t, inputFolderOpts{
 		HTMLContent: "<html><body>edited while deleted</body></html>",
 	})
-	runPCSuccess(t, homeDir, "edit", recordID, editDir)
+	runPCSuccess(t, homeDir, "records", "edit", recordID, editDir)
 
 	after := queryDeletedAt(t, db, recordID)
 	if !after.Valid {

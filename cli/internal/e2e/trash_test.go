@@ -11,17 +11,17 @@ func TestTrashListsSoftDeletedRecords(t *testing.T) {
 
 	// Add 3 records.
 	input1 := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Record 1</html>"})
-	id1 := strings.TrimSpace(runPCSuccess(t, homeDir, "add", input1))
+	id1 := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", input1))
 
 	input2 := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Record 2</html>"})
-	id2 := strings.TrimSpace(runPCSuccess(t, homeDir, "add", input2))
+	id2 := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", input2))
 
 	input3 := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Record 3</html>"})
-	_ = strings.TrimSpace(runPCSuccess(t, homeDir, "add", input3))
+	_ = strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", input3))
 
 	// Soft-delete 2 of them.
-	runPCSuccess(t, homeDir, "delete", id1)
-	runPCSuccess(t, homeDir, "delete", id2)
+	runPCSuccess(t, homeDir, "records", "delete", id1)
+	runPCSuccess(t, homeDir, "records", "delete", id2)
 
 	// Trash should show exactly the 2 deleted records.
 	stdout := runPCSuccess(t, homeDir, "trash")
@@ -32,11 +32,11 @@ func TestTrashListsSoftDeletedRecords(t *testing.T) {
 		t.Fatalf("expected trash output to contain deleted record %s, got:\n%s", id2, stdout)
 	}
 
-	// Count non-header lines that contain a record ID (header is "ID  Date  Deleted At").
+	// Count non-header lines that contain a record ID (header is "ID  TYPE  DATE  DELETED AT").
 	lines := strings.Split(strings.TrimSpace(stdout), "\n")
 	dataLines := 0
 	for _, line := range lines {
-		if strings.Contains(line, "ID") && strings.Contains(line, "Date") && strings.Contains(line, "Deleted At") {
+		if strings.Contains(line, "ID") && strings.Contains(line, "TYPE") && strings.Contains(line, "DATE") && strings.Contains(line, "DELETED AT") {
 			continue
 		}
 		if strings.TrimSpace(line) != "" {
@@ -53,15 +53,15 @@ func TestTrashShowsIDDateDeletedAt(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	input := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>To Delete</html>"})
-	id := strings.TrimSpace(runPCSuccess(t, homeDir, "add", "--date", "2025-03-15", input))
+	id := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", "--date", "2025-03-15", input))
 
-	runPCSuccess(t, homeDir, "delete", id)
+	runPCSuccess(t, homeDir, "records", "delete", id)
 
 	stdout := runPCSuccess(t, homeDir, "trash")
 
 	// Should contain the header.
-	if !strings.Contains(stdout, "ID") || !strings.Contains(stdout, "Date") || !strings.Contains(stdout, "Deleted At") {
-		t.Fatalf("expected header with ID, Date, Deleted At, got:\n%s", stdout)
+	if !strings.Contains(stdout, "ID") || !strings.Contains(stdout, "TYPE") || !strings.Contains(stdout, "DATE") || !strings.Contains(stdout, "DELETED AT") {
+		t.Fatalf("expected header with ID, TYPE, DATE, DELETED AT, got:\n%s", stdout)
 	}
 
 	// Should contain the record ID.
@@ -94,7 +94,7 @@ func TestTrashEmptyReturnsCleanMessage(t *testing.T) {
 
 	// Add a record but do NOT delete it.
 	input := createInputFolder(t, inputFolderOpts{})
-	runPCSuccess(t, homeDir, "add", input)
+	runPCSuccess(t, homeDir, "records", "add", input)
 
 	stdout := runPCSuccess(t, homeDir, "trash")
 	if !strings.Contains(stdout, "Trash is empty.") {
@@ -117,11 +117,11 @@ func TestTrashExcludesRestoredRecords(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	input := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Restore Me</html>"})
-	id := strings.TrimSpace(runPCSuccess(t, homeDir, "add", input))
+	id := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", input))
 
 	// Delete then restore.
-	runPCSuccess(t, homeDir, "delete", id)
-	runPCSuccess(t, homeDir, "restore", id)
+	runPCSuccess(t, homeDir, "records", "delete", id)
+	runPCSuccess(t, homeDir, "records", "restore", id)
 
 	stdout := runPCSuccess(t, homeDir, "trash")
 	if !strings.Contains(stdout, "Trash is empty.") {

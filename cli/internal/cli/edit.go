@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/conn-castle/personal-context/cli/internal/recordio"
+	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/spf13/cobra"
 )
 

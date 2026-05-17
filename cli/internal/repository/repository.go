@@ -49,6 +49,9 @@ type Repository interface {
 	ArchiveProject(ctx context.Context, id string) (Project, error)
 	RestoreProject(ctx context.Context, id string) (Project, error)
 	UpsertProjectForImport(ctx context.Context, project Project) (bool, error)
+	UpsertProjectPath(ctx context.Context, input CreateProjectPathInput) (ProjectPath, bool, error)
+	ListProjectPaths(ctx context.Context, projectID *string) ([]ProjectPath, error)
+	BackfillChatProjects(ctx context.Context) (int, error)
 
 	CreateDevice(ctx context.Context, input CreateRegistryInput) (Device, error)
 	GetDeviceByID(ctx context.Context, id string) (Device, error)
@@ -56,6 +59,21 @@ type Repository interface {
 	ArchiveDevice(ctx context.Context, id string) (Device, error)
 	RestoreDevice(ctx context.Context, id string) (Device, error)
 	UpsertDeviceForImport(ctx context.Context, device Device) (bool, error)
+
+	UpsertChatSession(ctx context.Context, input UpsertChatSessionInput) (ChatSession, bool, error)
+	GetChatSessionByID(ctx context.Context, id string) (ChatSession, error)
+	GetChatSessionBySource(ctx context.Context, source string, sourceSessionID string) (ChatSession, error)
+	ListChatSessions(ctx context.Context, filter ListChatSessionsFilter) ([]ChatSession, error)
+	CountChatSessions(ctx context.Context, filter ListChatSessionsFilter) (int, error)
+	SoftDeleteChatSession(ctx context.Context, id string) error
+	RestoreChatSession(ctx context.Context, id string) error
+	DeleteChatSession(ctx context.Context, id string) error
+	MaxChatItemOrdinal(ctx context.Context, sessionID string) (int, error)
+	CreateChatItem(ctx context.Context, input CreateChatItemInput) (ChatItem, error)
+	ReplaceChatItems(ctx context.Context, sessionID string, items []CreateChatItemInput) error
+	ListChatItems(ctx context.Context, sessionID string) ([]ChatItem, error)
+	SearchChatItems(ctx context.Context, filter SearchChatItemsFilter) ([]ChatSearchResult, error)
+	SearchAll(ctx context.Context, filter UnifiedSearchFilter) ([]DomainSearchResult, error)
 
 	// CountActiveRecords returns the number of non-deleted records.
 	CountActiveRecords(ctx context.Context) (int, error)

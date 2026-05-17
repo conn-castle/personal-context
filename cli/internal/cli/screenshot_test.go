@@ -197,7 +197,7 @@ func TestScreenshotHappyPath(t *testing.T) {
 
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", recordDir})
+	addCmd.SetArgs([]string{"records", "add", recordDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -289,7 +289,7 @@ printf 'fake png' > "$out"
 
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", recordDir})
+	addCmd.SetArgs([]string{"records", "add", recordDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestScreenshotDefaultOutput(t *testing.T) {
 
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", recordDir})
+	addCmd.SetArgs([]string{"records", "add", recordDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestScreenshotChromeFailure(t *testing.T) {
 	writeDefaultProvenanceMetadata(t, recordDir)
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", recordDir})
+	addCmd.SetArgs([]string{"records", "add", recordDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -582,7 +582,7 @@ func TestScreenshotTempDirError(t *testing.T) {
 	writeDefaultProvenanceMetadata(t, recordDir)
 	var addOut bytes.Buffer
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", recordDir})
+	addCmd.SetArgs([]string{"records", "add", recordDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
