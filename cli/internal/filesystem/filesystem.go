@@ -11,6 +11,9 @@ import (
 var (
 	syncFileFn  = func(f *os.File) error { return f.Sync() }
 	closeFileFn = func(f *os.File) error { return f.Close() }
+	// renameFileFn wraps os.Rename so tests can inject failures into the
+	// stage→active promotion path without resorting to mode-trick hacks.
+	renameFileFn = os.Rename
 )
 
 // StoredFile describes a copied asset on disk.

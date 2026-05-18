@@ -175,6 +175,40 @@ func TestSyncChatTargetWinnerSkipsRawTransfer(t *testing.T) {
 	}
 }
 
+// TestSyncChangedChatsDirectedBailsOnCancelledContext verifies the
+// ctx.Err() guard inside the chat-sync loop: a cancelled context returns
+// the cancellation error before issuing any further per-session repo
+// calls or raw transfers.
+func TestSyncChangedChatsDirectedBailsOnCancelledContext(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	source := newMemoryRepo(nil)
+	source.chatSessions["20260514-cancel01"] = repository.ChatSession{
+		ID:              "20260514-cancel01",
+		Source:          "codex",
+		SourceSessionID: "cancel-1",
+		SourceDeviceID:  "device/cancel",
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	target := newMemoryRepo(nil)
+	transferCalled := false
+	transfer := func(context.Context, string, repository.ChatSession, *chatRawSyncReport) error {
+		transferCalled = true
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := syncChangedChatsDirected(ctx, time.Time{}, "push", source, target, WinnerLocal, transfer, nil)
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+	if transferCalled {
+		t.Fatal("raw transfer should not run after context cancellation")
+	}
+}
+
 type failingWarnWriter struct{}
 
 func (failingWarnWriter) Write([]byte) (int, error) {

@@ -228,11 +228,11 @@ func TestVerifyErrorBranches(t *testing.T) {
 	resolveHomeDirFn = func() (string, error) {
 		return "", errors.New("home failed")
 	}
+	t.Cleanup(func() { resolveHomeDirFn = originalResolve })
 	if err := runVerify(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, false); err == nil || !strings.Contains(err.Error(), "home failed") {
 		t.Fatalf("expected home resolution error, got %v", err)
 	}
 	resolveHomeDirFn = originalResolve
-	t.Cleanup(func() { resolveHomeDirFn = originalResolve })
 
 	homeDir := setupEnv(t)
 	origOpenCloud := openCloudStackFn

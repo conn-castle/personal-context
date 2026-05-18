@@ -94,7 +94,8 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("importSnapshotIntoStack(create): %v", err)
 	}
-	if stats.Created != 1 || stats.Updated != 0 || stats.Skipped != 0 {
+	// One record + one chat are both created.
+	if stats.Created != 2 || stats.Updated != 0 || stats.Skipped != 0 {
 		t.Fatalf("create stats = %+v", stats)
 	}
 	importedChat, err := targetStack.Repo.GetChatSessionBySource(ctx, "codex", "snapshot-chat")
@@ -174,7 +175,7 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("importSnapshotIntoStack(update): %v", err)
 	}
-	if stats.Created != 0 || stats.Updated != 1 || stats.Skipped != 0 {
+	if stats.Created != 0 || stats.Updated != 2 || stats.Skipped != 0 {
 		t.Fatalf("update stats = %+v", stats)
 	}
 
@@ -214,7 +215,7 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("importSnapshotIntoStack(stale chat snapshot): %v", err)
 	}
-	if stats.Created != 0 || stats.Updated != 0 || stats.Skipped != 1 {
+	if stats.Created != 0 || stats.Updated != 0 || stats.Skipped != 2 {
 		t.Fatalf("stale snapshot stats = %+v", stats)
 	}
 	importedItems, err = targetStack.Repo.ListChatItems(ctx, importedChat.ID)
@@ -236,7 +237,7 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("importSnapshotIntoStack(skip): %v", err)
 	}
-	if stats.Created != 0 || stats.Updated != 0 || stats.Skipped != 1 {
+	if stats.Created != 0 || stats.Updated != 0 || stats.Skipped != 2 {
 		t.Fatalf("skip stats = %+v", stats)
 	}
 }

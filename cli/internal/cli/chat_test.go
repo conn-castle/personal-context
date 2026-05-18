@@ -138,6 +138,83 @@ func TestChatImportListSearchShowDelete(t *testing.T) {
 	}
 }
 
+// TestChatSearchJSONLimitEmitsNextCursor verifies that the chat search
+// JSON envelope sets next_cursor and trims results to opts.Limit when the
+// repository returns more than the requested page size (the over-fetched
+// extra row is detected via the Limit+1 pattern in runChatSearch).
+func TestChatSearchJSONLimitEmitsNextCursor(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	// Two items containing "needle" so --limit 1 must return one item
+	// plus next_cursor and drop the second.
+	transcript := `{
+  "id": "limit-cursor",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [
+    {"role": "user", "content": "first needle"},
+    {"role": "assistant", "content": "second needle"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(root, "limit.json"), []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "--format", "json", "--limit", "1", "needle"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat search --limit 1: %v", err)
+	}
+	body := stdout.String()
+	if !strings.Contains(body, `"next_cursor": "1"`) {
+		t.Fatalf("expected next_cursor=\"1\", got %q", body)
+	}
+	// Decode to verify items length is trimmed to the page size.
+	var page struct {
+		Items      []chatSearchJSON `json:"items"`
+		NextCursor *string          `json:"next_cursor"`
+	}
+	if err := json.Unmarshal([]byte(body), &page); err != nil {
+		t.Fatalf("parse json envelope: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected exactly 1 item per Limit, got %d (%+v)", len(page.Items), page.Items)
+	}
+	if page.NextCursor == nil || *page.NextCursor != "1" {
+		t.Fatalf("expected next_cursor=\"1\", got %+v", page.NextCursor)
+	}
+}
+
+// TestRunChatImportBailsOnCancelledContext verifies the ctx.Err() guard
+// inside the per-file import loop: a context cancelled before the loop
+// hits its first file must short-circuit the import rather than continuing
+// to walk and process additional transcripts.
+func TestRunChatImportBailsOnCancelledContext(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	for _, name := range []string{"a.json", "b.json"} {
+		body := `{"id":"` + name + `","messages":[{"role":"user","content":"hi"}]}`
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := runChatImport(ctx, &bytes.Buffer{}, &bytes.Buffer{}, chatImportOptions{
+		DeviceID: "test-device",
+		Agent:    "codex",
+		Roots:    []string{root},
+	})
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
 func TestChatImportDeleteSourceRemovesOriginal(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()
@@ -395,6 +472,7 @@ func TestChatImportJSONLTableListAndTopLevelShow(t *testing.T) {
 	if out := stdout.String(); !strings.Contains(out, `"tool_output"`) {
 		t.Fatalf("expected tool output search result, got %q", out)
 	}
+
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})

@@ -266,9 +266,12 @@ func (r *Repository) chatSessionPredicate(filter repository.ListChatSessionsFilt
 	return builder.String(), args, next, nil
 }
 
-// SoftDeleteChatSession marks a chat session deleted.
+// SoftDeleteChatSession marks a chat session deleted. Re-deleting an
+// already-soft-deleted chat is a no-op for the tombstone timestamp so the
+// original deletion time survives — matches SoftDeleteRecord and prevents
+// trash-age / gc / sync drift on repeated deletes.
 func (r *Repository) SoftDeleteChatSession(ctx context.Context, id string) error {
-	tag, err := r.pool.Exec(ctx, `UPDATE chat_session SET deleted_at = NOW() WHERE user_id = $1 AND id = $2`, r.userID, id)
+	tag, err := r.pool.Exec(ctx, `UPDATE chat_session SET deleted_at = COALESCE(deleted_at, NOW()) WHERE user_id = $1 AND id = $2`, r.userID, id)
 	if err != nil {
 		return mapPgError(err)
 	}
@@ -514,7 +517,21 @@ func (r *Repository) searchRecords(ctx context.Context, filter repository.Unifie
 	if filter.ProjectID != nil {
 		fmt.Fprintf(&where, ` AND project_id = $%d`, next)
 		args = append(args, *filter.ProjectID)
+		next++
 	}
+	// Forward DateFrom/DateTo so unified search trims record hits the same
+	// way it trims chat hits.
+	if filter.DateFrom != nil {
+		fmt.Fprintf(&where, ` AND date >= $%d`, next)
+		args = append(args, filter.DateFrom.UTC().Format("2006-01-02"))
+		next++
+	}
+	if filter.DateTo != nil {
+		fmt.Fprintf(&where, ` AND date <= $%d`, next)
+		args = append(args, filter.DateTo.UTC().Format("2006-01-02"))
+		next++
+	}
+	_ = next
 	sqlQuery := `SELECT id, user_id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at,
             ts_rank(search_vector, plainto_tsquery('pg_catalog.simple'::regconfig, $2)) AS rank
         FROM records ` + where.String() + `

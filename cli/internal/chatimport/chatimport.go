@@ -82,6 +82,24 @@ func Roots(extra []string, sourceFilter string, projectPaths []repository.Projec
 			}
 		}
 	}
+	// Two project paths can resolve to the same scan root (e.g. `/foo` and
+	// `/foo/sub` both surface `.claude`), and the home-dir + project-path
+	// pass can repeat the same directory. De-duplicate per source so the
+	// caller doesn't re-scan the same tree, which would double-import and
+	// (worse) cause `--delete-source` to fail the second pass.
+	for source, paths := range roots {
+		seen := make(map[string]struct{}, len(paths))
+		deduped := paths[:0]
+		for _, p := range paths {
+			cleaned := filepath.Clean(p)
+			if _, ok := seen[cleaned]; ok {
+				continue
+			}
+			seen[cleaned] = struct{}{}
+			deduped = append(deduped, cleaned)
+		}
+		roots[source] = deduped
+	}
 	return roots, nil
 }
 
@@ -217,12 +235,28 @@ func applyItemSessionFields(session *repository.CreateChatSessionInput, payload 
 }
 
 func hasItemPayload(payload map[string]any) bool {
-	for _, key := range []string{"role", "type", "author", "content", "text", "message", "item_type"} {
+	// An object qualifies as a transcript item only if it carries a content
+	// field. Bare-`type` rows are common in session metadata / event streams
+	// (e.g. `{"type":"session_start"}`) and previously got imported as
+	// empty chat items, polluting the chat table and search index.
+	hasContent := false
+	for _, key := range []string{"content", "text", "message"} {
+		if _, ok := payload[key]; ok {
+			hasContent = true
+			break
+		}
+	}
+	if !hasContent {
+		return false
+	}
+	for _, key := range []string{"role", "type", "author", "item_type"} {
 		if _, ok := payload[key]; ok {
 			return true
 		}
 	}
-	return false
+	// Content present but no role-typing hint at all: still treat as item
+	// so we don't silently drop user-content lines that omit role metadata.
+	return true
 }
 
 func parseJSONTranscript(source string, path string) (repository.CreateChatSessionInput, []repository.CreateChatItemInput, error) {
@@ -237,11 +271,20 @@ func parseJSONTranscript(source string, path string) (repository.CreateChatSessi
 	session := newTranscriptSession(source, path)
 	applySessionFields(&session, payload)
 	var rawItems []any
+	matched := false
 	for _, key := range []string{"messages", "items", "transcript"} {
 		if value, ok := payload[key].([]any); ok {
 			rawItems = value
+			matched = true
 			break
 		}
+	}
+	if !matched {
+		// Reject any .json file that doesn't carry one of the supported
+		// transcript array keys, so arbitrary agent config/state JSON
+		// under a scanned root doesn't get silently imported as an empty
+		// chat session.
+		return repository.CreateChatSessionInput{}, nil, fmt.Errorf("parse %s: no transcript array (expected one of messages/items/transcript)", path)
 	}
 	items := make([]repository.CreateChatItemInput, 0, len(rawItems))
 	for i, raw := range rawItems {
@@ -452,12 +495,16 @@ func normalizePath(path string) (string, error) {
 	return filepath.Clean(resolved), nil
 }
 
+// truncate caps value at max runes (not bytes) so multibyte characters
+// — common in chat titles containing emoji or non-ASCII text — are not
+// split mid-codepoint and rendered as garbage.
 func truncate(value string, max int) string {
-	if len(value) <= max {
+	runes := []rune(value)
+	if len(runes) <= max {
 		return value
 	}
 	if max <= 3 {
-		return value[:max]
+		return string(runes[:max])
 	}
-	return value[:max-3] + "..."
+	return string(runes[:max-3]) + "..."
 }

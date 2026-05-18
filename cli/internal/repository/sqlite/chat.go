@@ -182,9 +182,13 @@ func (r *Repository) ListChatSessions(ctx context.Context, filter repository.Lis
 		return nil, err
 	}
 	query := `SELECT ` + chatSessionColumns + ` FROM chat_session ` + where + ` ORDER BY last_activity_at DESC, id DESC`
+	// SQLite rejects OFFSET without a LIMIT, so emit a sentinel LIMIT -1
+	// (which SQLite interprets as "no limit") for offset-only filters.
 	if filter.Limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, filter.Limit)
+	} else if filter.Offset > 0 {
+		query += ` LIMIT -1`
 	}
 	if filter.Offset > 0 {
 		query += ` OFFSET ?`
@@ -264,9 +268,12 @@ func chatSessionPredicateSQLite(filter repository.ListChatSessionsFilter) (strin
 	return builder.String(), args, nil
 }
 
-// SoftDeleteChatSession marks a chat session deleted.
+// SoftDeleteChatSession marks a chat session deleted. Re-deleting an
+// already-soft-deleted chat preserves the original tombstone (COALESCE
+// over the existing deleted_at) so trash-age / gc / sync stay stable on
+// repeated soft-deletes — matches the SoftDeleteRecord contract.
 func (r *Repository) SoftDeleteChatSession(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `UPDATE chat_session SET deleted_at = STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?;`, id)
+	result, err := r.db.ExecContext(ctx, `UPDATE chat_session SET deleted_at = COALESCE(deleted_at, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')) WHERE id = ?;`, id)
 	if err != nil {
 		return mapSQLiteError(err)
 	}
@@ -432,6 +439,8 @@ func (r *Repository) SearchChatItems(ctx context.Context, filter repository.Sear
 	if filter.Limit > 0 {
 		sqlQuery += ` LIMIT ?`
 		args = append(args, filter.Limit)
+	} else if filter.Offset > 0 {
+		sqlQuery += ` LIMIT -1`
 	}
 	if filter.Offset > 0 {
 		sqlQuery += ` OFFSET ?`
@@ -500,6 +509,16 @@ func (r *Repository) SearchAll(ctx context.Context, filter repository.UnifiedSea
 
 func (r *Repository) searchRecords(ctx context.Context, filter repository.UnifiedSearchFilter) ([]repository.DomainSearchResult, error) {
 	recordFilter := repository.ListRecordsFilter{ProjectID: filter.ProjectID, IncludeDeleted: filter.IncludeDeleted}
+	// Forward DateFrom/DateTo so a unified search with a date window
+	// trims record hits the same way it already trims chat hits.
+	if filter.DateFrom != nil {
+		from := filter.DateFrom.UTC().Format("2006-01-02")
+		recordFilter.DateFrom = &from
+	}
+	if filter.DateTo != nil {
+		to := filter.DateTo.UTC().Format("2006-01-02")
+		recordFilter.DateTo = &to
+	}
 	where, args, err := listRecordsPredicateSQL(recordFilter, "records", false)
 	if err != nil {
 		return nil, err

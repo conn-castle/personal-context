@@ -193,7 +193,7 @@ func runSearch(ctx context.Context, stdout io.Writer, stderr io.Writer, query st
 
 func searchTable(w io.Writer, results []repository.DomainSearchResult) error {
 	if len(results) == 0 {
-		_, _ = fmt.Fprintln(w, "No matching records found.")
+		_, _ = fmt.Fprintln(w, "No matching records or chats found.")
 		return nil
 	}
 

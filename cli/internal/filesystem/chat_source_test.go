@@ -84,6 +84,11 @@ func TestValidateChatSourceKey(t *testing.T) {
 			}
 		})
 	}
+	// An invalid chat session id must surface from validateChatSessionID
+	// before the key shape checks run.
+	if err := ValidateChatSourceKey("not-a-valid-id", "chats/raw/not-a-valid-id/source.json"); err == nil {
+		t.Fatal("expected ValidateChatSourceKey to reject invalid chat session id")
+	}
 }
 
 func TestChatSourceStageAndPromote(t *testing.T) {
@@ -292,7 +297,10 @@ func TestPromoteChatSourceStageBackupRenameFailure(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(activeDir, "source.json"), []byte("OLD"), 0o600); err != nil {
 		t.Fatalf("write active: %v", err)
 	}
-	stageDir := filepath.Join(t.TempDir(), "stage")
+	// Put the stage under the managed chats/raw/.staging-* layout so it
+	// passes the resolveManagedStageDir guard; rely on the chmod 0o500
+	// on rawDir to make the active→backup rename inside rawDir fail.
+	stageDir := filepath.Join(rawDir, ".staging-"+chatID)
 	if err := os.MkdirAll(stageDir, 0o700); err != nil {
 		t.Fatalf("mkdir stage: %v", err)
 	}
@@ -315,10 +323,120 @@ func TestPromoteChatSourceStageBackupRenameFailure(t *testing.T) {
 	}
 }
 
-func TestPromoteChatSourceStageFailureRollsBackBackup(t *testing.T) {
+// TestCopyChatSourceToStageRejectsDirectorySource verifies that a directory
+// supplied as the source path is rejected before any staging directory is
+// created — chat sources must be files.
+func TestCopyChatSourceToStageRejectsDirectorySource(t *testing.T) {
+	base := t.TempDir()
+	client, _ := NewClient(base)
+	// Give the dir a transcript extension so DeriveChatSourceKey accepts
+	// the path and we reach the IsDir() check.
+	dirSrc := filepath.Join(t.TempDir(), "src-dir.json")
+	if err := os.MkdirAll(dirSrc, 0o700); err != nil {
+		t.Fatalf("mkdir src: %v", err)
+	}
+	if _, err := client.CopyChatSourceToStage("20260315-abcdef12", dirSrc); err == nil ||
+		!strings.Contains(err.Error(), "chat source must be a file") {
+		t.Fatalf("expected directory rejection, got %v", err)
+	}
+}
+
+// TestPromoteChatSourceStageRenameFailureRollsBackBackup injects a
+// stage→active Rename failure via the renameFileFn hook and asserts the
+// previously-backed-up active directory is restored.
+func TestPromoteChatSourceStageRenameFailureRollsBackBackup(t *testing.T) {
 	base := t.TempDir()
 	client, _ := NewClient(base)
 	chatID := "20260315-abcdef12"
+	rawDir := filepath.Join(base, "chats", "raw")
+	activeDir := filepath.Join(rawDir, chatID)
+	if err := os.MkdirAll(activeDir, 0o700); err != nil {
+		t.Fatalf("mkdir active: %v", err)
+	}
+	activePath := filepath.Join(activeDir, "source.json")
+	if err := os.WriteFile(activePath, []byte("OLD"), 0o600); err != nil {
+		t.Fatalf("write active: %v", err)
+	}
+	stageDir := filepath.Join(rawDir, ".staging-"+chatID)
+	if err := os.MkdirAll(stageDir, 0o700); err != nil {
+		t.Fatalf("mkdir stage: %v", err)
+	}
+	stagedPath := filepath.Join(stageDir, "source.json")
+	if err := os.WriteFile(stagedPath, []byte("NEW"), 0o600); err != nil {
+		t.Fatalf("write staged: %v", err)
+	}
+
+	origRename := renameFileFn
+	t.Cleanup(func() { renameFileFn = origRename })
+	renameFileFn = func(src, dst string) error {
+		// Only fail the stage→active rename so the prior backup
+		// rename can still succeed via the unhooked os.Rename.
+		return errors.New("simulated stage rename failure")
+	}
+
+	_, err := client.PromoteChatSourceStage(ChatSourceStage{
+		ChatSessionID: chatID,
+		RawSourceKey:  "chats/raw/" + chatID + "/source.json",
+		StagedPath:    stagedPath,
+	})
+	if err == nil || !strings.Contains(err.Error(), "promote chat source stage") {
+		t.Fatalf("expected promote failure, got %v", err)
+	}
+	// Backup must have been restored to activeDir with the original content.
+	got, readErr := os.ReadFile(activePath)
+	if readErr != nil {
+		t.Fatalf("read restored active: %v", readErr)
+	}
+	if string(got) != "OLD" {
+		t.Fatalf("expected backup rollback to restore old content, got %q", string(got))
+	}
+}
+
+// TestPromoteChatSourceStageRejectsUnmanagedStagedPath verifies that the
+// staging-path validator rejects anything that isn't a direct child of
+// `<basePath>/chats/raw/.staging-*` before any RemoveAll/Rename runs. This
+// is defense-in-depth so a malformed ChatSourceStage cannot trick us into
+// deleting or moving unrelated directories.
+func TestPromoteChatSourceStageRejectsUnmanagedStagedPath(t *testing.T) {
+	base := t.TempDir()
+	client, _ := NewClient(base)
+	chatID := "20260315-abcdef12"
+
+	cases := []struct {
+		name     string
+		stageDir string
+	}{
+		{name: "outside chats/raw", stageDir: filepath.Join(base, "stage-dir")},
+		{name: "under chats/raw but missing .staging- prefix", stageDir: filepath.Join(base, "chats", "raw", "not-staging")},
+		{name: "two levels deep under chats/raw", stageDir: filepath.Join(base, "chats", "raw", "sub", ".staging-"+chatID)},
+		{name: "file in parent of chats/raw", stageDir: filepath.Join(base, "chats")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.MkdirAll(tc.stageDir, 0o700); err != nil {
+				t.Fatalf("mkdir stage: %v", err)
+			}
+			stagedPath := filepath.Join(tc.stageDir, "source.json")
+			if err := os.WriteFile(stagedPath, []byte("{}"), 0o600); err != nil {
+				t.Fatalf("write staged: %v", err)
+			}
+			_, err := client.PromoteChatSourceStage(ChatSourceStage{
+				ChatSessionID: chatID,
+				RawSourceKey:  "chats/raw/" + chatID + "/source.json",
+				StagedPath:    stagedPath,
+			})
+			if err == nil || !strings.Contains(err.Error(), "managed chats/raw/.staging-* directory") {
+				t.Fatalf("expected validator rejection, got %v", err)
+			}
+		})
+	}
+}
+
+func TestPromoteChatSourceStageVerifyFailure(t *testing.T) {
+	base := t.TempDir()
+	client, _ := NewClient(base)
+	chatID := "20260315-abcdef12"
+	// Pre-create active so the backup rollback path also runs.
 	activeDir := filepath.Join(base, "chats", "raw", chatID)
 	if err := os.MkdirAll(activeDir, 0o700); err != nil {
 		t.Fatalf("mkdir active: %v", err)
@@ -327,32 +445,13 @@ func TestPromoteChatSourceStageFailureRollsBackBackup(t *testing.T) {
 	if err := os.WriteFile(activePath, []byte("OLD"), 0o600); err != nil {
 		t.Fatalf("write active: %v", err)
 	}
-
-	_, err := client.PromoteChatSourceStage(ChatSourceStage{
-		ChatSessionID: chatID,
-		RawSourceKey:  "chats/raw/" + chatID + "/source.json",
-		StagedPath:    activePath,
-	})
-	if err == nil || !strings.Contains(err.Error(), "promote chat source stage") {
-		t.Fatalf("expected promote failure, got %v", err)
-	}
-	content, readErr := os.ReadFile(activePath)
-	if readErr != nil {
-		t.Fatalf("read restored active: %v", readErr)
-	}
-	if string(content) != "OLD" {
-		t.Fatalf("expected backup rollback to restore old content, got %q", string(content))
-	}
-}
-
-func TestPromoteChatSourceStageVerifyFailure(t *testing.T) {
-	base := t.TempDir()
-	client, _ := NewClient(base)
-	chatID := "20260315-abcdef12"
-	stageDir := filepath.Join(base, "stage-dir")
+	stageDir := filepath.Join(base, "chats", "raw", ".staging-"+chatID)
 	if err := os.MkdirAll(stageDir, 0o700); err != nil {
 		t.Fatalf("mkdir stage: %v", err)
 	}
+	// File exists at the staged path (so stat passes the early check) but
+	// its basename doesn't match the RawSourceKey, so after Rename the
+	// verify stat on activePath fails.
 	stagedPath := filepath.Join(stageDir, "wrong-name.json")
 	if err := os.WriteFile(stagedPath, []byte("{}"), 0o600); err != nil {
 		t.Fatalf("write staged: %v", err)
@@ -365,6 +464,15 @@ func TestPromoteChatSourceStageVerifyFailure(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "verify promoted chat source") {
 		t.Fatalf("expected verify failure, got %v", err)
+	}
+	// Verify the backup was restored: the original "OLD" content must
+	// still be present at activePath after rollback.
+	got, readErr := os.ReadFile(activePath)
+	if readErr != nil {
+		t.Fatalf("read restored active: %v", readErr)
+	}
+	if string(got) != "OLD" {
+		t.Fatalf("expected backup rollback to restore old content, got %q", string(got))
 	}
 }
 
@@ -617,6 +725,12 @@ func TestDeleteChatSourceStage(t *testing.T) {
 	}
 	if err := client.DeleteChatSourceStage(ChatSourceStage{StagedPath: "bad\x00path/source.json"}); err == nil {
 		t.Fatal("expected invalid stage path cleanup error")
+	}
+	// Path outside the managed chats/raw/.staging-* layout must be
+	// rejected by the validator before any RemoveAll runs.
+	if err := client.DeleteChatSourceStage(ChatSourceStage{StagedPath: filepath.Join(base, "other-dir", "source.json")}); err == nil ||
+		!strings.Contains(err.Error(), "managed chats/raw/.staging-* directory") {
+		t.Fatalf("expected validator rejection for outside-of-managed path, got %v", err)
 	}
 }
 

@@ -27,6 +27,26 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-05-17 s4w9x2: SearchAll fetches full match set into Go memory before pagination
+    Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/chat.go
+    Description: `SearchAll` runs per-domain (records, chats) queries with no LIMIT/OFFSET, merges them in Go, sorts by BM25 rank across domains, then slices client-side. For queries that match thousands of rows this is O(N) memory and adds latency. The recent CLI fix limits the CLI-side over-fetch via `Limit+1`, but the repository still pulls all matches into memory before applying Limit/Offset.
+    Next step: Push the union+rank+limit into SQL via UNION ALL with a shared rank expression, or cap each domain's fetch at `Limit+1` rows and merge. Update both backends and contract tests.
+
+- Issue 2026-05-17 a3i6f8: Snapshot replacement is rollback-safe but not crash-safe atomic
+    Priority: Medium. Area: cli/internal/gitsnapshot/snapshot.go
+    Description: `replaceSnapshotContents` moves each managed entry independently (backup-then-promote per entry). If the process is killed between the backup loop and the promotion loop, the export root is left with a partial snapshot plus a backup dir, violating the atomic-replacement contract.
+    Next step: Refactor to swap the entire snapshot root via a single rename (write to `<root>.new`, rename old root to backup, rename new in, then delete backup). Make sure restore-on-failure handles the case where the original root was already renamed away.
+
+- Issue 2026-05-17 r6e0k3: Cross-table ID uniqueness for records vs chat_session is not atomically enforced
+    Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/repository.go, schema
+    Description: `CreateRecord` and `UpsertChatSession` each do a read-then-insert preflight to check that the ID isn't already used by the other table. Two concurrent writers can pass both probes and commit conflicting IDs. The races are unlikely in practice (chat IDs include random hex), but the invariant is real if the design relies on a shared ID namespace.
+    Next step: Introduce a dedicated `id_registry` table with a unique constraint and reserve the ID transactionally on creation, or run both inserts inside the same transaction with a shared advisory lock. Update both backends; document the contract in DECISIONS.md.
+
+- Issue 2026-05-17 j1m4z5: JSON transcript parser loads the whole file into memory
+    Priority: Low. Area: cli/internal/chatimport/chatimport.go
+    Description: `parseJSONTranscript` uses `os.ReadFile` to load the entire `.json` transcript before json.Unmarshal. For very large Gemini transcripts this can exceed memory; the JSONL path already uses a streaming bufio.Scanner.
+    Next step: Switch to `json.Decoder` and stream the array. The change is mechanical and isolated.
+
 - Issue 2026-05-17 c8h9k1: Chat sync upsert + items replacement is not atomic
     Priority: High. Area: cli/internal/sync/service.go
     Description: `syncChangedChatsDirected` calls `UpsertChatSession` (which advances target `updated_at` to the source value) followed by `ReplaceChatItems`. If `ReplaceChatItems` fails, the chat row is left advanced while items remain stale, and the next sync sees equal timestamps (WinnerNone) and skips the chat — leaving the items table inconsistent indefinitely. Unlike records, chats use unconditional `ReplaceChatItems` so they are not self-healing across syncs.

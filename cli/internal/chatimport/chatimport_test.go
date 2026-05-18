@@ -294,6 +294,49 @@ func TestUnexportedNormalizationBranches(t *testing.T) {
 	if parsed, err := ParseChatTime("2026-05-14T12:00:00Z"); err != nil || parsed.Location() != time.UTC {
 		t.Fatalf("ParseChatTime(RFC3339) = %v, %v", parsed, err)
 	}
+
+	// hasItemPayload requires actual content (content/text/message) — a
+	// bare `{"type":"session_start"}` is metadata, not a transcript item.
+	if hasItemPayload(map[string]any{"type": "session_start"}) {
+		t.Fatal("hasItemPayload should reject metadata-only objects")
+	}
+	if !hasItemPayload(map[string]any{"content": "hi"}) {
+		t.Fatal("hasItemPayload should accept content-only objects")
+	}
+
+	// parseJSONTranscript rejects .json files that lack a transcript
+	// array so arbitrary agent state/config JSON under a scanned root is
+	// not silently imported as an empty chat session.
+	noArrayPath := filepath.Join(root, "no-array.json")
+	if err := os.WriteFile(noArrayPath, []byte(`{"id":"x","title":"no items"}`), 0o600); err != nil {
+		t.Fatalf("write no-array: %v", err)
+	}
+	if _, _, err := parseJSONTranscript("codex", noArrayPath); err == nil || !strings.Contains(err.Error(), "no transcript array") {
+		t.Fatalf("expected transcript-array rejection, got %v", err)
+	}
+
+	// Roots de-duplicates overlapping project paths so the importer
+	// doesn't scan the same root twice (which would also break
+	// --delete-source).
+	pa := filepath.Join(root, "overlap")
+	pb := filepath.Join(root, "overlap") // identical second entry
+	gotRoots, err := Roots(nil, "codex", []repository.ProjectPath{
+		{Path: pa, DeviceID: ""}, {Path: pb, DeviceID: ""},
+	})
+	if err != nil {
+		t.Fatalf("Roots: %v", err)
+	}
+	codexRoots := gotRoots["codex"]
+	// We expect at most one (home).codex/sessions plus one duplicate-collapsed
+	// project root. The exact count depends on the platform, but the same
+	// project path appearing twice in input must collapse to one entry.
+	seen := map[string]bool{}
+	for _, p := range codexRoots {
+		if seen[p] {
+			t.Fatalf("Roots returned duplicate path %q in %v", p, codexRoots)
+		}
+		seen[p] = true
+	}
 }
 
 func strPtr(value string) *string {

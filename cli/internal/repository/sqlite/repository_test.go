@@ -1345,6 +1345,38 @@ func TestSQLiteProjectPathChatAndUnifiedSearchBranches(t *testing.T) {
 	if _, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", Limit: -1}); !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected invalid unified search limit error, got %v", err)
 	}
+
+	// Unified date filters must trim record hits to the window. The test
+	// fixture has at least one record whose date falls outside a far-past
+	// window, so a unified search restricted to that window must drop it.
+	farPast := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	farPastEnd := time.Date(2020, 12, 31, 0, 0, 0, 0, time.UTC)
+	pastOnly, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{
+		Query:    "needle",
+		DateFrom: &farPast,
+		DateTo:   &farPastEnd,
+	})
+	if err != nil {
+		t.Fatalf("SearchAll(past window) error = %v", err)
+	}
+	for _, r := range pastOnly {
+		if r.Domain == "records" {
+			t.Fatalf("expected record hits to be excluded by far-past date window, got %+v", r)
+		}
+	}
+
+	// Offset-only filter on chat list (no Limit) must not fail — the
+	// SQLite query builder emits a LIMIT -1 sentinel for this case.
+	if _, err := repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{Offset: 0}); err != nil {
+		t.Fatalf("ListChatSessions(Offset:0) error = %v", err)
+	}
+	if _, err := repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{Offset: 1}); err != nil {
+		t.Fatalf("ListChatSessions(Offset:1, no Limit) error = %v", err)
+	}
+	// Same LIMIT -1 sentinel must work for offset-only chat-item search.
+	if _, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle", Offset: 1, IncludeToolOutputs: true}); err != nil {
+		t.Fatalf("SearchChatItems(Offset:1, no Limit) error = %v", err)
+	}
 	unknownDomain := "unknown"
 	unknownResults, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", Domain: &unknownDomain})
 	if err != nil {

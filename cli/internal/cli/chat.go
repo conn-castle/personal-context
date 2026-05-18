@@ -156,6 +156,9 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 				return err
 			}
 			for _, file := range files {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
 				summary.FilesScanned++
 				session, items, err := chatimport.ParseTranscriptFile(source, file)
 				if err != nil {
@@ -541,7 +544,9 @@ func runChatSearch(ctx context.Context, stdout io.Writer, _ io.Writer, query str
 		return err
 	}
 	defer func() { _ = stack.Close() }()
-	filter := repository.SearchChatItemsFilter{Query: query, IncludeToolOutputs: opts.IncludeTools, Limit: opts.Limit, Offset: opts.Offset}
+	// Fetch one extra row beyond the requested page so we can emit a
+	// next-cursor for the JSON envelope without issuing a second COUNT.
+	filter := repository.SearchChatItemsFilter{Query: query, IncludeToolOutputs: opts.IncludeTools, Limit: opts.Limit + 1, Offset: opts.Offset}
 	if source != "" {
 		filter.Source = &source
 	}
@@ -553,6 +558,10 @@ func runChatSearch(ctx context.Context, stdout io.Writer, _ io.Writer, query str
 	if err != nil {
 		return fmt.Errorf("search chats: %w", err)
 	}
+	hasMore := len(results) > opts.Limit
+	if hasMore {
+		results = results[:opts.Limit]
+	}
 	switch opts.Format {
 	case "table":
 		return writeChatSearchTable(stdout, results)
@@ -561,7 +570,12 @@ func runChatSearch(ctx context.Context, stdout io.Writer, _ io.Writer, query str
 		for _, result := range results {
 			items = append(items, chatSearchJSON{Session: chatSessionToJSON(result.Session), Ordinal: result.Item.Ordinal, Role: result.Item.Role, Type: result.Item.ItemType, Text: result.Item.Text, Snippet: result.Snippet})
 		}
-		return listpage.WriteJSON(stdout, listpage.Response[chatSearchJSON]{Items: items, Total: len(items), NextCursor: nil})
+		var nextCursor *string
+		if hasMore {
+			next := fmt.Sprintf("%d", opts.Offset+opts.Limit)
+			nextCursor = &next
+		}
+		return listpage.WriteJSON(stdout, listpage.Response[chatSearchJSON]{Items: items, Total: len(items), NextCursor: nextCursor})
 	default:
 		return fmt.Errorf("unknown format %q: expected table or json", opts.Format)
 	}

@@ -4420,6 +4420,11 @@ func (m *memoryRepo) UpsertChatSession(_ context.Context, input repository.Upser
 			if session.ProjectID == nil {
 				session.ProjectID = existing.ProjectID
 			}
+			// Match the SQLite/Postgres COALESCE-on-cwd semantics so a
+			// nil input.CWD does not silently clear an existing value.
+			if session.CWD == nil {
+				session.CWD = existing.CWD
+			}
 			if session.Title == nil {
 				session.Title = existing.Title
 			}

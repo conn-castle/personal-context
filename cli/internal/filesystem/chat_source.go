@@ -169,16 +169,39 @@ func (c *Client) CopyChatSourceToStage(chatSessionID string, sourcePath string) 
 
 // DeleteChatSourceStage removes any staging directory the stage occupies. It
 // is safe to call on a stage that has already been promoted or partially
-// cleaned up; missing directories are not an error.
+// cleaned up; missing directories are not an error. The path is validated
+// against the managed `chats/raw/.staging-*` layout before any RemoveAll so
+// a malformed StagedPath cannot delete arbitrary directories.
 func (c *Client) DeleteChatSourceStage(stage ChatSourceStage) error {
 	if c == nil || stage.StagedPath == "" {
 		return nil
 	}
-	stageDir := filepath.Dir(stage.StagedPath)
+	stageDir, err := c.resolveManagedStageDir(stage.StagedPath)
+	if err != nil {
+		return err
+	}
 	if err := os.RemoveAll(stageDir); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove chat source stage dir: %w", err)
 	}
 	return nil
+}
+
+// resolveManagedStageDir returns the cleaned stage directory derived from a
+// staged-file path and rejects anything that does not live under
+// `<basePath>/chats/raw/.staging-*`. This is a defense-in-depth guard so a
+// malformed or maliciously crafted ChatSourceStage cannot trick us into
+// running RemoveAll/Rename on unrelated directories.
+func (c *Client) resolveManagedStageDir(stagedPath string) (string, error) {
+	absStageDir, _ := filepath.Abs(filepath.Dir(stagedPath))
+	absRawRoot, _ := filepath.Abs(filepath.Join(c.basePath, "chats", "raw"))
+	// The stage dir must sit *directly* under chats/raw (parent dir
+	// equals the raw root) and its basename must carry the managed
+	// `.staging-` prefix. Anything else means the StagedPath was not
+	// produced by CopyChatSourceToStage and must not be touched.
+	if filepath.Dir(absStageDir) != absRawRoot || !strings.HasPrefix(filepath.Base(absStageDir), ".staging-") {
+		return "", fmt.Errorf("staged path is not a managed chats/raw/.staging-* directory: %q", stagedPath)
+	}
+	return absStageDir, nil
 }
 
 // PromoteChatSourceStage moves a staged chat raw source into the active
@@ -201,7 +224,10 @@ func (c *Client) PromoteChatSourceStage(stage ChatSourceStage) (StoredFile, erro
 	}
 	activeDir := filepath.Join(c.basePath, "chats", "raw", stage.ChatSessionID)
 	activePath := filepath.Join(c.basePath, filepath.FromSlash(stage.RawSourceKey))
-	stageDir := filepath.Dir(stage.StagedPath)
+	stageDir, err := c.resolveManagedStageDir(stage.StagedPath)
+	if err != nil {
+		return StoredFile{}, err
+	}
 
 	if err := os.MkdirAll(filepath.Dir(activeDir), 0o700); err != nil {
 		return StoredFile{}, fmt.Errorf("ensure chats/raw exists: %w", err)
@@ -221,7 +247,7 @@ func (c *Client) PromoteChatSourceStage(stage ChatSourceStage) (StoredFile, erro
 		return StoredFile{}, fmt.Errorf("stat active chat raw dir: %w", err)
 	}
 
-	if err := os.Rename(stageDir, activeDir); err != nil {
+	if err := renameFileFn(stageDir, activeDir); err != nil {
 		if backupDir != "" {
 			_ = os.Rename(backupDir, activeDir)
 		}

@@ -308,6 +308,7 @@ func importSnapshotIntoStack(ctx context.Context, stack *localStack, snapshot gi
 		}
 		if rollback.existed && !chat.UpdatedAt.After(rollback.session.UpdatedAt) {
 			rollback.cleanup(stack)
+			stats.Skipped++
 			continue
 		}
 		rawStage, err := stageSnapshotChatRawSource(stack, chat)
@@ -367,6 +368,11 @@ func importSnapshotIntoStack(ctx context.Context, stack *localStack, snapshot gi
 				rollback.cleanup(stack)
 				return stats, fmt.Errorf("promote chat raw source %s: %w", chat.ID, err)
 			}
+		}
+		if rollback.existed {
+			stats.Updated++
+		} else {
+			stats.Created++
 		}
 		rollback.cleanup(stack)
 	}

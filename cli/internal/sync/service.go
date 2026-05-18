@@ -206,6 +206,9 @@ func syncChangedChatsDirected(ctx context.Context, since time.Time, name string,
 	}
 	report := chatRawSyncReport{}
 	for _, session := range sessions {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		targetSession, targetExists, err := loadChatSession(ctx, target, session.ID)
 		if err != nil {
 			return fmt.Errorf("load target chat session %s: %w", session.ID, err)

@@ -19,8 +19,8 @@ func TestSearchTableNoResults(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "No matching records found.") {
-		t.Fatalf("expected 'No matching records found.', got %q", stdout.String())
+	if !strings.Contains(stdout.String(), "No matching records or chats found.") {
+		t.Fatalf("expected unified empty-state message, got %q", stdout.String())
 	}
 }
 
@@ -360,7 +360,7 @@ func TestSearchValidationAndEmptyPageBranches(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("search high offset: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "No matching records found.") {
+	if !strings.Contains(stdout.String(), "No matching records or chats found.") {
 		t.Fatalf("expected no results for high offset, got %q", stdout.String())
 	}
 

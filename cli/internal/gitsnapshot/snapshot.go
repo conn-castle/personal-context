@@ -828,7 +828,10 @@ func readChatItems(path string, chatID string) ([]ChatItem, error) {
 	}
 	defer func() { _ = file.Close() }()
 	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
+	// 256 MiB matches the chatimport JSONL parser so any item Write produced
+	// can be Read back; the old 10 MiB cap could make a successfully-exported
+	// chat unreadable on import if any item carried a large raw_json/text.
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024*1024)
 	var items []ChatItem
 	seen := map[int]struct{}{}
 	for scanner.Scan() {
