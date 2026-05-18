@@ -1,12 +1,11 @@
 ---
 name: audit-tests
 description: >-
-  Audit the test suite for redundancy, quality gaps, and organizational health
-  across unit, integration, and e2e tiers. Discovers test conventions from the
-  project, classifies tests by tier, identifies duplicative or low-value tests,
-  finds coverage gaps that metrics miss, fixes what can be fixed safely, and
-  reports findings. Use `boost-coverage` to fill gaps; use this skill to assess
-  and clean up the existing test suite.
+  Audit the existing test suite for redundancy, quality gaps, and organization
+  across unit, integration, and e2e tiers. Finds duplicate or self-confirming
+  tests, coverage gaps metrics miss, and safe cleanup fixes. Use
+  `prune-new-tests` instead when the target is tests added in the current
+  uncommitted diff.
 ---
 
 # audit-tests
@@ -14,13 +13,15 @@ description: >-
 Audit the health of the existing test suite and fix what can be fixed safely:
 - discover the project's test conventions and runner configuration
 - classify existing tests by tier (unit, integration, e2e)
-- identify redundant, duplicative, or low-value tests
+- identify redundant, misleading, or low-value tests
 - identify meaningful coverage gaps that line-coverage metrics miss
 - identify misclassified tests (e.g., integration tests labeled as unit tests)
 - remove dead tests and strengthen weak assertions where mechanical
 - report all findings and fixes
 
 Use `boost-coverage` when the goal is to write new tests to raise coverage.
+Use `prune-new-tests` when the goal is to prune speculative tests added in the
+current uncommitted diff (burden-of-proof, diff-scoped only).
 Use this skill when the goal is to assess and clean up the existing test suite.
 
 ## Defaults
@@ -76,14 +77,13 @@ Recommended roles:
 
 - Required: ask when the project's test conventions are ambiguous enough
   that tier classification would be unreliable.
-- Required: ask before removing tests that have partial value and are not
-  clearly dead, rubber-stamp, or duplicate (borderline cases).
+- Required: ask before removing tests that have partial value and no clear
+  negative-value or duplicate finding.
 - Required: ask when a finding would require changes to production code
   for testability.
 - When a checkpoint involves a genuine tradeoff between substantive alternatives, present at least two options with brief pros and cons, state which you recommend and why, and let the human decide.
-- Stay autonomous for: dead tests (skipped, commented out, unreachable),
-  rubber-stamp tests (no meaningful assertions), clear duplicates
-  (same code path and assertions), and mechanical assertion fixes.
+- Stay autonomous for: dead tests, clear negative-value tests, clear duplicates,
+  and mechanical assertion fixes.
 
 ## Audit workflow
 
@@ -125,6 +125,10 @@ For each redundancy finding, state:
 ### Phase 3: Quality analysis (Quality analyst)
 
 Identify tests with quality concerns:
+- **Tautological/self-confirming tests**: tests whose assertions are satisfied
+  by their own setup; delete clear cases instead of counting them as coverage.
+  Also flag runtime tests that only re-check constraints already enforced by a
+  language, compiler, type checker, schema, or static analyzer.
 - **Rubber-stamp tests**: tests with no meaningful assertions — they run
   code but only check that it does not panic/error, assert truthiness
   without verifying behavior, or assert on implementation details rather
@@ -168,15 +172,17 @@ Focus on gaps that represent real risk, not low line-coverage numbers. If covera
 
 ### Phase 5: Fix safe findings (Fixer)
 
-1. Delete clearly dead tests (skipped, commented out, unreachable).
-2. Delete rubber-stamp tests that have no meaningful assertions.
-3. Consolidate clear duplicates: keep the more complete version, delete
+1. Delete clear tautological/self-confirming tests; report the resulting
+   coverage gap instead of replacing them with false coverage.
+2. Delete clearly dead tests (skipped, commented out, unreachable).
+3. Delete rubber-stamp tests that have no meaningful assertions.
+4. Consolidate clear duplicates: keep the more complete version, delete
    the rest. When tests overlap substantially but each has unique value,
    merge into a single consolidated test.
-4. Strengthen weak assertions where the fix is mechanical and unambiguous.
-5. For borderline cases where the test has partial value and deletion is
+5. Strengthen weak assertions where the fix is mechanical and unambiguous.
+6. For borderline cases where the test has partial value and deletion is
    not clearly correct, ask the user.
-6. Run the test suite after fixes to confirm nothing broke.
+7. Run the test suite after fixes to confirm nothing broke.
 
 ### Phase 6: Synthesize findings (Reporter)
 

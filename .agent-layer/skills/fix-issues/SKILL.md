@@ -1,10 +1,9 @@
 ---
 name: fix-issues
 description: >-
-  Fix open items in `ISSUES.md` by default: plan the set, batch work,
-  implement, audit, verify, and keep the ledger current. Use when the user asks
-  to clear or work through known issues. Use `debug-issue` for one unexplained
-  symptom and `resolve-findings` for a review findings report.
+  Fix open `ISSUES.md` items: plan a batch, implement, audit, verify, and keep
+  the ledger current. Use `debug-issue` for one unexplained symptom or
+  `resolve-findings` for review reports.
 ---
 
 # fix-issues
@@ -124,7 +123,7 @@ After writing the artifacts:
 4. If a selected issue proves materially broader than planned, hand it back to the execution gatekeeper instead of freelancing.
 
 If the touched scope accumulates obvious local complexity or dead scaffolding that can be fixed without broadening scope:
-- use the `simplify-code` skill
+- use the `simplify-new-code` skill
 - then continue to Phase 5
 
 ### Phase 5: Audit the touched area (Auditor)

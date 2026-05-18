@@ -1,11 +1,10 @@
 ---
 name: boost-coverage
 description: >-
-  Raise test coverage by discovering the repo's real coverage command,
-  selecting under-covered files, adding tests, and iterating to the documented
-  target or blocker. Use when the user asks to increase coverage. Use
-  `audit-tests` for suite-quality cleanup and `debug-issue` for reproducing a
-  specific bug.
+  Raise coverage by finding the real coverage command, selecting under-covered
+  files, adding behavior-focused tests, and iterating to target or blocker. Use
+  `audit-tests` for full-suite cleanup; use `prune-new-tests` to prune
+  speculative tests in the current uncommitted diff.
 ---
 
 # boost-coverage
@@ -55,6 +54,11 @@ Recommended roles:
 
 - Do not guess coverage commands, thresholds, or domain boundaries.
 - Do not change production behavior to inflate coverage.
+- Do not add tautological or self-confirming tests to reach a coverage target;
+  stop at the real shortfall instead.
+- Do not add runtime tests for constraints already enforced by a language,
+  compiler, type checker, schema, or static analyzer; coverage should come from
+  behavior, logic, integration, or runtime failure modes.
 - Keep each iteration focused on one target file unless the repo's test runner forces a broader command.
 - Keep tests deterministic and aligned with repo conventions.
 

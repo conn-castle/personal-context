@@ -1,10 +1,9 @@
 ---
 name: debug-issue
 description: >-
-  Investigate a reported bug or unexpected behavior from symptom to root cause:
-  reproduce, narrow down, diagnose, write a failing test, fix, and verify. Use
-  when the root cause is unknown and investigation is needed before a fix can be
-  planned.
+  Investigate a reported bug from symptom to root cause: reproduce, narrow,
+  diagnose, write a failing test, fix, and verify. Use when the cause is unknown
+  and investigation must precede planning.
 ---
 
 # debug-issue
@@ -143,7 +142,7 @@ If the root cause is ambiguous after investigation, escalate with the competing 
 3. If the correct fix is materially larger than a targeted change, escalate before proceeding.
 
 If the fix touches scope that accumulates obvious local complexity or dead scaffolding:
-- use the `simplify-code` skill
+- use the `simplify-new-code` skill
 - then continue to Phase 6
 
 ### Phase 6: Verify (Verifier)

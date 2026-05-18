@@ -1,11 +1,9 @@
 ---
 name: complete-current-phase
 description: >-
-  Complete the current roadmap phase through planning, plan review,
-  implementation, verification, audit, cleanup, and closeout. Use when the user
-  asks to finish, complete, or work through a roadmap phase. Use `plan-work`
-  for planning only, `implement-plan` when artifacts already exist, and
-  `finish-task` for non-roadmap closeout.
+  Complete the current roadmap phase through planning, review, implementation,
+  verification, audit, cleanup, and closeout. Use `plan-work` for planning only
+  and `finish-task` for non-roadmap closeout.
 ---
 
 # complete-current-phase
@@ -124,7 +122,7 @@ Before moving into implementation or advancing to the next package:
 
 Use the `implement-plan` skill with the current plan and task list. Stay inside the selected roadmap phase and complete the current work package end-to-end before moving on. If the package reveals additional in-phase tasks or dependency changes, update the plan and task list before continuing.
 
-If implementation leaves obvious local complexity that can be improved without broadening scope, use the `simplify-code` skill, then continue to Phase 6.
+If implementation leaves obvious local complexity that can be improved without broadening scope, use the `simplify-new-code` skill, then continue to Phase 6.
 
 ### Phase 6: Review against the plan (Completeness reviewers)
 
@@ -145,7 +143,7 @@ If accepted Critical or High findings were fixed, run one more `review-scope` pa
 Repeat the audit/fix loop only when the new report still contains unresolved Critical or High findings.
 
 If the fixes introduce or expose local complexity that remains behavior-preserving and in-scope:
-- use the `simplify-code` skill
+- use the `simplify-new-code` skill
 - then return to Phase 6
 
 Count every return to Phase 6 after Phase 7 begins, including cleanup-triggered returns. Escalate if the loop is not converging.
