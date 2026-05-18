@@ -425,9 +425,9 @@ func TestTransferChatRawSourcePullReportsMissingCloud(t *testing.T) {
 	}
 }
 
-// TestTransferChatRawSourceInvalidKeyRejected verifies that a raw_source_key
-// that does not match the owning chat session is rejected by the filesystem
-// resolver before any S3 traffic happens.
+// TestTransferChatRawSourcePushReturnsUploadError verifies that upload errors
+// from the object store are propagated (wrapped as "upload chat raw source") by
+// transferChatRawSource on the push side.
 func TestTransferChatRawSourcePushReturnsUploadError(t *testing.T) {
 	service, _, _, localFS, objects, _ := newTestService(t, nil, nil)
 	objects.uploadErr = errors.New("upload blocked")

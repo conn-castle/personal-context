@@ -340,6 +340,10 @@ func TestRunChatPagerBranches(t *testing.T) {
 		t.Fatalf("runChatPager(empty PAGER): %v", err)
 	}
 
+	if runtime.GOOS == "windows" {
+		t.Skip("pager script branch uses a POSIX shell script and is not portable to Windows")
+	}
+
 	pagerPath := filepath.Join(t.TempDir(), "pager")
 	if err := os.WriteFile(pagerPath, []byte("#!/bin/sh\ncat >/dev/null\n"), 0o700); err != nil {
 		t.Fatalf("write pager script: %v", err)
