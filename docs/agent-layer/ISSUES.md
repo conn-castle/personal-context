@@ -69,7 +69,7 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 - Issue 2026-05-11 q8r9s0: Snapshot import and restore-db replacement paths are not atomic
     Priority: High. Area: cli/internal/cli/snapshot_support.go
-    Description: `pc import` and `pc restore-db` can still mutate earlier database/file sections before a later record or filesystem failure completes, so a mid-operation error can leave users with a partial restore despite chat raw-source rollback and upfront chat source-identity validation.
+    Description: `pc import` and `pc restore-db` can still mutate earlier database/file sections before a later record or filesystem failure occurs, so a mid-operation error can leave users with a partial restore despite chat raw-source rollback and upfront chat source-identity validation.
     Next step: Design a staged or transactional replacement path for the full local SQLite database plus managed file payloads, then add failure tests proving the original state remains recoverable after post-backup errors.
 
 - Issue 2026-05-11 n6p7q8: Multi-project web filter paginates over an incomplete client-side result set
