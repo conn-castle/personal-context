@@ -42,10 +42,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: `CreateRecord` and `UpsertChatSession` each do a read-then-insert preflight to check that the ID isn't already used by the other table. Two concurrent writers can pass both probes and commit conflicting IDs. The races are unlikely in practice (chat IDs include random hex), but the invariant is real if the design relies on a shared ID namespace.
     Next step: Introduce a dedicated `id_registry` table with a unique constraint and reserve the ID transactionally on creation, or run both inserts inside the same transaction with a shared advisory lock. Update both backends; document the contract in DECISIONS.md.
 
-- Issue 2026-05-17 j1m4z5: JSON transcript parser loads the whole file into memory
+- Issue 2026-05-17 j1m4z5: JSON transcript parser materialises whole payload via map[string]any
     Priority: Low. Area: cli/internal/chatimport/chatimport.go
-    Description: `parseJSONTranscript` uses `os.ReadFile` to load the entire `.json` transcript before json.Unmarshal. For very large Gemini transcripts this can exceed memory; the JSONL path already uses a streaming bufio.Scanner.
-    Next step: Switch to `json.Decoder` and stream the array. The change is mechanical and isolated.
+    Description: `parseJSONTranscript` now uses `json.NewDecoder(file).Decode(&payload)` (no longer ReadFile), which avoids the duplicate raw-bytes copy, but `payload` is still a `map[string]any` covering the entire transcript. Memory remains O(transcript size) with high interface-overhead multiplier. For very large Gemini transcripts this can still exceed memory; the JSONL path already uses a streaming bufio.Scanner.
+    Next step: Define a typed struct for top-level session fields and stream the transcript array element-by-element with `Decoder.Token()` + `Decoder.Decode()`. Note that `finalizeSessionTimes` reads items to set session timestamps, so the streaming pass needs to either buffer item timestamps or do a two-pass read.
 
 - Issue 2026-05-17 c8h9k1: Chat sync upsert + items replacement is not atomic
     Priority: High. Area: cli/internal/sync/service.go

@@ -260,12 +260,13 @@ func hasItemPayload(payload map[string]any) bool {
 }
 
 func parseJSONTranscript(source string, path string) (repository.CreateChatSessionInput, []repository.CreateChatItemInput, error) {
-	bytes, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return repository.CreateChatSessionInput{}, nil, err
 	}
+	defer file.Close()
 	var payload map[string]any
-	if err := json.Unmarshal(bytes, &payload); err != nil {
+	if err := json.NewDecoder(file).Decode(&payload); err != nil {
 		return repository.CreateChatSessionInput{}, nil, err
 	}
 	session := newTranscriptSession(source, path)
