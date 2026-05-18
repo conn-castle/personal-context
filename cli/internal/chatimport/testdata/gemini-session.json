@@ -1,0 +1,10 @@
+{
+  "conversation_id": "gemini-fixture",
+  "cwd": "/tmp/gemini-project",
+  "title": "Gemini fixture",
+  "started_at": "2026-05-14T14:00:00Z",
+  "messages": [
+    {"author": "user", "content": "gemini fixture user text"},
+    {"author": "assistant", "content": {"text": "gemini fixture assistant text"}}
+  ]
+}

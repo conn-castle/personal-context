@@ -16,6 +16,12 @@ type syncRunner interface {
 	Sync(ctx context.Context) error
 }
 
+// syncWarnTarget is satisfied by *pcsync.Service. Tests that swap out the
+// concrete syncRunner may also implement it to capture warnings.
+type syncWarnTarget interface {
+	SetWarnWriter(io.Writer)
+}
+
 var (
 	openSyncRunnerFn        = openSyncRunner
 	newSyncSessionManagerFn = func(homeDir string) (pcsync.SessionManager, error) {
@@ -43,7 +49,7 @@ func newSyncCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	return cmd
 }
 
-func runSync(ctx context.Context, stdout io.Writer, _ io.Writer) (returnErr error) {
+func runSync(ctx context.Context, stdout io.Writer, stderr io.Writer) (returnErr error) {
 	runner, cleanup, err := openSyncRunnerFn(ctx)
 	if err != nil {
 		if errors.Is(err, errCloudNotConfigured) {
@@ -61,6 +67,9 @@ func runSync(ctx context.Context, stdout io.Writer, _ io.Writer) (returnErr erro
 		}
 	}()
 
+	if warn, ok := runner.(syncWarnTarget); ok {
+		warn.SetWarnWriter(stderr)
+	}
 	if err := runner.Sync(ctx); err != nil {
 		return fmt.Errorf("run sync: %w", err)
 	}
@@ -84,6 +93,9 @@ func runAutoSync(ctx context.Context, stderr io.Writer) error {
 		}
 	}()
 
+	if warn, ok := runner.(syncWarnTarget); ok {
+		warn.SetWarnWriter(stderr)
+	}
 	if err := runner.Sync(ctx); err != nil {
 		warnAutoSync(stderr, err)
 	}

@@ -36,6 +36,70 @@ type Device struct {
 	ArchivedAt *time.Time
 }
 
+// ProjectPath links a registered project to an absolute source path on a device.
+type ProjectPath struct {
+	ID        int64
+	ProjectID string
+	Path      string
+	DeviceID  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// ChatSession is one imported agent chat transcript.
+//
+// OriginalSourcePath is the original imported transcript path (provenance,
+// machine-specific). RawSourceKey is the canonical relative key for the
+// Personal Context-owned raw transcript copy, resolved locally under
+// <PC_HOME>/personal-context/ and used as the S3 object suffix after
+// users/{user_id}/ in cloud mode.
+type ChatSession struct {
+	ID                 string
+	UserID             string // Postgres only; empty in SQLite (local mode)
+	Source             string
+	SourceSessionID    string
+	SourceDeviceID     string
+	ProjectID          *string
+	CWD                *string
+	Title              *string
+	StartedAt          time.Time
+	LastActivityAt     time.Time
+	OriginalSourcePath *string
+	RawSourceKey       *string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+}
+
+// ChatItem is one normalized message/tool event inside a chat session.
+type ChatItem struct {
+	ID         int64
+	SessionID  string
+	Ordinal    int
+	Role       string
+	ItemType   string
+	Text       *string
+	SearchText string
+	RawJSON    *string
+	CreatedAt  time.Time
+}
+
+// ChatSearchResult is one matched chat item with its parent session metadata.
+type ChatSearchResult struct {
+	Session ChatSession
+	Item    ChatItem
+	Snippet string
+	Rank    float64
+}
+
+// DomainSearchResult is a cross-domain search hit.
+type DomainSearchResult struct {
+	Domain string
+	Record *Record
+	Chat   *ChatSearchResult
+	Rank   float64
+}
+
 // RecordFigure is a row from the record_figures table.
 type RecordFigure struct {
 	ID        int64
@@ -105,6 +169,92 @@ type CreateRecordInput struct {
 	CreatedAt      *time.Time
 	UpdatedAt      *time.Time
 	DeletedAt      *time.Time
+}
+
+// CreateProjectPathInput contains required fields for path registration.
+type CreateProjectPathInput struct {
+	ProjectID string
+	Path      string
+	DeviceID  string
+	CreatedAt *time.Time
+	UpdatedAt *time.Time
+}
+
+// CreateChatSessionInput contains required and optional chat session fields.
+type CreateChatSessionInput struct {
+	ID                 string
+	Source             string
+	SourceSessionID    string
+	SourceDeviceID     string
+	ProjectID          *string
+	CWD                *string
+	Title              *string
+	StartedAt          time.Time
+	LastActivityAt     time.Time
+	OriginalSourcePath *string
+	RawSourceKey       *string
+	CreatedAt          *time.Time
+	UpdatedAt          *time.Time
+	DeletedAt          *time.Time
+}
+
+// UpsertChatSessionInput creates or updates an imported chat by source identity.
+type UpsertChatSessionInput struct {
+	CreateChatSessionInput
+	ClearDeleted bool
+}
+
+// CreateChatItemInput contains required and optional chat item fields.
+type CreateChatItemInput struct {
+	SessionID  string
+	Ordinal    int
+	Role       string
+	ItemType   string
+	Text       *string
+	SearchText string
+	RawJSON    *string
+	CreatedAt  *time.Time
+}
+
+// ListChatSessionsFilter controls chat-list query behavior.
+type ListChatSessionsFilter struct {
+	IncludeDeleted bool
+	OnlyDeleted    bool
+	ProjectID      *string
+	Unassigned     bool
+	Source         *string
+	DeviceID       *string
+	DateFrom       *time.Time
+	DateTo         *time.Time
+	Limit          int
+	Offset         int
+	UpdatedAfter   *time.Time
+}
+
+// SearchChatItemsFilter controls chat FTS query behavior.
+type SearchChatItemsFilter struct {
+	Query              string
+	IncludeDeleted     bool
+	IncludeToolOutputs bool
+	ProjectID          *string
+	Source             *string
+	DateFrom           *time.Time
+	DateTo             *time.Time
+	Limit              int
+	Offset             int
+}
+
+// UnifiedSearchFilter controls top-level cross-domain search.
+type UnifiedSearchFilter struct {
+	Query              string
+	Domain             *string
+	ProjectID          *string
+	DateFrom           *time.Time
+	DateTo             *time.Time
+	IncludeDeleted     bool
+	IncludeToolOutputs bool
+	Limit              int
+	Offset             int
 }
 
 // UpdateRecordInput contains mutable record fields.

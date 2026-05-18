@@ -13,20 +13,20 @@ import (
 )
 
 type cloudRecordExportJSON struct {
-	FormatVersion  int                      `json:"format_version"`
-	ID             string                   `json:"id"`
-	Date           string                   `json:"date"`
-	DayOrder       string                   `json:"day_order"`
-	ProjectID      *string                  `json:"project_id,omitempty"`
-	SourceDeviceID *string                  `json:"source_device_id,omitempty"`
-	SourceRef      *string                  `json:"source_ref,omitempty"`
-	GitRemoteURL   *string                  `json:"git_remote_url,omitempty"`
-	GitHash        *string                  `json:"git_hash,omitempty"`
-	HasNotes       bool                     `json:"has_notes"`
+	FormatVersion  int                       `json:"format_version"`
+	ID             string                    `json:"id"`
+	Date           string                    `json:"date"`
+	DayOrder       string                    `json:"day_order"`
+	ProjectID      *string                   `json:"project_id,omitempty"`
+	SourceDeviceID *string                   `json:"source_device_id,omitempty"`
+	SourceRef      *string                   `json:"source_ref,omitempty"`
+	GitRemoteURL   *string                   `json:"git_remote_url,omitempty"`
+	GitHash        *string                   `json:"git_hash,omitempty"`
+	HasNotes       bool                      `json:"has_notes"`
 	Figures        []cloudRecordFigureJSON   `json:"figures"`
 	DataFiles      []cloudRecordDataFileJSON `json:"data_files"`
-	CreatedAt      string                   `json:"created_at"`
-	UpdatedAt      string                   `json:"updated_at"`
+	CreatedAt      string                    `json:"created_at"`
+	UpdatedAt      string                    `json:"updated_at"`
 }
 
 type cloudRecordFigureJSON struct {
@@ -44,18 +44,18 @@ type cloudRecordDataFileJSON struct {
 }
 
 type cloudRecordDetailsJSON struct {
-	ID             string                   `json:"id"`
-	Date           string                   `json:"date"`
-	DayOrder       string                   `json:"day_order"`
-	HTMLContent    string                   `json:"html_content"`
-	Notes          *string                  `json:"notes"`
-	ProjectID      *string                  `json:"project_id"`
-	SourceDeviceID *string                  `json:"source_device_id"`
-	SourceRef      *string                  `json:"source_ref"`
-	GitRemoteURL   *string                  `json:"git_remote_url"`
-	GitHash        *string                  `json:"git_hash"`
-	CreatedAt      string                   `json:"created_at"`
-	UpdatedAt      string                   `json:"updated_at"`
+	ID             string                    `json:"id"`
+	Date           string                    `json:"date"`
+	DayOrder       string                    `json:"day_order"`
+	HTMLContent    string                    `json:"html_content"`
+	Notes          *string                   `json:"notes"`
+	ProjectID      *string                   `json:"project_id"`
+	SourceDeviceID *string                   `json:"source_device_id"`
+	SourceRef      *string                   `json:"source_ref"`
+	GitRemoteURL   *string                   `json:"git_remote_url"`
+	GitHash        *string                   `json:"git_hash"`
+	CreatedAt      string                    `json:"created_at"`
+	UpdatedAt      string                    `json:"updated_at"`
 	Figures        []cloudRecordFigureJSON   `json:"figures"`
 	DataFiles      []cloudRecordDataFileJSON `json:"data_files"`
 }
@@ -73,7 +73,7 @@ func TestExportFromCloudWritesGitTreeAndSkipsDeletedRecords(t *testing.T) {
 		map[string][]byte{"metrics.csv": []byte("metric,value\naccuracy,0.95\n")},
 	)
 	activeID := strings.TrimSpace(runPCSuccessNoStderr(t, homeWriter, userWriter,
-		"add", "--project", "phase7/cloud-export", activeInput))
+		"records", "add", "--project", "phase7/cloud-export", activeInput))
 
 	deletedInput := createInputFolder(t,
 		"<html><body>deleted cloud export payload</body></html>",
@@ -81,8 +81,8 @@ func TestExportFromCloudWritesGitTreeAndSkipsDeletedRecords(t *testing.T) {
 		nil,
 		nil,
 	)
-	deletedID := strings.TrimSpace(runPCSuccessNoStderr(t, homeWriter, userWriter, "add", deletedInput))
-	runPCSuccessNoStderr(t, homeWriter, userWriter, "delete", deletedID)
+	deletedID := strings.TrimSpace(runPCSuccessNoStderr(t, homeWriter, userWriter, "records", "add", deletedInput))
+	runPCSuccessNoStderr(t, homeWriter, userWriter, "records", "delete", deletedID)
 	runPCSuccessNoStderr(t, homeWriter, userWriter, "sync")
 
 	exportDir := t.TempDir()
@@ -128,19 +128,19 @@ func TestImportFromCloudExportUsesUpdatedAtMergeRulesAndPreservesExternalURLs(t 
 	homeWriter, userWriter := setupCloudHome(t, cloud)
 	homeExporter, userExporter := setupCloudHomeNoSchema(t, cloud)
 
-	sameID := strings.TrimSpace(runPCSuccessNoStderr(t, homeWriter, userWriter, "add", createInputFolder(t,
+	sameID := strings.TrimSpace(runPCSuccessNoStderr(t, homeWriter, userWriter, "records", "add", createInputFolder(t,
 		`<html><body><img src="figures/same.png">same from cloud</body></html>`,
 		"same cloud notes",
 		map[string][]byte{"same.png": []byte("same-cloud-figure")},
 		map[string][]byte{"same.csv": []byte("kind,value\nsame,1\n")},
 	)))
-	olderID := strings.TrimSpace(runPCSuccessNoStderr(t, homeWriter, userWriter, "add", createInputFolder(t,
+	olderID := strings.TrimSpace(runPCSuccessNoStderr(t, homeWriter, userWriter, "records", "add", createInputFolder(t,
 		`<html><body><img src="figures/older.png">older from cloud</body></html>`,
 		"older cloud notes",
 		map[string][]byte{"older.png": []byte("older-cloud-figure")},
 		map[string][]byte{"older.csv": []byte("kind,value\nolder,1\n")},
 	)))
-	newerID := strings.TrimSpace(runPCSuccessNoStderr(t, homeWriter, userWriter, "add", "--project", "phase7/cloud-import", createInputFolder(t,
+	newerID := strings.TrimSpace(runPCSuccessNoStderr(t, homeWriter, userWriter, "records", "add", "--project", "phase7/cloud-import", createInputFolder(t,
 		`<html><body><img src="https://example.com/external-cloud.png"><img src="figures/cloud-newer.png">newer from cloud</body></html>`,
 		"newer cloud notes",
 		map[string][]byte{"cloud-newer.png": []byte("newer-cloud-figure")},
@@ -154,19 +154,19 @@ func TestImportFromCloudExportUsesUpdatedAtMergeRulesAndPreservesExternalURLs(t 
 	localHome, localUserHome := setupLocalOnlyHome(t)
 	runPCSuccessNoStderr(t, localHome, localUserHome, "restore-db", exportDir)
 
-	runPCSuccessNoStderr(t, localHome, localUserHome, "edit", sameID, createInputFolder(t,
+	runPCSuccessNoStderr(t, localHome, localUserHome, "records", "edit", sameID, createInputFolder(t,
 		`<html><body><img src="figures/same-local.png">same local edit</body></html>`,
 		"same local notes",
 		map[string][]byte{"same-local.png": []byte("same-local-figure")},
 		map[string][]byte{"same-local.csv": []byte("kind,value\nsame-local,2\n")},
 	))
-	runPCSuccessNoStderr(t, localHome, localUserHome, "edit", olderID, createInputFolder(t,
+	runPCSuccessNoStderr(t, localHome, localUserHome, "records", "edit", olderID, createInputFolder(t,
 		`<html><body><img src="figures/older-local.png">older local edit</body></html>`,
 		"older local notes",
 		map[string][]byte{"older-local.png": []byte("older-local-figure")},
 		map[string][]byte{"older-local.csv": []byte("kind,value\nolder-local,2\n")},
 	))
-	runPCSuccessNoStderr(t, localHome, localUserHome, "edit", newerID, createInputFolder(t,
+	runPCSuccessNoStderr(t, localHome, localUserHome, "records", "edit", newerID, createInputFolder(t,
 		`<html><body><img src="https://example.com/external-local.png"><img src="figures/local-only.png">newer local edit</body></html>`,
 		"newer local notes",
 		map[string][]byte{"local-only.png": []byte("newer-local-figure")},
@@ -242,19 +242,19 @@ func TestRestoreDBFromCloudExportSyncsIntoFreshCloud(t *testing.T) {
 	sourceWriter, sourceUser := setupCloudHome(t, sourceCloud)
 	sourceExporter, sourceExporterUser := setupCloudHomeNoSchema(t, sourceCloud)
 
-	activeID := strings.TrimSpace(runPCSuccessNoStderr(t, sourceWriter, sourceUser, "add", "--project", "phase7/cloud-restore", createInputFolder(t,
+	activeID := strings.TrimSpace(runPCSuccessNoStderr(t, sourceWriter, sourceUser, "records", "add", "--project", "phase7/cloud-restore", createInputFolder(t,
 		`<html><body><img src="https://example.com/external-restore.png"><img src="figures/restore figure.png">cloud restore café 日本語</body></html>`,
 		"restore cloud notes",
 		map[string][]byte{"restore figure.png": []byte("restore-cloud-figure")},
 		map[string][]byte{"restore.csv": []byte("kind,value\nrestore,1\n")},
 	)))
-	deletedID := strings.TrimSpace(runPCSuccessNoStderr(t, sourceWriter, sourceUser, "add", createInputFolder(t,
+	deletedID := strings.TrimSpace(runPCSuccessNoStderr(t, sourceWriter, sourceUser, "records", "add", createInputFolder(t,
 		"<html><body>deleted cloud restore record</body></html>",
 		"",
 		nil,
 		nil,
 	)))
-	runPCSuccessNoStderr(t, sourceWriter, sourceUser, "delete", deletedID)
+	runPCSuccessNoStderr(t, sourceWriter, sourceUser, "records", "delete", deletedID)
 	runPCSuccessNoStderr(t, sourceWriter, sourceUser, "sync")
 
 	exportDir := t.TempDir()
@@ -307,7 +307,7 @@ func TestVerifyFromCloudRoundTrip(t *testing.T) {
 	homeWriter, userWriter := setupCloudHome(t, cloud)
 	homeVerifier, userVerifier := setupCloudHomeNoSchema(t, cloud)
 
-	runPCSuccessNoStderr(t, homeWriter, userWriter, "add", "--project", "phase7/cloud-verify", createInputFolder(t,
+	runPCSuccessNoStderr(t, homeWriter, userWriter, "records", "add", "--project", "phase7/cloud-verify", createInputFolder(t,
 		`<html><body><img src="figures/verify.png">cloud verify</body></html>`,
 		"cloud verify notes",
 		map[string][]byte{"verify.png": []byte("verify-cloud-figure")},

@@ -26,7 +26,7 @@ func TestListCommandFiltersAndPaginatesRecords(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"list", "--project", "alpha/project", "--limit", "1", "--format", "json"})
+	cmd.SetArgs([]string{"records", "list", "--project", "alpha/project", "--limit", "1", "--format", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list first page: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestListCommandFiltersAndPaginatesRecords(t *testing.T) {
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"list", "--project", "alpha/project", "--limit", "1", "--cursor", *firstPage.NextCursor, "--format", "json"})
+	cmd.SetArgs([]string{"records", "list", "--project", "alpha/project", "--limit", "1", "--cursor", *firstPage.NextCursor, "--format", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list second page: %v", err)
 	}
@@ -71,13 +71,13 @@ func TestListCommandRejectsInvalidOptions(t *testing.T) {
 	setupEnv(t)
 
 	for _, args := range [][]string{
-		{"list", "--limit", "0"},
-		{"list", "--limit", "501"},
-		{"list", "--format", "xml"},
-		{"list", "--cursor", "not-base64"},
-		{"list", "--from", "2026-99-99"},
-		{"list", "--from", "2026-01-02", "--to", "2026-01-01"},
-		{"list", "--all", "--cursor", listpage.EncodeCursor(listpage.Cursor{Date: "2026-01-01", DayOrder: "a0", ID: "20260101-aaaabbbb"})},
+		{"records", "list", "--limit", "0"},
+		{"records", "list", "--limit", "501"},
+		{"records", "list", "--format", "xml"},
+		{"records", "list", "--cursor", "not-base64"},
+		{"records", "list", "--from", "2026-99-99"},
+		{"records", "list", "--from", "2026-01-02", "--to", "2026-01-01"},
+		{"records", "list", "--all", "--cursor", listpage.EncodeCursor(listpage.Cursor{Date: "2026-01-01", DayOrder: "a0", ID: "20260101-aaaabbbb"})},
 	} {
 		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 		cmd.SetArgs(args)
@@ -94,14 +94,14 @@ func TestListCommandTableIDsDeletedAndEmptyOutput(t *testing.T) {
 	thirdID := addRecordWithContent(t, "<html>third</html>", "", `{"project_id":"alpha/project"}`, nil, map[string][]byte{"data.csv": []byte("data")}, "--date", "2026-01-03")
 	noHTMLID := addRecordWithoutHTML(t, "alpha/project", "2026-01-04")
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", firstID})
+	delCmd.SetArgs([]string{"records", "delete", firstID})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"list", "--limit", "1"})
+	cmd.SetArgs([]string{"records", "list", "--limit", "1"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list table: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestListCommandTableIDsDeletedAndEmptyOutput(t *testing.T) {
 	stdout.Reset()
 	stderr := &bytes.Buffer{}
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"list", "--format", "ids", "--limit", "1"})
+	cmd.SetArgs([]string{"records", "list", "--format", "ids", "--limit", "1"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list ids: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestListCommandTableIDsDeletedAndEmptyOutput(t *testing.T) {
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"list", "--has-data", "--all", "--format", "ids"})
+	cmd.SetArgs([]string{"records", "list", "--has-data", "--all", "--format", "ids"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list has-data ids: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestListCommandTableIDsDeletedAndEmptyOutput(t *testing.T) {
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"list", "--has-html", "--all", "--format", "ids"})
+	cmd.SetArgs([]string{"records", "list", "--has-html", "--all", "--format", "ids"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list has-html ids: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestListCommandTableIDsDeletedAndEmptyOutput(t *testing.T) {
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"list", "--deleted", "--format", "json"})
+	cmd.SetArgs([]string{"records", "list", "--deleted", "--format", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list deleted json: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestListCommandTableIDsDeletedAndEmptyOutput(t *testing.T) {
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"list", "--project", "missing/project"})
+	cmd.SetArgs([]string{"records", "list", "--project", "missing/project"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list empty table: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestListCommandContentFiltersJSONTotals(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"list", "--has-data", "--limit", "1", "--format", "json"})
+	cmd.SetArgs([]string{"records", "list", "--has-data", "--limit", "1", "--format", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list has-data json: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestListCommandContentFiltersJSONTotals(t *testing.T) {
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"list", "--has-data", "--limit", "1", "--cursor", *dataPage.NextCursor, "--format", "json"})
+	cmd.SetArgs([]string{"records", "list", "--has-data", "--limit", "1", "--cursor", *dataPage.NextCursor, "--format", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list has-data cursor json: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestListCommandContentFiltersJSONTotals(t *testing.T) {
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"list", "--has-html", "--all", "--format", "json"})
+	cmd.SetArgs([]string{"records", "list", "--has-html", "--all", "--format", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list has-html json: %v", err)
 	}
@@ -232,14 +232,14 @@ func TestStatsCommandJSONCountsAndSizes(t *testing.T) {
 	)
 	deletedID := addRecordWithContent(t, "<html>deleted</html>", "", `{"project_id":"alpha/project"}`, nil, nil, "--date", "2026-01-04")
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", deletedID})
+	delCmd.SetArgs([]string{"records", "delete", deletedID})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"stats", "--project", "alpha/project", "--format", "json"})
+	cmd.SetArgs([]string{"records", "stats", "--project", "alpha/project", "--format", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("stats: %v", err)
 	}
@@ -273,14 +273,14 @@ func TestStatsCommandTextDeletedAndInvalidFormat(t *testing.T) {
 		t.Fatal("expected distinct test records")
 	}
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", deletedID})
+	delCmd.SetArgs([]string{"records", "delete", deletedID})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"stats", "--deleted"})
+	cmd.SetArgs([]string{"records", "stats", "--deleted"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("stats text deleted: %v", err)
 	}
@@ -292,13 +292,13 @@ func TestStatsCommandTextDeletedAndInvalidFormat(t *testing.T) {
 	}
 
 	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"stats", "--format", "yaml"})
+	cmd.SetArgs([]string{"records", "stats", "--format", "yaml"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected invalid stats format to fail")
 	}
 
 	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"stats", "--from", "2026-99-99"})
+	cmd.SetArgs([]string{"records", "stats", "--from", "2026-99-99"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected invalid stats date to fail")
 	}
@@ -309,7 +309,7 @@ func TestStatsCommandTextEmptyStore(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"stats"})
+	cmd.SetArgs([]string{"records", "stats"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("stats empty: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestFilesListCommandReportsLocalInventory(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"files", "list", "--record", recordID, "--format", "json"})
+	cmd.SetArgs([]string{"records", "files", "list", "--record", recordID, "--format", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("files list: %v", err)
 	}
@@ -377,7 +377,7 @@ func TestFilesListCommandTableMissingEmptyAndInvalid(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"files", "list", "--record", recordID})
+	cmd.SetArgs([]string{"records", "files", "list", "--record", recordID})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("files list table: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestFilesListCommandTableMissingEmptyAndInvalid(t *testing.T) {
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"files", "list", "--project", "missing/project"})
+	cmd.SetArgs([]string{"records", "files", "list", "--project", "missing/project"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("files list empty: %v", err)
 	}
@@ -396,32 +396,32 @@ func TestFilesListCommandTableMissingEmptyAndInvalid(t *testing.T) {
 	}
 
 	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"files"})
+	cmd.SetArgs([]string{"records", "files"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("files help command: %v", err)
 	}
 
 	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"files", "list", "--format", "xml"})
+	cmd.SetArgs([]string{"records", "files", "list", "--format", "xml"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected invalid files format to fail")
 	}
 
 	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"files", "list", "--from", "2026-99-99"})
+	cmd.SetArgs([]string{"records", "files", "list", "--from", "2026-99-99"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected invalid files date to fail")
 	}
 
 	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"files", "list", "--record", "20260101-deadbeef"})
+	cmd.SetArgs([]string{"records", "files", "list", "--record", "20260101-deadbeef"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected missing record filter to fail")
 	}
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"stats", "--format", "json"})
+	cmd.SetArgs([]string{"records", "stats", "--format", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("stats with missing local data file: %v", err)
 	}
@@ -735,7 +735,7 @@ func addRecordWithoutHTML(t *testing.T, projectID string, date string) string {
 	}
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", "--date", date, dir})
+	cmd.SetArgs([]string{"records", "add", "--date", date, dir})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("add record without HTML: %v", err)
 	}
@@ -793,7 +793,7 @@ func TestFilesListCommandRecordFilterMismatch(t *testing.T) {
 	recordID := addRecordWithContent(t, "<html>x</html>", "", `{"project_id":"alpha/project"}`, nil, nil)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"files", "list", "--record", recordID, "--project", "beta/project"})
+	cmd.SetArgs([]string{"records", "files", "list", "--record", recordID, "--project", "beta/project"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "does not match the requested filters") {
 		t.Fatalf("expected filter mismatch error, got %v", err)

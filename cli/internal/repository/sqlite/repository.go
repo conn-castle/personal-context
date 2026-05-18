@@ -40,6 +40,11 @@ func (r *Repository) CreateRecord(ctx context.Context, input repository.CreateRe
 	if strings.TrimSpace(input.DayOrder) == "" {
 		input.DayOrder = "n"
 	}
+	if exists, err := r.chatSessionIDExists(ctx, input.ID); err != nil {
+		return repository.Record{}, err
+	} else if exists {
+		return repository.Record{}, fmt.Errorf("%w: id %s already exists as chat session", repository.ErrConflict, input.ID)
+	}
 
 	_, err := r.db.ExecContext(
 		ctx,
@@ -124,12 +129,17 @@ func (r *Repository) ListRecords(ctx context.Context, filter repository.ListReco
 		return nil, repository.ErrInvalidArgument
 	}
 
-	whereSQL, args, err := listRecordsPredicateSQL(filter)
+	whereSQL, args, err := listRecordsPredicateSQL(filter, "records", false)
 	if err != nil {
 		return nil, err
 	}
 
 	query := `SELECT id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at FROM records ` + whereSQL + ` ORDER BY date, day_order, id`
+	if filter.Query != nil {
+		query = `SELECT records.id, records.date, records.day_order, records.html_content, records.notes, records.project_id, records.source_device_id, records.source_ref, records.git_remote_url, records.git_hash, records.created_at, records.updated_at, records.deleted_at
+			FROM records INNER JOIN records_fts ON records_fts.id = records.id ` + whereSQL + ` AND records_fts MATCH ? ORDER BY -bm25(records_fts) DESC, records.date, records.day_order, records.id`
+		args = append(args, sqliteFTSQuery(*filter.Query))
+	}
 	if filter.Limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, filter.Limit)
@@ -155,7 +165,7 @@ func (r *Repository) ListRecords(ctx context.Context, filter repository.ListReco
 	return records, nil
 }
 
-func listRecordsPredicateSQL(filter repository.ListRecordsFilter) (string, []any, error) {
+func listRecordsPredicateSQL(filter repository.ListRecordsFilter, qualifier string, includeQuery bool) (string, []any, error) {
 	trimmedQuery := ""
 	if filter.Query != nil {
 		trimmedQuery = strings.TrimSpace(*filter.Query)
@@ -167,55 +177,66 @@ func listRecordsPredicateSQL(filter repository.ListRecordsFilter) (string, []any
 	builder := strings.Builder{}
 	builder.WriteString(`WHERE 1=1`)
 	args := make([]any, 0, 4)
+	col := func(name string) string {
+		if qualifier == "" {
+			return name
+		}
+		return qualifier + "." + name
+	}
 
 	if filter.OnlyDeleted {
-		builder.WriteString(` AND deleted_at IS NOT NULL`)
+		builder.WriteString(` AND ` + col("deleted_at") + ` IS NOT NULL`)
 	} else if !filter.IncludeDeleted {
-		builder.WriteString(` AND deleted_at IS NULL`)
+		builder.WriteString(` AND ` + col("deleted_at") + ` IS NULL`)
 	}
 	if filter.ProjectID != nil {
-		builder.WriteString(` AND project_id = ?`)
+		builder.WriteString(` AND ` + col("project_id") + ` = ?`)
 		args = append(args, *filter.ProjectID)
 	}
 	if filter.DateFrom != nil {
-		builder.WriteString(` AND date >= ?`)
+		builder.WriteString(` AND ` + col("date") + ` >= ?`)
 		args = append(args, *filter.DateFrom)
 	}
 	if filter.DateTo != nil {
-		builder.WriteString(` AND date <= ?`)
+		builder.WriteString(` AND ` + col("date") + ` <= ?`)
 		args = append(args, *filter.DateTo)
 	}
 	if filter.HasHTML {
-		builder.WriteString(` AND html_content IS NOT NULL`)
+		builder.WriteString(` AND ` + col("html_content") + ` IS NOT NULL`)
 	}
 	if filter.HasData {
-		builder.WriteString(` AND EXISTS (SELECT 1 FROM record_data_files AS rdf WHERE rdf.record_id = records.id)`)
+		builder.WriteString(` AND EXISTS (SELECT 1 FROM record_data_files AS rdf WHERE rdf.record_id = ` + col("id") + `)`)
 	}
 	if filter.UpdatedAfter != nil {
-		builder.WriteString(` AND updated_at >= ?`)
+		builder.WriteString(` AND ` + col("updated_at") + ` >= ?`)
 		args = append(args, timeutil.FormatUTCMillis(*filter.UpdatedAfter))
 	}
 	if filter.UpdatedBefore != nil {
-		builder.WriteString(` AND updated_at <= ?`)
+		builder.WriteString(` AND ` + col("updated_at") + ` <= ?`)
 		args = append(args, timeutil.FormatUTCMillis(*filter.UpdatedBefore))
 	}
-	if filter.Query != nil {
+	if includeQuery && filter.Query != nil {
 		escaped := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(trimmedQuery)
 		q := "%" + escaped + "%"
-		builder.WriteString(` AND (html_content LIKE ? ESCAPE '\' OR notes LIKE ? ESCAPE '\' OR project_id LIKE ? ESCAPE '\' OR source_device_id LIKE ? ESCAPE '\' OR source_ref LIKE ? ESCAPE '\')`)
-		args = append(args, q, q, q, q, q)
+		builder.WriteString(` AND (` + col("html_content") + ` LIKE ? ESCAPE '\' OR ` + col("notes") + ` LIKE ? ESCAPE '\')`)
+		args = append(args, q, q)
 	}
 	return builder.String(), args, nil
 }
 
 // CountRecords returns the number of records matching non-pagination filters.
 func (r *Repository) CountRecords(ctx context.Context, filter repository.ListRecordsFilter) (int, error) {
-	whereSQL, args, err := listRecordsPredicateSQL(filter)
+	whereSQL, args, err := listRecordsPredicateSQL(filter, "records", false)
 	if err != nil {
 		return 0, err
 	}
 	var count int
-	err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM records `+whereSQL, args...).Scan(&count)
+	query := `SELECT COUNT(*) FROM records ` + whereSQL
+	if filter.Query != nil {
+		query = `SELECT COUNT(*) FROM records INNER JOIN records_fts ON records_fts.id = records.id ` + whereSQL + ` AND records_fts MATCH ?`
+		args = append(args, sqliteFTSQuery(*filter.Query))
+	}
+	err = r.db.QueryRowContext(ctx, query, args...).Scan(&count)
 	if err != nil {
 		return 0, mapSQLiteError(err)
 	}

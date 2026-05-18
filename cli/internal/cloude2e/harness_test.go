@@ -404,22 +404,29 @@ func runPCSuccessNoStderr(t *testing.T, homeDir string, userHome string, args ..
 
 func withMutationProvenance(t *testing.T, homeDir string, userHome string, args []string) []string {
 	t.Helper()
-	if len(args) == 0 {
+	if len(args) < 2 || args[0] != "records" {
 		return args
 	}
-	if args[0] == "edit" && len(args) >= 3 {
-		ensureEditMetadata(t, homeDir, userHome, args[1], args[2])
+	subcommand := args[1]
+	recordArgs := args[2:]
+	if subcommand == "edit" && len(recordArgs) >= 2 {
+		ensureEditMetadata(t, homeDir, userHome, recordArgs[0], recordArgs[1])
 		return args
 	}
-	if args[0] != "add" {
+	for _, recordCommand := range []string{"delete", "restore", "move", "list", "stats", "files"} {
+		if subcommand == recordCommand {
+			return args
+		}
+	}
+	if subcommand != "add" {
 		return args
 	}
 
 	const defaultProjectID = "cloud-e2e/default"
 	const defaultDeviceID = "cloud-e2e-device"
 
-	projectID, hasProject := flagValue(args, "--project")
-	deviceID, hasDevice := flagValue(args, "--device")
+	projectID, hasProject := flagValue(recordArgs, "--project")
+	deviceID, hasDevice := flagValue(recordArgs, "--device")
 	if !hasProject {
 		projectID = defaultProjectID
 	}
@@ -430,7 +437,7 @@ func withMutationProvenance(t *testing.T, homeDir string, userHome string, args 
 	ensureDeviceRegistered(t, homeDir, userHome, deviceID)
 
 	withProvenance := append([]string{}, args...)
-	insertAt := 1
+	insertAt := 2
 	if !hasDevice {
 		withProvenance = append(withProvenance[:insertAt], append([]string{"--device", deviceID}, withProvenance[insertAt:]...)...)
 	}

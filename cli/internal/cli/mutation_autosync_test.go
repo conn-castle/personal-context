@@ -14,7 +14,7 @@ import (
 
 func TestRunAddAutoSyncWarningDoesNotPolluteStdout(t *testing.T) {
 	setupEnv(t)
-	if err := runProjectAdd(context.Background(), io.Discard, io.Discard, "test/project"); err != nil {
+	if err := runProjectAdd(context.Background(), io.Discard, io.Discard, "test/project", "", ""); err != nil {
 		t.Fatalf("runProjectAdd() error = %v", err)
 	}
 	inputDir := t.TempDir()

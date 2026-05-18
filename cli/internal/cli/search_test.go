@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/conn-castle/personal-context/cli/internal/listpage"
+	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
 func TestSearchTableNoResults(t *testing.T) {
@@ -18,8 +19,63 @@ func TestSearchTableNoResults(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if !strings.Contains(stdout.String(), "No matching records found.") {
-		t.Fatalf("expected 'No matching records found.', got %q", stdout.String())
+	if !strings.Contains(stdout.String(), "No matching records or chats found.") {
+		t.Fatalf("expected unified empty-state message, got %q", stdout.String())
+	}
+}
+
+func TestSearchWritersCoverRecordAndChatDomains(t *testing.T) {
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	projectID := "project/search"
+	record := repository.Record{
+		ID:             "20260514-aabbccdd",
+		Date:           "2026-05-14",
+		DayOrder:       "a0",
+		ProjectID:      projectID,
+		SourceDeviceID: "device/search",
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		HTMLContent:    strPtr("html"),
+	}
+	chat := repository.ChatSearchResult{
+		Session: repository.ChatSession{
+			ID:             "20260514-beadfeed",
+			ProjectID:      &projectID,
+			SourceDeviceID: "device/search",
+			LastActivityAt: now,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+		Item:    repository.ChatItem{Ordinal: 2},
+		Snippet: strings.Repeat("snippet ", 20),
+	}
+	results := []repository.DomainSearchResult{
+		{Domain: "records", Record: &record},
+		{Domain: "chats", Chat: &chat},
+	}
+
+	tableOut := &bytes.Buffer{}
+	if err := searchTable(tableOut, results); err != nil {
+		t.Fatalf("searchTable() error = %v", err)
+	}
+	if out := tableOut.String(); !strings.Contains(out, "records") || !strings.Contains(out, "chats") {
+		t.Fatalf("expected both domains in table output, got %q", out)
+	}
+
+	idsOut := &bytes.Buffer{}
+	if err := searchIDs(idsOut, results); err != nil {
+		t.Fatalf("searchIDs() error = %v", err)
+	}
+	if out := idsOut.String(); !strings.Contains(out, record.ID) || !strings.Contains(out, chat.Session.ID) {
+		t.Fatalf("expected both ids in ids output, got %q", out)
+	}
+
+	jsonOut := &bytes.Buffer{}
+	if err := searchJSON(jsonOut, results, map[string]repository.ChildCounts{record.ID: {Figures: 1, DataFiles: 2}}); err != nil {
+		t.Fatalf("searchJSON() error = %v", err)
+	}
+	if out := jsonOut.String(); !strings.Contains(out, `"domain": "records"`) || !strings.Contains(out, `"domain": "chats"`) || !strings.Contains(out, `"figure_count": 1`) {
+		t.Fatalf("expected both domains in json output, got %q", out)
 	}
 }
 
@@ -112,20 +168,14 @@ func TestSearchJSONFormat(t *testing.T) {
 		t.Fatalf("search json: %v", err)
 	}
 
-	var page listpage.Response[searchResultJSON]
-	if err := json.Unmarshal(stdout.Bytes(), &page); err != nil {
+	var items []searchResultJSON
+	if err := json.Unmarshal(stdout.Bytes(), &items); err != nil {
 		t.Fatalf("parse json: %v\noutput: %s", err, stdout.String())
 	}
-	if page.Total != 1 {
-		t.Fatalf("expected total=1, got %d", page.Total)
-	}
-	if page.NextCursor != nil {
-		t.Fatalf("expected null next_cursor, got %q", *page.NextCursor)
-	}
-	if len(page.Items) == 0 {
+	if len(items) != 1 {
 		t.Fatal("expected at least one result")
 	}
-	got := page.Items[0]
+	got := items[0]
 	if got.ProjectID != "proj-search" {
 		t.Fatalf("expected project_id=proj-search, got %v", got.ProjectID)
 	}
@@ -140,6 +190,50 @@ func TestSearchJSONFormat(t *testing.T) {
 	}
 }
 
+func TestSearchJSONFlagAlias(t *testing.T) {
+	setupEnv(t)
+	addRecordWithContent(
+		t,
+		"<html>json alias search test</html>",
+		"json alias notes",
+		`{"project_id":"proj-search-json-flag"}`,
+		nil,
+		nil,
+	)
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"search", "alias", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("search --json: %v", err)
+	}
+
+	var items []searchResultJSON
+	if err := json.Unmarshal(stdout.Bytes(), &items); err != nil {
+		t.Fatalf("parse json: %v\noutput: %s", err, stdout.String())
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one result, got %d", len(items))
+	}
+	if items[0].Domain != "records" || items[0].ProjectID != "proj-search-json-flag" {
+		t.Fatalf("expected records result from json alias, got %+v", items[0])
+	}
+}
+
+func TestSearchJSONFlagRejectsConflictingFormat(t *testing.T) {
+	setupEnv(t)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"search", "query", "--json", "--format", "table"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected conflicting --json and --format table to fail")
+	}
+	if !strings.Contains(err.Error(), "--json cannot be combined with --format table") {
+		t.Fatalf("expected conflict error, got %v", err)
+	}
+}
+
 func TestSearchJSONFormatEmpty(t *testing.T) {
 	setupEnv(t)
 
@@ -150,12 +244,12 @@ func TestSearchJSONFormatEmpty(t *testing.T) {
 		t.Fatalf("search json: %v", err)
 	}
 
-	var page listpage.Response[searchResultJSON]
-	if err := json.Unmarshal(stdout.Bytes(), &page); err != nil {
+	var items []searchResultJSON
+	if err := json.Unmarshal(stdout.Bytes(), &items); err != nil {
 		t.Fatalf("parse json: %v", err)
 	}
-	if page.Total != 0 || len(page.Items) != 0 || page.NextCursor != nil {
-		t.Fatalf("expected empty envelope, got %+v", page)
+	if len(items) != 0 {
+		t.Fatalf("expected empty array, got %+v", items)
 	}
 }
 
@@ -165,7 +259,7 @@ func TestSearchJSONWithDeletedAt(t *testing.T) {
 
 	// Soft-delete the record
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -177,13 +271,13 @@ func TestSearchJSONWithDeletedAt(t *testing.T) {
 		t.Fatalf("search json: %v", err)
 	}
 
-	var page listpage.Response[searchResultJSON]
-	if err := json.Unmarshal(stdout.Bytes(), &page); err != nil {
+	var items []searchResultJSON
+	if err := json.Unmarshal(stdout.Bytes(), &items); err != nil {
 		t.Fatalf("parse json: %v\noutput: %s", err, stdout.String())
 	}
 
 	found := false
-	for _, r := range page.Items {
+	for _, r := range items {
 		if r.ID == id {
 			found = true
 			if r.DeletedAt == nil {
@@ -202,7 +296,7 @@ func TestSearchExcludesDeletedByDefault(t *testing.T) {
 
 	// Soft-delete the record.
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", id})
+	delCmd.SetArgs([]string{"records", "delete", id})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -241,6 +335,43 @@ func TestSearchWhitespaceOnlyQuery(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "query must not be empty") {
 		t.Fatalf("expected empty-query error, got %v", err)
+	}
+}
+
+func TestSearchValidationAndEmptyPageBranches(t *testing.T) {
+	setupEnv(t)
+	id := addRecordWithContent(t, "<html>branch needle</html>", "", `{"project_id":"search-branch"}`, nil, nil)
+
+	cases := [][]string{
+		{"search", "--offset", "-1", "needle"},
+		{"search", "--domain", "notes", "needle"},
+	}
+	for _, args := range cases {
+		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err == nil {
+			t.Fatalf("expected %v to fail", args)
+		}
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"search", "--offset", "99", "needle"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("search high offset: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "No matching records or chats found.") {
+		t.Fatalf("expected no results for high offset, got %q", stdout.String())
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"search", "--domain", "records", "--format", "ids", "branch needle"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("search records ids: %v", err)
+	}
+	if strings.TrimSpace(stdout.String()) != id {
+		t.Fatalf("search ids = %q, want %q", stdout.String(), id)
 	}
 }
 
@@ -295,7 +426,7 @@ func TestSearchDefaultLimitTruncatesIDsToStderr(t *testing.T) {
 	if len(lines) != defaultSearchLimit {
 		t.Fatalf("expected %d ids, got %d", defaultSearchLimit, len(lines))
 	}
-	if !strings.Contains(stderr.String(), "Showing 50 of 51 results (use --limit 0 to see all)") {
+	if !strings.Contains(stderr.String(), "Showing first 50 results (use --limit 0 to see all") {
 		t.Fatalf("expected truncation message on stderr, got %q", stderr.String())
 	}
 }
@@ -335,7 +466,7 @@ func TestSearchTableTruncationFooter(t *testing.T) {
 		t.Fatalf("search table footer: %v", err)
 	}
 
-	if !strings.Contains(stdout.String(), "Showing 1 of 2 results (use --limit 0 to see all)") {
+	if !strings.Contains(stdout.String(), "Showing first 1 results (use --limit 0 to see all") {
 		t.Fatalf("expected truncation footer on stdout, got %q", stdout.String())
 	}
 }

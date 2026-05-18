@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,7 @@ func TestDoctorResolveHomeDirError(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error from resolveHomeDirFn")
 	}
@@ -47,7 +48,7 @@ func TestDoctorOpenLocalStackFail(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	err = runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err = runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when openLocalStack fails")
 	}
@@ -71,6 +72,56 @@ func TestDoctorListRecordsFail(t *testing.T) {
 	}
 }
 
+func TestDoctorMissingFigureCheckFail(t *testing.T) {
+	homeDir := setupEnv(t)
+	addRecord(t)
+	corruptTable(t, homeDir, "record_figures")
+
+	err := runDoctor(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, doctorOptions{})
+	if err == nil || !strings.Contains(err.Error(), "missing figures check failed") {
+		t.Fatalf("runDoctor() error = %v, want missing figures failure", err)
+	}
+}
+
+func TestDoctorMissingDataFileCheckFail(t *testing.T) {
+	homeDir := setupEnv(t)
+	addRecord(t)
+	corruptTable(t, homeDir, "record_data_files")
+
+	err := runDoctor(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, doctorOptions{})
+	if err == nil || !strings.Contains(err.Error(), "missing data files check failed") {
+		t.Fatalf("runDoctor() error = %v, want missing data files failure", err)
+	}
+}
+
+func TestDoctorListChatSessionsFail(t *testing.T) {
+	homeDir := setupEnv(t)
+	corruptTable(t, homeDir, "chat_session")
+
+	err := runDoctor(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, doctorOptions{})
+	if err == nil || !strings.Contains(err.Error(), "list chat sessions failed") {
+		t.Fatalf("runDoctor() error = %v, want chat session list failure", err)
+	}
+}
+
+func TestDoctorCloudWarning(t *testing.T) {
+	setupEnv(t)
+	original := openCloudStackFn
+	t.Cleanup(func() { openCloudStackFn = original })
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
+		return nil, errors.New("cloud unavailable")
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
+	if err == nil || !strings.Contains(err.Error(), "warnings found") {
+		t.Fatalf("runDoctor() error = %v, want warnings found", err)
+	}
+	if !strings.Contains(stdout.String(), "Cloud:") || !strings.Contains(stdout.String(), "cloud unavailable") {
+		t.Fatalf("expected cloud warning in output, got %q", stdout.String())
+	}
+}
+
 // failAfterWriter fails after n successful writes.
 type failAfterWriter struct {
 	remaining int
@@ -89,7 +140,7 @@ func TestDoctorDatabaseSuccessWriteError(t *testing.T) {
 
 	// Fail on the first write (Database: OK line).
 	stdout := &failAfterWriter{remaining: 0}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
 	}
@@ -100,7 +151,7 @@ func TestDoctorOrphanedFiguresSuccessWriteError(t *testing.T) {
 
 	// "Database: OK" is the first write. Fail on the second write (Orphaned figures: OK).
 	stdout := &failAfterWriter{remaining: 1}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
 	}
@@ -111,7 +162,7 @@ func TestDoctorOrphanedDataSuccessWriteError(t *testing.T) {
 
 	// "Database: OK", "Orphaned figures: OK". Fail on 3rd (Orphaned data: OK).
 	stdout := &failAfterWriter{remaining: 2}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
 	}
@@ -122,7 +173,7 @@ func TestDoctorMissingFiguresSuccessWriteError(t *testing.T) {
 
 	// 4th write is "Missing figures: OK".
 	stdout := &failAfterWriter{remaining: 3}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
 	}
@@ -133,7 +184,7 @@ func TestDoctorMissingDataFilesSuccessWriteError(t *testing.T) {
 
 	// 5th write is "Missing data files: OK".
 	stdout := &failAfterWriter{remaining: 4}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
 	}
@@ -142,9 +193,10 @@ func TestDoctorMissingDataFilesSuccessWriteError(t *testing.T) {
 func TestDoctorAllPassedWriteError(t *testing.T) {
 	setupEnv(t)
 
-	// 6th write is "All checks passed.".
-	stdout := &failAfterWriter{remaining: 5}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	// 7th write is "All checks passed." after Database, Orphaned figures,
+	// Orphaned data, Missing figures, Missing data files, Missing chat raw sources.
+	stdout := &failAfterWriter{remaining: 6}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
 	}
@@ -169,7 +221,7 @@ func TestDoctorDatabaseFailWriteError(t *testing.T) {
 
 	// Use a failing writer so writeDoctorf for the FAIL line also errors
 	stdout := &failAfterWriter{remaining: 0}
-	err = runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err = runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on FAIL path")
 	}
@@ -183,7 +235,7 @@ func TestDoctorDatabaseReadFailWriteError(t *testing.T) {
 
 	// Fail on the first write (Database: FAIL line)
 	stdout := &failAfterWriter{remaining: 0}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
 	}
@@ -208,7 +260,7 @@ func TestDoctorOrphanedFiguresWarnWriteError(t *testing.T) {
 
 	// Fail on 2nd write (Orphaned figures: WARN); 1st is "Database: OK"
 	stdout := &failAfterWriter{remaining: 1}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
 	}
@@ -231,7 +283,7 @@ func TestDoctorMissingFiguresWarnWriteError(t *testing.T) {
 	// Writes: "Database: OK", "Orphaned figures: OK", "Orphaned data: OK", "Missing figures: WARN"
 	// Fail on 4th write
 	stdout := &failAfterWriter{remaining: 3}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on Missing figures WARN")
 	}
@@ -253,7 +305,7 @@ func TestDoctorMissingFiguresWarnPathWriteError(t *testing.T) {
 
 	// Fail on 5th write (the "  recordID/fig.png" path line after "Missing figures: WARN")
 	stdout := &failAfterWriter{remaining: 4}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on missing figure path line")
 	}
@@ -284,6 +336,9 @@ func TestDoctorHealthyNoRecords(t *testing.T) {
 	}
 	if !strings.Contains(out, "Missing data files: OK") {
 		t.Fatalf("expected 'Missing data files: OK', got %q", out)
+	}
+	if !strings.Contains(out, "Missing chat raw sources:") {
+		t.Fatalf("expected 'Missing chat raw sources:' line, got %q", out)
 	}
 	if !strings.Contains(out, "All checks passed.") {
 		t.Fatalf("expected 'All checks passed.', got %q", out)
@@ -408,6 +463,71 @@ func TestDoctorOrphanedDataDirectory(t *testing.T) {
 	}
 }
 
+func TestDoctorOrphanedChatRawDirectory(t *testing.T) {
+	homeDir := setupEnv(t)
+	chatID := "20260514-deadbeef"
+	rawPath := filepath.Join(homeDir, "personal-context", "chats", "raw", chatID, "source.json")
+	if err := os.MkdirAll(filepath.Dir(rawPath), 0o700); err != nil {
+		t.Fatalf("mkdir raw dir: %v", err)
+	}
+	if err := os.WriteFile(rawPath, []byte(`{"id":"orphan"}`), 0o600); err != nil {
+		t.Fatalf("write raw source: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"doctor"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for orphaned chat raw source")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Orphaned chat raws: WARN") {
+		t.Fatalf("expected orphaned chat raws WARN, got %q", out)
+	}
+	if !strings.Contains(out, chatID) {
+		t.Fatalf("expected chat ID %s in warning, got %q", chatID, out)
+	}
+}
+
+func TestDoctorChatRawRootFile(t *testing.T) {
+	homeDir := setupEnv(t)
+	rawRoot := filepath.Join(homeDir, "personal-context", "chats", "raw")
+	if err := os.MkdirAll(filepath.Dir(rawRoot), 0o700); err != nil {
+		t.Fatalf("mkdir chats dir: %v", err)
+	}
+	if err := os.WriteFile(rawRoot, []byte("not-a-directory"), 0o600); err != nil {
+		t.Fatalf("write raw root blocker: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
+	if err == nil || !strings.Contains(err.Error(), "list chat raw directories") {
+		t.Fatalf("runDoctor() error = %v, want chat raw directory list error", err)
+	}
+}
+
+func TestFindChatRawOrphansRepositoryError(t *testing.T) {
+	repo := &mockRepo{
+		getChatByIDFn: func(context.Context, string) (repository.ChatSession, error) {
+			return repository.ChatSession{}, errors.New("lookup failed")
+		},
+	}
+
+	_, err := findChatRawOrphans(context.Background(), repo, []string{"20260514-deadbeef"})
+	if err == nil || !strings.Contains(err.Error(), "look up chat 20260514-deadbeef") {
+		t.Fatalf("findChatRawOrphans() error = %v, want lookup error", err)
+	}
+}
+
+func TestReportDoctorMissingPathsWritePathError(t *testing.T) {
+	writer := &failAfterWriter{remaining: 1}
+	_, err := reportDoctorMissingPaths(writer, "Missing figures", "figure files", []string{"20260514-deadbeef/plot.png"})
+	if err == nil || !strings.Contains(err.Error(), "write missing figure path") {
+		t.Fatalf("reportDoctorMissingPaths() error = %v, want path write error", err)
+	}
+}
+
 func TestDoctorMissingFigureFile(t *testing.T) {
 	homeDir := setupEnv(t)
 
@@ -485,7 +605,7 @@ func TestDoctorMissingFigureFileInDeletedRecord(t *testing.T) {
 	)
 
 	deleteCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	deleteCmd.SetArgs([]string{"delete", id})
+	deleteCmd.SetArgs([]string{"records", "delete", id})
 	if err := deleteCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -830,7 +950,7 @@ func TestDoctorCloudOK(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -853,7 +973,7 @@ func TestDoctorCloudNotConfiguredSkipsCheck(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -876,7 +996,7 @@ func TestDoctorCloudUnreachableShowsWarn(t *testing.T) {
 	}
 
 	stdout := &bytes.Buffer{}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error for cloud WARN")
 	}
@@ -901,10 +1021,11 @@ func TestDoctorCloudOKWriteError(t *testing.T) {
 		return &cloudStack{Repo: cloudRepoStub{}}, nil
 	}
 
-	// 5 local checks succeed (Database, Orphaned figures, Orphaned data, Missing figures, Missing data files).
-	// 6th write is Cloud: OK — fail there.
-	stdout := &failAfterWriter{remaining: 5}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	// 6 local checks succeed (Database, Orphaned figures, Orphaned data,
+	// Missing figures, Missing data files, Missing chat raw sources). 7th
+	// write is Cloud: OK — fail there.
+	stdout := &failAfterWriter{remaining: 6}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on Cloud: OK")
 	}
@@ -919,9 +1040,9 @@ func TestDoctorCloudWarnWriteError(t *testing.T) {
 		return nil, errors.New("connection refused")
 	}
 
-	// 5 local checks succeed. 6th write is Cloud: WARN — fail there.
-	stdout := &failAfterWriter{remaining: 5}
-	err := runDoctor(context.Background(), stdout, &bytes.Buffer{})
+	// 6 local checks succeed. 7th write is Cloud: WARN — fail there.
+	stdout := &failAfterWriter{remaining: 6}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on Cloud: WARN")
 	}
@@ -990,5 +1111,210 @@ func TestDoctorReportsDirectoryWhereFigureExpected(t *testing.T) {
 	}
 	if !strings.Contains(out, "(is a directory)") {
 		t.Fatalf("expected directory annotation, got %q", out)
+	}
+}
+
+// importChatForDoctor imports a single transcript and returns the new chat ID.
+func importChatForDoctor(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	transcript := `{
+  "id": "doctor-session",
+  "cwd": "/tmp/doctor-chat",
+  "title": "Doctor chat",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [{"role": "user", "content": "hi doctor"}]
+}`
+	if err := os.WriteFile(filepath.Join(root, "session.json"), []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import: %v", err)
+	}
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "list", "--format", "ids"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat list: %v", err)
+	}
+	chatID := strings.TrimSpace(stdout.String())
+	if chatID == "" {
+		t.Fatalf("expected at least one chat id, got %q", stdout.String())
+	}
+	return chatID
+}
+
+func TestDoctorChatRawSourcesHealthy(t *testing.T) {
+	setupEnv(t)
+	_ = importChatForDoctor(t)
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"doctor"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Missing chat raw sources:") {
+		t.Fatalf("expected Missing chat raw sources line, got %q", out)
+	}
+	if !strings.Contains(out, "All checks passed.") {
+		t.Fatalf("expected all checks passed, got %q", out)
+	}
+}
+
+func TestDoctorChatRawSourcesMissingLocal(t *testing.T) {
+	homeDir := setupEnv(t)
+	chatID := importChatForDoctor(t)
+
+	rawPath := filepath.Join(homeDir, "personal-context", "chats", "raw", chatID, "source.json")
+	if err := os.Remove(rawPath); err != nil {
+		t.Fatalf("remove raw source: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"doctor"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected doctor to report warnings for missing chat raw source")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Missing chat raw sources:") || !strings.Contains(out, "WARN") {
+		t.Fatalf("expected Missing chat raw sources WARN, got %q", out)
+	}
+	if strings.Contains(out, chatID) {
+		t.Fatalf("normal mode should not list per-chat detail, got %q", out)
+	}
+}
+
+func TestDoctorChatRawSourcesVerboseListsDetail(t *testing.T) {
+	homeDir := setupEnv(t)
+	chatID := importChatForDoctor(t)
+
+	rawPath := filepath.Join(homeDir, "personal-context", "chats", "raw", chatID, "source.json")
+	if err := os.Remove(rawPath); err != nil {
+		t.Fatalf("remove raw source: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"doctor", "--verbose"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected doctor to fail with verbose details")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, chatID) {
+		t.Fatalf("verbose mode should list chat id, got %q", out)
+	}
+	if !strings.Contains(out, "[local]") {
+		t.Fatalf("verbose mode should tag local origin, got %q", out)
+	}
+	if !strings.Contains(out, "chats/raw/"+chatID+"/source.json") {
+		t.Fatalf("verbose mode should include raw_source_key, got %q", out)
+	}
+}
+
+func TestDoctorChatRawSourcesDeletedChatStillChecked(t *testing.T) {
+	homeDir := setupEnv(t)
+	chatID := importChatForDoctor(t)
+
+	// Soft-delete the chat — durability check should still report missing raw
+	// source files because they are PC-owned content.
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "delete", chatID})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat delete: %v", err)
+	}
+	rawPath := filepath.Join(homeDir, "personal-context", "chats", "raw", chatID, "source.json")
+	if err := os.Remove(rawPath); err != nil {
+		t.Fatalf("remove raw source: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	doctor := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	doctor.SetArgs([]string{"doctor", "--verbose"})
+	if err := doctor.Execute(); err == nil {
+		t.Fatal("expected doctor to flag deleted-chat raw source miss")
+	}
+	if !strings.Contains(stdout.String(), chatID) {
+		t.Fatalf("expected deleted chat id in verbose output, got %q", stdout.String())
+	}
+}
+
+func TestScanCloudChatRawMissesNilClient(t *testing.T) {
+	misses, err := scanCloudChatRawMisses(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("expected nil error for nil client, got %v", err)
+	}
+	if len(misses) != 0 {
+		t.Fatalf("expected no misses for nil client, got %d", len(misses))
+	}
+}
+
+func TestScanCloudChatRawMissesReportsAbsentObjects(t *testing.T) {
+	// HEAD returns 404 for every object, simulating "cloud is empty".
+	s3 := newTestS3Client(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(404)
+	}))
+	key := "chats/raw/20250101-deadbeef/source.json"
+	misses, err := scanCloudChatRawMisses(context.Background(), s3, []repository.ChatSession{{ID: "20250101-deadbeef", RawSourceKey: &key}})
+	if err != nil {
+		t.Fatalf("scanCloudChatRawMisses: %v", err)
+	}
+	if len(misses) != 1 || misses[0].Origin != "cloud" || misses[0].ChatID != "20250101-deadbeef" {
+		t.Fatalf("expected one cloud miss, got %v", misses)
+	}
+}
+
+func TestScanCloudChatRawMissesPropagatesAuthError(t *testing.T) {
+	// HEAD returns 500 — surfaces as a cloud-check error, not a miss.
+	s3 := newTestS3Client(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(500)
+	}))
+	key := "chats/raw/20250101-deadbeef/source.json"
+	misses, err := scanCloudChatRawMisses(context.Background(), s3, []repository.ChatSession{{ID: "20250101-deadbeef", RawSourceKey: &key}})
+	if err == nil {
+		t.Fatal("expected cloud-check error to be surfaced separately")
+	}
+	if len(misses) != 0 {
+		t.Fatalf("expected auth/network errors to not count as misses, got %v", misses)
+	}
+}
+
+func TestScanLocalChatRawMissesSkipsEmptyKey(t *testing.T) {
+	homeDir := setupEnv(t)
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		t.Fatalf("open local stack: %v", err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	misses, err := scanLocalChatRawMisses(stack.FS, []repository.ChatSession{{ID: "20250101-deadbeef"}})
+	if err != nil {
+		t.Fatalf("expected nil scan error, got %v", err)
+	}
+	if len(misses) != 0 {
+		t.Fatalf("expected nil-keyed session to be skipped, got %v", misses)
+	}
+}
+
+func TestScanLocalChatRawMissesRejectsInvalidKey(t *testing.T) {
+	homeDir := setupEnv(t)
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		t.Fatalf("open local stack: %v", err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	badKey := "chats/raw/other-id/source.json"
+	misses, err := scanLocalChatRawMisses(stack.FS, []repository.ChatSession{{ID: "20250101-deadbeef", RawSourceKey: &badKey}})
+	if err != nil {
+		t.Fatalf("expected nil scan error for invalid key, got %v", err)
+	}
+	if len(misses) != 1 {
+		t.Fatalf("expected invalid key to be reported as miss, got %v", misses)
+	}
+	if misses[0].Origin != "local" {
+		t.Fatalf("expected local origin, got %q", misses[0].Origin)
 	}
 }

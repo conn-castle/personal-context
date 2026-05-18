@@ -33,13 +33,13 @@ func TestGCBoundary30Days(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	folder := createInputFolder(t, inputFolderOpts{})
-	recordID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", folder))
+	recordID := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", folder))
 
 	// Soft-delete and backdate to 29 days and 23 hours ago.
 	// This is comfortably within the 30-day window, so gc must NOT delete it.
 	// We avoid using exactly 30 days because test execution time could push
 	// time.Since() past the boundary.
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 	db := openTestDB(t, homeDir)
 	past := time.Now().UTC().Add(-(29*24*time.Hour + 23*time.Hour))
 	ts := past.Format("2006-01-02T15:04:05.000Z")
@@ -72,10 +72,10 @@ func TestGCCascadesChildRows(t *testing.T) {
 		Figures:     map[string][]byte{"a.png": []byte("fig-a"), "b.png": []byte("fig-b")},
 		DataFiles:   map[string][]byte{"data.csv": []byte("a,b,c")},
 	})
-	recordID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", folder))
+	recordID := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", folder))
 
 	// Soft-delete and backdate.
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 	db := openTestDB(t, homeDir)
 	backdateDeletedAt(t, db, recordID, 31)
 
@@ -109,7 +109,7 @@ func TestGCRemovesFigureFilesFromDisk(t *testing.T) {
 		Figures:     map[string][]byte{"fig.png": []byte("image data")},
 		DataFiles:   map[string][]byte{"data.csv": []byte("x,y,z")},
 	})
-	recordID := strings.TrimSpace(runPCSuccess(t, homeDir, "add", folder))
+	recordID := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", folder))
 
 	// Verify files exist before gc.
 	figurePath := filepath.Join(homeDir, "personal-context", "figures", recordID, "fig.png")
@@ -122,7 +122,7 @@ func TestGCRemovesFigureFilesFromDisk(t *testing.T) {
 	}
 
 	// Soft-delete and backdate.
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 	db := openTestDB(t, homeDir)
 	backdateDeletedAt(t, db, recordID, 31)
 
@@ -144,13 +144,13 @@ func TestGCLeavesActiveRecords(t *testing.T) {
 
 	// Add an active record and an old deleted record.
 	folderActive := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Active</html>"})
-	idActive := strings.TrimSpace(runPCSuccess(t, homeDir, "add", folderActive))
+	idActive := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", folderActive))
 
 	folderDeleted := createInputFolder(t, inputFolderOpts{HTMLContent: "<html>Deleted</html>"})
-	idDeleted := strings.TrimSpace(runPCSuccess(t, homeDir, "add", folderDeleted))
+	idDeleted := strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", folderDeleted))
 
 	// Only delete the second one.
-	runPCSuccess(t, homeDir, "delete", idDeleted)
+	runPCSuccess(t, homeDir, "records", "delete", idDeleted)
 	db := openTestDB(t, homeDir)
 	backdateDeletedAt(t, db, idDeleted, 31)
 

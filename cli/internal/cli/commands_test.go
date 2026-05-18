@@ -31,7 +31,7 @@ func TestEditCommandSuccess(t *testing.T) {
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", inputDir})
+	addCmd.SetArgs([]string{"records", "add", inputDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestEditCommandSuccess(t *testing.T) {
 
 	editOut := &bytes.Buffer{}
 	editCmd := NewRootCommand(RootCommandOptions{Stdout: editOut, Stderr: &bytes.Buffer{}})
-	editCmd.SetArgs([]string{"edit", recordID, editDir})
+	editCmd.SetArgs([]string{"records", "edit", recordID, editDir})
 	if err := editCmd.Execute(); err != nil {
 		t.Fatalf("edit: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestEditCommandNotFound(t *testing.T) {
 	writeDefaultProvenanceMetadata(t, editDir)
 
 	editCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	editCmd.SetArgs([]string{"edit", "nonexistent-id", editDir})
+	editCmd.SetArgs([]string{"records", "edit", "nonexistent-id", editDir})
 	if err := editCmd.Execute(); err == nil {
 		t.Fatal("expected error for nonexistent record ID")
 	}
@@ -84,7 +84,7 @@ func TestEditCommandNoArgs(t *testing.T) {
 	t.Setenv("PC_HOME", homeDir)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit"})
+	cmd.SetArgs([]string{"records", "edit"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when no args provided")
 	}
@@ -116,7 +116,7 @@ func TestEditCommandWithFigures(t *testing.T) {
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", inputDir})
+	addCmd.SetArgs([]string{"records", "add", inputDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestEditCommandWithFigures(t *testing.T) {
 
 	editOut := &bytes.Buffer{}
 	editCmd := NewRootCommand(RootCommandOptions{Stdout: editOut, Stderr: &bytes.Buffer{}})
-	editCmd.SetArgs([]string{"edit", recordID, editDir})
+	editCmd.SetArgs([]string{"records", "edit", recordID, editDir})
 	if err := editCmd.Execute(); err != nil {
 		t.Fatalf("edit with figures: %v", err)
 	}
@@ -170,7 +170,7 @@ func TestDeleteCommandSuccess(t *testing.T) {
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", inputDir})
+	addCmd.SetArgs([]string{"records", "add", inputDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestDeleteCommandSuccess(t *testing.T) {
 
 	delOut := &bytes.Buffer{}
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: delOut, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", recordID})
+	delCmd.SetArgs([]string{"records", "delete", recordID})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestDeleteCommandNotFound(t *testing.T) {
 	}
 
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", "nonexistent-id"})
+	delCmd.SetArgs([]string{"records", "delete", "nonexistent-id"})
 	if err := delCmd.Execute(); err == nil {
 		t.Fatal("expected error for nonexistent record ID")
 	}
@@ -210,7 +210,7 @@ func TestDeleteCommandNoArgs(t *testing.T) {
 	t.Setenv("PC_HOME", homeDir)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"delete"})
+	cmd.SetArgs([]string{"records", "delete"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when no args provided")
 	}
@@ -238,7 +238,7 @@ func TestRestoreCommandSuccess(t *testing.T) {
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", inputDir})
+	addCmd.SetArgs([]string{"records", "add", inputDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestRestoreCommandSuccess(t *testing.T) {
 
 	// Delete the record first
 	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	delCmd.SetArgs([]string{"delete", recordID})
+	delCmd.SetArgs([]string{"records", "delete", recordID})
 	if err := delCmd.Execute(); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestRestoreCommandSuccess(t *testing.T) {
 	// Restore it
 	restoreOut := &bytes.Buffer{}
 	restoreCmd := NewRootCommand(RootCommandOptions{Stdout: restoreOut, Stderr: &bytes.Buffer{}})
-	restoreCmd.SetArgs([]string{"restore", recordID})
+	restoreCmd.SetArgs([]string{"records", "restore", recordID})
 	if err := restoreCmd.Execute(); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestRestoreCommandNotFound(t *testing.T) {
 	}
 
 	restoreCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	restoreCmd.SetArgs([]string{"restore", "nonexistent-id"})
+	restoreCmd.SetArgs([]string{"records", "restore", "nonexistent-id"})
 	if err := restoreCmd.Execute(); err == nil {
 		t.Fatal("expected error for nonexistent record ID")
 	}
@@ -286,7 +286,7 @@ func TestRestoreCommandNoArgs(t *testing.T) {
 	t.Setenv("PC_HOME", homeDir)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"restore"})
+	cmd.SetArgs([]string{"records", "restore"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when no args provided")
 	}
@@ -314,7 +314,7 @@ func TestMoveCommandChangesDate(t *testing.T) {
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", inputDir, "--date", "2025-06-01"})
+	addCmd.SetArgs([]string{"records", "add", inputDir, "--date", "2025-06-01"})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestMoveCommandChangesDate(t *testing.T) {
 
 	moveOut := &bytes.Buffer{}
 	moveCmd := NewRootCommand(RootCommandOptions{Stdout: moveOut, Stderr: &bytes.Buffer{}})
-	moveCmd.SetArgs([]string{"move", recordID, "--date", "2025-07-15"})
+	moveCmd.SetArgs([]string{"records", "move", recordID, "--date", "2025-07-15"})
 	if err := moveCmd.Execute(); err != nil {
 		t.Fatalf("move: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestMoveCommandPositionFirst(t *testing.T) {
 
 	addOut1 := &bytes.Buffer{}
 	addCmd1 := NewRootCommand(RootCommandOptions{Stdout: addOut1, Stderr: &bytes.Buffer{}})
-	addCmd1.SetArgs([]string{"add", inputDir1, "--date", "2025-06-01"})
+	addCmd1.SetArgs([]string{"records", "add", inputDir1, "--date", "2025-06-01"})
 	if err := addCmd1.Execute(); err != nil {
 		t.Fatalf("add first: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestMoveCommandPositionFirst(t *testing.T) {
 
 	addOut2 := &bytes.Buffer{}
 	addCmd2 := NewRootCommand(RootCommandOptions{Stdout: addOut2, Stderr: &bytes.Buffer{}})
-	addCmd2.SetArgs([]string{"add", inputDir2, "--date", "2025-06-01"})
+	addCmd2.SetArgs([]string{"records", "add", inputDir2, "--date", "2025-06-01"})
 	if err := addCmd2.Execute(); err != nil {
 		t.Fatalf("add second: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestMoveCommandPositionFirst(t *testing.T) {
 	// Move second record to --first
 	moveOut := &bytes.Buffer{}
 	moveCmd := NewRootCommand(RootCommandOptions{Stdout: moveOut, Stderr: &bytes.Buffer{}})
-	moveCmd.SetArgs([]string{"move", recordID2, "--first"})
+	moveCmd.SetArgs([]string{"records", "move", recordID2, "--first"})
 	if err := moveCmd.Execute(); err != nil {
 		t.Fatalf("move --first: %v", err)
 	}
@@ -401,14 +401,14 @@ func TestMoveCommandNoFlags(t *testing.T) {
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", inputDir})
+	addCmd.SetArgs([]string{"records", "add", inputDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	recordID := strings.TrimSpace(addOut.String())
 
 	moveCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	moveCmd.SetArgs([]string{"move", recordID})
+	moveCmd.SetArgs([]string{"records", "move", recordID})
 	err := moveCmd.Execute()
 	if err == nil {
 		t.Fatal("expected error when no flags provided")
@@ -429,7 +429,7 @@ func TestMoveCommandNotFound(t *testing.T) {
 	}
 
 	moveCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	moveCmd.SetArgs([]string{"move", "nonexistent-id", "--date", "2025-07-15"})
+	moveCmd.SetArgs([]string{"records", "move", "nonexistent-id", "--date", "2025-07-15"})
 	if err := moveCmd.Execute(); err == nil {
 		t.Fatal("expected error for nonexistent record ID")
 	}
@@ -440,7 +440,7 @@ func TestMoveCommandNoArgs(t *testing.T) {
 	t.Setenv("PC_HOME", homeDir)
 
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"move"})
+	cmd.SetArgs([]string{"records", "move"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected error when no args provided")
 	}
@@ -464,14 +464,14 @@ func TestMoveCommandInvalidDate(t *testing.T) {
 
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", inputDir})
+	addCmd.SetArgs([]string{"records", "add", inputDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
 	recordID := strings.TrimSpace(addOut.String())
 
 	moveCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	moveCmd.SetArgs([]string{"move", recordID, "--date", "bad"})
+	moveCmd.SetArgs([]string{"records", "move", recordID, "--date", "bad"})
 	err := moveCmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for invalid date")
@@ -508,7 +508,7 @@ func TestEditWithDataFiles(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", id, newDir})
+	cmd.SetArgs([]string{"records", "edit", id, newDir})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("edit: %v", err)
 	}
@@ -555,7 +555,7 @@ func TestEditReplacesFiguresAndDataFiles(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"edit", id, newDir})
+	cmd.SetArgs([]string{"records", "edit", id, newDir})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("edit: %v", err)
 	}
@@ -576,7 +576,7 @@ func TestMovePositionAfter(t *testing.T) {
 	// Move id3 after id1
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"move", id3, "--after", id1})
+	cmd.SetArgs([]string{"records", "move", id3, "--after", id1})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("move --after: %v", err)
 	}
@@ -595,7 +595,7 @@ func TestMovePositionBefore(t *testing.T) {
 	// Move id1 before id3
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"move", id1, "--before", id3})
+	cmd.SetArgs([]string{"records", "move", id1, "--before", id3})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("move --before: %v", err)
 	}
@@ -611,7 +611,7 @@ func TestMovePositionLast(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"move", id1, "--last"})
+	cmd.SetArgs([]string{"records", "move", id1, "--last"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("move --last: %v", err)
 	}
@@ -625,7 +625,7 @@ func TestMoveDateAndPosition(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"move", id, "--date", "2025-06-05", "--first"})
+	cmd.SetArgs([]string{"records", "move", id, "--date", "2025-06-05", "--first"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("move --date --first: %v", err)
 	}

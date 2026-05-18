@@ -35,6 +35,24 @@ func TestLoadAWSConfigWhitespaceOnlyProfile(t *testing.T) {
 	}
 }
 
+func TestCloudClientConstructorBranches(t *testing.T) {
+	client := newAWSSDKS3ClientFn(aws.Config{Region: "us-east-1"}, "http://127.0.0.1:9000", true)
+	if client == nil {
+		t.Fatal("expected S3 client")
+	}
+	wrapped, err := newCloudS3ClientFn(client, "test-bucket", "users/test/")
+	if err != nil {
+		t.Fatalf("newCloudS3ClientFn() error = %v", err)
+	}
+	if wrapped == nil {
+		t.Fatal("expected wrapped S3 client")
+	}
+	if err := (&cloudStack{}).Close(); err != nil {
+		t.Fatalf("cloudStack.Close() error = %v", err)
+	}
+	closePGXPool(nil)
+}
+
 func TestOpenCloudStackEmptyHomeDir(t *testing.T) {
 	_, err := openCloudStack(context.Background(), "", "")
 	if err == nil {

@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/conn-castle/personal-context/cli/internal/filesystem"
 	"github.com/conn-castle/personal-context/cli/internal/gitsnapshot"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
@@ -35,6 +36,19 @@ func buildLocalSnapshot(ctx context.Context, stack *localStack, filter repositor
 			return nil, fmt.Errorf("read local figure %s: %w", path, err)
 		}
 		return content, nil
+	}, func(_ context.Context, chat repository.ChatSession) ([]byte, error) {
+		if chat.RawSourceKey == nil {
+			return nil, nil
+		}
+		path, err := stack.FS.ResolveChatSourcePath(chat.ID, *chat.RawSourceKey)
+		if err != nil {
+			return nil, err
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read local chat raw source %s: %w", path, err)
+		}
+		return content, nil
 	}, filter)
 }
 
@@ -56,6 +70,23 @@ func buildCloudSnapshot(ctx context.Context, homeDir string, cloud *cloudStack, 
 			return nil, fmt.Errorf("read cloud figure %s: %w", figure.S3Key, err)
 		}
 		return content, nil
+	}, func(ctx context.Context, chat repository.ChatSession) ([]byte, error) {
+		if chat.RawSourceKey == nil {
+			return nil, nil
+		}
+		if cloud.S3 == nil {
+			return nil, fmt.Errorf("cloud S3 client is required to export chat raw source %s", chat.ID)
+		}
+		body, err := cloud.S3.Download(ctx, *chat.RawSourceKey)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = body.Close() }()
+		content, err := io.ReadAll(body)
+		if err != nil {
+			return nil, fmt.Errorf("read cloud chat raw source %s: %w", *chat.RawSourceKey, err)
+		}
+		return content, nil
 	}, filter)
 }
 
@@ -64,6 +95,7 @@ func buildSnapshot(
 	templateRepo repository.Repository,
 	recordRepo repository.Repository,
 	readFigure func(context.Context, repository.RecordFigure) ([]byte, error),
+	readChatRawSource func(context.Context, repository.ChatSession) ([]byte, error),
 	filter repository.ListRecordsFilter,
 ) (gitsnapshot.Snapshot, error) {
 	templates, err := templateRepo.ListTemplates(ctx)
@@ -162,11 +194,62 @@ func buildSnapshot(
 			UpdatedAt:      record.UpdatedAt,
 		})
 	}
+	chats, err := recordRepo.ListChatSessions(ctx, repository.ListChatSessionsFilter{})
+	if err != nil {
+		return gitsnapshot.Snapshot{}, fmt.Errorf("list chats: %w", err)
+	}
+	snapshot.Chats = make([]gitsnapshot.ChatSession, 0, len(chats))
+	for _, chat := range chats {
+		items, err := recordRepo.ListChatItems(ctx, chat.ID)
+		if err != nil {
+			return gitsnapshot.Snapshot{}, fmt.Errorf("list chat items for %s: %w", chat.ID, err)
+		}
+		exportItems := make([]gitsnapshot.ChatItem, 0, len(items))
+		for _, item := range items {
+			exportItems = append(exportItems, gitsnapshot.ChatItem{
+				Ordinal:    item.Ordinal,
+				Role:       item.Role,
+				ItemType:   item.ItemType,
+				Text:       item.Text,
+				SearchText: item.SearchText,
+				RawJSON:    item.RawJSON,
+				CreatedAt:  item.CreatedAt,
+			})
+		}
+		var rawSourceContent []byte
+		if chat.RawSourceKey != nil {
+			rawSourceContent, err = readChatRawSource(ctx, chat)
+			if err != nil {
+				return gitsnapshot.Snapshot{}, fmt.Errorf("load chat raw source %s: %w", chat.ID, err)
+			}
+		}
+		snapshot.Chats = append(snapshot.Chats, gitsnapshot.ChatSession{
+			ID:                 chat.ID,
+			Source:             chat.Source,
+			SourceSessionID:    chat.SourceSessionID,
+			SourceDeviceID:     chat.SourceDeviceID,
+			ProjectID:          chat.ProjectID,
+			CWD:                chat.CWD,
+			Title:              chat.Title,
+			StartedAt:          chat.StartedAt,
+			LastActivityAt:     chat.LastActivityAt,
+			OriginalSourcePath: chat.OriginalSourcePath,
+			RawSourceKey:       chat.RawSourceKey,
+			RawSourceContent:   rawSourceContent,
+			CreatedAt:          chat.CreatedAt,
+			UpdatedAt:          chat.UpdatedAt,
+			Items:              exportItems,
+		})
+	}
 	return snapshot, nil
 }
 
 func importSnapshotIntoStack(ctx context.Context, stack *localStack, snapshot gitsnapshot.Snapshot) (importStats, error) {
 	stats := importStats{}
+
+	if err := validateSnapshotChatSourceIdentities(ctx, stack.Repo, snapshot.Chats); err != nil {
+		return stats, err
+	}
 
 	for _, template := range snapshot.Templates {
 		if err := upsertTemplate(ctx, stack.Repo, template); err != nil {
@@ -215,8 +298,198 @@ func importSnapshotIntoStack(ctx context.Context, stack *localStack, snapshot gi
 		}
 		stats.Updated++
 	}
+	for _, chat := range snapshot.Chats {
+		if err := ensureSnapshotChatSourceIdentity(ctx, stack.Repo, chat); err != nil {
+			return stats, err
+		}
+		rollback, err := captureSnapshotChatRollback(ctx, stack, chat.ID)
+		if err != nil {
+			return stats, err
+		}
+		if rollback.existed && !chat.UpdatedAt.After(rollback.session.UpdatedAt) {
+			rollback.cleanup(stack)
+			stats.Skipped++
+			continue
+		}
+		rawStage, err := stageSnapshotChatRawSource(stack, chat)
+		if err != nil {
+			rollback.cleanup(stack)
+			return stats, err
+		}
+		createdAt := chat.CreatedAt.UTC()
+		updatedAt := chat.UpdatedAt.UTC()
+		stored, _, err := stack.Repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:                 chat.ID,
+				Source:             chat.Source,
+				SourceSessionID:    chat.SourceSessionID,
+				SourceDeviceID:     chat.SourceDeviceID,
+				ProjectID:          chat.ProjectID,
+				CWD:                chat.CWD,
+				Title:              chat.Title,
+				StartedAt:          chat.StartedAt,
+				LastActivityAt:     chat.LastActivityAt,
+				OriginalSourcePath: chat.OriginalSourcePath,
+				RawSourceKey:       chat.RawSourceKey,
+				CreatedAt:          &createdAt,
+				UpdatedAt:          &updatedAt,
+			},
+			ClearDeleted: true,
+		})
+		if err != nil {
+			deleteSnapshotChatRawStage(stack, rawStage)
+			rollback.cleanup(stack)
+			return stats, fmt.Errorf("upsert chat %s: %w", chat.ID, err)
+		}
+		itemInputs := make([]repository.CreateChatItemInput, 0, len(chat.Items))
+		for _, item := range chat.Items {
+			createdAt := item.CreatedAt.UTC()
+			itemInputs = append(itemInputs, repository.CreateChatItemInput{
+				SessionID:  stored.ID,
+				Ordinal:    item.Ordinal,
+				Role:       item.Role,
+				ItemType:   item.ItemType,
+				Text:       item.Text,
+				SearchText: item.SearchText,
+				RawJSON:    item.RawJSON,
+				CreatedAt:  &createdAt,
+			})
+		}
+		if err := replaceChatItems(ctx, stack.Repo, stored.ID, itemInputs); err != nil {
+			deleteSnapshotChatRawStage(stack, rawStage)
+			rollback.restore(ctx, stack)
+			rollback.cleanup(stack)
+			return stats, fmt.Errorf("replace chat items %s: %w", stored.ID, err)
+		}
+		if rawStage != nil {
+			if _, err := stack.FS.PromoteChatSourceStage(*rawStage); err != nil {
+				deleteSnapshotChatRawStage(stack, rawStage)
+				rollback.restore(ctx, stack)
+				rollback.cleanup(stack)
+				return stats, fmt.Errorf("promote chat raw source %s: %w", chat.ID, err)
+			}
+		}
+		if rollback.existed {
+			stats.Updated++
+		} else {
+			stats.Created++
+		}
+		rollback.cleanup(stack)
+	}
 
 	return stats, nil
+}
+
+func validateSnapshotChatSourceIdentities(ctx context.Context, repo repository.Repository, chats []gitsnapshot.ChatSession) error {
+	seen := make(map[string]string, len(chats))
+	for _, chat := range chats {
+		key := chat.Source + "\x00" + chat.SourceSessionID
+		if existingID, ok := seen[key]; ok {
+			// Even a same-id duplicate is rejected: directory iteration
+			// order in gitsnapshot is not stable, so silently keeping the
+			// first-seen entry would let items, metadata, or raw content
+			// be picked non-deterministically from different snapshot dirs.
+			return fmt.Errorf(
+				"chat source %s/%s appears multiple times in snapshot (ids %s, %s); resolve the duplicate snapshot entries before import",
+				chat.Source,
+				chat.SourceSessionID,
+				existingID,
+				chat.ID,
+			)
+		}
+		seen[key] = chat.ID
+		if err := ensureSnapshotChatSourceIdentity(ctx, repo, chat); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureSnapshotChatSourceIdentity(ctx context.Context, repo repository.Repository, chat gitsnapshot.ChatSession) error {
+	existing, err := repo.GetChatSessionBySource(ctx, chat.Source, chat.SourceSessionID)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load chat source %s/%s: %w", chat.Source, chat.SourceSessionID, err)
+	}
+	if existing.ID != chat.ID {
+		return fmt.Errorf(
+			"chat source %s/%s already exists with id %s; snapshot id %s cannot be imported without manual resolution",
+			chat.Source,
+			chat.SourceSessionID,
+			existing.ID,
+			chat.ID,
+		)
+	}
+	return nil
+}
+
+func captureSnapshotChatRollback(ctx context.Context, stack *localStack, chatID string) (chatImportRollbackState, error) {
+	existing, err := stack.Repo.GetChatSessionByID(ctx, chatID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return chatImportRollbackState{session: repository.ChatSession{ID: chatID}}, nil
+		}
+		return chatImportRollbackState{}, fmt.Errorf("look up existing chat rollback state: %w", err)
+	}
+	items, err := stack.Repo.ListChatItems(ctx, existing.ID)
+	if err != nil {
+		return chatImportRollbackState{}, fmt.Errorf("list existing chat items for rollback: %w", err)
+	}
+	state := chatImportRollbackState{existed: true, session: existing, items: items}
+	if existing.RawSourceKey != nil && stack.FS != nil {
+		rawPath, err := stack.FS.ResolveChatSourcePath(existing.ID, *existing.RawSourceKey)
+		if err != nil {
+			return chatImportRollbackState{}, fmt.Errorf("resolve existing chat raw source for rollback: %w", err)
+		}
+		backup, err := stack.FS.CopyChatSourceToStage(existing.ID, rawPath)
+		if err == nil {
+			state.rawBackup = &backup
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return chatImportRollbackState{}, fmt.Errorf("back up existing chat raw source for rollback: %w", err)
+		}
+	}
+	return state, nil
+}
+
+func stageSnapshotChatRawSource(stack *localStack, chat gitsnapshot.ChatSession) (*filesystem.ChatSourceStage, error) {
+	if chat.RawSourceKey == nil {
+		return nil, nil
+	}
+	if len(chat.RawSourceContent) == 0 {
+		return nil, fmt.Errorf("chat %s raw_source_key is set but raw source content is empty", chat.ID)
+	}
+	path, err := stack.FS.ResolveChatSourcePath(chat.ID, *chat.RawSourceKey)
+	if err != nil {
+		return nil, fmt.Errorf("resolve chat raw source %s: %w", chat.ID, err)
+	}
+	rawRoot := filepath.Dir(filepath.Dir(path))
+	if err := os.MkdirAll(rawRoot, 0o700); err != nil {
+		return nil, fmt.Errorf("create chat raw staging root: %w", err)
+	}
+	stageDir, err := os.MkdirTemp(rawRoot, ".staging-"+chat.ID+"-")
+	if err != nil {
+		return nil, fmt.Errorf("create chat raw stage: %w", err)
+	}
+	stage := filesystem.ChatSourceStage{
+		ChatSessionID: chat.ID,
+		RawSourceKey:  *chat.RawSourceKey,
+		StagedPath:    filepath.Join(stageDir, filepath.Base(path)),
+		Size:          int64(len(chat.RawSourceContent)),
+	}
+	if err := writeTextFileAtomically(stage.StagedPath, chat.RawSourceContent, 0o700, 0o600); err != nil {
+		_ = stack.FS.DeleteChatSourceStage(stage)
+		return nil, fmt.Errorf("stage chat raw source %s: %w", chat.ID, err)
+	}
+	return &stage, nil
+}
+
+func deleteSnapshotChatRawStage(stack *localStack, stage *filesystem.ChatSourceStage) {
+	if stack == nil || stack.FS == nil || stage == nil {
+		return
+	}
+	_ = stack.FS.DeleteChatSourceStage(*stage)
 }
 
 func upsertTemplate(ctx context.Context, repo repository.Repository, tmpl gitsnapshot.Template) error {
@@ -324,7 +597,7 @@ func replaceRecordChildren(ctx context.Context, stack *localStack, record gitsna
 			return fmt.Errorf("write local figure %s/%s: %w", record.ID, figure.Filename, err)
 		}
 		if _, err := stack.Repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-			RecordID:  record.ID,
+			RecordID: record.ID,
 			Filename: figure.Filename,
 			S3Key:    figure.S3Key,
 			AltText:  figure.AltText,
@@ -334,7 +607,7 @@ func replaceRecordChildren(ctx context.Context, stack *localStack, record gitsna
 	}
 	for _, file := range record.DataFiles {
 		if _, err := stack.Repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-			RecordID:     record.ID,
+			RecordID:    record.ID,
 			Filename:    file.Filename,
 			S3Key:       file.S3Key,
 			Size:        file.Size,
@@ -395,6 +668,7 @@ func wipeLocalState(homeDir string) error {
 	for _, dir := range []string{
 		filepath.Join(basePath(homeDir), "figures"),
 		filepath.Join(basePath(homeDir), "data"),
+		filepath.Join(basePath(homeDir), "chats", "raw"),
 	} {
 		if err := os.RemoveAll(dir); err != nil {
 			return fmt.Errorf("remove %s: %w", dir, err)

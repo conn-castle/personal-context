@@ -17,10 +17,27 @@ func newShowCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "show <id>",
-		Short: "Display record details",
+		Short: "Display record or chat details",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runShow(cmd.Context(), stdout, stderr, args[0], formatFlag)
+		},
+	}
+
+	cmd.Flags().StringVar(&formatFlag, "format", "text", "Output format (text|json)")
+
+	return cmd
+}
+
+func newShowRecordCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+	var formatFlag string
+
+	cmd := &cobra.Command{
+		Use:   "show <id>",
+		Short: "Display record details",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runShowRecord(cmd.Context(), stdout, stderr, args[0], formatFlag)
 		},
 	}
 
@@ -75,19 +92,55 @@ func runShow(ctx context.Context, stdout io.Writer, _ io.Writer, id string, form
 	defer func() { _ = stack.Close() }()
 
 	record, err := stack.Repo.GetRecordByID(ctx, id)
+	recordErr := err
+	chat, chatErr := stack.Repo.GetChatSessionByID(ctx, id)
+	if recordErr == nil && chatErr == nil {
+		return fmt.Errorf("id %q is ambiguous across records and chats", id)
+	}
+	if recordErr == nil {
+		return showRecordFromStack(ctx, stdout, stack, record, format)
+	}
+	if chatErr == nil {
+		return showChatFromStack(ctx, stdout, stack, chat, chatShowOptions{Format: format})
+	}
+	if !errors.Is(recordErr, repository.ErrNotFound) {
+		return fmt.Errorf("get record: %w", recordErr)
+	}
+	if !errors.Is(chatErr, repository.ErrNotFound) {
+		return fmt.Errorf("get chat: %w", chatErr)
+	}
+	return fmt.Errorf("record or chat %q not found", id)
+}
+
+func runShowRecord(ctx context.Context, stdout io.Writer, _ io.Writer, id string, format string) error {
+	homeDir, err := resolveHomeDir()
+	if err != nil {
+		return err
+	}
+
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stack.Close() }()
+
+	record, err := stack.Repo.GetRecordByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return fmt.Errorf("record %q not found", id)
 		}
 		return fmt.Errorf("get record: %w", err)
 	}
+	return showRecordFromStack(ctx, stdout, stack, record, format)
+}
 
-	figures, err := stack.Repo.ListRecordFiguresByRecordID(ctx, id)
+func showRecordFromStack(ctx context.Context, stdout io.Writer, stack *localStack, record repository.Record, format string) error {
+	figures, err := stack.Repo.ListRecordFiguresByRecordID(ctx, record.ID)
 	if err != nil {
 		return fmt.Errorf("list figures: %w", err)
 	}
 
-	dataFiles, err := stack.Repo.ListRecordDataFilesByRecordID(ctx, id)
+	dataFiles, err := stack.Repo.ListRecordDataFilesByRecordID(ctx, record.ID)
 	if err != nil {
 		return fmt.Errorf("list data files: %w", err)
 	}

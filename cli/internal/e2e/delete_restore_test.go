@@ -15,7 +15,7 @@ func addRecordHelper(t *testing.T) (string, string) {
 	runPCSuccess(t, homeDir, "setup")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 	if len(recordID) == 0 {
 		t.Fatal("expected record ID in stdout")
@@ -64,7 +64,7 @@ func TestDeleteSetsDeletedAt(t *testing.T) {
 		t.Fatalf("expected deleted_at to be NULL before delete, got %q", before.String)
 	}
 
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 
 	after := queryDeletedAt(t, db, recordID)
 	if !after.Valid {
@@ -76,7 +76,7 @@ func TestDeleteNonexistentID(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	stderr := runPCFailure(t, homeDir, "delete", "nonexistent-id")
+	stderr := runPCFailure(t, homeDir, "records", "delete", "nonexistent-id")
 	if !strings.Contains(strings.ToLower(stderr), "not found") {
 		t.Fatalf("expected 'not found' in stderr, got %q", stderr)
 	}
@@ -85,7 +85,7 @@ func TestDeleteNonexistentID(t *testing.T) {
 func TestDeleteOutputMessage(t *testing.T) {
 	homeDir, recordID := addRecordHelper(t)
 
-	stdout := runPCSuccess(t, homeDir, "delete", recordID)
+	stdout := runPCSuccess(t, homeDir, "records", "delete", recordID)
 	expected := "Record " + recordID + " deleted"
 	if !strings.Contains(stdout, expected) {
 		t.Fatalf("expected stdout to contain %q, got %q", expected, stdout)
@@ -95,7 +95,7 @@ func TestDeleteOutputMessage(t *testing.T) {
 func TestRestoreClearsDeletedAt(t *testing.T) {
 	homeDir, recordID := addRecordHelper(t)
 
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 
 	db := openTestDB(t, homeDir)
 	afterDelete := queryDeletedAt(t, db, recordID)
@@ -103,7 +103,7 @@ func TestRestoreClearsDeletedAt(t *testing.T) {
 		t.Fatal("expected deleted_at to be NOT NULL after delete")
 	}
 
-	runPCSuccess(t, homeDir, "restore", recordID)
+	runPCSuccess(t, homeDir, "records", "restore", recordID)
 
 	afterRestore := queryDeletedAt(t, db, recordID)
 	if afterRestore.Valid {
@@ -115,7 +115,7 @@ func TestRestoreNonexistentID(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
-	stderr := runPCFailure(t, homeDir, "restore", "nonexistent-id")
+	stderr := runPCFailure(t, homeDir, "records", "restore", "nonexistent-id")
 	if !strings.Contains(strings.ToLower(stderr), "not found") {
 		t.Fatalf("expected 'not found' in stderr, got %q", stderr)
 	}
@@ -124,8 +124,8 @@ func TestRestoreNonexistentID(t *testing.T) {
 func TestRestoreOutputMessage(t *testing.T) {
 	homeDir, recordID := addRecordHelper(t)
 
-	runPCSuccess(t, homeDir, "delete", recordID)
-	stdout := runPCSuccess(t, homeDir, "restore", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
+	stdout := runPCSuccess(t, homeDir, "records", "restore", recordID)
 
 	expected := "Record " + recordID + " restored"
 	if !strings.Contains(stdout, expected) {
@@ -142,7 +142,7 @@ func TestDeleteUpdatesUpdatedAt(t *testing.T) {
 	backdateUpdatedAt(t, db, recordID)
 	before := queryUpdatedAt(t, db, recordID)
 
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 
 	after := queryUpdatedAt(t, db, recordID)
 	if after <= before {
@@ -153,7 +153,7 @@ func TestDeleteUpdatesUpdatedAt(t *testing.T) {
 func TestRestoreUpdatesUpdatedAt(t *testing.T) {
 	homeDir, recordID := addRecordHelper(t)
 
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 
 	db := openTestDB(t, homeDir)
 
@@ -161,7 +161,7 @@ func TestRestoreUpdatesUpdatedAt(t *testing.T) {
 	backdateUpdatedAt(t, db, recordID)
 	before := queryUpdatedAt(t, db, recordID)
 
-	runPCSuccess(t, homeDir, "restore", recordID)
+	runPCSuccess(t, homeDir, "records", "restore", recordID)
 
 	after := queryUpdatedAt(t, db, recordID)
 	if after <= before {
@@ -172,7 +172,7 @@ func TestRestoreUpdatesUpdatedAt(t *testing.T) {
 func TestDeletedRecordStillShowable(t *testing.T) {
 	homeDir, recordID := addRecordHelper(t)
 
-	runPCSuccess(t, homeDir, "delete", recordID)
+	runPCSuccess(t, homeDir, "records", "delete", recordID)
 
 	stdout := runPCSuccess(t, homeDir, "show", recordID)
 	if !strings.Contains(strings.ToLower(stdout), "deleted") {

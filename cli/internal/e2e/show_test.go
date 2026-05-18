@@ -14,7 +14,7 @@ func TestShowTextFormat(t *testing.T) {
 		Notes:        "Important notes here",
 		MetadataJSON: `{"project_id":"show-test"}`,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	showOut := runPCSuccess(t, homeDir, "show", recordID)
@@ -36,7 +36,7 @@ func TestShowJSONFormat(t *testing.T) {
 		Figures:     map[string][]byte{"plot.png": []byte("data")},
 		DataFiles:   map[string][]byte{"metrics.csv": []byte("a,b\n1,2\n")},
 	})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	showOut := runPCSuccess(t, homeDir, "show", "--format", "json", recordID)
@@ -79,7 +79,7 @@ func TestShowWithNoNotes(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	showOut := runPCSuccess(t, homeDir, "show", recordID)
@@ -93,7 +93,7 @@ func TestShowInvalidFormat(t *testing.T) {
 	runPCSuccess(t, homeDir, "setup")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
-	stdout := runPCSuccess(t, homeDir, "add", inputDir)
+	stdout := runPCSuccess(t, homeDir, "records", "add", inputDir)
 	recordID := strings.TrimSpace(stdout)
 
 	stderr := runPCFailure(t, homeDir, "show", "--format", "xml", recordID)

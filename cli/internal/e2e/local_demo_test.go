@@ -33,29 +33,29 @@ func TestLocalDemoWorkflow(t *testing.T) {
 			Notes:        demoRecordNotes(i),
 			MetadataJSON: `{"project_id":"` + projectID + `","source_device_id":"test-device"}`,
 		})
-		recordIDs[i] = strings.TrimSpace(runPCSuccess(t, homeDir, "add", "--date", dateValue, folder))
+		recordIDs[i] = strings.TrimSpace(runPCSuccess(t, homeDir, "records", "add", "--date", dateValue, folder))
 	}
 
 	for _, i := range []int{6, 7, 8, 9, 10} {
-		stdout := runPCSuccess(t, homeDir, "delete", recordIDs[i])
+		stdout := runPCSuccess(t, homeDir, "records", "delete", recordIDs[i])
 		expected := "Record " + recordIDs[i] + " deleted"
 		if !strings.Contains(stdout, expected) {
 			t.Fatalf("expected delete output to contain %q, got %q", expected, stdout)
 		}
 	}
 
-	restoreOut := runPCSuccess(t, homeDir, "restore", recordIDs[8])
+	restoreOut := runPCSuccess(t, homeDir, "records", "restore", recordIDs[8])
 	if !strings.Contains(restoreOut, "Record "+recordIDs[8]+" restored") {
 		t.Fatalf("expected restore output to mention record %s, got %q", recordIDs[8], restoreOut)
 	}
 
-	moveOut := runPCSuccess(t, homeDir, "move", recordIDs[4], "--after", recordIDs[2])
+	moveOut := runPCSuccess(t, homeDir, "records", "move", recordIDs[4], "--after", recordIDs[2])
 	if !strings.Contains(moveOut, "Record "+recordIDs[4]+" moved") {
 		t.Fatalf("expected move output to mention record %s, got %q", recordIDs[4], moveOut)
 	}
 
-	activeSearch := runPCSuccess(t, homeDir, "search", "--format", "ids", "Record")
-	activeIDs := nonEmptyLines(activeSearch)
+	activeList := runPCSuccess(t, homeDir, "records", "list", "--format", "ids", "--project", projectID, "--all")
+	activeIDs := nonEmptyLines(activeList)
 	expectedActive := []string{
 		recordIDs[1],
 		recordIDs[2],
@@ -64,7 +64,7 @@ func TestLocalDemoWorkflow(t *testing.T) {
 		recordIDs[5],
 		recordIDs[8],
 	}
-	assertExactOrder(t, activeIDs, expectedActive, "active record order")
+	assertExactOrder(t, activeIDs, expectedActive, "active record list")
 
 	trashOut := runPCSuccess(t, homeDir, "trash")
 	deletedIDs := trashIDs(trashOut)
@@ -81,7 +81,7 @@ func TestLocalDemoWorkflow(t *testing.T) {
 
 	searchDeleted := runPCSuccess(t, homeDir, "search", "--deleted", "--format", "ids", "remain in trash")
 	deletedSearchIDs := nonEmptyLines(searchDeleted)
-	assertExactOrder(t, deletedSearchIDs, expectedDeleted, "deleted search order")
+	assertSameMembers(t, deletedSearchIDs, expectedDeleted, "deleted search records")
 
 	projectOut := runPCSuccess(t, homeDir, "project", "list")
 	if !strings.Contains(projectOut, projectID) {
@@ -189,6 +189,26 @@ func assertExactOrder(t *testing.T, got []string, expected []string, label strin
 	for i := range expected {
 		if got[i] != expected[i] {
 			t.Fatalf("%s mismatch at position %d: expected %s, got %s (full got=%v)", label, i, expected[i], got[i], got)
+		}
+	}
+}
+
+func assertSameMembers(t *testing.T, got []string, expected []string, label string) {
+	t.Helper()
+
+	if len(got) != len(expected) {
+		t.Fatalf("%s length mismatch: expected %d, got %d (%v)", label, len(expected), len(got), got)
+	}
+	counts := make(map[string]int, len(expected))
+	for _, id := range expected {
+		counts[id]++
+	}
+	for _, id := range got {
+		counts[id]--
+	}
+	for id, count := range counts {
+		if count != 0 {
+			t.Fatalf("%s membership mismatch for %s: count delta %d (got=%v expected=%v)", label, id, count, got, expected)
 		}
 	}
 }

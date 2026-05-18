@@ -105,7 +105,7 @@ func TestAddCommandSuccess(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"add", inputDir})
+	cmd.SetArgs([]string{"records", "add", inputDir})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("add failed: %v", err)
@@ -124,7 +124,7 @@ func TestAddCommandWithDateFlag(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"add", "--date", "2025-06-15", inputDir})
+	cmd.SetArgs([]string{"records", "add", "--date", "2025-06-15", inputDir})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("add --date failed: %v", err)
@@ -143,7 +143,7 @@ func TestAddCommandWithProjectFlag(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"add", "--project", "my-proj", inputDir})
+	cmd.SetArgs([]string{"records", "add", "--project", "my-proj", inputDir})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("add --project failed: %v", err)
@@ -167,7 +167,7 @@ func TestAddCommandWithFigures(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"add", inputDir})
+	cmd.SetArgs([]string{"records", "add", inputDir})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("add with figures failed: %v", err)
@@ -190,7 +190,7 @@ func TestAddCommandWithDataFiles(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"add", inputDir})
+	cmd.SetArgs([]string{"records", "add", inputDir})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("add with data files failed: %v", err)
@@ -238,7 +238,7 @@ func TestAddCommandInvalidDate(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"add", "--date", "bad", inputDir})
+	cmd.SetArgs([]string{"records", "add", "--date", "bad", inputDir})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -258,7 +258,7 @@ func TestAddCommandMissingRecordHTMLStoresNull(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"add", emptyDir})
+	cmd.SetArgs([]string{"records", "add", emptyDir})
 
 	err := cmd.Execute()
 	if err != nil {
@@ -333,7 +333,7 @@ func TestAddCommandMutuallyExclusiveFlags(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"add", "--first", "--last", inputDir})
+	cmd.SetArgs([]string{"records", "add", "--first", "--last", inputDir})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -353,7 +353,7 @@ func TestAddCommandPositionFirst(t *testing.T) {
 	})
 	stdout1 := &bytes.Buffer{}
 	cmd1 := NewRootCommand(RootCommandOptions{Stdout: stdout1, Stderr: &bytes.Buffer{}})
-	cmd1.SetArgs([]string{"add", "--date", "2025-07-01", inputDir1})
+	cmd1.SetArgs([]string{"records", "add", "--date", "2025-07-01", inputDir1})
 	if err := cmd1.Execute(); err != nil {
 		t.Fatalf("add record 1 failed: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestAddCommandPositionFirst(t *testing.T) {
 	})
 	stdout2 := &bytes.Buffer{}
 	cmd2 := NewRootCommand(RootCommandOptions{Stdout: stdout2, Stderr: &bytes.Buffer{}})
-	cmd2.SetArgs([]string{"add", "--first", "--date", "2025-07-01", inputDir2})
+	cmd2.SetArgs([]string{"records", "add", "--first", "--date", "2025-07-01", inputDir2})
 	if err := cmd2.Execute(); err != nil {
 		t.Fatalf("add record 2 --first failed: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestAddCommandNoArgs(t *testing.T) {
 	stdout := &bytes.Buffer{}
 	stderr := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
-	cmd.SetArgs([]string{"add"})
+	cmd.SetArgs([]string{"records", "add"})
 
 	err := cmd.Execute()
 	if err == nil {
@@ -598,7 +598,7 @@ func TestComputeDayOrderAfterNotFound(t *testing.T) {
 	}
 	writeDefaultProvenanceMetadata(t, dir)
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", "--date", "2025-05-06", "--after", "nonexistent-id", dir})
+	cmd.SetArgs([]string{"records", "add", "--date", "2025-05-06", "--after", "nonexistent-id", dir})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for --after nonexistent")
@@ -618,7 +618,7 @@ func TestComputeDayOrderBeforeNotFound(t *testing.T) {
 	}
 	writeDefaultProvenanceMetadata(t, dir)
 	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"add", "--date", "2025-05-07", "--before", "nonexistent-id", dir})
+	cmd.SetArgs([]string{"records", "add", "--date", "2025-05-07", "--before", "nonexistent-id", dir})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected error for --before nonexistent")

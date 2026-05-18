@@ -291,7 +291,7 @@ Run from: repo root
 ./scripts/check_schema_equivalence.sh
 ```
 Run from: repo root
-Notes: Compares `schema/schema.sql` (Postgres) and `cli/internal/sqlite/sqlite_schema.sql` (SQLite) for structural equivalence — tables, columns, indexes, UNIQUE constraints. Does not compare dialect-specific syntax (types, CHECK expressions, triggers). Runs in CI.
+Notes: Compares `schema/schema.sql` (Postgres) and `cli/internal/sqlite/sqlite_schema.sql` (SQLite) for structural equivalence — tables, columns, indexes, UNIQUE constraints, and search-index structures. Does not compare dialect-specific syntax (types, CHECK expressions, non-search triggers). Runs in CI.
 
 - Verify canonical schema contract for both workspaces
 ```bash

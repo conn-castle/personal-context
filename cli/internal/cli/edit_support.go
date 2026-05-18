@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/conn-castle/personal-context/cli/internal/recordio"
+	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
 type editExistingAssets struct {
@@ -24,7 +24,7 @@ type stagedEditInput struct {
 }
 
 type editMutationState struct {
-	recordUpdated       bool
+	recordUpdated      bool
 	createdFigureIDs   []int64
 	updatedFigures     []repository.RecordFigure
 	deletedFigures     []repository.RecordFigure
@@ -95,7 +95,7 @@ func stageEditInputFiles(id string, input recordio.RecordInput, stack *localStac
 			FinalPath: finalPath,
 		})
 		staged.Figures = append(staged.Figures, repository.CreateRecordFigureInput{
-			RecordID:  id,
+			RecordID: id,
 			Filename: filename,
 			S3Key:    filepath.ToSlash(filepath.Join("figures", id, filename)),
 		})
@@ -120,7 +120,7 @@ func stageEditInputFiles(id string, input recordio.RecordInput, stack *localStac
 			return stagedEditInput{}, fmt.Errorf("hash data file %s: %w", filename, err)
 		}
 		staged.DataFiles = append(staged.DataFiles, repository.CreateRecordDataFileInput{
-			RecordID:  id,
+			RecordID: id,
 			Filename: filename,
 			S3Key:    filepath.ToSlash(filepath.Join("data", id, filename)),
 			Size:     size,
@@ -315,7 +315,7 @@ func (s *editMutationState) rollbackRepository(ctx context.Context, repo reposit
 		}
 		for _, oldFigure := range s.deletedFigures {
 			_, _ = repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-				RecordID:  oldFigure.RecordID,
+				RecordID: oldFigure.RecordID,
 				Filename: oldFigure.Filename,
 				S3Key:    oldFigure.S3Key,
 				AltText:  oldFigure.AltText,
@@ -338,7 +338,7 @@ func (s *editMutationState) rollbackRepository(ctx context.Context, repo reposit
 		}
 		for _, oldDataFile := range s.deletedDataFiles {
 			_, _ = repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-				RecordID:     oldDataFile.RecordID,
+				RecordID:    oldDataFile.RecordID,
 				Filename:    oldDataFile.Filename,
 				S3Key:       oldDataFile.S3Key,
 				Size:        oldDataFile.Size,

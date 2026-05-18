@@ -83,6 +83,22 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE INDEX IF NOT EXISTS idx_devices_user ON devices (user_id);
 CREATE INDEX IF NOT EXISTS idx_devices_archived ON devices (archived_at) WHERE archived_at IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS project_paths (
+    id              SERIAL PRIMARY KEY,
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    project_id      TEXT NOT NULL,
+    path            TEXT NOT NULL CHECK (length(path) > 0),
+    device_id       TEXT NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (user_id, project_id) REFERENCES projects(user_id, id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id, device_id) REFERENCES devices(user_id, id) ON DELETE RESTRICT,
+    UNIQUE (user_id, project_id, path, device_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_paths_project ON project_paths (project_id);
+CREATE INDEX IF NOT EXISTS idx_project_paths_device ON project_paths (device_id);
+
 CREATE TABLE IF NOT EXISTS records (
     id              TEXT PRIMARY KEY CHECK (id ~ '^\d{8}-[0-9a-f]{8}$'),
     user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,  -- Postgres only; absent in SQLite
@@ -95,6 +111,9 @@ CREATE TABLE IF NOT EXISTS records (
     source_ref      TEXT,
     git_remote_url  TEXT,                           -- e.g. 'https://github.com/org/repo'
     git_hash        TEXT CHECK (git_hash ~ '^[0-9a-f]{40}$'),  -- full SHA-1 commit hash (40 hex chars)
+    search_vector   TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('pg_catalog.simple'::regconfig, COALESCE(notes, '') || ' ' || COALESCE(html_content, ''))
+    ) STORED,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     deleted_at      TIMESTAMPTZ,                    -- NULL = active, non-NULL = soft deleted
@@ -108,6 +127,59 @@ CREATE INDEX IF NOT EXISTS idx_records_project ON records (project_id);
 CREATE INDEX IF NOT EXISTS idx_records_source_device ON records (source_device_id);
 CREATE INDEX IF NOT EXISTS idx_records_updated ON records (updated_at);
 CREATE INDEX IF NOT EXISTS idx_records_deleted ON records (deleted_at) WHERE deleted_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_records_fts ON records USING GIN (search_vector);
+
+CREATE TABLE IF NOT EXISTS chat_session (
+    id              TEXT PRIMARY KEY CHECK (id ~ '^\d{8}-[0-9a-f]{8}$'),
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source          TEXT NOT NULL CHECK (length(source) > 0),
+    source_session_id TEXT NOT NULL CHECK (length(source_session_id) > 0),
+    source_device_id TEXT NOT NULL,
+    project_id      TEXT,
+    cwd             TEXT,
+    title           TEXT,
+    started_at      TIMESTAMPTZ NOT NULL,
+    last_activity_at TIMESTAMPTZ NOT NULL,
+    original_source_path TEXT,
+    raw_source_key  TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at      TIMESTAMPTZ,
+    FOREIGN KEY (user_id, source_device_id) REFERENCES devices(user_id, id) ON DELETE RESTRICT,
+    FOREIGN KEY (user_id, project_id) REFERENCES projects(user_id, id) ON DELETE SET NULL (project_id),
+    UNIQUE (user_id, source, source_session_id),
+    CONSTRAINT chat_session_raw_source_key_shape CHECK (
+        raw_source_key IS NULL
+        OR raw_source_key = 'chats/raw/' || id || '/source.json'
+        OR raw_source_key = 'chats/raw/' || id || '/source.jsonl'
+        OR raw_source_key = 'chats/raw/' || id || '/source.ndjson'
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_session_project ON chat_session (project_id);
+CREATE INDEX IF NOT EXISTS idx_chat_session_source ON chat_session (source, source_session_id);
+CREATE INDEX IF NOT EXISTS idx_chat_session_device ON chat_session (source_device_id);
+CREATE INDEX IF NOT EXISTS idx_chat_session_activity ON chat_session (last_activity_at);
+CREATE INDEX IF NOT EXISTS idx_chat_session_deleted ON chat_session (deleted_at) WHERE deleted_at IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS chat_item (
+    id              SERIAL PRIMARY KEY,
+    session_id      TEXT NOT NULL REFERENCES chat_session(id) ON DELETE CASCADE,
+    ordinal         INTEGER NOT NULL CHECK (ordinal >= 0),
+    role            TEXT NOT NULL CHECK (length(role) > 0),
+    item_type       TEXT NOT NULL CHECK (length(item_type) > 0),
+    text            TEXT,
+    search_text     TEXT NOT NULL DEFAULT '',
+    raw_json        TEXT,
+    search_vector   TSVECTOR GENERATED ALWAYS AS (
+        to_tsvector('pg_catalog.simple'::regconfig, search_text)
+    ) STORED,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (session_id, ordinal)
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_item_session ON chat_item (session_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_chat_item_fts ON chat_item USING GIN (search_vector);
 
 CREATE TABLE IF NOT EXISTS record_figures (
     id              SERIAL PRIMARY KEY,
@@ -168,8 +240,10 @@ BEGIN
         _user_id := COALESCE(NEW.user_id, OLD.user_id);
     ELSIF TG_TABLE_NAME IN ('record_figures', 'record_data_files') THEN
         SELECT user_id INTO _user_id FROM records WHERE id = COALESCE(NEW.record_id, OLD.record_id);
-    ELSIF TG_TABLE_NAME IN ('projects', 'devices') THEN
+    ELSIF TG_TABLE_NAME IN ('projects', 'devices', 'project_paths', 'chat_session') THEN
         _user_id := COALESCE(NEW.user_id, OLD.user_id);
+    ELSIF TG_TABLE_NAME = 'chat_item' THEN
+        SELECT user_id INTO _user_id FROM chat_session WHERE id = COALESCE(NEW.session_id, OLD.session_id);
     ELSIF TG_TABLE_NAME = 'templates' THEN
         -- Templates are shared; create or bump every user's sync_version.
         INSERT INTO sync_version (user_id, version, updated_at)
@@ -329,6 +403,84 @@ CREATE TRIGGER devices_sync_bump_after_delete
     AFTER DELETE ON devices
     FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
 
+DROP TRIGGER IF EXISTS project_paths_sync_bump_after_insert ON project_paths;
+CREATE TRIGGER project_paths_sync_bump_after_insert
+    AFTER INSERT ON project_paths
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS project_paths_sync_bump_after_update ON project_paths;
+CREATE TRIGGER project_paths_sync_bump_after_update
+    AFTER UPDATE ON project_paths
+    FOR EACH ROW
+    WHEN (
+        OLD.project_id IS DISTINCT FROM NEW.project_id OR
+        OLD.path IS DISTINCT FROM NEW.path OR
+        OLD.device_id IS DISTINCT FROM NEW.device_id OR
+        OLD.created_at IS DISTINCT FROM NEW.created_at OR
+        OLD.updated_at IS DISTINCT FROM NEW.updated_at
+    )
+    EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS project_paths_sync_bump_after_delete ON project_paths;
+CREATE TRIGGER project_paths_sync_bump_after_delete
+    AFTER DELETE ON project_paths
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS chat_session_sync_bump_after_insert ON chat_session;
+CREATE TRIGGER chat_session_sync_bump_after_insert
+    AFTER INSERT ON chat_session
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS chat_session_sync_bump_after_update ON chat_session;
+CREATE TRIGGER chat_session_sync_bump_after_update
+    AFTER UPDATE ON chat_session
+    FOR EACH ROW
+    WHEN (
+        OLD.id IS DISTINCT FROM NEW.id OR
+        OLD.source IS DISTINCT FROM NEW.source OR
+        OLD.source_session_id IS DISTINCT FROM NEW.source_session_id OR
+        OLD.source_device_id IS DISTINCT FROM NEW.source_device_id OR
+        OLD.project_id IS DISTINCT FROM NEW.project_id OR
+        OLD.cwd IS DISTINCT FROM NEW.cwd OR
+        OLD.title IS DISTINCT FROM NEW.title OR
+        OLD.started_at IS DISTINCT FROM NEW.started_at OR
+        OLD.last_activity_at IS DISTINCT FROM NEW.last_activity_at OR
+        OLD.original_source_path IS DISTINCT FROM NEW.original_source_path OR
+        OLD.raw_source_key IS DISTINCT FROM NEW.raw_source_key OR
+        OLD.deleted_at IS DISTINCT FROM NEW.deleted_at
+    )
+    EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS chat_session_sync_bump_after_delete ON chat_session;
+CREATE TRIGGER chat_session_sync_bump_after_delete
+    AFTER DELETE ON chat_session
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS chat_item_sync_bump_after_insert ON chat_item;
+CREATE TRIGGER chat_item_sync_bump_after_insert
+    AFTER INSERT ON chat_item
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS chat_item_sync_bump_after_update ON chat_item;
+CREATE TRIGGER chat_item_sync_bump_after_update
+    AFTER UPDATE ON chat_item
+    FOR EACH ROW
+    WHEN (
+        OLD.session_id IS DISTINCT FROM NEW.session_id OR
+        OLD.ordinal IS DISTINCT FROM NEW.ordinal OR
+        OLD.role IS DISTINCT FROM NEW.role OR
+        OLD.item_type IS DISTINCT FROM NEW.item_type OR
+        OLD.text IS DISTINCT FROM NEW.text OR
+        OLD.search_text IS DISTINCT FROM NEW.search_text OR
+        OLD.raw_json IS DISTINCT FROM NEW.raw_json
+    )
+    EXECUTE FUNCTION bump_sync_version();
+
+DROP TRIGGER IF EXISTS chat_item_sync_bump_after_delete ON chat_item;
+CREATE TRIGGER chat_item_sync_bump_after_delete
+    AFTER DELETE ON chat_item
+    FOR EACH ROW EXECUTE FUNCTION bump_sync_version();
+
 -- ---------------------------------------------------------------------------
 -- Auto-update updated_at on row modification.
 -- When a normal UPDATE does not explicitly set updated_at, the trigger bumps
@@ -370,4 +522,14 @@ CREATE TRIGGER projects_auto_updated_at
 DROP TRIGGER IF EXISTS devices_auto_updated_at ON devices;
 CREATE TRIGGER devices_auto_updated_at
     BEFORE UPDATE ON devices
+    FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
+
+DROP TRIGGER IF EXISTS project_paths_auto_updated_at ON project_paths;
+CREATE TRIGGER project_paths_auto_updated_at
+    BEFORE UPDATE ON project_paths
+    FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();
+
+DROP TRIGGER IF EXISTS chat_session_auto_updated_at ON chat_session;
+CREATE TRIGGER chat_session_auto_updated_at
+    BEFORE UPDATE ON chat_session
     FOR EACH ROW EXECUTE FUNCTION auto_update_updated_at();

@@ -21,7 +21,7 @@ func TestFullLocalWorkflow(t *testing.T) {
 		Notes:        "First record notes",
 		MetadataJSON: `{"project_id":"workflow/test","source_device_id":"test-device"}`,
 	})
-	stdout := runPCSuccess(t, homeDir, "add", folder1, "--date", "2025-01-15")
+	stdout := runPCSuccess(t, homeDir, "records", "add", folder1, "--date", "2025-01-15")
 	record1 := strings.TrimSpace(stdout)
 
 	// Verify record1 has its explicit project.
@@ -40,7 +40,7 @@ func TestFullLocalWorkflow(t *testing.T) {
 		Notes:        "Second record notes",
 		MetadataJSON: `{"project_id":"other/proj","source_device_id":"test-device"}`,
 	})
-	stdout = runPCSuccess(t, homeDir, "add", "--project", "other/proj", folder2, "--date", "2025-01-16")
+	stdout = runPCSuccess(t, homeDir, "records", "add", "--project", "other/proj", folder2, "--date", "2025-01-16")
 	record2 := strings.TrimSpace(stdout)
 
 	// 4. pc add record3 (date 2025-01-15, same date as record1)
@@ -49,7 +49,7 @@ func TestFullLocalWorkflow(t *testing.T) {
 		Figures:      map[string][]byte{"chart.png": []byte("fake-png-data")},
 		MetadataJSON: `{"project_id":"workflow/test","source_device_id":"test-device"}`,
 	})
-	stdout = runPCSuccess(t, homeDir, "add", folder3, "--date", "2025-01-15")
+	stdout = runPCSuccess(t, homeDir, "records", "add", folder3, "--date", "2025-01-15")
 	record3 := strings.TrimSpace(stdout)
 
 	// 6. pc search "neural" -- should find record1
@@ -63,16 +63,12 @@ func TestFullLocalWorkflow(t *testing.T) {
 
 	// 7. pc search --format json "Record" -- should find all 3
 	stdout = runPCSuccess(t, homeDir, "search", "--format", "json", "Record")
-	var searchPage struct {
-		Items      []map[string]interface{} `json:"items"`
-		Total      int                      `json:"total"`
-		NextCursor *string                  `json:"next_cursor"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &searchPage); err != nil {
+	var searchResults []map[string]interface{}
+	if err := json.Unmarshal([]byte(stdout), &searchResults); err != nil {
 		t.Fatalf("parse search json: %v", err)
 	}
-	if searchPage.Total != 3 || len(searchPage.Items) != 3 || searchPage.NextCursor != nil {
-		t.Fatalf("expected 3-result search envelope, got %+v", searchPage)
+	if len(searchResults) != 3 {
+		t.Fatalf("expected 3 search results, got %+v", searchResults)
 	}
 
 	// 8. pc search --project "other/proj" "Record" -- should find only record2
@@ -89,7 +85,7 @@ func TestFullLocalWorkflow(t *testing.T) {
 		HTMLContent:  "<html><body>Updated record one content</body></html>",
 		MetadataJSON: `{"project_id":"workflow/test","source_device_id":"test-device"}`,
 	})
-	runPCSuccess(t, homeDir, "edit", record1, editFolder)
+	runPCSuccess(t, homeDir, "records", "edit", record1, editFolder)
 
 	// 10. pc search "Updated" -- should find record1
 	stdout = runPCSuccess(t, homeDir, "search", "Updated")
@@ -98,10 +94,10 @@ func TestFullLocalWorkflow(t *testing.T) {
 	}
 
 	// 11. pc move record3 to different date
-	runPCSuccess(t, homeDir, "move", record3, "--date", "2025-01-16")
+	runPCSuccess(t, homeDir, "records", "move", record3, "--date", "2025-01-16")
 
 	// 12. pc delete record2
-	runPCSuccess(t, homeDir, "delete", record2)
+	runPCSuccess(t, homeDir, "records", "delete", record2)
 
 	// 13. pc trash -- should show record2
 	stdout = runPCSuccess(t, homeDir, "trash")

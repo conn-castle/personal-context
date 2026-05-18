@@ -670,6 +670,25 @@ func TestBackupExistingFileForEditMissingDestination(t *testing.T) {
 	}
 }
 
+func TestStageReplacementFileErrorBranches(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, err := stageReplacementFile(filepath.Join(dir, "dest.txt"), filepath.Join(dir, "missing.txt")); err == nil {
+		t.Fatal("expected missing source file to fail")
+	}
+
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write blocker: %v", err)
+	}
+	source := filepath.Join(dir, "source.txt")
+	if err := os.WriteFile(source, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	if _, _, err := stageReplacementFile(filepath.Join(blocker, "dest.txt"), source); err == nil {
+		t.Fatal("expected destination parent creation to fail")
+	}
+}
+
 func TestBackupExistingFileForEditMovesExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	finalPath := filepath.Join(dir, "dest.txt")

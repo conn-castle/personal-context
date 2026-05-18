@@ -1,6 +1,7 @@
 package gitsnapshot
 
 import (
+	"bufio"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -15,14 +16,21 @@ import (
 	"time"
 )
 
+// FormatVersion is the record/global snapshot format version.
 const FormatVersion = 1
+
+// ChatFormatVersion is the chat metadata format version. v2 renamed source_path
+// to original_source_path and added raw_source_key; v1 chat metadata is
+// intentionally rejected on import (clean-cut pre-release schema change).
+const ChatFormatVersion = 2
 
 // Snapshot is the deterministic git-export representation of Personal Context data.
 type Snapshot struct {
 	Templates []Template
 	Projects  []RegistryEntry
 	Devices   []RegistryEntry
-	Records    []Record
+	Records   []Record
+	Chats     []ChatSession
 }
 
 // Template is an exported HTML template file.
@@ -74,6 +82,36 @@ type DataFile struct {
 	Description *string
 }
 
+// ChatSession is an exported chat directory with metadata and normalized items.
+type ChatSession struct {
+	ID                 string
+	Source             string
+	SourceSessionID    string
+	SourceDeviceID     string
+	ProjectID          *string
+	CWD                *string
+	Title              *string
+	StartedAt          time.Time
+	LastActivityAt     time.Time
+	OriginalSourcePath *string
+	RawSourceKey       *string
+	RawSourceContent   []byte
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	Items              []ChatItem
+}
+
+// ChatItem is a normalized exported chat item.
+type ChatItem struct {
+	Ordinal    int
+	Role       string
+	ItemType   string
+	Text       *string
+	SearchText string
+	RawJSON    *string
+	CreatedAt  time.Time
+}
+
 type metadataFile struct {
 	FormatVersion  int          `json:"format_version"`
 	ID             string       `json:"id"`
@@ -112,6 +150,36 @@ type dataFile struct {
 	Description *string `json:"description"`
 }
 
+type chatMetadataFile struct {
+	FormatVersion      int     `json:"format_version"`
+	ID                 string  `json:"id"`
+	Source             string  `json:"source"`
+	SourceSessionID    string  `json:"source_session_id"`
+	SourceDeviceID     string  `json:"source_device_id"`
+	ProjectID          *string `json:"project_id,omitempty"`
+	CWD                *string `json:"cwd,omitempty"`
+	Title              *string `json:"title,omitempty"`
+	StartedAt          string  `json:"started_at"`
+	LastActivityAt     string  `json:"last_activity_at"`
+	OriginalSourcePath *string `json:"original_source_path,omitempty"`
+	RawSourceKey       *string `json:"raw_source_key,omitempty"`
+	// SourcePathLegacy is populated when decoding a v1 snapshot; it triggers an
+	// import-time rejection so legacy snapshots are not silently re-imported.
+	SourcePathLegacy *string `json:"source_path,omitempty"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
+}
+
+type chatItemFile struct {
+	Ordinal    int     `json:"ordinal"`
+	Role       string  `json:"role"`
+	ItemType   string  `json:"item_type"`
+	Text       *string `json:"text,omitempty"`
+	SearchText string  `json:"search_text"`
+	RawJSON    *string `json:"raw_json,omitempty"`
+	CreatedAt  string  `json:"created_at"`
+}
+
 var lfsPointerPattern = regexp.MustCompile(`(?s)\Aversion https://git-lfs\.github\.com/spec/v1\r?\noid sha256:[0-9a-fA-F]{64}\r?\nsize [0-9]+\r?\n?\z`)
 
 type tempFile interface {
@@ -131,7 +199,9 @@ var (
 	chmodFileFn  = os.Chmod
 )
 
-// Write replaces the export subdirectories under root with a deterministic snapshot.
+var managedSnapshotEntries = []string{"projects.json", "devices.json", "templates", "records", "chats"}
+
+// Write stages a deterministic snapshot, then replaces the managed export entries under root.
 func Write(root string, snapshot Snapshot) error {
 	if strings.TrimSpace(root) == "" {
 		return fmt.Errorf("root path is required")
@@ -139,22 +209,28 @@ func Write(root string, snapshot Snapshot) error {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return fmt.Errorf("create export root: %w", err)
 	}
+	stagingDir, err := os.MkdirTemp(root, ".snapshot-staging-*")
+	if err != nil {
+		return fmt.Errorf("create staging snapshot dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(stagingDir) }()
+
+	if err := writeSnapshotContents(stagingDir, snapshot); err != nil {
+		return err
+	}
+	if err := replaceSnapshotContents(root, stagingDir); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func writeSnapshotContents(root string, snapshot Snapshot) error {
 	templatesDir := filepath.Join(root, "templates")
 	recordsDir := filepath.Join(root, "records")
+	chatsDir := filepath.Join(root, "chats")
 	projectsPath := filepath.Join(root, "projects.json")
 	devicesPath := filepath.Join(root, "devices.json")
-	if err := os.Remove(projectsPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("reset projects.json: %w", err)
-	}
-	if err := os.Remove(devicesPath); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("reset devices.json: %w", err)
-	}
-	if err := os.RemoveAll(templatesDir); err != nil {
-		return fmt.Errorf("reset templates dir: %w", err)
-	}
-	if err := os.RemoveAll(recordsDir); err != nil {
-		return fmt.Errorf("reset records dir: %w", err)
-	}
 	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
 		return fmt.Errorf("create templates dir: %w", err)
 	}
@@ -266,6 +342,85 @@ func Write(root string, snapshot Snapshot) error {
 		}
 	}
 
+	chats := append([]ChatSession(nil), snapshot.Chats...)
+	sort.Slice(chats, func(i, j int) bool {
+		if !chats[i].LastActivityAt.Equal(chats[j].LastActivityAt) {
+			return chats[i].LastActivityAt.Before(chats[j].LastActivityAt)
+		}
+		return chats[i].ID < chats[j].ID
+	})
+	if len(chats) > 0 {
+		if err := os.MkdirAll(chatsDir, 0o755); err != nil {
+			return fmt.Errorf("create chats dir: %w", err)
+		}
+	}
+	for _, chat := range chats {
+		if err := validatePathSegment("chat id", chat.ID); err != nil {
+			return err
+		}
+		chatDir := filepath.Join(chatsDir, chat.ID)
+		if err := os.MkdirAll(chatDir, 0o755); err != nil {
+			return fmt.Errorf("create chat dir %s: %w", chat.ID, err)
+		}
+		metadataBytes, err := json.MarshalIndent(chatMetadataFile{
+			FormatVersion:      ChatFormatVersion,
+			ID:                 chat.ID,
+			Source:             chat.Source,
+			SourceSessionID:    chat.SourceSessionID,
+			SourceDeviceID:     chat.SourceDeviceID,
+			ProjectID:          chat.ProjectID,
+			CWD:                chat.CWD,
+			Title:              chat.Title,
+			StartedAt:          chat.StartedAt.UTC().Format(time.RFC3339Nano),
+			LastActivityAt:     chat.LastActivityAt.UTC().Format(time.RFC3339Nano),
+			OriginalSourcePath: chat.OriginalSourcePath,
+			RawSourceKey:       chat.RawSourceKey,
+			CreatedAt:          chat.CreatedAt.UTC().Format(time.RFC3339Nano),
+			UpdatedAt:          chat.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		}, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal chat metadata for %s: %w", chat.ID, err)
+		}
+		metadataBytes = append(metadataBytes, '\n')
+		if err := writeFile(filepath.Join(chatDir, "metadata.json"), metadataBytes); err != nil {
+			return fmt.Errorf("write chat metadata for %s: %w", chat.ID, err)
+		}
+		items := append([]ChatItem(nil), chat.Items...)
+		sort.Slice(items, func(i, j int) bool { return items[i].Ordinal < items[j].Ordinal })
+		var itemBytes []byte
+		for _, item := range items {
+			line, err := json.Marshal(chatItemFile{
+				Ordinal:    item.Ordinal,
+				Role:       item.Role,
+				ItemType:   item.ItemType,
+				Text:       item.Text,
+				SearchText: item.SearchText,
+				RawJSON:    item.RawJSON,
+				CreatedAt:  item.CreatedAt.UTC().Format(time.RFC3339Nano),
+			})
+			if err != nil {
+				return fmt.Errorf("marshal chat item %s/%d: %w", chat.ID, item.Ordinal, err)
+			}
+			itemBytes = append(itemBytes, line...)
+			itemBytes = append(itemBytes, '\n')
+		}
+		if err := writeFile(filepath.Join(chatDir, "items.jsonl"), itemBytes); err != nil {
+			return fmt.Errorf("write chat items for %s: %w", chat.ID, err)
+		}
+		if chat.RawSourceKey != nil {
+			if len(chat.RawSourceContent) == 0 {
+				return fmt.Errorf("chat %s raw_source_key is set but raw source content is empty", chat.ID)
+			}
+			rawName, err := rawSourceExportFilename(chat.ID, *chat.RawSourceKey)
+			if err != nil {
+				return fmt.Errorf("chat %s raw source key: %w", chat.ID, err)
+			}
+			if err := writeFile(filepath.Join(chatDir, rawName), chat.RawSourceContent); err != nil {
+				return fmt.Errorf("write chat raw source for %s: %w", chat.ID, err)
+			}
+		}
+	}
+
 	if err := writeRegistryFile(projectsPath, snapshot.Projects); err != nil {
 		return fmt.Errorf("write projects.json: %w", err)
 	}
@@ -274,6 +429,77 @@ func Write(root string, snapshot Snapshot) error {
 	}
 
 	return nil
+}
+
+func replaceSnapshotContents(root string, stagingRoot string) error {
+	backupDir, err := os.MkdirTemp(root, ".snapshot-backup-*")
+	if err != nil {
+		return fmt.Errorf("create snapshot backup dir: %w", err)
+	}
+	cleanupBackup := true
+	defer func() {
+		if cleanupBackup {
+			_ = os.RemoveAll(backupDir)
+		}
+	}()
+
+	movedExisting := make([]string, 0, len(managedSnapshotEntries))
+	promoted := make([]string, 0, len(managedSnapshotEntries))
+	for _, name := range managedSnapshotEntries {
+		target := filepath.Join(root, name)
+		if _, err := os.Lstat(target); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, fmt.Errorf("inspect existing %s: %w", name, err), &cleanupBackup)
+		}
+		if err := renameFileFn(target, filepath.Join(backupDir, name)); err != nil {
+			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, fmt.Errorf("backup existing %s: %w", name, err), &cleanupBackup)
+		}
+		movedExisting = append(movedExisting, name)
+	}
+
+	for _, name := range managedSnapshotEntries {
+		staged := filepath.Join(stagingRoot, name)
+		if _, err := os.Lstat(staged); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, fmt.Errorf("inspect staged %s: %w", name, err), &cleanupBackup)
+		}
+		if err := renameFileFn(staged, filepath.Join(root, name)); err != nil {
+			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, fmt.Errorf("promote staged %s: %w", name, err), &cleanupBackup)
+		}
+		promoted = append(promoted, name)
+	}
+
+	return nil
+}
+
+func restoreSnapshotContents(root string, backupDir string, movedExisting []string, promoted []string, cause error, cleanupBackup *bool) error {
+	restoreErrors := make([]string, 0)
+	for i := len(promoted) - 1; i >= 0; i-- {
+		name := promoted[i]
+		if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
+			restoreErrors = append(restoreErrors, fmt.Sprintf("remove promoted %s: %v", name, err))
+		}
+	}
+	for i := len(movedExisting) - 1; i >= 0; i-- {
+		name := movedExisting[i]
+		target := filepath.Join(root, name)
+		if err := os.RemoveAll(target); err != nil {
+			restoreErrors = append(restoreErrors, fmt.Sprintf("clear target %s: %v", name, err))
+			continue
+		}
+		if err := renameFileFn(filepath.Join(backupDir, name), target); err != nil {
+			restoreErrors = append(restoreErrors, fmt.Sprintf("restore %s: %v", name, err))
+		}
+	}
+	if len(restoreErrors) > 0 {
+		*cleanupBackup = false
+		return fmt.Errorf("%w; failed to restore previous snapshot state from %s: %s", cause, backupDir, strings.Join(restoreErrors, "; "))
+	}
+	return cause
 }
 
 // Read loads and validates a snapshot from disk.
@@ -297,7 +523,11 @@ func Read(root string) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("read devices.json: %w", err)
 	}
-	return Snapshot{Templates: templates, Projects: projects, Devices: devices, Records: records}, nil
+	chats, err := readChats(filepath.Join(root, "chats"))
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return Snapshot{Templates: templates, Projects: projects, Devices: devices, Records: records, Chats: chats}, nil
 }
 
 // Manifest returns a deterministic listing of the snapshot tree for byte-for-byte comparisons.
@@ -473,6 +703,169 @@ func readRecords(dir string) ([]Record, error) {
 		return records[i].ID < records[j].ID
 	})
 	return records, nil
+}
+
+func readChats(dir string) ([]ChatSession, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read chats dir: %w", err)
+	}
+	chats := make([]ChatSession, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			return nil, fmt.Errorf("unexpected file in chats export: %s", entry.Name())
+		}
+		chat, err := readChat(filepath.Join(dir, entry.Name()), entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		chats = append(chats, chat)
+	}
+	sort.Slice(chats, func(i, j int) bool {
+		if !chats[i].LastActivityAt.Equal(chats[j].LastActivityAt) {
+			return chats[i].LastActivityAt.Before(chats[j].LastActivityAt)
+		}
+		return chats[i].ID < chats[j].ID
+	})
+	return chats, nil
+}
+
+func readChat(dir string, chatID string) (ChatSession, error) {
+	if err := validatePathSegment("chat id", chatID); err != nil {
+		return ChatSession{}, err
+	}
+	metadataBytes, err := os.ReadFile(filepath.Join(dir, "metadata.json"))
+	if err != nil {
+		return ChatSession{}, fmt.Errorf("read chat metadata for %s: %w", chatID, err)
+	}
+	var metadata chatMetadataFile
+	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
+		return ChatSession{}, fmt.Errorf("parse chat metadata for %s: %w", chatID, err)
+	}
+	if metadata.FormatVersion != ChatFormatVersion {
+		return ChatSession{}, fmt.Errorf("unsupported chat format_version %d for %s (expected %d)", metadata.FormatVersion, chatID, ChatFormatVersion)
+	}
+	if metadata.SourcePathLegacy != nil {
+		return ChatSession{}, fmt.Errorf("chat %s metadata contains legacy source_path; re-export with current format", chatID)
+	}
+	if metadata.ID != chatID {
+		return ChatSession{}, fmt.Errorf("chat metadata id %s does not match dir %s", metadata.ID, chatID)
+	}
+	startedAt, err := time.Parse(time.RFC3339Nano, metadata.StartedAt)
+	if err != nil {
+		return ChatSession{}, fmt.Errorf("parse started_at for chat %s: %w", chatID, err)
+	}
+	lastActivityAt, err := time.Parse(time.RFC3339Nano, metadata.LastActivityAt)
+	if err != nil {
+		return ChatSession{}, fmt.Errorf("parse last_activity_at for chat %s: %w", chatID, err)
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, metadata.CreatedAt)
+	if err != nil {
+		return ChatSession{}, fmt.Errorf("parse created_at for chat %s: %w", chatID, err)
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, metadata.UpdatedAt)
+	if err != nil {
+		return ChatSession{}, fmt.Errorf("parse updated_at for chat %s: %w", chatID, err)
+	}
+	items, err := readChatItems(filepath.Join(dir, "items.jsonl"), chatID)
+	if err != nil {
+		return ChatSession{}, err
+	}
+	var rawSourceContent []byte
+	if metadata.RawSourceKey != nil {
+		rawName, err := rawSourceExportFilename(chatID, *metadata.RawSourceKey)
+		if err != nil {
+			return ChatSession{}, fmt.Errorf("chat %s raw source key: %w", chatID, err)
+		}
+		rawSourceContent, err = os.ReadFile(filepath.Join(dir, rawName))
+		if err != nil {
+			return ChatSession{}, fmt.Errorf("read chat raw source for %s: %w", chatID, err)
+		}
+	}
+	return ChatSession{
+		ID:                 chatID,
+		Source:             metadata.Source,
+		SourceSessionID:    metadata.SourceSessionID,
+		SourceDeviceID:     metadata.SourceDeviceID,
+		ProjectID:          metadata.ProjectID,
+		CWD:                metadata.CWD,
+		Title:              metadata.Title,
+		StartedAt:          startedAt.UTC(),
+		LastActivityAt:     lastActivityAt.UTC(),
+		OriginalSourcePath: metadata.OriginalSourcePath,
+		RawSourceKey:       metadata.RawSourceKey,
+		RawSourceContent:   rawSourceContent,
+		CreatedAt:          createdAt.UTC(),
+		UpdatedAt:          updatedAt.UTC(),
+		Items:              items,
+	}, nil
+}
+
+func rawSourceExportFilename(chatID string, rawSourceKey string) (string, error) {
+	parts := strings.Split(rawSourceKey, "/")
+	if len(parts) != 4 || parts[0] != "chats" || parts[1] != "raw" {
+		return "", fmt.Errorf("expected chats/raw/{chat_session_id}/source.{json|jsonl|ndjson}, got %q", rawSourceKey)
+	}
+	if parts[2] != chatID {
+		return "", fmt.Errorf("raw source key chat id %q does not match snapshot chat %q", parts[2], chatID)
+	}
+	name := parts[3]
+	switch name {
+	case "source.json", "source.jsonl", "source.ndjson":
+		return name, nil
+	default:
+		return "", fmt.Errorf("expected source.{json|jsonl|ndjson}, got %q", name)
+	}
+}
+
+func readChatItems(path string, chatID string) ([]ChatItem, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("read chat items for %s: %w", chatID, err)
+	}
+	defer func() { _ = file.Close() }()
+	scanner := bufio.NewScanner(file)
+	// 256 MiB matches the chatimport JSONL parser so any item Write produced
+	// can be Read back; the old 10 MiB cap could make a successfully-exported
+	// chat unreadable on import if any item carried a large raw_json/text.
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024*1024)
+	var items []ChatItem
+	seen := map[int]struct{}{}
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var raw chatItemFile
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			return nil, fmt.Errorf("parse chat item for %s: %w", chatID, err)
+		}
+		if _, ok := seen[raw.Ordinal]; ok {
+			return nil, fmt.Errorf("duplicate chat item ordinal %d for %s", raw.Ordinal, chatID)
+		}
+		seen[raw.Ordinal] = struct{}{}
+		createdAt, err := time.Parse(time.RFC3339Nano, raw.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse chat item created_at for %s/%d: %w", chatID, raw.Ordinal, err)
+		}
+		items = append(items, ChatItem{
+			Ordinal:    raw.Ordinal,
+			Role:       raw.Role,
+			ItemType:   raw.ItemType,
+			Text:       raw.Text,
+			SearchText: raw.SearchText,
+			RawJSON:    raw.RawJSON,
+			CreatedAt:  createdAt.UTC(),
+		})
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan chat items for %s: %w", chatID, err)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Ordinal < items[j].Ordinal })
+	return items, nil
 }
 
 func readRecord(dir string, recordID string) (Record, error) {

@@ -33,7 +33,7 @@ func TestExportCommandWritesSnapshot(t *testing.T) {
 	}
 
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", inputDir})
+	addCmd.SetArgs([]string{"records", "add", inputDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestRestoreDBCommandReportsBackupPath(t *testing.T) {
 	writeDefaultProvenanceMetadata(t, inputDir)
 	addOut := &bytes.Buffer{}
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: addOut, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", inputDir})
+	addCmd.SetArgs([]string{"records", "add", inputDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -137,6 +137,47 @@ func TestRestoreDBCommandReportsBackupPath(t *testing.T) {
 	}
 }
 
+func TestRestoreDBReportsBackupPathWhenImportFails(t *testing.T) {
+	homeDir := setupEnv(t)
+	t.Setenv(pcHomeEnvVar, homeDir)
+
+	now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	snapshotDir := t.TempDir()
+	writeSnapshotForCLITest(t, snapshotDir, gitsnapshot.Snapshot{
+		Chats: []gitsnapshot.ChatSession{{
+			ID:              "20260309-cafe0001",
+			Source:          "codex",
+			SourceSessionID: "duplicate-source",
+			SourceDeviceID:  "device/unit",
+			StartedAt:       now,
+			LastActivityAt:  now,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}, {
+			ID:              "20260309-cafe0002",
+			Source:          "codex",
+			SourceSessionID: "duplicate-source",
+			SourceDeviceID:  "device/unit",
+			StartedAt:       now,
+			LastActivityAt:  now,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}},
+	})
+
+	stdout := &bytes.Buffer{}
+	err := runRestoreDB(context.Background(), stdout, &bytes.Buffer{}, snapshotDir)
+	if err == nil || !strings.Contains(err.Error(), "appears multiple times in snapshot") {
+		t.Fatalf("runRestoreDB() error = %v, want duplicate source identity error", err)
+	}
+	if !strings.Contains(stdout.String(), "Backup created at ") {
+		t.Fatalf("restore-db should report backup path before import failure, got %q", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Restore complete") {
+		t.Fatalf("restore-db should not report completion on import failure, got %q", stdout.String())
+	}
+}
+
 func TestVerifyCommandLocalRoundTrip(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("PC_HOME", homeDir)
@@ -158,7 +199,7 @@ func TestVerifyCommandLocalRoundTrip(t *testing.T) {
 	}
 
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", inputDir})
+	addCmd.SetArgs([]string{"records", "add", inputDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -179,6 +220,29 @@ func TestVerifyFromCloudNotConfigured(t *testing.T) {
 	err := runVerify(context.Background(), stdout, &bytes.Buffer{}, true)
 	if err == nil || !strings.Contains(err.Error(), "cloud is not configured") {
 		t.Fatalf("runVerify(fromCloud) error = %v", err)
+	}
+}
+
+func TestVerifyErrorBranches(t *testing.T) {
+	originalResolve := resolveHomeDirFn
+	resolveHomeDirFn = func() (string, error) {
+		return "", errors.New("home failed")
+	}
+	t.Cleanup(func() { resolveHomeDirFn = originalResolve })
+	if err := runVerify(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, false); err == nil || !strings.Contains(err.Error(), "home failed") {
+		t.Fatalf("expected home resolution error, got %v", err)
+	}
+	resolveHomeDirFn = originalResolve
+
+	homeDir := setupEnv(t)
+	origOpenCloud := openCloudStackFn
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
+		return nil, errors.New("cloud failed")
+	}
+	t.Cleanup(func() { openCloudStackFn = origOpenCloud })
+	t.Setenv(pcHomeEnvVar, homeDir)
+	if err := runVerify(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, true); err == nil || !strings.Contains(err.Error(), "open cloud") {
+		t.Fatalf("expected cloud open error, got %v", err)
 	}
 }
 
@@ -446,7 +510,7 @@ func TestBuildCloudSnapshotAndCloudPhase7Commands(t *testing.T) {
 	}
 	writeDefaultProvenanceMetadata(t, inputDir)
 	addCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	addCmd.SetArgs([]string{"add", inputDir})
+	addCmd.SetArgs([]string{"records", "add", inputDir})
 	if err := addCmd.Execute(); err != nil {
 		t.Fatalf("add: %v", err)
 	}

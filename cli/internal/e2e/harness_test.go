@@ -87,11 +87,11 @@ func runPCWithOptions(t *testing.T, homeDir string, opts runOptions, args ...str
 // runPCSuccess runs pc and fails the test if exit code is non-zero.
 func runPCSuccess(t *testing.T, homeDir string, args ...string) string {
 	t.Helper()
-	if len(args) > 0 && args[0] == "add" {
-		ensureRegistryForAdd(t, homeDir, args[1:])
+	if recordArgs, ok := recordCommandArgs(args, "add"); ok {
+		ensureRegistryForAdd(t, homeDir, recordArgs)
 	}
-	if len(args) > 0 && args[0] == "edit" {
-		ensureRegistryForEdit(t, homeDir, args[1:])
+	if recordArgs, ok := recordCommandArgs(args, "edit"); ok {
+		ensureRegistryForEdit(t, homeDir, recordArgs)
 	}
 	result := runPC(t, homeDir, args...)
 	if result.ExitCode != 0 {
@@ -99,6 +99,16 @@ func runPCSuccess(t *testing.T, homeDir string, args ...string) string {
 			args, result.ExitCode, result.Stdout, result.Stderr)
 	}
 	return result.Stdout
+}
+
+func recordCommandArgs(args []string, subcommand string) ([]string, bool) {
+	if len(args) < 2 {
+		return nil, false
+	}
+	if args[0] == "records" && args[1] == subcommand {
+		return args[2:], true
+	}
+	return nil, false
 }
 
 // runPCFailure runs pc and fails the test if exit code is zero.

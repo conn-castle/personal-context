@@ -3,10 +3,12 @@
 #
 # Structural equivalence guard: parses the canonical Postgres schema
 # (schema/schema.sql) and the SQLite schema (cli/internal/sqlite/sqlite_schema.sql),
-# then asserts that both define the same tables, columns, indexes, and unique constraints.
+# then asserts that both define the same tables, columns, indexes, unique
+# constraints, and search-index structures.
 #
-# Dialect differences (type names, CHECK syntax, trigger syntax, IF NOT EXISTS)
-# are expected and ignored. The guard checks structural alignment only.
+# Dialect differences (type names, CHECK syntax, non-search trigger syntax,
+# IF NOT EXISTS) are expected and ignored. SQLite FTS triggers and Postgres
+# TSVECTOR/GIN structures are pinned because they back user-visible search.
 
 set -euo pipefail
 
@@ -30,10 +32,13 @@ errors=0
 POSTGRES_ONLY_TABLES="api_keys users"
 POSTGRES_ONLY_COLUMNS_projects="user_id"
 POSTGRES_ONLY_COLUMNS_devices="user_id"
-POSTGRES_ONLY_COLUMNS_records="user_id"
+POSTGRES_ONLY_COLUMNS_project_paths="user_id"
+POSTGRES_ONLY_COLUMNS_records="user_id search_vector"
+POSTGRES_ONLY_COLUMNS_chat_session="user_id"
+POSTGRES_ONLY_COLUMNS_chat_item="search_vector"
 POSTGRES_ONLY_COLUMNS_sync_version="user_id"
 SQLITE_ONLY_COLUMNS_sync_version="id"
-POSTGRES_ONLY_INDEXES="idx_api_keys_hash idx_api_keys_user idx_devices_user idx_projects_user idx_records_user"
+POSTGRES_ONLY_INDEXES="idx_api_keys_hash idx_api_keys_user idx_devices_user idx_projects_user idx_records_user idx_records_fts idx_chat_item_fts"
 
 # Helper: remove Postgres-only entries from a newline-separated list.
 filter_pg_only() {
@@ -199,6 +204,7 @@ fi
 extract_unique() {
   grep -iE '^\s+UNIQUE\s*\(' "$1" \
     | sed -E 's/[[:space:]]+/ /g; s/^ //; s/,?$//' \
+    | sed -E 's/\(user_id, /\(/g' \
     | tr '[:upper:]' '[:lower:]' \
     | sort
 }
@@ -214,6 +220,36 @@ if [[ "$pg_unique" != "$sq_unique" ]]; then
 else
   uniq_count=$(echo "$pg_unique" | wc -l | tr -d ' ')
   echo "unique constraints: OK ($uniq_count constraints)"
+fi
+
+# ─── Search index structures ─────────────────────────────────────────────────
+# SQLite full-text search uses FTS5 virtual tables and triggers, while Postgres
+# uses generated TSVECTOR columns plus GIN indexes. The generic table/index
+# extraction above intentionally ignores SQLite virtual tables, so pin the
+# search structures explicitly.
+assert_contains() {
+  local file="$1"
+  local pattern="$2"
+  local label="$3"
+  if ! grep -qiE "$pattern" "$file"; then
+    echo "schema equivalence FAILED: missing $label" >&2
+    errors=$((errors + 1))
+  fi
+}
+
+assert_contains "$SQLITE_SCHEMA" '^CREATE[[:space:]]+VIRTUAL[[:space:]]+TABLE[[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+records_fts[[:space:]]+USING[[:space:]]+fts5' "SQLite records_fts virtual table"
+assert_contains "$SQLITE_SCHEMA" '^CREATE[[:space:]]+VIRTUAL[[:space:]]+TABLE[[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+chat_item_fts[[:space:]]+USING[[:space:]]+fts5' "SQLite chat_item_fts virtual table"
+assert_contains "$SQLITE_SCHEMA" '^CREATE[[:space:]]+TRIGGER[[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+records_fts_after_insert' "SQLite records FTS insert trigger"
+assert_contains "$SQLITE_SCHEMA" '^CREATE[[:space:]]+TRIGGER[[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+records_fts_after_update' "SQLite records FTS update trigger"
+assert_contains "$SQLITE_SCHEMA" '^CREATE[[:space:]]+TRIGGER[[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+records_fts_after_delete' "SQLite records FTS delete trigger"
+assert_contains "$SQLITE_SCHEMA" '^CREATE[[:space:]]+TRIGGER[[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+chat_item_fts_after_insert' "SQLite chat item FTS insert trigger"
+assert_contains "$SQLITE_SCHEMA" '^CREATE[[:space:]]+TRIGGER[[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+chat_item_fts_after_update' "SQLite chat item FTS update trigger"
+assert_contains "$SQLITE_SCHEMA" '^CREATE[[:space:]]+TRIGGER[[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+chat_item_fts_after_delete' "SQLite chat item FTS delete trigger"
+assert_contains "$POSTGRES_SCHEMA" 'search_vector[[:space:]]+TSVECTOR' "Postgres search_vector columns"
+assert_contains "$POSTGRES_SCHEMA" '^CREATE[[:space:]]+INDEX[[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+idx_records_fts[[:space:]]+ON[[:space:]]+records[[:space:]]+USING[[:space:]]+GIN' "Postgres records GIN index"
+assert_contains "$POSTGRES_SCHEMA" '^CREATE[[:space:]]+INDEX[[:space:]]+IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+idx_chat_item_fts[[:space:]]+ON[[:space:]]+chat_item[[:space:]]+USING[[:space:]]+GIN' "Postgres chat item GIN index"
+if [[ $errors -eq 0 ]]; then
+  echo "search indexes: OK (SQLite FTS5 tables/triggers, Postgres TSVECTOR/GIN)"
 fi
 
 # ─── Summary ──────────────────────────────────────────────────────────────────

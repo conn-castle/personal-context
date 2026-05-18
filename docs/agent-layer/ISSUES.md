@@ -27,6 +27,41 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-05-17 s4w9x2: SearchAll fetches full match set into Go memory before pagination
+    Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/chat.go
+    Description: `SearchAll` runs per-domain (records, chats) queries with no LIMIT/OFFSET, merges them in Go, sorts by BM25 rank across domains, then slices client-side. For queries that match thousands of rows this is O(N) memory and adds latency. The recent CLI fix limits the CLI-side over-fetch via `Limit+1`, but the repository still pulls all matches into memory before applying Limit/Offset.
+    Next step: Push the union+rank+limit into SQL via UNION ALL with a shared rank expression, or cap each domain's fetch at `Limit+1` rows and merge. Update both backends and contract tests.
+
+- Issue 2026-05-17 a3i6f8: Snapshot replacement is rollback-safe but not crash-safe atomic
+    Priority: Medium. Area: cli/internal/gitsnapshot/snapshot.go
+    Description: `replaceSnapshotContents` moves each managed entry independently (backup-then-promote per entry). If the process is killed between the backup loop and the promotion loop, the export root is left with a partial snapshot plus a backup dir, violating the atomic-replacement contract.
+    Next step: Refactor to swap the entire snapshot root via a single rename (write to `<root>.new`, rename old root to backup, rename new in, then delete backup). Make sure restore-on-failure handles the case where the original root was already renamed away.
+
+- Issue 2026-05-17 r6e0k3: Cross-table ID uniqueness for records vs chat_session is not atomically enforced
+    Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/repository.go, schema
+    Description: `CreateRecord` and `UpsertChatSession` each do a read-then-insert preflight to check that the ID isn't already used by the other table. Two concurrent writers can pass both probes and commit conflicting IDs. The races are unlikely in practice (chat IDs include random hex), but the invariant is real if the design relies on a shared ID namespace.
+    Next step: Introduce a dedicated `id_registry` table with a unique constraint and reserve the ID transactionally on creation, or run both inserts inside the same transaction with a shared advisory lock. Update both backends; document the contract in DECISIONS.md.
+
+- Issue 2026-05-17 j1m4z5: JSON transcript parser materialises whole payload via map[string]any
+    Priority: Low. Area: cli/internal/chatimport/chatimport.go
+    Description: `parseJSONTranscript` now uses `json.NewDecoder(file).Decode(&payload)` (no longer ReadFile), which avoids the duplicate raw-bytes copy, but `payload` is still a `map[string]any` covering the entire transcript. Memory remains O(transcript size) with high interface-overhead multiplier. For very large Gemini transcripts this can still exceed memory; the JSONL path already uses a streaming bufio.Scanner.
+    Next step: Define a typed struct for top-level session fields and stream the transcript array element-by-element with `Decoder.Token()` + `Decoder.Decode()`. Note that `finalizeSessionTimes` reads items to set session timestamps, so the streaming pass needs to either buffer item timestamps or do a two-pass read.
+
+- Issue 2026-05-17 c8h9k1: Chat sync upsert + items replacement is not atomic
+    Priority: High. Area: cli/internal/sync/service.go
+    Description: `syncChangedChatsDirected` calls `UpsertChatSession` (which advances target `updated_at` to the source value) followed by `ReplaceChatItems`. If `ReplaceChatItems` fails, the chat row is left advanced while items remain stale, and the next sync sees equal timestamps (WinnerNone) and skips the chat — leaving the items table inconsistent indefinitely. Unlike records, chats use unconditional `ReplaceChatItems` so they are not self-healing across syncs.
+    Next step: Wrap the chat upsert + items replacement in a single repository-level transaction, or downgrade target `updated_at` on items failure so the next sync re-picks the chat. Add a failing-test reproducer (force `ReplaceChatItems` error, assert next sync corrects items).
+
+- Issue 2026-05-17 p2r3s4: Project-paths registry sync is insert-only and grows monotonically
+    Priority: Medium. Area: cli/internal/sync/service.go cli/internal/repository
+    Description: `syncRegistries` re-uploads every project path on every sync (no `since` filter and `UpsertProjectPath` uses `INSERT OR IGNORE`). Project paths therefore cannot be removed via sync — a path deleted on device A still influences chat project-id matching on device B forever — and cost is O(paths × sync-passes).
+    Next step: Decide between (a) adding `deleted_at` to `project_paths` with tombstone propagation, or (b) documenting one-way insert-only semantics and exposing `pc project paths prune`. Add a `since` filter on `ListProjectPaths` for incremental sync regardless.
+
+- Issue 2026-05-17 d4n6m2: Chat raw-source pull writes to disk before metadata upsert
+    Priority: Medium. Area: cli/internal/sync/service.go
+    Description: `transferChatRawSource` runs upload/download before `UpsertChatSession` in both directions. On push that ordering prevents advertising a key whose object is missing; on pull it inverts the rationale, so a metadata upsert failure can leave the downloaded file under `chats/raw/{id}/source.ext` with no DB row referencing it. Doctor flags it; the next successful sync self-heals; in between, lifecycle operations cannot clean it up.
+    Next step: Split push and pull ordering so pull upserts metadata first, then writes the local raw file; or wrap pull metadata + raw write in a single transactional helper.
+
 - Issue 2026-05-11 v2w3x4: Legacy sync lock files still require manual recovery
     Priority: Medium. Area: cli/internal/syncengine
     Description: New sync locks include JSON metadata and can recover stale same-host dead PIDs, but pre-metadata literal locks (`locked\n`) and other unparseable lock files remain blocking because they cannot be safely attributed to a dead process.
@@ -34,13 +69,8 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 - Issue 2026-05-11 q8r9s0: Snapshot import and restore-db replacement paths are not atomic
     Priority: High. Area: cli/internal/cli/snapshot_support.go
-    Description: `pc import` and `pc restore-db` can mutate local database/file state before the full replacement has completed, so a mid-operation error can leave users with a partial restore. `restore-db` also reports the backup path only after later replacement work succeeds.
-    Next step: Stage replacements first, report the backup path immediately after successful backup creation, and add failure tests proving the original state remains recoverable on post-backup errors.
-
-- Issue 2026-05-11 p7q8r9: Git snapshot writes remove the existing export tree before successful replacement
-    Priority: Medium. Area: cli/internal/gitsnapshot
-    Description: `gitsnapshot.Write` deletes export subdirectories under the target root before all validation and writes have completed. A later write failure can leave a previously valid export partially removed.
-    Next step: Write to a staging tree, validate the complete snapshot, then atomically swap export directories where the filesystem allows; add tests that preserve the old tree after an injected write failure.
+    Description: `pc import` and `pc restore-db` can still mutate earlier database/file sections before a later record or filesystem failure occurs, so a mid-operation error can leave users with a partial restore despite chat raw-source rollback and upfront chat source-identity validation.
+    Next step: Design a staged or transactional replacement path for the full local SQLite database plus managed file payloads, then add failure tests proving the original state remains recoverable after post-backup errors.
 
 - Issue 2026-05-11 n6p7q8: Multi-project web filter paginates over an incomplete client-side result set
     Priority: Medium. Area: web/components/spreadsheet-viewer.tsx
@@ -57,12 +87,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: `fetchAllDataFiles` iterates records and data files one at a time, so each S3 download blocks the next and each on-disk hash blocks subsequent work. For users with thousands of records, wall-clock time is dominated by sequential network latency and hashing even though the operations are independent. Implementing a bounded worker pool would require: thread-safe stats updates (currently plain ints/int64), deterministic-enough stderr/failure ordering for tests, a concurrency cap (flag, env, or CPU-based default), and a decision on whether cancellation drains or aborts in-flight downloads.
     Next step: Prototype an `errgroup.Group` with a semaphore-bounded worker pool, add a `--concurrency` flag (default e.g. min(8, runtime.NumCPU())), and convert `fetchAllStats` to atomic counters. Verify with a benchmark and an updated cloud E2E that exercises >50 files.
     Notes: Raised by gemini-code-assist on PR #20; deferred from that PR because parallelization is a perf optimization beyond the initial feature scope.
-
-- Issue 2026-05-07 m1g2r3a: Multi-file migration runner needed before first user-facing release
-    Priority: High. Area: cli/internal/sqlite, cli/internal/repository/postgres, cli/internal/cli (setup)
-    Description: `cli/internal/sqlite/schema.go` embeds the canonical schema via `singleFileFS` as a single `001_initial.sql` version, and `ApplyMigrationsFromFS` only runs unrecorded files — so every schema change after a user's first `pc setup` is invisible to their DB. Two pending deltas already depend on this: PR #14 added `records.source_device_id`/`source_ref` with NOT NULL FKs to new `projects`/`devices` tables, and PR #18 renamed tables `slides`/`slide_figures`/`slide_data_files` → `records`/`record_figures`/`record_data_files` (plus the `slide_id` → `record_id` child column). Repository code and `pc serve`/`pc sync` both bind to the new shape unconditionally, so a pre-PR DB would fail at first query. Not currently blocking because no user-facing release has shipped.
-    Next step: Replace `singleFileFS` with a multi-file `embed.FS` (`//go:embed migrations/*.sql`); add `002_*.sql` covering both deltas — SQLite needs the table-rebuild recipe (rename old → temp, create new, copy + backfill, drop old, recreate triggers/indexes); Postgres can use `ALTER TABLE … RENAME` + `ADD COLUMN` + `UPDATE` + `SET NOT NULL` + `ADD CONSTRAINT`. Wire `pc setup --upgrade` with a `--default-device <id>` backfill flag (or auto-`legacy` device) for the NOT NULL device FK; mirror in `setup_cloud.go` per-user. Surface schema version in `pc doctor`. Tests: pre-rename fixture DB + assertion that upgrade lands on the new shape.
-    Notes: Originally raised by Codex on PR #14; broadened by PR #18 rename. Required before the first v0.x release that targets external users. Replace with a Decision in DECISIONS.md once shipped.
 
 - Issue 2026-03-11 t1u2v3a: Seed idempotency is fragile when user edits tutorial record HTML
     Priority: Low. Area: cli/internal/cli/seed.go
