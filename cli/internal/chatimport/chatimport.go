@@ -264,7 +264,7 @@ func parseJSONTranscript(source string, path string) (repository.CreateChatSessi
 	if err != nil {
 		return repository.CreateChatSessionInput{}, nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	var payload map[string]any
 	if err := json.NewDecoder(file).Decode(&payload); err != nil {
 		return repository.CreateChatSessionInput{}, nil, err
