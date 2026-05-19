@@ -474,6 +474,56 @@ func TestJSONLCodexCWDLiftedFromTurnContext(t *testing.T) {
 	}
 }
 
+func TestJSONLCodexResponseItemSessionFields(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-item-session-fields.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-01-05T21:25:34.000Z","type":"response_item","payload":{"type":"message","role":"user","session_id":"codex-from-item","cwd":"/from/response_item","content":[{"type":"input_text","text":"hi"}]}}`,
+		``,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	session, items, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one imported item, got %+v", items)
+	}
+	if session.SourceSessionID != "codex-from-item" {
+		t.Fatalf("session id should be lifted from response_item.payload.session_id, got %q", session.SourceSessionID)
+	}
+	if session.CWD == nil || *session.CWD != "/from/response_item" {
+		t.Fatalf("session cwd should be lifted from response_item.payload.cwd, got %v", session.CWD)
+	}
+}
+
+func TestJSONLClaudeToolResultEnvelopeIsToolOutput(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "tool-result.jsonl")
+	lines := []string{
+		`{"type":"user","timestamp":"2026-05-03T02:00:00.000Z","cwd":"/repo","sessionId":"tool-session","message":{"role":"user","content":[{"type":"tool_result","content":"hidden tool output"}]}}`,
+		``,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	_, items, err := ParseTranscriptFile("claude_code", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one imported item, got %+v", items)
+	}
+	if items[0].ItemType != "tool_output" {
+		t.Fatalf("Claude tool_result envelope should import as tool_output, got %+v", items[0])
+	}
+	if items[0].SearchText != "hidden tool output" {
+		t.Fatalf("tool output text should still be indexed for explicit include-tool searches, got %q", items[0].SearchText)
+	}
+}
+
 // TestTranscriptFilesSkipsSubAgentMetaSidecars asserts that Claude sub-agent
 // `*.meta.json` sidecars (e.g. `agent-foo.meta.json` next to a sibling
 // `agent-foo.jsonl`) are not transcripts and must not be returned by

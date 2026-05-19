@@ -205,6 +205,45 @@ func TestChatSearchRealCodexEnvelopeContract(t *testing.T) {
 	}
 }
 
+func TestChatSearchRealClaudeToolResultEnvelopeHiddenByDefault(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "claude-tool-result.jsonl")
+	lines := []string{
+		`{"type":"user","timestamp":"2026-05-03T02:00:00.000Z","cwd":"/repo","sessionId":"claude-tool-session","message":{"role":"user","content":[{"type":"tool_result","content":"sensitive tool result token"}]}}`,
+		``,
+	}
+	if err := os.WriteFile(transcriptPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "claude", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "--format", "json", "sensitive"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat search default: %v", err)
+	}
+	if strings.Contains(stdout.String(), "sensitive tool result token") {
+		t.Fatalf("default chat search should hide tool_result output, got %q", stdout.String())
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "--format", "json", "--include-tool-outputs", "sensitive"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat search include tools: %v", err)
+	}
+	if out := stdout.String(); !strings.Contains(out, `"tool_output"`) || !strings.Contains(out, "sensitive tool result token") {
+		t.Fatalf("include-tool search should return tool output, got %q", out)
+	}
+}
+
 // TestChatSearchJSONLimitEmitsNextCursor verifies that the chat search
 // JSON envelope sets next_cursor and trims results to opts.Limit when the
 // repository returns more than the requested page size (the over-fetched

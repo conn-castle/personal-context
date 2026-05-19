@@ -294,7 +294,7 @@ func unwrapChatLine(source string, line map[string]any) (item map[string]any, se
 					flat["timestamp"] = ts
 				}
 			}
-			return flat, nil
+			return flat, inner
 		case "turn_context":
 			// turn_context lines carry the working directory per turn.
 			// When session_meta lacked cwd (older rollouts), feeding the
@@ -487,7 +487,7 @@ func itemFromPayload(payload map[string]any, ordinal int) repository.CreateChatI
 	}
 	rawBytes, _ := json.Marshal(payload)
 	raw := string(rawBytes)
-	if strings.Contains(strings.ToLower(itemType), "tool") && !strings.Contains(strings.ToLower(role), "assistant") {
+	if (strings.Contains(strings.ToLower(itemType), "tool") || contentHasToolPayload(payload["content"])) && !strings.Contains(strings.ToLower(role), "assistant") {
 		itemType = "tool_output"
 	}
 	var textPtr *string
@@ -595,6 +595,23 @@ func contentText(value any) string {
 	default:
 		return ""
 	}
+}
+
+func contentHasToolPayload(value any) bool {
+	switch typed := value.(type) {
+	case []any:
+		for _, item := range typed {
+			if contentHasToolPayload(item) {
+				return true
+			}
+		}
+	case map[string]any:
+		if strings.Contains(strings.ToLower(firstString(typed, "type", "item_type")), "tool") {
+			return true
+		}
+		return contentHasToolPayload(typed["content"])
+	}
+	return false
 }
 
 func normalizePath(path string) (string, error) {
