@@ -597,6 +597,8 @@ func contentText(value any) string {
 	}
 }
 
+// contentHasToolPayload reports whether a content value or nested content
+// block carries a tool-shaped type marker, such as Claude's `tool_result`.
 func contentHasToolPayload(value any) bool {
 	switch typed := value.(type) {
 	case []any:
