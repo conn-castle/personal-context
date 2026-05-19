@@ -167,14 +167,28 @@ func TestHelpersAndParseErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Roots(all project paths) error = %v", err)
 	}
-	for source, suffix := range map[string]string{
-		"codex":       filepath.Join(".codex", "sessions"),
-		"claude_code": ".claude",
-		"gemini":      ".gemini",
-	} {
+	// Each source must contribute at least one project-derived root in
+	// addition to the home-dir root; for source==claude_code the
+	// per-project pass contributes both `.claude` and `.claude-config/projects`
+	// (see TestRootsIncludesClaudeConfigForPerProjectScans).
+	suffixesBySource := map[string][]string{
+		"codex":       {filepath.Join(".codex", "sessions")},
+		"claude_code": {".claude", filepath.Join(".claude-config", "projects")},
+		"gemini":      {".gemini"},
+	}
+	for source, suffixes := range suffixesBySource {
 		roots := allProjectRoots[source]
-		if len(roots) < 2 || !strings.HasSuffix(roots[len(roots)-1], suffix) {
-			t.Fatalf("expected %s project root suffix %q, got %+v", source, suffix, roots)
+		for _, suffix := range suffixes {
+			matched := false
+			for _, r := range roots {
+				if strings.HasSuffix(r, suffix) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				t.Fatalf("expected %s project root with suffix %q, got %+v", source, suffix, roots)
+			}
 		}
 	}
 	for _, agent := range []string{"", "codex", "claude", "claude-code", "claude_code", "gemini"} {
@@ -341,4 +355,222 @@ func TestUnexportedNormalizationBranches(t *testing.T) {
 
 func strPtr(value string) *string {
 	return &value
+}
+
+// TestJSONLCodexResponseItemEnvelope reproduces bug #1 from
+// `.agent-layer/tmp/chat-import-smoke-test-findings.md`: real codex rollouts
+// wrap chat items inside {timestamp, type:"response_item", payload:{...}},
+// and the parser was dropping every line because it only inspected top-level
+// fields. session_meta lines must lift cwd/id from their inner payload.
+func TestJSONLCodexResponseItemEnvelope(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-codex.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-01-05T21:25:33.024Z","type":"session_meta","payload":{"id":"019b900d-codex","cwd":"/tmp/codex-real","timestamp":"2026-01-05T21:25:33.002Z"}}`,
+		`{"timestamp":"2026-01-05T21:25:34.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello codex"}]}}`,
+		`{"timestamp":"2026-01-05T21:25:35.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hi user"}]}}`,
+		`{"timestamp":"2026-01-05T21:25:35.500Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"thinking..."}}`,
+		`{"timestamp":"2026-01-05T21:25:36.000Z","type":"turn_context","payload":{"cwd":"/tmp/codex-real","model":"gpt-5.2-codex"}}`,
+		``,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	session, items, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if got := len(items); got != 2 {
+		t.Fatalf("expected 2 chat items (user+assistant message payloads), got %d: %+v", got, items)
+	}
+	if items[0].Role != "user" || items[0].SearchText != "hello codex" {
+		t.Fatalf("first item not extracted from response_item.payload: %+v", items[0])
+	}
+	if items[0].Text == nil || *items[0].Text != "hello codex" {
+		t.Fatalf("first item text not populated: text=%v search=%q", items[0].Text, items[0].SearchText)
+	}
+	if items[1].Role != "assistant" || items[1].SearchText != "hi user" {
+		t.Fatalf("second item not extracted: %+v", items[1])
+	}
+	if session.SourceSessionID != "019b900d-codex" {
+		t.Fatalf("session id should come from session_meta.payload.id, got %q", session.SourceSessionID)
+	}
+	if session.CWD == nil || *session.CWD != "/tmp/codex-real" {
+		t.Fatalf("session cwd should be lifted from session_meta.payload.cwd, got %v", session.CWD)
+	}
+}
+
+// TestJSONLClaudeMessageEnvelope reproduces bug #2 from
+// `.agent-layer/tmp/chat-import-smoke-test-findings.md`: real Claude rows
+// look like {type:"user"|"assistant", message:{role,content}, ...} where the
+// text lives inside message.content. The parser was treating `message` as if
+// it were a string field and producing items with empty Text/SearchText. It
+// Also asserts that queue-operation / file-history-snapshot / permission-mode
+// metadata rows that carry top-level content must not be imported as items.
+func TestJSONLClaudeMessageEnvelope(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "abc.jsonl")
+	lines := []string{
+		`{"type":"last-prompt","leafUuid":"prelude","sessionId":"abc-session"}`,
+		// queue-operation lines carry top-level content that duplicates
+		// the next user message; they must be dropped, not imported.
+		`{"type":"queue-operation","operation":"enqueue","timestamp":"2026-05-03T01:59:59.000Z","sessionId":"abc-session","content":"hello claude"}`,
+		`{"parentUuid":null,"type":"user","timestamp":"2026-05-03T02:00:00.000Z","cwd":"/repo","sessionId":"abc-session","message":{"role":"user","content":"hello claude"}}`,
+		`{"parentUuid":"x","type":"assistant","timestamp":"2026-05-03T02:00:01.000Z","cwd":"/repo","sessionId":"abc-session","message":{"role":"assistant","content":[{"type":"text","text":"hi back"}]}}`,
+		// permission-mode and file-history-snapshot are pure metadata.
+		`{"type":"permission-mode","mode":"plan","sessionId":"abc-session"}`,
+		`{"type":"file-history-snapshot","sessionId":"abc-session","content":"snapshot blob"}`,
+		``,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	session, items, err := ParseTranscriptFile("claude_code", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if got := len(items); got != 2 {
+		t.Fatalf("expected exactly 2 items (user+assistant, no queue-operation/metadata duplicates), got %d: %+v", got, items)
+	}
+	if items[0].Role != "user" || items[0].SearchText != "hello claude" {
+		t.Fatalf("user item text not extracted from message.content (string form): %+v", items[0])
+	}
+	if items[0].Text == nil || *items[0].Text != "hello claude" {
+		t.Fatalf("user item Text pointer not set: %+v", items[0].Text)
+	}
+	if items[1].Role != "assistant" || items[1].SearchText != "hi back" {
+		t.Fatalf("assistant item text not extracted from message.content (array form): %+v", items[1])
+	}
+	if session.SourceSessionID != "abc-session" {
+		t.Fatalf("session id should come from outer envelope sessionId, got %q", session.SourceSessionID)
+	}
+	if session.CWD == nil || *session.CWD != "/repo" {
+		t.Fatalf("session cwd should come from outer envelope cwd, got %v", session.CWD)
+	}
+}
+
+// TestJSONLCodexCWDLiftedFromTurnContext asserts that when session_meta
+// lacks a cwd but turn_context carries one, the session's cwd must be
+// populated so MatchProjectPath can auto-assign the project.
+func TestJSONLCodexCWDLiftedFromTurnContext(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-no-meta-cwd.jsonl")
+	lines := []string{
+		// session_meta omits cwd; older codex versions did this.
+		`{"timestamp":"2026-01-05T21:25:33.024Z","type":"session_meta","payload":{"id":"codex-no-cwd","timestamp":"2026-01-05T21:25:33.002Z"}}`,
+		`{"timestamp":"2026-01-05T21:25:34.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}`,
+		`{"timestamp":"2026-01-05T21:25:34.500Z","type":"turn_context","payload":{"cwd":"/from/turn_context","model":"gpt-5"}}`,
+		``,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	session, _, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.CWD == nil || *session.CWD != "/from/turn_context" {
+		t.Fatalf("session cwd should be lifted from turn_context.payload.cwd, got %v", session.CWD)
+	}
+}
+
+func TestJSONLCodexResponseItemSessionFields(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-item-session-fields.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-01-05T21:25:34.000Z","type":"response_item","payload":{"type":"message","role":"user","session_id":"codex-from-item","cwd":"/from/response_item","content":[{"type":"input_text","text":"hi"}]}}`,
+		``,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	session, items, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one imported item, got %+v", items)
+	}
+	if session.SourceSessionID != "codex-from-item" {
+		t.Fatalf("session id should be lifted from response_item.payload.session_id, got %q", session.SourceSessionID)
+	}
+	if session.CWD == nil || *session.CWD != "/from/response_item" {
+		t.Fatalf("session cwd should be lifted from response_item.payload.cwd, got %v", session.CWD)
+	}
+}
+
+func TestJSONLClaudeToolResultEnvelopeIsToolOutput(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "tool-result.jsonl")
+	lines := []string{
+		`{"type":"user","timestamp":"2026-05-03T02:00:00.000Z","cwd":"/repo","sessionId":"tool-session","message":{"role":"user","content":[{"type":"tool_result","content":"hidden tool output"}]}}`,
+		``,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	_, items, err := ParseTranscriptFile("claude_code", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one imported item, got %+v", items)
+	}
+	if items[0].ItemType != "tool_output" {
+		t.Fatalf("Claude tool_result envelope should import as tool_output, got %+v", items[0])
+	}
+	if items[0].SearchText != "hidden tool output" {
+		t.Fatalf("tool output text should still be indexed for explicit include-tool searches, got %q", items[0].SearchText)
+	}
+}
+
+// TestTranscriptFilesSkipsSubAgentMetaSidecars asserts that Claude sub-agent
+// `*.meta.json` sidecars (e.g. `agent-foo.meta.json` next to a sibling
+// `agent-foo.jsonl`) are not transcripts and must not be returned by
+// TranscriptFiles, which would otherwise trigger noisy parse errors.
+func TestTranscriptFilesSkipsSubAgentMetaSidecars(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "agent-foo.jsonl")
+	sidecarPath := filepath.Join(root, "agent-foo.meta.json")
+	for _, path := range []string{transcriptPath, sidecarPath} {
+		if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	files, err := TranscriptFiles(root)
+	if err != nil {
+		t.Fatalf("TranscriptFiles error = %v", err)
+	}
+	if len(files) != 1 || files[0] != transcriptPath {
+		t.Fatalf("expected only the .jsonl transcript, got %+v", files)
+	}
+}
+
+// TestRootsIncludesClaudeConfigForPerProjectScans asserts that per-project
+// scans include `.claude-config/projects` because some repos (e.g.
+// agent-layer) redirect Claude Code state there. Without this, in-repo
+// transcripts are invisible to the default `pc chat import` and users must
+// symlink.
+func TestRootsIncludesClaudeConfigForPerProjectScans(t *testing.T) {
+	projectPath := t.TempDir()
+	roots, err := Roots(nil, "claude_code", []repository.ProjectPath{{Path: projectPath}})
+	if err != nil {
+		t.Fatalf("Roots error = %v", err)
+	}
+	claudeRoots := roots["claude_code"]
+	wantClaude := filepath.Join(projectPath, ".claude")
+	wantClaudeConfig := filepath.Join(projectPath, ".claude-config", "projects")
+	hasClaude := false
+	hasClaudeConfig := false
+	for _, r := range claudeRoots {
+		if r == wantClaude {
+			hasClaude = true
+		}
+		if r == wantClaudeConfig {
+			hasClaudeConfig = true
+		}
+	}
+	if !hasClaude || !hasClaudeConfig {
+		t.Fatalf("expected both %q and %q in per-project claude roots, got %+v", wantClaude, wantClaudeConfig, claudeRoots)
+	}
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -150,6 +151,17 @@ func runSetup(ctx context.Context, stdout io.Writer, stderr io.Writer, stdin io.
 		return fmt.Errorf("apply migrations: %w", err)
 	}
 
+	// The chat feature ships as a clean-cut schema update (DECISIONS.md
+	// n2p3q4): there is no forward migration that adds the chat tables to
+	// a pre-existing v0.1.1 store. The migration runner records the
+	// schema as a single `001_initial.sql` row in `schema_migrations`, so
+	// re-running `pc setup` against an old DB silently skips schema
+	// re-application and leaves `chat_session`/`chat_item` missing.
+	// Detect that here and fail loudly instead of declaring success.
+	if err := verifyCanonicalSchemaTables(ctx, conn.DB(), base); err != nil {
+		return err
+	}
+
 	repo, err := newSQLiteRepoFn(conn.DB())
 	if err != nil {
 		return fmt.Errorf("create repository: %w", err)
@@ -231,6 +243,44 @@ func seedTemplates(ctx context.Context, repo repository.Repository) error {
 		}
 		if _, err := repo.CreateTemplate(ctx, tmpl); err != nil {
 			return fmt.Errorf("create template %q: %w", tmpl.Name, err)
+		}
+	}
+	return nil
+}
+
+// canonicalSchemaTables is a curated probe (not a mirror of
+// cli/internal/sqlite/sqlite_schema.sql) used to detect stores that predate
+// the chat-tables clean-cut schema update (DECISIONS.md n2p3q4). It includes:
+//   - chat_session, chat_item: the tables a v0.1.1-vintage store will be
+//     missing - the actual failure mode we want to surface.
+//   - records, project_paths: sanity-check tables that any working store
+//     must have; absent means the migration runner did not run at all.
+//
+// New canonical tables should be added here only if their absence would
+// indicate the same pre-chat-tables mismatch, not because they exist in
+// the schema.
+var canonicalSchemaTables = []string{
+	"records",
+	"chat_session",
+	"chat_item",
+	"project_paths",
+}
+
+// verifyCanonicalSchemaTables fails loudly when expected tables are missing
+// after schema application. The recovery message names the actual store
+// directory (`base`, which honors PC_HOME) so users back up the right path.
+func verifyCanonicalSchemaTables(ctx context.Context, db *sql.DB, base string) error {
+	for _, table := range canonicalSchemaTables {
+		var name string
+		err := db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf(
+				"local store is missing required table %q: this database predates the current Personal Context schema and cannot be upgraded in place. Back up your existing store (e.g. `mv %s %s.backup-$(date +%%Y%%m%%dT%%H%%M%%S)`) and re-run `pc setup` to initialize a fresh store",
+				table, base, base,
+			)
+		}
+		if err != nil {
+			return fmt.Errorf("verify schema table %q: %w", table, err)
 		}
 	}
 	return nil

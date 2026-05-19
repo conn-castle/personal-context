@@ -138,6 +138,112 @@ func TestChatImportListSearchShowDelete(t *testing.T) {
 	}
 }
 
+// TestChatSearchRealCodexEnvelopeContract is the end-to-end contract for
+// `pc chat search --format json` against a real-shape codex rollout. The
+// rollout uses the `{type:"response_item",payload:{...}}` envelope; before
+// the envelope fix, search would silently return zero results because items
+// had empty SearchText. This test now asserts the
+// envelope shape (items[], total, next_cursor), confirms hits include the
+// session, and verifies items carry the original role and non-empty text
+// snippet.
+func TestChatSearchRealCodexEnvelopeContract(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	rolloutPath := filepath.Join(root, "rollout-real.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-01-05T21:25:33.024Z","type":"session_meta","payload":{"id":"contract-codex","cwd":"/tmp/contract","timestamp":"2026-01-05T21:25:33.002Z"}}`,
+		`{"timestamp":"2026-01-05T21:25:34.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"please find the haystack token"}]}}`,
+		`{"timestamp":"2026-01-05T21:25:35.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"sure, here is the haystack"}]}}`,
+	}
+	if err := os.WriteFile(rolloutPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write rollout: %v", err)
+	}
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "--format", "json", "--limit", "10", "haystack"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat search: %v", err)
+	}
+
+	var page struct {
+		Items      []chatSearchJSON `json:"items"`
+		Total      int              `json:"total"`
+		NextCursor *string          `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &page); err != nil {
+		t.Fatalf("decode envelope: %v (body=%q)", err, stdout.String())
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("expected 2 hits (both items match 'haystack'), got %d (body=%q)", len(page.Items), stdout.String())
+	}
+	if page.Total != 2 {
+		t.Fatalf("expected total=2, got %d", page.Total)
+	}
+	if page.NextCursor != nil {
+		t.Fatalf("expected no next_cursor when limit > results, got %q", *page.NextCursor)
+	}
+	for i, item := range page.Items {
+		if item.Session.SourceSessionID != "contract-codex" {
+			t.Fatalf("item %d session id = %q, want contract-codex", i, item.Session.SourceSessionID)
+		}
+		if item.Role != "user" && item.Role != "assistant" {
+			t.Fatalf("item %d role = %q, want user or assistant", i, item.Role)
+		}
+		if item.Text == nil || strings.TrimSpace(*item.Text) == "" {
+			t.Fatalf("item %d Text must be populated (envelope-unwrap regression check), got %+v", i, item.Text)
+		}
+		if !strings.Contains(strings.ToLower(*item.Text), "haystack") {
+			t.Fatalf("item %d Text should contain the search term, got %q", i, *item.Text)
+		}
+	}
+}
+
+func TestChatSearchRealClaudeToolResultEnvelopeHiddenByDefault(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "claude-tool-result.jsonl")
+	lines := []string{
+		`{"type":"user","timestamp":"2026-05-03T02:00:00.000Z","cwd":"/repo","sessionId":"claude-tool-session","message":{"role":"user","content":[{"type":"tool_result","content":"sensitive tool result token"}]}}`,
+		``,
+	}
+	if err := os.WriteFile(transcriptPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "claude", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "--format", "json", "sensitive"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat search default: %v", err)
+	}
+	if strings.Contains(stdout.String(), "sensitive tool result token") {
+		t.Fatalf("default chat search should hide tool_result output, got %q", stdout.String())
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "--format", "json", "--include-tool-outputs", "sensitive"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat search include tools: %v", err)
+	}
+	if out := stdout.String(); !strings.Contains(out, `"tool_output"`) || !strings.Contains(out, "sensitive tool result token") {
+		t.Fatalf("include-tool search should return tool output, got %q", out)
+	}
+}
+
 // TestChatSearchJSONLimitEmitsNextCursor verifies that the chat search
 // JSON envelope sets next_cursor and trims results to opts.Limit when the
 // repository returns more than the requested page size (the over-fetched
@@ -476,7 +582,6 @@ func TestChatImportJSONLTableListAndTopLevelShow(t *testing.T) {
 	if out := stdout.String(); !strings.Contains(out, `"tool_output"`) {
 		t.Fatalf("expected tool output search result, got %q", out)
 	}
-
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
