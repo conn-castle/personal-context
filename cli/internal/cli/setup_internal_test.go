@@ -548,6 +548,56 @@ func TestRunSetupSeedTemplatesError(t *testing.T) {
 	}
 }
 
+// TestRunSetupFailsLoudlyAgainstPreChatTableStore asserts that
+// when `pc setup` runs against an existing v0.1.1-vintage store whose
+// `schema_migrations` row marks `001_initial.sql` as already applied, the
+// migration runner skips re-application and leaves `chat_session` /
+// `chat_item` missing. The previous behavior was to print "Personal Context
+// initialized at ..." and exit 0, silently leaving the user on an
+// incompatible schema. Setup must now fail loudly with recovery guidance.
+func TestRunSetupFailsLoudlyAgainstPreChatTableStore(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	// Clean setup so schema_migrations records 001_initial.sql.
+	stdout := &bytes.Buffer{}
+	if err := runSetup(context.Background(), stdout, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err != nil {
+		t.Fatalf("initial setup failed: %v", err)
+	}
+
+	// Simulate a pre-chat-table store: drop chat_session while the
+	// schema_migrations row stays in place. Subsequent setup runs will
+	// see the version as applied and skip schema re-application.
+	db := openTestDBInternal(t, homeDir)
+	if _, err := db.Exec("DROP TABLE chat_item"); err != nil {
+		t.Fatalf("drop chat_item: %v", err)
+	}
+	if _, err := db.Exec("DROP TABLE chat_session"); err != nil {
+		t.Fatalf("drop chat_session: %v", err)
+	}
+	_ = db.Close()
+
+	stdout.Reset()
+	err := runSetup(context.Background(), stdout, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts())
+	if err == nil {
+		t.Fatal("expected setup to fail when chat_session is missing, got nil")
+	}
+	if !strings.Contains(err.Error(), "chat_session") {
+		t.Fatalf("expected error to name the missing table, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "predates") {
+		t.Fatalf("expected error to mention that the store predates the current schema, got: %v", err)
+	}
+	expectedBase := basePath(homeDir)
+	if !strings.Contains(err.Error(), expectedBase) {
+		t.Fatalf("expected error to name the actual store path %q (honoring PC_HOME), got: %v", expectedBase, err)
+	}
+	// The success message must not have been printed.
+	if strings.Contains(stdout.String(), "Personal Context initialized at") {
+		t.Fatalf("setup printed success message despite schema mismatch: %q", stdout.String())
+	}
+}
+
 func TestRunSetupConfigStoreWriteCoversPath(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("PC_HOME", homeDir)

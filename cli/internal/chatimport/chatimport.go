@@ -77,6 +77,12 @@ func Roots(extra []string, sourceFilter string, projectPaths []repository.Projec
 				roots[source] = append(roots[source], filepath.Join(path.Path, ".codex", "sessions"))
 			case "claude_code":
 				roots[source] = append(roots[source], filepath.Join(path.Path, ".claude"))
+				// Some repos redirect Claude Code state into
+				// `.claude-config/` (e.g. agent-layer projects) so the
+				// in-repo transcripts live under `.claude-config/projects`
+				// rather than the canonical `.claude/projects`. Including
+				// both avoids requiring users to symlink or pass --root.
+				roots[source] = append(roots[source], filepath.Join(path.Path, ".claude-config", "projects"))
 			case "gemini":
 				roots[source] = append(roots[source], filepath.Join(path.Path, ".gemini"))
 			}
@@ -117,6 +123,15 @@ func TranscriptFiles(root string) ([]string, error) {
 			return err
 		}
 		if entry.IsDir() {
+			return nil
+		}
+		// Skip `*.meta.json` sub-agent sidecars: they live alongside the
+		// real transcript jsonl in `subagents/` and carry agent metadata
+		// (not a chat transcript array), so the JSON parser would reject
+		// every one of them as "no transcript array" and clutter import
+		// output.
+		name := strings.ToLower(filepath.Base(path))
+		if strings.HasSuffix(name, ".meta.json") {
 			return nil
 		}
 		switch strings.ToLower(filepath.Ext(path)) {
@@ -196,12 +211,17 @@ func parseJSONLTranscript(source string, path string) (repository.CreateChatSess
 		if err := json.Unmarshal([]byte(line), &payload); err != nil {
 			return repository.CreateChatSessionInput{}, nil, fmt.Errorf("parse %s line %d: %w", path, lineNumber, err)
 		}
-		if !hasItemPayload(payload) {
-			applySessionFields(&session, payload)
+		itemPayload, sessionPayload := unwrapChatLine(source, payload)
+		if itemPayload == nil || !hasItemPayload(itemPayload) {
+			if sessionPayload != nil {
+				applySessionFields(&session, sessionPayload)
+			}
 			continue
 		}
-		applyItemSessionFields(&session, payload, fallbackSourceSessionID)
-		item := itemFromPayload(payload, ordinal)
+		if sessionPayload != nil {
+			applyItemSessionFields(&session, sessionPayload, fallbackSourceSessionID)
+		}
+		item := itemFromPayload(itemPayload, ordinal)
 		if item.SearchText != "" || item.RawJSON != nil {
 			items = append(items, item)
 			ordinal++
@@ -218,7 +238,10 @@ func parseJSONLTranscript(source string, path string) (repository.CreateChatSess
 }
 
 func applyItemSessionFields(session *repository.CreateChatSessionInput, payload map[string]any, fallbackSourceSessionID string) {
-	for _, key := range []string{"session_id", "conversation_id", "chat_id"} {
+	// sessionId (camelCase) is the canonical key emitted in real Claude Code
+	// transcripts; session_id / conversation_id / chat_id cover snake_case
+	// variants used by other agents.
+	for _, key := range []string{"session_id", "sessionId", "conversation_id", "chat_id"} {
 		if value := stringField(payload, key); value != nil && *value != "" {
 			if session.SourceSessionID == fallbackSourceSessionID || session.SourceSessionID == *value {
 				session.SourceSessionID = *value
@@ -232,6 +255,100 @@ func applyItemSessionFields(session *repository.CreateChatSessionInput, payload 
 	if session.Title == nil {
 		session.Title = stringField(payload, "title")
 	}
+}
+
+// unwrapChatLine peels the agent-specific envelope off a single JSONL row and
+// returns (itemPayload, sessionMetaPayload). Real transcripts use different
+// shapes than the loose `{role, content, ...}` synthetic fixtures:
+//
+//   - codex rollouts wrap each row as
+//     `{timestamp, type:"response_item"|"session_meta"|..., payload:{...}}`
+//     and the actual chat item (or session metadata) lives inside payload.
+//   - Claude transcripts wrap each row as
+//     `{type:"user"|"assistant", message:{role,content,...}, timestamp,
+//     sessionId, cwd, ...}` so the text lives inside `message.content`.
+//
+// Without unwrapping, top-level lookups for `content` / `role` find nothing
+// for codex (all items silently dropped) and for Claude they find a non-string
+// `message` field so Text/SearchText come out empty. For unknown shapes the
+// row is returned unchanged so the existing loose `{role, content}` fallback
+// keeps working.
+func unwrapChatLine(source string, line map[string]any) (item map[string]any, sessionMeta map[string]any) {
+	switch source {
+	case "codex":
+		outerType := firstString(line, "type")
+		inner, _ := line["payload"].(map[string]any)
+		switch outerType {
+		case "session_meta":
+			return nil, inner
+		case "response_item":
+			if inner == nil {
+				return nil, nil
+			}
+			flat := make(map[string]any, len(inner)+1)
+			for k, v := range inner {
+				flat[k] = v
+			}
+			if _, has := flat["timestamp"]; !has {
+				if ts, ok := line["timestamp"]; ok {
+					flat["timestamp"] = ts
+				}
+			}
+			return flat, nil
+		case "turn_context":
+			// turn_context lines carry the working directory per turn.
+			// When session_meta lacked cwd (older rollouts), feeding the
+			// inner payload to applySessionFields lets the first
+			// turn_context's cwd populate session.CWD; subsequent ones
+			// don't overwrite because applySessionFields preserves the
+			// first non-nil value. This is what unlocks project auto-
+			// assignment for codex sessions that previously stayed
+			// project_id=NULL.
+			return nil, inner
+		case "event_msg":
+			return nil, nil
+		}
+		// No recognized codex envelope (e.g. synthetic loose-format
+		// fixtures) - fall through to passthrough.
+		return line, line
+	case "claude_code":
+		outerType := firstString(line, "type")
+		if outerType == "user" || outerType == "assistant" {
+			if message, ok := line["message"].(map[string]any); ok {
+				flat := make(map[string]any, len(message)+4)
+				for k, v := range message {
+					flat[k] = v
+				}
+				// Outer envelope carries the canonical timestamp, cwd,
+				// sessionId, and (sometimes) the role hint when the
+				// nested message omits it.
+				for _, key := range []string{"timestamp", "cwd", "sessionId"} {
+					if _, has := flat[key]; !has {
+						if v, ok := line[key]; ok {
+							flat[key] = v
+						}
+					}
+				}
+				if _, has := flat["role"]; !has {
+					flat["role"] = outerType
+				}
+				return flat, line
+			}
+		}
+		// Drop real-Claude metadata rows. Real Claude transcripts carry
+		// `sessionId` (camelCase) on every row; a row with that marker
+		// but no user/assistant type is metadata (queue-operation,
+		// which duplicates the next user message via its top-level
+		// `content` field, plus file-history-snapshot, ai-title,
+		// permission-mode, progress, task_reminder, pr-link, ...). The
+		// synthetic loose fixtures use snake_case `session_id` and lack
+		// this marker, so they still fall through to passthrough.
+		if _, hasRealClaudeMarker := line["sessionId"]; hasRealClaudeMarker {
+			return nil, nil
+		}
+		return line, line
+	}
+	return line, line
 }
 
 func hasItemPayload(payload map[string]any) bool {
