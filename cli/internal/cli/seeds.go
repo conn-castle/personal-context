@@ -267,7 +267,7 @@ Projects and source devices are first-class registries. Each record must name a 
 
 ### Registry workflow
 ` + "```bash" + `
-pc project add "ml/sleep-staging"
+pc project register "ml/sleep-staging"
 pc device register "work-laptop"
 pc add record1/ --project "ml/sleep-staging" --device "work-laptop"
 pc project list
@@ -308,7 +308,7 @@ In the web UI, use the project picker in the left panel to filter records by pro
       <div class="section">
         <h2>Registry First</h2>
         <p>Register projects and devices, then pass explicit provenance when adding records.</p>
-        <pre>pc project add "ml/sleep-staging"
+        <pre>pc project register "ml/sleep-staging"
 pc device register "work-laptop"
 pc add my-record/ --project "ml/sleep-staging" --device "work-laptop"
 

@@ -82,7 +82,7 @@ func validateActiveProjectAndDevice(ctx context.Context, repo repository.Reposit
 	project, err := repo.GetProjectByID(ctx, projectID)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
-			return fmt.Errorf("project %q is not registered; run `pc project list` or `pc project add %s`", projectID, projectID)
+			return fmt.Errorf("project %q is not registered; run `pc project list` or `pc project register %s`", projectID, projectID)
 		}
 		return fmt.Errorf("get project %q: %w", projectID, err)
 	}

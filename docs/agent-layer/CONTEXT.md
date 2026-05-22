@@ -106,7 +106,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - **notes**: Full markdown. Empty string normalized to NULL at write time. `has_notes` = `notes IS NOT NULL`.
 - **No title. No tags.** Organization is by project and date only.
 - **Chat source values**: use unambiguous product identifiers in storage (`codex`, `claude_code`, `gemini`). CLI `--agent claude` maps to `claude_code`.
-- **Chat project assignment**: import is non-interactive. Sessions whose `cwd` does not match a registered `project_paths` row are stored with `project_id = NULL`; registering a path via `pc project add <id> [path] --device <id>` backfills matching NULL sessions.
+- **Chat project assignment**: import is non-interactive. Sessions whose `cwd` does not match a registered `project_paths` row are stored with `project_id = NULL`; registering a path via `pc project register <id> [path] --device <id>` backfills matching NULL sessions.
 
 ### Figure References in HTML
 - `html_content` references figures as `figures/{filename}` (relative path, no record_id — implicit from context).
@@ -311,7 +311,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Current chat expo
 - `pc records files list` — local record attachment inventory with figure/data rows, recorded data-file size, local file size/path, and present/missing status
 - `pc chat import --device <id>` — full-scan import for Codex, Claude Code, and Gemini transcripts; `--agent` narrows and `--root` overrides default roots while requiring `--agent`.
 - `pc chat list|search|show|delete|restore` — chat browsing, item search, transcript rendering, soft deletion, and restore. `pc chat show` uses `$PAGER` only when stdout is a TTY.
-- `pc project list|add|archive|restore` — manage registered projects; optional `pc project add <id> [path] --device <id>` registers a project path and backfills matching unassigned chats.
+- `pc project list|register|archive|restore` — manage registered projects; optional `pc project register <id> [path] --device <id>` registers a project path and backfills matching unassigned chats.
 - `pc device list|register|archive|restore` — manage registered source devices
 
 ### Local Dev Server

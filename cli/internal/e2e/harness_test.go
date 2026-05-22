@@ -248,7 +248,7 @@ func ensureRegistryForAdd(t *testing.T, homeDir string, args []string) {
 			}
 		}
 	}
-	ensureRegistryEntry(t, homeDir, "project", "add", projectID)
+	ensureRegistryEntry(t, homeDir, "project", "register", projectID)
 	ensureRegistryEntry(t, homeDir, "device", "register", deviceID)
 }
 
@@ -270,7 +270,7 @@ func ensureRegistryForEdit(t *testing.T, homeDir string, args []string) {
 	if err := json.Unmarshal(data, &meta); err != nil {
 		return
 	}
-	ensureRegistryEntry(t, homeDir, "project", "add", meta.ProjectID)
+	ensureRegistryEntry(t, homeDir, "project", "register", meta.ProjectID)
 	ensureRegistryEntry(t, homeDir, "device", "register", meta.SourceDeviceID)
 }
 

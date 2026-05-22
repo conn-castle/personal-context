@@ -169,12 +169,13 @@ func TestHelpersAndParseErrors(t *testing.T) {
 	}
 	// Each source must contribute at least one project-derived root in
 	// addition to the home-dir root; for source==claude_code the
-	// per-project pass contributes both `.claude` and `.claude-config/projects`
-	// (see TestRootsIncludesClaudeConfigForPerProjectScans).
+	// per-project pass contributes both `.claude/projects` and
+	// `.claude-config/projects` (see
+	// TestRootsIncludesClaudeProjectDirsForPerProjectScans).
 	suffixesBySource := map[string][]string{
 		"codex":       {filepath.Join(".codex", "sessions")},
-		"claude_code": {".claude", filepath.Join(".claude-config", "projects")},
-		"gemini":      {".gemini"},
+		"claude_code": {filepath.Join(".claude", "projects"), filepath.Join(".claude-config", "projects")},
+		"gemini":      {filepath.Join(".gemini", "tmp")},
 	}
 	for source, suffixes := range suffixesBySource {
 		roots := allProjectRoots[source]
@@ -546,19 +547,36 @@ func TestTranscriptFilesSkipsSubAgentMetaSidecars(t *testing.T) {
 	}
 }
 
-// TestRootsIncludesClaudeConfigForPerProjectScans asserts that per-project
-// scans include `.claude-config/projects` because some repos (e.g.
-// agent-layer) redirect Claude Code state there. Without this, in-repo
-// transcripts are invisible to the default `pc chat import` and users must
-// symlink.
-func TestRootsIncludesClaudeConfigForPerProjectScans(t *testing.T) {
+func TestTranscriptFilesSkipsClaudeSessionsIndexSidecar(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "claude-session.jsonl")
+	sidecarPath := filepath.Join(root, "sessions-index.json")
+	if err := os.WriteFile(transcriptPath, []byte(`{"type":"user","message":{"role":"user","content":"hello"}}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	if err := os.WriteFile(sidecarPath, []byte(`{"sessions":["claude-session"]}`), 0o644); err != nil {
+		t.Fatalf("write sidecar: %v", err)
+	}
+	files, err := TranscriptFiles(root)
+	if err != nil {
+		t.Fatalf("TranscriptFiles error = %v", err)
+	}
+	if len(files) != 1 || files[0] != transcriptPath {
+		t.Fatalf("expected only the .jsonl transcript, got %+v", files)
+	}
+}
+
+// TestRootsIncludesClaudeProjectDirsForPerProjectScans asserts that
+// per-project scans include Claude transcript directories without scanning the
+// broad `.claude` config/worktree root.
+func TestRootsIncludesClaudeProjectDirsForPerProjectScans(t *testing.T) {
 	projectPath := t.TempDir()
 	roots, err := Roots(nil, "claude_code", []repository.ProjectPath{{Path: projectPath}})
 	if err != nil {
 		t.Fatalf("Roots error = %v", err)
 	}
 	claudeRoots := roots["claude_code"]
-	wantClaude := filepath.Join(projectPath, ".claude")
+	wantClaude := filepath.Join(projectPath, ".claude", "projects")
 	wantClaudeConfig := filepath.Join(projectPath, ".claude-config", "projects")
 	hasClaude := false
 	hasClaudeConfig := false
@@ -572,5 +590,10 @@ func TestRootsIncludesClaudeConfigForPerProjectScans(t *testing.T) {
 	}
 	if !hasClaude || !hasClaudeConfig {
 		t.Fatalf("expected both %q and %q in per-project claude roots, got %+v", wantClaude, wantClaudeConfig, claudeRoots)
+	}
+	for _, r := range claudeRoots {
+		if r == filepath.Join(projectPath, ".claude") {
+			t.Fatalf("per-project claude roots must not scan broad .claude root: %+v", claudeRoots)
+		}
 	}
 }

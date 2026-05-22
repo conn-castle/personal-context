@@ -31,7 +31,7 @@ func TestCloudSyncChatRoundTripAndSnapshotExport(t *testing.T) {
 		t.Fatalf("resolve project root: %v", err)
 	}
 	runPCSuccessNoStderr(t, homeA, userHomeA, "device", "register", deviceID)
-	runPCSuccessNoStderr(t, homeA, userHomeA, "project", "add", projectID, projectRoot, "--device", deviceID)
+	runPCSuccessNoStderr(t, homeA, userHomeA, "project", "register", projectID, projectRoot, "--device", deviceID)
 
 	transcriptRoot := filepath.Join(userHomeA, ".codex", "sessions")
 	if err := os.MkdirAll(transcriptRoot, 0o755); err != nil {
@@ -133,7 +133,7 @@ func TestCloudSyncChatRawSourceRoundTripAndSameKeyReplacement(t *testing.T) {
 		t.Fatalf("create project root: %v", err)
 	}
 	runPCSuccessNoStderr(t, homeA, userHomeA, "device", "register", deviceID)
-	runPCSuccessNoStderr(t, homeA, userHomeA, "project", "add", projectID, projectRoot, "--device", deviceID)
+	runPCSuccessNoStderr(t, homeA, userHomeA, "project", "register", projectID, projectRoot, "--device", deviceID)
 
 	transcriptRoot := filepath.Join(userHomeA, ".codex", "sessions")
 	if err := os.MkdirAll(transcriptRoot, 0o755); err != nil {

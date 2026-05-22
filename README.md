@@ -162,10 +162,10 @@ above with `--api-key`.
 - `pc records stats` — show local record counts, attachment counts, date range, and explicit size components (`--from`, `--to`, `--project`, `--deleted`, `--format text|json`)
 - `pc records files list` — inventory record attachments with local path/status (`--record`, `--from`, `--to`, `--project`, `--deleted`, `--format table|json`)
 - `pc chat import --device <id>` — import Codex, Claude Code, and Gemini transcript files; copies each raw transcript into `<PC_HOME>/personal-context/chats/raw/{chat_session_id}/source.{ext}` and records the original imported path as `original_source_path`. `--agent` narrows the scan, `--root` overrides default roots and requires `--agent`, and `--delete-source` removes each original transcript file only after the managed copy and DB writes succeed.
-- `pc chat list|search|show|delete|restore` — browse, search, render, soft-delete, and restore imported chat sessions; `show` uses `$PAGER` when stdout is a TTY
+- `pc chat list|search|show|delete|restore` — browse, search, render, soft-delete, and restore imported chat sessions; list/search JSON returns `{items,total,next_cursor}`. For `pc chat search --format json`, `total` is the current page size, not the overall match count; paginate via `next_cursor`. `show` uses `$PAGER` when stdout is a TTY
 - `pc trash` — list soft-deleted records and chats
 - `pc gc` — hard-delete trash older than 30 days (cascades child rows, removes files including chat raw sources; cloud-aware: deletes from cloud first to prevent sync re-creation)
-- `pc project list|add|archive|restore` — manage the project registry; `pc project add <id> [path] --device <id>` registers a source path for chat project assignment
+- `pc project list|register|archive|restore` — manage the project registry; `pc project register <id> [path] --device <id>` registers a source path for chat project assignment
 - `pc device list|register|archive|restore` — manage the source-device registry
 - `pc doctor` — check system health (DB, orphans, missing files; cloud connectivity if configured)
 - `pc sync` — bidirectional sync between local SQLite and cloud Postgres/S3 (requires cloud configuration)

@@ -486,9 +486,9 @@ func ensureProjectRegistered(t *testing.T, homeDir string, userHome string, proj
 	if registeredProjects[key] {
 		return
 	}
-	result := runPCWithEnv(t, homeDir, userHome, nil, "project", "add", projectID)
+	result := runPCWithEnv(t, homeDir, userHome, nil, "project", "register", projectID)
 	if result.ExitCode != 0 {
-		t.Fatalf("pc project add %q failed (exit %d):\nstdout: %s\nstderr: %s", projectID, result.ExitCode, result.Stdout, result.Stderr)
+		t.Fatalf("pc project register %q failed (exit %d):\nstdout: %s\nstderr: %s", projectID, result.ExitCode, result.Stdout, result.Stderr)
 	}
 	registeredProjects[key] = true
 }

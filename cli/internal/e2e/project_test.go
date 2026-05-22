@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestProjectAddListArchiveRestore(t *testing.T) {
+func TestProjectRegisterListArchiveRestore(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
 
@@ -16,8 +16,8 @@ func TestProjectAddListArchiveRestore(t *testing.T) {
 		t.Fatalf("expected empty registry message, got %q", stdout)
 	}
 
-	runPCSuccess(t, homeDir, "project", "add", "alpha")
-	runPCSuccess(t, homeDir, "project", "add", "beta")
+	runPCSuccess(t, homeDir, "project", "register", "alpha")
+	runPCSuccess(t, homeDir, "project", "register", "beta")
 
 	stdout = runPCSuccess(t, homeDir, "project", "list", "--all")
 	if !strings.Contains(stdout, "alpha") || !strings.Contains(stdout, "beta") {
@@ -114,10 +114,10 @@ func TestProjectFlagMustMatchMetadata(t *testing.T) {
 	}
 }
 
-func TestArchivedProjectRejectedForNewAdd(t *testing.T) {
+func TestArchivedProjectRejectedForNewRegister(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
-	runPCSuccess(t, homeDir, "project", "add", "archived-proj")
+	runPCSuccess(t, homeDir, "project", "register", "archived-proj")
 	runPCSuccess(t, homeDir, "device", "register", "test-device")
 	runPCSuccess(t, homeDir, "project", "archive", "archived-proj")
 

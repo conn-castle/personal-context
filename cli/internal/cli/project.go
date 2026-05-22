@@ -22,7 +22,7 @@ func newProjectCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 		},
 	}
 	cmd.AddCommand(newProjectListCommand(stdout, stderr))
-	cmd.AddCommand(newProjectAddCommand(stdout, stderr))
+	cmd.AddCommand(newProjectRegisterCommand(stdout, stderr))
 	cmd.AddCommand(newProjectArchiveCommand(stdout, stderr))
 	cmd.AddCommand(newProjectRestoreCommand(stdout, stderr))
 	return cmd
@@ -67,10 +67,10 @@ func runProjectList(ctx context.Context, stdout io.Writer, _ io.Writer, includeA
 	return nil
 }
 
-func newProjectAddCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
+func newProjectRegisterCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	var deviceID string
 	cmd := &cobra.Command{
-		Use:   "add <id> [path]",
+		Use:   "register <id> [path]",
 		Short: "Register a project",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -78,17 +78,17 @@ func newProjectAddCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 			if len(args) == 2 {
 				path = args[1]
 			}
-			return runProjectAdd(cmd.Context(), stdout, stderr, args[0], path, deviceID)
+			return runProjectRegister(cmd.Context(), stdout, stderr, args[0], path, deviceID)
 		},
 	}
 	cmd.Flags().StringVar(&deviceID, "device", "", "Registered source device for the project path")
 	return cmd
 }
 
-// runProjectAdd registers `id` as a project. When `path` is non-empty it also
-// registers the project path on `deviceID` (which becomes required). The
+// runProjectRegister registers `id` as a project. When `path` is non-empty it
+// also registers the project path on `deviceID` (which becomes required). The
 // helper is also called directly from tests with empty `path`/`deviceID`.
-func runProjectAdd(ctx context.Context, stdout io.Writer, _ io.Writer, id string, path string, deviceID string) error {
+func runProjectRegister(ctx context.Context, stdout io.Writer, _ io.Writer, id string, path string, deviceID string) error {
 	if strings.TrimSpace(id) == "" {
 		return fmt.Errorf("project id must not be empty")
 	}
@@ -116,7 +116,7 @@ func runProjectAdd(ctx context.Context, stdout io.Writer, _ io.Writer, id string
 	project, err := stack.Repo.CreateProject(ctx, repository.CreateRegistryInput{ID: projectID})
 	if err != nil {
 		if !errors.Is(err, repository.ErrConflict) {
-			return fmt.Errorf("add project: %w", err)
+			return fmt.Errorf("register project: %w", err)
 		}
 		project, err = stack.Repo.GetProjectByID(ctx, projectID)
 		if err != nil {

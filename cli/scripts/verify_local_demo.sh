@@ -197,7 +197,7 @@ setup_out="$(run_pc setup)"
 [[ "${setup_out}" == *"Personal Context initialized at"* ]] || fail "setup output did not include initialization message"
 
 run_pc device register "${device_id}" >/dev/null
-run_pc project add "${project_id}" >/dev/null
+run_pc project register "${project_id}" >/dev/null
 
 for i in {1..10}; do
 	write_record_input "${i}"

@@ -18,12 +18,12 @@ func TestProjectRegistryCommands(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"project", "add", "alpha"})
+	cmd.SetArgs([]string{"project", "register", "alpha"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("project add: %v", err)
+		t.Fatalf("project register: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "alpha") {
-		t.Fatalf("expected alpha in add output, got %q", stdout.String())
+		t.Fatalf("expected alpha in register output, got %q", stdout.String())
 	}
 
 	stdout.Reset()
@@ -59,9 +59,15 @@ func TestProjectRegistryCommands(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("project restore: %v", err)
 	}
+
+	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "add", "beta"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatal("expected project add compatibility alias to be absent")
+	}
 }
 
-func TestProjectAddPathRegistersAndBackfillsChat(t *testing.T) {
+func TestProjectRegisterPathRegistersAndBackfillsChat(t *testing.T) {
 	projectPath := t.TempDir()
 	normalizedProjectPath, err := normalizeProjectPath(projectPath)
 	if err != nil {
@@ -87,22 +93,22 @@ func TestProjectAddPathRegistersAndBackfillsChat(t *testing.T) {
 
 	stdout := &bytes.Buffer{}
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"project", "add", "path/project", projectPath, "--device", "test-device"})
+	cmd.SetArgs([]string{"project", "register", "path/project", projectPath, "--device", "test-device"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("project add path: %v", err)
+		t.Fatalf("project register path: %v", err)
 	}
 	out := stdout.String()
 	for _, want := range []string{"path/project registered", "path registered", "Backfilled 1 chat session"} {
 		if !strings.Contains(out, want) {
-			t.Fatalf("expected %q in project add output, got %q", want, out)
+			t.Fatalf("expected %q in project register output, got %q", want, out)
 		}
 	}
 
 	stdout.Reset()
 	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"project", "add", "path/project", projectPath, "--device", "test-device"})
+	cmd.SetArgs([]string{"project", "register", "path/project", projectPath, "--device", "test-device"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("project add path idempotent: %v", err)
+		t.Fatalf("project register path idempotent: %v", err)
 	}
 	if out := stdout.String(); !strings.Contains(out, "already registered") || !strings.Contains(out, "path already registered") {
 		t.Fatalf("expected idempotent output, got %q", out)
@@ -119,13 +125,13 @@ func TestProjectAddPathRegistersAndBackfillsChat(t *testing.T) {
 	}
 }
 
-func TestProjectAddPathValidationBranches(t *testing.T) {
+func TestProjectRegisterPathValidationBranches(t *testing.T) {
 	setupEnv(t)
 	projectPath := t.TempDir()
 	cases := [][]string{
-		{"project", "add", "missing-device", projectPath},
-		{"project", "add", "unknown-device", projectPath, "--device", "does-not-exist"},
-		{"project", "add", "bad-path", filepath.Join(projectPath, "missing"), "--device", "test-device"},
+		{"project", "register", "missing-device", projectPath},
+		{"project", "register", "unknown-device", projectPath, "--device", "does-not-exist"},
+		{"project", "register", "bad-path", filepath.Join(projectPath, "missing"), "--device", "test-device"},
 	}
 	for _, args := range cases {
 		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -152,7 +158,7 @@ func TestProjectAddPathValidationBranches(t *testing.T) {
 		t.Fatalf("archive device: %v", err)
 	}
 	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"project", "add", "archived-device", projectPath, "--device", "test-device"})
+	cmd.SetArgs([]string{"project", "register", "archived-device", projectPath, "--device", "test-device"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected archived device path registration to fail")
 	}
@@ -273,8 +279,8 @@ func TestRegistryCommandsHomeResolutionErrors(t *testing.T) {
 		run  func() error
 	}{
 		{name: "project list", run: func() error { return runProjectList(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, false) }},
-		{name: "project add", run: func() error {
-			return runProjectAdd(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "p", "", "")
+		{name: "project register", run: func() error {
+			return runProjectRegister(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "p", "", "")
 		}},
 		{name: "project archive", run: func() error { _, err := runArchiveProjectForTest("p"); return err }},
 		{name: "project restore", run: func() error { return runProjectRestore(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "p") }},
@@ -299,7 +305,7 @@ func TestProjectAndDeviceRegistryCommandBranches(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "project empty", args: []string{"project", "add", ""}, want: "project id must not be empty"},
+		{name: "project empty", args: []string{"project", "register", ""}, want: "project id must not be empty"},
 		{name: "device empty", args: []string{"device", "register", ""}, want: "device id must not be empty"},
 		{name: "project missing archive", args: []string{"project", "archive", "missing"}, want: "archive project"},
 		{name: "project missing restore", args: []string{"project", "restore", "missing"}, want: "restore project"},
@@ -316,8 +322,8 @@ func TestProjectAndDeviceRegistryCommandBranches(t *testing.T) {
 		})
 	}
 
-	if err := runProjectAdd(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "archived-project", "", ""); err != nil {
-		t.Fatalf("runProjectAdd: %v", err)
+	if err := runProjectRegister(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, "archived-project", "", ""); err != nil {
+		t.Fatalf("runProjectRegister: %v", err)
 	}
 	if _, err := runArchiveProjectForTest("archived-project"); err != nil {
 		t.Fatalf("archive project: %v", err)

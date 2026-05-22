@@ -228,6 +228,6 @@ A rolling log of important, non-obvious decisions that materially affect future 
     Tradeoffs: Existing developer databases created before this feature must be recreated manually; future post-release schema changes still need a migration strategy.
 
 - Decision 2026-05-14 r5s6t7: Chat import uses explicit device provenance and nullable project assignment
-    Decision: `pc chat import` requires `--device`; project assignment is derived from registered `project_paths`, and unmatched sessions remain `project_id = NULL` until `pc project add <id> [path] --device <id>` backfills them.
+    Decision: `pc chat import` requires `--device`; project assignment is derived from registered `project_paths`, and unmatched sessions remain `project_id = NULL` until `pc project register <id> [path] --device <id>` backfills them.
     Reason: This mirrors record provenance rules and avoids hidden current-device/current-project defaults.
     Tradeoffs: First-time setup requires registering devices and paths before imports classify cleanly, but unassigned sessions stay visible for later review.

@@ -14,8 +14,8 @@ import (
 
 func TestRunAddAutoSyncWarningDoesNotPolluteStdout(t *testing.T) {
 	setupEnv(t)
-	if err := runProjectAdd(context.Background(), io.Discard, io.Discard, "test/project", "", ""); err != nil {
-		t.Fatalf("runProjectAdd() error = %v", err)
+	if err := runProjectRegister(context.Background(), io.Discard, io.Discard, "test/project", "", ""); err != nil {
+		t.Fatalf("runProjectRegister() error = %v", err)
 	}
 	inputDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(inputDir, "record.html"), []byte("<h1>record</h1>"), 0o644); err != nil {
