@@ -124,13 +124,10 @@ func TranscriptFiles(root string) ([]string, error) {
 		if entry.IsDir() {
 			return nil
 		}
-		// Skip `*.meta.json` sub-agent sidecars: they live alongside the
-		// real transcript jsonl in `subagents/` and carry agent metadata
-		// (not a chat transcript array), so the JSON parser would reject
-		// every one of them as "no transcript array" and clutter import
-		// output.
+		// Skip known agent sidecars that live beside real transcripts but are
+		// not chat transcript payloads.
 		name := strings.ToLower(filepath.Base(path))
-		if strings.HasSuffix(name, ".meta.json") || name == "sessions-index.json" {
+		if strings.HasSuffix(name, ".meta.json") || name == "sessions-index.json" || name == "logs.json" {
 			return nil
 		}
 		switch strings.ToLower(filepath.Ext(path)) {

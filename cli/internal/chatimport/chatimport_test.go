@@ -110,6 +110,34 @@ func TestJSONLItemSessionScopedFieldsCanFillFallbackMetadata(t *testing.T) {
 	}
 }
 
+func TestTranscriptFilesSkipsGeminiLogsJSON(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "gemini-session.json")
+	logsPath := filepath.Join(root, "logs.json")
+	if err := os.WriteFile(transcriptPath, []byte(`{"messages":[]}`), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	if err := os.WriteFile(logsPath, []byte(`[]`), 0o644); err != nil {
+		t.Fatalf("write logs sidecar: %v", err)
+	}
+
+	files, err := TranscriptFiles(root)
+	if err != nil {
+		t.Fatalf("TranscriptFiles(directory) error = %v", err)
+	}
+	if len(files) != 1 || files[0] != transcriptPath {
+		t.Fatalf("TranscriptFiles(directory) = %+v, want only %q", files, transcriptPath)
+	}
+
+	files, err = TranscriptFiles(logsPath)
+	if err != nil {
+		t.Fatalf("TranscriptFiles(file root) error = %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("TranscriptFiles(file root logs.json) = %+v, want none", files)
+	}
+}
+
 func TestHelpersAndParseErrors(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "nested")

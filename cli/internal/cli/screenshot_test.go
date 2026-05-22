@@ -19,6 +19,27 @@ func writeFakeChromeScript(t *testing.T, content string) string {
 	return scriptPath
 }
 
+func writeFakeChromePNGScript(t *testing.T) string {
+	t.Helper()
+	return writeFakeChromeScript(t, `#!/bin/sh
+set -eu
+out=""
+for arg in "$@"; do
+  case "$arg" in
+    --screenshot=*)
+      out="${arg#--screenshot=}"
+      ;;
+  esac
+done
+if [ -z "$out" ]; then
+  echo "missing screenshot arg" >&2
+  exit 2
+fi
+printf '\211PNG\r\n\032\n' > "$out"
+dd if=/dev/zero bs=1024 count=1 >> "$out" 2>/dev/null
+`)
+}
+
 func TestBuildRecordHTML_FullDocument(t *testing.T) {
 	// A full HTML document should be returned as-is.
 	full := `<!DOCTYPE html><html><head></head><body><h1>Hello</h1></body></html>`
@@ -177,13 +198,11 @@ func TestScreenshotWithChrome_InvalidBinary(t *testing.T) {
 }
 
 func TestScreenshotHappyPath(t *testing.T) {
-	// Skip if Chrome is not available.
-	t.Setenv("PC_CHROME_PATH", "")
-	chromePath, err := findChromeBinary()
-	if err != nil {
-		t.Skipf("Chrome not available: %v", err)
+	old := findChromeBinaryFn
+	t.Cleanup(func() { findChromeBinaryFn = old })
+	findChromeBinaryFn = func() (string, error) {
+		return writeFakeChromePNGScript(t), nil
 	}
-	_ = chromePath
 
 	homeDir := setupEnv(t)
 
@@ -309,10 +328,10 @@ printf 'fake png' > "$out"
 }
 
 func TestScreenshotDefaultOutput(t *testing.T) {
-	// Skip if Chrome is not available.
-	t.Setenv("PC_CHROME_PATH", "")
-	if _, err := findChromeBinary(); err != nil {
-		t.Skipf("Chrome not available: %v", err)
+	old := findChromeBinaryFn
+	t.Cleanup(func() { findChromeBinaryFn = old })
+	findChromeBinaryFn = func() (string, error) {
+		return writeFakeChromePNGScript(t), nil
 	}
 
 	setupEnv(t)
