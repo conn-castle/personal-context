@@ -17,6 +17,80 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
+type chatImportTestSnapshot struct {
+	session  repository.ChatSession
+	items    []repository.ChatItem
+	rawPath  string
+	rawBytes []byte
+}
+
+func runChatImportSummaryForTest(t *testing.T, root string, extraArgs ...string) chatImportSummary {
+	t.Helper()
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	args := []string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root}
+	args = append(args, extraArgs...)
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import %v: %v", args, err)
+	}
+	var summary chatImportSummary
+	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+		t.Fatalf("parse chat import summary: %v\n%s", err, stdout.String())
+	}
+	return summary
+}
+
+func readChatImportTestSnapshot(t *testing.T, sourceSessionID string) chatImportTestSnapshot {
+	t.Helper()
+	stack, err := openLocalStackFromHome()
+	if err != nil {
+		t.Fatalf("open local stack: %v", err)
+	}
+	defer func() { _ = stack.Close() }()
+
+	session, err := stack.Repo.GetChatSessionBySource(context.Background(), "codex", sourceSessionID)
+	if err != nil {
+		t.Fatalf("GetChatSessionBySource(%q): %v", sourceSessionID, err)
+	}
+	items, err := stack.Repo.ListChatItems(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems(%q): %v", session.ID, err)
+	}
+	if session.RawSourceKey == nil {
+		t.Fatalf("expected raw source key for %q", sourceSessionID)
+	}
+	rawPath, err := stack.FS.ResolveChatSourcePath(session.ID, *session.RawSourceKey)
+	if err != nil {
+		t.Fatalf("resolve raw source path: %v", err)
+	}
+	rawBytes, err := os.ReadFile(rawPath)
+	if err != nil {
+		t.Fatalf("read raw source: %v", err)
+	}
+	return chatImportTestSnapshot{session: session, items: items, rawPath: rawPath, rawBytes: rawBytes}
+}
+
+func chatItemIDs(items []repository.ChatItem) []int64 {
+	ids := make([]int64, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	return ids
+}
+
+func equalInt64Slices(a []int64, b []int64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestChatImportListSearchShowDelete(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()
@@ -58,7 +132,7 @@ func TestChatImportListSearchShowDelete(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &importSummary); err != nil {
 		t.Fatalf("parse second import summary: %v\n%s", err, stdout.String())
 	}
-	if importSummary.SessionsUpdated != 1 || importSummary.ItemsCreated != 0 {
+	if importSummary.FilesScanned != 1 || importSummary.SessionsSkipped != 1 || importSummary.SessionsUpdated != 0 || importSummary.ItemsCreated != 0 {
 		t.Fatalf("unexpected second import summary: %+v", importSummary)
 	}
 	updatedTranscript := `{
@@ -135,6 +209,199 @@ func TestChatImportListSearchShowDelete(t *testing.T) {
 	cmd.SetArgs([]string{"chat", "delete", "missing-chat"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("expected deleting a missing chat to fail")
+	}
+}
+
+func TestChatImportSkipsIdenticalSecondImport(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "identical-session.json")
+	transcript := `{
+  "id": "identical-session",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [
+    {"role": "user", "content": "unchanged import needle"},
+    {"role": "assistant", "content": "same answer"}
+  ]
+}`
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	originalAutoSync := runAutoSyncFn
+	syncCalls := 0
+	t.Cleanup(func() { runAutoSyncFn = originalAutoSync })
+	runAutoSyncFn = func(context.Context, io.Writer) error {
+		syncCalls++
+		return nil
+	}
+
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.FilesScanned != 1 || firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 2 || firstSummary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	before := readChatImportTestSnapshot(t, "identical-session")
+	beforeItemIDs := chatItemIDs(before.items)
+
+	secondSummary := runChatImportSummaryForTest(t, root)
+	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 1 ||
+		secondSummary.SessionsCreated != 0 || secondSummary.SessionsUpdated != 0 ||
+		secondSummary.ItemsCreated != 0 || secondSummary.RawSourcesCopied != 0 {
+		t.Fatalf("unexpected unchanged second import summary: %+v", secondSummary)
+	}
+	if syncCalls != 1 {
+		t.Fatalf("autosync calls = %d, want only the first import to sync", syncCalls)
+	}
+
+	after := readChatImportTestSnapshot(t, "identical-session")
+	if !after.session.UpdatedAt.Equal(before.session.UpdatedAt) {
+		t.Fatalf("updated_at changed on skipped import: before=%v after=%v", before.session.UpdatedAt, after.session.UpdatedAt)
+	}
+	if !equalInt64Slices(beforeItemIDs, chatItemIDs(after.items)) {
+		t.Fatalf("item IDs changed on skipped import: before=%+v after=%+v", beforeItemIDs, chatItemIDs(after.items))
+	}
+	if !bytes.Equal(before.rawBytes, after.rawBytes) || before.rawPath != after.rawPath {
+		t.Fatalf("managed raw source changed on skipped import: before=%q after=%q", before.rawPath, after.rawPath)
+	}
+	if _, err := os.Stat(transcriptPath); err != nil {
+		t.Fatalf("unchanged source should remain without --delete-source: %v", err)
+	}
+}
+
+func TestChatImportSkipKeepsUnchangedSoftDeletedSessionDeleted(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcript := `{
+  "id": "soft-deleted-unchanged-session",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [{"role": "user", "content": "soft deleted unchanged"}]
+}`
+	if err := os.WriteFile(filepath.Join(root, "soft-deleted.json"), []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+
+	before := readChatImportTestSnapshot(t, "soft-deleted-unchanged-session")
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "delete", before.session.ID})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat delete: %v", err)
+	}
+	deleted := readChatImportTestSnapshot(t, "soft-deleted-unchanged-session")
+	if deleted.session.DeletedAt == nil {
+		t.Fatal("expected session to be soft-deleted before re-import")
+	}
+
+	secondSummary := runChatImportSummaryForTest(t, root)
+	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 1 ||
+		secondSummary.SessionsCreated != 0 || secondSummary.SessionsUpdated != 0 || secondSummary.ItemsCreated != 0 {
+		t.Fatalf("unexpected unchanged soft-deleted import summary: %+v", secondSummary)
+	}
+	after := readChatImportTestSnapshot(t, "soft-deleted-unchanged-session")
+	if after.session.DeletedAt == nil {
+		t.Fatal("unchanged re-import restored a soft-deleted session")
+	}
+}
+
+func TestChatImportDeleteSourceRemovesSkippedUnchangedOriginal(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "delete-skipped-unchanged.json")
+	transcript := `{
+  "id": "delete-skipped-unchanged",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [{"role": "user", "content": "delete skipped unchanged"}]
+}`
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	before := readChatImportTestSnapshot(t, "delete-skipped-unchanged")
+
+	secondSummary := runChatImportSummaryForTest(t, root, "--delete-source")
+	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 1 || secondSummary.SourcesDeleted != 1 ||
+		secondSummary.SessionsCreated != 0 || secondSummary.SessionsUpdated != 0 || secondSummary.ItemsCreated != 0 || secondSummary.RawSourcesCopied != 0 {
+		t.Fatalf("unexpected delete-source skipped import summary: %+v", secondSummary)
+	}
+	if _, err := os.Stat(transcriptPath); !os.IsNotExist(err) {
+		t.Fatalf("expected original transcript to be removed, stat err = %v", err)
+	}
+	after := readChatImportTestSnapshot(t, "delete-skipped-unchanged")
+	if before.rawPath != after.rawPath || !bytes.Equal(before.rawBytes, after.rawBytes) {
+		t.Fatalf("managed raw source changed during skipped delete-source import: before=%q after=%q", before.rawPath, after.rawPath)
+	}
+}
+
+func TestChatImportPostParseSkipForLegacyOriginalSourcePath(t *testing.T) {
+	homeDir := setupEnv(t)
+	root := t.TempDir()
+	transcript := `{
+  "id": "legacy-original-path-session",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [{"role": "user", "content": "legacy original path unchanged"}]
+}`
+	if err := os.WriteFile(filepath.Join(root, "legacy.json"), []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+
+	dbPath := filepath.Join(homeDir, "personal-context", ".pc", "pc.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE chat_session SET original_source_path = NULL WHERE source = 'codex' AND source_session_id = 'legacy-original-path-session'`); err != nil {
+		_ = db.Close()
+		t.Fatalf("clear original_source_path: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	secondSummary := runChatImportSummaryForTest(t, root)
+	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 1 ||
+		secondSummary.SessionsUpdated != 0 || secondSummary.RawSourcesCopied != 0 || secondSummary.ItemsCreated != 0 {
+		t.Fatalf("unexpected legacy-path unchanged import summary: %+v", secondSummary)
+	}
+}
+
+func TestChatImportRepairsMissingManagedRawSource(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcript := `{
+  "id": "missing-managed-raw-session",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [{"role": "user", "content": "managed raw repair"}]
+}`
+	if err := os.WriteFile(filepath.Join(root, "missing-raw.json"), []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	before := readChatImportTestSnapshot(t, "missing-managed-raw-session")
+	if err := os.Remove(before.rawPath); err != nil {
+		t.Fatalf("remove managed raw source: %v", err)
+	}
+
+	secondSummary := runChatImportSummaryForTest(t, root)
+	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 0 ||
+		secondSummary.SessionsUpdated != 1 || secondSummary.RawSourcesCopied != 1 || secondSummary.ItemsCreated != 0 {
+		t.Fatalf("unexpected missing-raw repair summary: %+v", secondSummary)
+	}
+	after := readChatImportTestSnapshot(t, "missing-managed-raw-session")
+	if !bytes.Equal(before.rawBytes, after.rawBytes) {
+		t.Fatalf("repaired raw bytes differ from original managed copy")
 	}
 }
 
@@ -410,6 +677,40 @@ func TestRunChatImportBailsOnCancelledContext(t *testing.T) {
 	}
 }
 
+func TestRunChatImportBailsOnCancelledContextAfterIndex(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "session.json"), []byte(`{"id":"cancel-after-index","messages":[{"role":"user","content":"hi"}]}`), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	origNewSQLiteRepo := newSQLiteRepoFn
+	t.Cleanup(func() { newSQLiteRepoFn = origNewSQLiteRepo })
+	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
+		return &mockRepo{
+			getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+				return repository.Device{ID: "test-device"}, nil
+			},
+			listProjectPathsFn: func(context.Context, *string) ([]repository.ProjectPath, error) {
+				return nil, nil
+			},
+			listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+				return nil, nil
+			},
+		}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := runChatImport(ctx, &bytes.Buffer{}, &bytes.Buffer{}, chatImportOptions{
+		DeviceID: "test-device",
+		Agent:    "codex",
+		Roots:    []string{root},
+	})
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled after index load, got %v", err)
+	}
+}
+
 func TestChatImportDeleteSourceRemovesOriginal(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()
@@ -484,7 +785,7 @@ func TestChatImportDeleteSourceWarning(t *testing.T) {
 }
 
 func TestChatImportReplacementCountsOnlyNewItems(t *testing.T) {
-	setupEnv(t)
+	homeDir := setupEnv(t)
 	root := t.TempDir()
 	transcriptPath := filepath.Join(root, "count-session.json")
 	firstTranscript := `{
@@ -496,11 +797,12 @@ func TestChatImportReplacementCountsOnlyNewItems(t *testing.T) {
 		t.Fatalf("write first transcript: %v", err)
 	}
 
-	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("first chat import: %v", err)
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 || firstSummary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
 	}
+	before := readChatImportTestSnapshot(t, "count-session")
+	v1 := readSyncVersionUnit(t, homeDir)
 
 	secondTranscript := `{
   "id": "count-session",
@@ -514,18 +816,20 @@ func TestChatImportReplacementCountsOnlyNewItems(t *testing.T) {
 		t.Fatalf("write second transcript: %v", err)
 	}
 
-	stdout := &bytes.Buffer{}
-	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
-	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("second chat import: %v", err)
-	}
-	var summary chatImportSummary
-	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
-		t.Fatalf("parse second import summary: %v\n%s", err, stdout.String())
-	}
-	if summary.SessionsUpdated != 1 || summary.ItemsCreated != 1 {
+	summary := runChatImportSummaryForTest(t, root)
+	if summary.SessionsUpdated != 1 || summary.ItemsCreated != 1 || summary.RawSourcesCopied != 1 || summary.SessionsSkipped != 0 {
 		t.Fatalf("unexpected replacement import summary: %+v", summary)
+	}
+	after := readChatImportTestSnapshot(t, "count-session")
+	if len(after.items) != 2 || !strings.Contains(after.items[1].SearchText, "second item") {
+		t.Fatalf("expected replaced items to include second item, got %+v", after.items)
+	}
+	if bytes.Equal(before.rawBytes, after.rawBytes) || !bytes.Contains(after.rawBytes, []byte("second item")) {
+		t.Fatalf("expected managed raw source to be replaced with updated transcript")
+	}
+	v2 := readSyncVersionUnit(t, homeDir)
+	if v2 <= v1 {
+		t.Fatalf("expected sync_version to bump on modified re-import (was %d, now %d)", v1, v2)
 	}
 }
 
@@ -571,6 +875,7 @@ func TestChatCommandValidationAndStackErrors(t *testing.T) {
 	t.Cleanup(func() { resolveHomeDirFn = origResolveHomeDirFn })
 
 	for _, args := range [][]string{
+		{"chat", "import", "--device", "test-device", "--agent", "codex"},
 		{"chat", "show", "20260315-aaaabbbb"},
 		{"chat", "delete", "20260315-aaaabbbb"},
 		{"chat", "restore", "20260315-aaaabbbb"},
@@ -818,6 +1123,91 @@ func TestChatImportRepositoryErrorBranches(t *testing.T) {
 			return nil, errors.New("paths failed")
 		},
 	}, "list project paths")
+
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+			return nil, errors.New("existing chats failed")
+		},
+	}, "list existing chat sessions")
+
+	badRawKey := "chats/raw/other/source.json"
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+			return []repository.ChatSession{{
+				ID:                 "20260315-44444444",
+				Source:             "codex",
+				SourceSessionID:    "repo-error-session",
+				SourceDeviceID:     "test-device",
+				OriginalSourcePath: &transcriptPath,
+				RawSourceKey:       &badRawKey,
+			}}, nil
+		},
+	}, "compare chat source with managed raw")
+
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+			return []repository.ChatSession{{
+				ID:              "20260315-55555555",
+				Source:          "codex",
+				SourceSessionID: "repo-error-session",
+				SourceDeviceID:  "test-device",
+				RawSourceKey:    &badRawKey,
+			}}, nil
+		},
+	}, "compare chat source with managed raw")
+
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			return repository.ChatSession{ID: "20260315-66666666"}, nil
+		},
+		upsertChatSessionFn: func(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+			return repository.ChatSession{}, false, errors.New("upsert failed")
+		},
+	}, "upsert chat session")
+
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			return repository.ChatSession{}, errors.New("lookup failed")
+		},
+	}, "look up existing chat session")
+
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			return repository.ChatSession{ID: "bad-id"}, nil
+		},
+	}, "stage chat source")
+
+	rollbackLookups := 0
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			rollbackLookups++
+			if rollbackLookups == 1 {
+				return repository.ChatSession{ID: "20260315-77777777"}, nil
+			}
+			return repository.ChatSession{}, errors.New("rollback lookup failed")
+		},
+	}, "look up existing chat rollback state")
 
 	runWithRepo(t, &mockRepo{
 		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {

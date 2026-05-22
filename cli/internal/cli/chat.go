@@ -17,6 +17,7 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/filesystem"
 	"github.com/conn-castle/personal-context/cli/internal/listpage"
 	"github.com/conn-castle/personal-context/cli/internal/recordid"
+	"github.com/conn-castle/personal-context/cli/internal/recordio"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/conn-castle/personal-context/cli/internal/timeutil"
 	"github.com/mattn/go-isatty"
@@ -104,11 +105,28 @@ type chatImportOptions struct {
 type chatImportSummary struct {
 	SessionsCreated      int      `json:"sessions_created"`
 	SessionsUpdated      int      `json:"sessions_updated"`
+	SessionsSkipped      int      `json:"sessions_skipped,omitempty"`
 	ItemsCreated         int      `json:"items_created"`
 	FilesScanned         int      `json:"files_scanned"`
 	RawSourcesCopied     int      `json:"raw_sources_copied"`
 	SourcesDeleted       int      `json:"sources_deleted,omitempty"`
 	SourceDeleteWarnings []string `json:"source_delete_warnings,omitempty"`
+}
+
+type chatImportSourcePathKey struct {
+	source   string
+	deviceID string
+	absPath  string
+}
+
+type chatImportSourceSessionKey struct {
+	source          string
+	sourceSessionID string
+}
+
+type chatImportSessionIndex struct {
+	byOriginalPath  map[chatImportSourcePathKey]repository.ChatSession
+	bySourceSession map[chatImportSourceSessionKey]repository.ChatSession
 }
 
 func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts chatImportOptions) error {
@@ -150,6 +168,10 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 	summary := chatImportSummary{}
 	hadMutations := false
 	for source, sourceRoots := range roots {
+		sessionIndex, err := loadChatImportSessionIndex(ctx, stack.Repo, source, deviceID)
+		if err != nil {
+			return err
+		}
 		for _, root := range sourceRoots {
 			files, err := chatimport.TranscriptFiles(root)
 			if err != nil {
@@ -160,14 +182,39 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 					return err
 				}
 				summary.FilesScanned++
+				existing, ok, err := sessionIndex.existingByOriginalPath(source, deviceID, file)
+				if err != nil {
+					return err
+				}
+				if ok {
+					skipped, err := skipUnchangedChatImport(ctx, stack.FS, &summary, existing, file, opts.DeleteSource)
+					if err != nil {
+						return err
+					}
+					if skipped {
+						continue
+					}
+				}
 				session, items, err := chatimport.ParseTranscriptFile(source, file)
 				if err != nil {
 					return fmt.Errorf("parse %s: %w", file, err)
 				}
 				session.SourceDeviceID = deviceID
 				session.ProjectID = chatimport.MatchProjectPath(projectPaths, session.CWD, deviceID)
+				sourceSessionKey := chatImportSourceSessionKey{source: session.Source, sourceSessionID: session.SourceSessionID}
+				if existing, ok := sessionIndex.bySourceSession[sourceSessionKey]; ok {
+					skipped, err := skipUnchangedChatImport(ctx, stack.FS, &summary, existing, file, opts.DeleteSource)
+					if err != nil {
+						return err
+					}
+					if skipped {
+						continue
+					}
+				}
 				if session.ID == "" {
-					if existing, err := stack.Repo.GetChatSessionBySource(ctx, session.Source, session.SourceSessionID); err == nil {
+					if existing, ok := sessionIndex.bySourceSession[sourceSessionKey]; ok {
+						session.ID = existing.ID
+					} else if existing, err := stack.Repo.GetChatSessionBySource(ctx, session.Source, session.SourceSessionID); err == nil {
 						session.ID = existing.ID
 					} else if !errors.Is(err, repository.ErrNotFound) {
 						return fmt.Errorf("look up existing chat session: %w", err)
@@ -222,6 +269,10 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 					rollbackState.restore(ctx, stack)
 					return fmt.Errorf("replace chat items: %w", err)
 				}
+				if err := sessionIndex.remember(stored); err != nil {
+					rollbackState.restore(ctx, stack)
+					return err
+				}
 				rollbackState.cleanup(stack)
 				if created {
 					summary.ItemsCreated += len(items)
@@ -229,13 +280,7 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 					summary.ItemsCreated += len(items) - len(rollbackState.items)
 				}
 				if opts.DeleteSource {
-					if !isSameAsManagedFile(stack.FS, stored.ID, stagedKey, file) {
-						if err := os.Remove(file); err != nil {
-							summary.SourceDeleteWarnings = append(summary.SourceDeleteWarnings, fmt.Sprintf("%s: %v", file, err))
-						} else {
-							summary.SourcesDeleted++
-						}
-					}
+					deleteImportedChatSourceIfSafe(&summary, stack.FS, stored.ID, stagedKey, file)
 				}
 			}
 		}
@@ -247,6 +292,127 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 		_, _ = fmt.Fprintf(stderr, "warning: failed to delete source after import: %s\n", warning)
 	}
 	return writeIndentedJSON(stdout, summary)
+}
+
+// loadChatImportSessionIndex builds the lookup tables used to skip unchanged
+// transcripts before the importer performs parse, copy, DB, item, or sync work.
+func loadChatImportSessionIndex(ctx context.Context, repo repository.Repository, source string, deviceID string) (chatImportSessionIndex, error) {
+	idx := chatImportSessionIndex{
+		byOriginalPath:  make(map[chatImportSourcePathKey]repository.ChatSession),
+		bySourceSession: make(map[chatImportSourceSessionKey]repository.ChatSession),
+	}
+	sessions, err := repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{
+		IncludeDeleted: true,
+		Source:         &source,
+		DeviceID:       &deviceID,
+	})
+	if err != nil {
+		return chatImportSessionIndex{}, fmt.Errorf("list existing chat sessions for %s: %w", source, err)
+	}
+	for _, session := range sessions {
+		if err := idx.remember(session); err != nil {
+			return chatImportSessionIndex{}, err
+		}
+	}
+	return idx, nil
+}
+
+// remember updates the source-path and source-session lookup tables after a
+// successful import so duplicates later in the same scan see the new session.
+func (idx *chatImportSessionIndex) remember(session repository.ChatSession) error {
+	idx.bySourceSession[chatImportSourceSessionKey{source: session.Source, sourceSessionID: session.SourceSessionID}] = session
+	if session.OriginalSourcePath == nil {
+		return nil
+	}
+	absPath, err := filepath.Abs(*session.OriginalSourcePath)
+	if err != nil {
+		return fmt.Errorf("resolve original chat source path %q: %w", *session.OriginalSourcePath, err)
+	}
+	idx.byOriginalPath[chatImportSourcePathKey{source: session.Source, deviceID: session.SourceDeviceID, absPath: absPath}] = session
+	return nil
+}
+
+// existingByOriginalPath returns a previously imported session for the exact
+// source/device/source-path tuple before parsing the transcript body.
+func (idx chatImportSessionIndex) existingByOriginalPath(source string, deviceID string, sourcePath string) (repository.ChatSession, bool, error) {
+	absPath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return repository.ChatSession{}, false, fmt.Errorf("resolve chat source path %q: %w", sourcePath, err)
+	}
+	session, ok := idx.byOriginalPath[chatImportSourcePathKey{source: source, deviceID: deviceID, absPath: absPath}]
+	return session, ok, nil
+}
+
+// skipUnchangedChatImport compares the scanned source with the managed raw
+// source and records a skipped import when the bytes are identical.
+func skipUnchangedChatImport(ctx context.Context, fs *filesystem.Client, summary *chatImportSummary, existing repository.ChatSession, sourcePath string, deleteSource bool) (bool, error) {
+	if existing.RawSourceKey == nil {
+		return false, nil
+	}
+	matches, err := sourceMatchesManagedRaw(ctx, fs, existing.ID, *existing.RawSourceKey, sourcePath)
+	if err != nil {
+		return false, fmt.Errorf("compare chat source with managed raw %s: %w", sourcePath, err)
+	}
+	if !matches {
+		return false, nil
+	}
+	summary.SessionsSkipped++
+	if deleteSource {
+		deleteImportedChatSourceIfSafe(summary, fs, existing.ID, *existing.RawSourceKey, sourcePath)
+	}
+	return true, nil
+}
+
+// sourceMatchesManagedRaw reports whether sourcePath has the same bytes as the
+// managed raw source. A missing managed raw file is reported as "not matching"
+// so the full import path can repair the managed copy.
+func sourceMatchesManagedRaw(ctx context.Context, fs *filesystem.Client, chatID string, rawSourceKey string, sourcePath string) (bool, error) {
+	managedPath, err := fs.ResolveChatSourcePath(chatID, rawSourceKey)
+	if err != nil {
+		return false, err
+	}
+	managedInfo, err := os.Stat(managedPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return false, err
+	}
+	if managedInfo.Size() != sourceInfo.Size() {
+		return false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	sourceHash, err := recordio.HashFile(sourcePath)
+	if err != nil {
+		return false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	managedHash, err := recordio.HashFile(managedPath)
+	if err != nil {
+		return false, err
+	}
+	return sourceHash == managedHash, nil
+}
+
+// deleteImportedChatSourceIfSafe removes the original source only when it is
+// not the managed raw file Personal Context owns.
+func deleteImportedChatSourceIfSafe(summary *chatImportSummary, fs *filesystem.Client, chatID string, rawSourceKey string, sourcePath string) {
+	if isSameAsManagedFile(fs, chatID, rawSourceKey, sourcePath) {
+		return
+	}
+	if err := os.Remove(sourcePath); err != nil {
+		summary.SourceDeleteWarnings = append(summary.SourceDeleteWarnings, fmt.Sprintf("%s: %v", sourcePath, err))
+	} else {
+		summary.SourcesDeleted++
+	}
 }
 
 type chatImportRollbackState struct {

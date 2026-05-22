@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-05-22 h9k2m4: Replace per-import hash of managed raw with schema-backed fingerprint
+    Priority: Low. Area: cli/internal/cli/chat.go, schema
+    Description: Unchanged chat imports now skip parse/DB/item/raw replacement work by comparing source bytes to the managed raw copy, but each candidate still pays source + managed file hashing cost, plus an O(N) `ListChatSessions(IncludeDeleted: true)` load per source per import to populate the lookup index. See: s4w9x2.
+    Next step: If large-history profiling shows hashing or the per-source list load remains expensive, design a schema-backed source fingerprint with explicit migration handling and consider a narrower index-load filter.
+
 - Issue 2026-05-17 s4w9x2: SearchAll fetches full match set into Go memory before pagination
     Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/chat.go
     Description: `SearchAll` runs per-domain (records, chats) queries with no LIMIT/OFFSET, merges them in Go, sorts by BM25 rank across domains, then slices client-side. For queries that match thousands of rows this is O(N) memory and adds latency. The recent CLI fix limits the CLI-side over-fetch via `Limit+1`, but the repository still pulls all matches into memory before applying Limit/Offset.

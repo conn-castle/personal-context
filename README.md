@@ -231,6 +231,10 @@ Operator playbook for this case:
 
 This migration path is intentionally manual today; treat it as a planned maintenance cutover.
 
+### Local Schema Mismatch Troubleshooting
+
+If `pc setup` reports that the local store is missing a required table such as `chat_session`, the database predates the current local schema and is not upgraded in place. Back up your existing store (for example, `mv ~/personal-context ~/personal-context.backup-$(date +%Y%m%dT%H%M%S)`) and re-run `pc setup` to initialize a fresh store.
+
 ### Local Dev Mode (`pc serve`)
 
 Run the full web UI against your local SQLite database and filesystem — no Neon or S3 required.

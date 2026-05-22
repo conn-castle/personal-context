@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -57,10 +58,10 @@ func runImportFor(t *testing.T, root string) error {
 	return cmd.Execute()
 }
 
-// TestChatImportReImportBumpsSyncVersionForSameKey verifies that re-importing
-// a chat that produces the same raw_source_key still bumps the chat session
-// sync version. The plan requires this so cloud push uploads the new bytes
-// even when the key string is unchanged.
+// TestChatImportReImportBumpsSyncVersionForSameKey covers the modified
+// re-import case: unchanged-bytes re-imports are skipped before writes, while
+// changed content that produces the same raw_source_key still bumps sync state
+// so cloud push uploads the new bytes.
 func TestChatImportReImportBumpsSyncVersionForSameKey(t *testing.T) {
 	homeDir := setupEnv(t)
 	root := t.TempDir()
@@ -590,6 +591,12 @@ func TestIsSameAsManagedFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
+	if err := os.MkdirAll(filepath.Dir(managed), 0o700); err != nil {
+		t.Fatalf("create managed dir: %v", err)
+	}
+	if err := os.WriteFile(managed, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write managed file: %v", err)
+	}
 	if !isSameAsManagedFile(stack.FS, chatID, key, managed) {
 		t.Fatal("expected identical path to match managed file")
 	}
@@ -599,5 +606,165 @@ func TestIsSameAsManagedFile(t *testing.T) {
 	// Invalid key produces a Resolve error, returning false.
 	if isSameAsManagedFile(stack.FS, chatID, "chats/raw/other/source.json", managed) {
 		t.Fatal("expected invalid key to short-circuit to false")
+	}
+	summary := chatImportSummary{}
+	deleteImportedChatSourceIfSafe(&summary, stack.FS, chatID, key, managed)
+	if summary.SourcesDeleted != 0 || len(summary.SourceDeleteWarnings) != 0 {
+		t.Fatalf("managed source should not be deleted, summary=%+v", summary)
+	}
+	if _, err := os.Stat(managed); err != nil {
+		t.Fatalf("managed source should still exist: %v", err)
+	}
+}
+
+func TestSourceMatchesManagedRawBranches(t *testing.T) {
+	homeDir := setupEnv(t)
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		t.Fatalf("openLocalStack: %v", err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+
+	chatID := "20260315-1234abcd"
+	key := "chats/raw/" + chatID + "/source.json"
+	managed, err := stack.FS.ResolveChatSourcePath(chatID, key)
+	if err != nil {
+		t.Fatalf("resolve managed raw: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(managed), 0o700); err != nil {
+		t.Fatalf("mkdir managed raw: %v", err)
+	}
+	source := filepath.Join(t.TempDir(), "source.json")
+	writeBoth := func(t *testing.T, sourceBody string, managedBody string) {
+		t.Helper()
+		if err := os.WriteFile(source, []byte(sourceBody), 0o644); err != nil {
+			t.Fatalf("write source: %v", err)
+		}
+		if err := os.WriteFile(managed, []byte(managedBody), 0o600); err != nil {
+			t.Fatalf("write managed: %v", err)
+		}
+	}
+
+	writeBoth(t, `{"a":1}`, `{"a":1}`)
+	matches, err := sourceMatchesManagedRaw(context.Background(), stack.FS, chatID, key, source)
+	if err != nil || !matches {
+		t.Fatalf("equal files: matches=%v err=%v", matches, err)
+	}
+
+	writeBoth(t, `{"a":1}`, `{"a":2}`)
+	matches, err = sourceMatchesManagedRaw(context.Background(), stack.FS, chatID, key, source)
+	if err != nil || matches {
+		t.Fatalf("same-size different files: matches=%v err=%v", matches, err)
+	}
+
+	writeBoth(t, `{"a":1}`, `{"longer":true}`)
+	matches, err = sourceMatchesManagedRaw(context.Background(), stack.FS, chatID, key, source)
+	if err != nil || matches {
+		t.Fatalf("different-size files: matches=%v err=%v", matches, err)
+	}
+
+	if err := os.Remove(managed); err != nil {
+		t.Fatalf("remove managed raw: %v", err)
+	}
+	matches, err = sourceMatchesManagedRaw(context.Background(), stack.FS, chatID, key, source)
+	if err != nil || matches {
+		t.Fatalf("missing managed raw: matches=%v err=%v", matches, err)
+	}
+
+	writeBoth(t, `{"a":1}`, `{"a":1}`)
+	missingSource := filepath.Join(t.TempDir(), "missing.json")
+	if _, err := sourceMatchesManagedRaw(context.Background(), stack.FS, chatID, key, missingSource); err == nil {
+		t.Fatal("expected missing source to fail")
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := sourceMatchesManagedRaw(canceled, stack.FS, chatID, key, source); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled context, got %v", err)
+	}
+
+	if _, err := sourceMatchesManagedRaw(context.Background(), stack.FS, chatID, "chats/raw/other/source.json", source); err == nil {
+		t.Fatal("expected invalid raw source key to fail")
+	}
+
+	if runtime.GOOS != "windows" {
+		writeBoth(t, ``, ``)
+		if err := os.Chmod(source, 0o000); err != nil {
+			t.Fatalf("chmod source unreadable: %v", err)
+		}
+		if _, err := sourceMatchesManagedRaw(context.Background(), stack.FS, chatID, key, source); err == nil {
+			t.Fatal("expected unreadable source hash to fail")
+		}
+		if err := os.Chmod(source, 0o644); err != nil {
+			t.Fatalf("restore source permissions: %v", err)
+		}
+
+		writeBoth(t, ``, ``)
+		if err := os.Chmod(managed, 0o000); err != nil {
+			t.Fatalf("chmod managed unreadable: %v", err)
+		}
+		if _, err := sourceMatchesManagedRaw(context.Background(), stack.FS, chatID, key, source); err == nil {
+			t.Fatal("expected unreadable managed hash to fail")
+		}
+		if err := os.Chmod(managed, 0o600); err != nil {
+			t.Fatalf("restore managed permissions: %v", err)
+		}
+	}
+}
+
+func TestChatImportSessionIndexAndSkipHelperBranches(t *testing.T) {
+	originalPath := filepath.Join(t.TempDir(), "indexed.json")
+	source := "codex"
+	deviceID := "test-device"
+	repo := &mockRepo{
+		listChatSessionsFn: func(_ context.Context, filter repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+			if !filter.IncludeDeleted || filter.Source == nil || *filter.Source != source || filter.DeviceID == nil || *filter.DeviceID != deviceID {
+				t.Fatalf("unexpected filter: %+v", filter)
+			}
+			return []repository.ChatSession{
+				{ID: "20260315-11111111", Source: source, SourceSessionID: "legacy", SourceDeviceID: deviceID},
+				{ID: "20260315-22222222", Source: source, SourceSessionID: "indexed", SourceDeviceID: deviceID, OriginalSourcePath: &originalPath},
+			}, nil
+		},
+	}
+	idx, err := loadChatImportSessionIndex(context.Background(), repo, source, deviceID)
+	if err != nil {
+		t.Fatalf("loadChatImportSessionIndex() error = %v", err)
+	}
+	if got := idx.bySourceSession[chatImportSourceSessionKey{source: source, sourceSessionID: "legacy"}]; got.ID != "20260315-11111111" {
+		t.Fatalf("expected legacy session to be indexed by source session, got %+v", got)
+	}
+	if _, ok, err := idx.existingByOriginalPath(source, deviceID, originalPath); err != nil || !ok {
+		t.Fatalf("expected original path lookup to succeed, ok=%v err=%v", ok, err)
+	}
+
+	failingRepo := &mockRepo{
+		listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+			return nil, errors.New("list failed")
+		},
+	}
+	if _, err := loadChatImportSessionIndex(context.Background(), failingRepo, source, deviceID); err == nil || !strings.Contains(err.Error(), "list existing chat sessions") {
+		t.Fatalf("expected wrapped list error, got %v", err)
+	}
+
+	homeDir := setupEnv(t)
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		t.Fatalf("openLocalStack: %v", err)
+	}
+	t.Cleanup(func() { _ = stack.Close() })
+	sourcePath := filepath.Join(t.TempDir(), "source.json")
+	if err := os.WriteFile(sourcePath, []byte(`{"messages":[]}`), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	summary := chatImportSummary{}
+	skipped, err := skipUnchangedChatImport(context.Background(), stack.FS, &summary, repository.ChatSession{ID: "20260315-33333333"}, sourcePath, false)
+	if err != nil || skipped || summary.SessionsSkipped != 0 {
+		t.Fatalf("nil raw key skip helper = skipped %v summary %+v err %v", skipped, summary, err)
+	}
+	badKey := "chats/raw/other/source.json"
+	skipped, err = skipUnchangedChatImport(context.Background(), stack.FS, &summary, repository.ChatSession{ID: "20260315-33333333", RawSourceKey: &badKey}, sourcePath, false)
+	if err == nil || skipped {
+		t.Fatalf("expected invalid raw key error, skipped=%v err=%v", skipped, err)
 	}
 }
