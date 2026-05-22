@@ -138,6 +138,95 @@ func TestChatImportListSearchShowDelete(t *testing.T) {
 	}
 }
 
+func TestChatImportDefaultScanIncludesRegisteredClaudeConfigProjectRoot(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	setupEnv(t)
+	projectPath := t.TempDir()
+	normalizedProjectPath, err := normalizeProjectPath(projectPath)
+	if err != nil {
+		t.Fatalf("normalize project path: %v", err)
+	}
+	transcriptRoot := filepath.Join(normalizedProjectPath, ".claude-config", "projects")
+	if err := os.MkdirAll(transcriptRoot, 0o700); err != nil {
+		t.Fatalf("create claude config transcript root: %v", err)
+	}
+	claudeConfigRoot := filepath.Join(normalizedProjectPath, ".claude")
+	if err := os.MkdirAll(filepath.Join(claudeConfigRoot, "worktrees", "example"), 0o700); err != nil {
+		t.Fatalf("create claude config root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeConfigRoot, "settings.json"), []byte(`{"permissions":{"allow":[]}}`), 0o644); err != nil {
+		t.Fatalf("write claude settings: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(claudeConfigRoot, "worktrees", "example", "manifest.json"), []byte(`{"not":"a transcript"}`), 0o644); err != nil {
+		t.Fatalf("write claude worktree json: %v", err)
+	}
+	geminiConfigRoot := filepath.Join(normalizedProjectPath, ".gemini", "antigravity-cli", "cache")
+	if err := os.MkdirAll(geminiConfigRoot, 0o700); err != nil {
+		t.Fatalf("create gemini config root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(geminiConfigRoot, "onboarding.json"), []byte(`{"not":"a transcript"}`), 0o644); err != nil {
+		t.Fatalf("write gemini config json: %v", err)
+	}
+	transcriptPath := filepath.Join(transcriptRoot, "default-claude-config.jsonl")
+	cwd := filepath.ToSlash(filepath.Join(normalizedProjectPath, "nested"))
+	lines := []string{
+		`{"type":"user","timestamp":"2026-05-18T12:00:00.000Z","cwd":"` + cwd + `","sessionId":"default-claude-config","message":{"role":"user","content":[{"type":"text","text":"registered claude config needle"}]}}`,
+		``,
+	}
+	if err := os.WriteFile(transcriptPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "register", "chat/default-scan", projectPath, "--device", "test-device"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project register path: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("default chat import: %v", err)
+	}
+	var summary chatImportSummary
+	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+		t.Fatalf("parse import summary: %v\n%s", err, stdout.String())
+	}
+	if summary.FilesScanned != 1 || summary.SessionsCreated != 1 || summary.ItemsCreated != 1 {
+		t.Fatalf("unexpected import summary: %+v", summary)
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "list", "--format", "json", "--project", "chat/default-scan"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat list: %v", err)
+	}
+	var page struct {
+		Items []chatSessionJSON `json:"items"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &page); err != nil {
+		t.Fatalf("parse chat list json: %v\n%s", err, stdout.String())
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected one imported chat, got %+v", page.Items)
+	}
+	got := page.Items[0]
+	if got.Source != "claude_code" || got.SourceSessionID != "default-claude-config" {
+		t.Fatalf("unexpected imported session: %+v", got)
+	}
+	if got.ProjectID == nil || *got.ProjectID != "chat/default-scan" {
+		t.Fatalf("expected project assignment, got %+v", got.ProjectID)
+	}
+	if got.OriginalSourcePath == nil {
+		t.Fatal("expected original source path")
+	}
+	if !strings.HasPrefix(*got.OriginalSourcePath, transcriptRoot+string(os.PathSeparator)) {
+		t.Fatalf("expected original source under %q, got %q", transcriptRoot, *got.OriginalSourcePath)
+	}
+}
+
 // TestChatSearchRealCodexEnvelopeContract is the end-to-end contract for
 // `pc chat search --format json` against a real-shape codex rollout. The
 // rollout uses the `{type:"response_item",payload:{...}}` envelope; before

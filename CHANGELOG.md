@@ -10,6 +10,11 @@ Release entries must use this format so the release workflow can extract notes:
 
 ## Unreleased
 
+- Changed the pre-release project registry command from `pc project add` to `pc project register` for consistency with `pc device register`; no compatibility alias is exposed.
+- Narrowed default project-path chat import roots to Claude and Gemini transcript directories so config/cache JSON under `.claude/` and `.gemini/` is not parsed as chat data.
+- Documented the pre-release `pc chat list --format json` envelope rename from `sessions` to the canonical `{items,total,next_cursor}` shape used by domain list/search commands.
+- Clarified that `pc chat search --format json` reports `total` as the current page size and uses `next_cursor` for pagination.
+
 ## v0.1.1 - 2026-05-09
 
 - Renamed the data model from "slides" to "records" across the CLI, web API, web UI, database schema, and git export format. Breaking change: database tables (`slides`/`slide_figures`/`slide_data_files` → `records`/`record_figures`/`record_data_files`), API URL paths (`/api/slides/*` → `/api/records/*`), JSON shapes (`SlideSummary`/`SlideDetail` → `RecordSummary`/`RecordDetail`), and git export folder layout (`slides/{slide_id}/slide.html` → `records/{record_id}/record.html`) are not backward-compatible.

@@ -173,8 +173,8 @@ setup_out="$(run_pc setup)"
 
 device_id="phase3-device"
 run_pc device register "${device_id}" >/dev/null
-run_pc project add "phase3/manual" >/dev/null
-run_pc project add "phase3/edited" >/dev/null
+run_pc project register "phase3/manual" >/dev/null
+run_pc project register "phase3/edited" >/dev/null
 
 id1="$(run_pc records add --date 2025-03-01 --device "${device_id}" "${input_a}" | tr -d '\r\n')"
 [[ "${id1}" =~ ^[0-9]{8}-[a-f0-9]{8}$ ]] || fail "unexpected record ID format from first add: ${id1}"

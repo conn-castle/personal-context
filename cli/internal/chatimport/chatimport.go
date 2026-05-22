@@ -67,7 +67,7 @@ func Roots(extra []string, sourceFilter string, projectPaths []repository.Projec
 		case "claude_code":
 			roots[source] = append(roots[source], filepath.Join(home, ".claude", "projects"))
 		case "gemini":
-			roots[source] = append(roots[source], filepath.Join(home, ".gemini"))
+			roots[source] = append(roots[source], filepath.Join(home, ".gemini", "tmp"))
 		}
 	}
 	for _, path := range projectPaths {
@@ -76,7 +76,7 @@ func Roots(extra []string, sourceFilter string, projectPaths []repository.Projec
 			case "codex":
 				roots[source] = append(roots[source], filepath.Join(path.Path, ".codex", "sessions"))
 			case "claude_code":
-				roots[source] = append(roots[source], filepath.Join(path.Path, ".claude"))
+				roots[source] = append(roots[source], filepath.Join(path.Path, ".claude", "projects"))
 				// Some repos redirect Claude Code state into
 				// `.claude-config/` (e.g. agent-layer projects) so the
 				// in-repo transcripts live under `.claude-config/projects`
@@ -84,15 +84,14 @@ func Roots(extra []string, sourceFilter string, projectPaths []repository.Projec
 				// both avoids requiring users to symlink or pass --root.
 				roots[source] = append(roots[source], filepath.Join(path.Path, ".claude-config", "projects"))
 			case "gemini":
-				roots[source] = append(roots[source], filepath.Join(path.Path, ".gemini"))
+				roots[source] = append(roots[source], filepath.Join(path.Path, ".gemini", "tmp"))
 			}
 		}
 	}
-	// Two project paths can resolve to the same scan root (e.g. `/foo` and
-	// `/foo/sub` both surface `.claude`), and the home-dir + project-path
-	// pass can repeat the same directory. De-duplicate per source so the
-	// caller doesn't re-scan the same tree, which would double-import and
-	// (worse) cause `--delete-source` to fail the second pass.
+	// Two project paths can resolve to the same scan root, and the home-dir +
+	// project-path pass can repeat the same directory. De-duplicate per source
+	// so the caller doesn't re-scan the same tree, which would double-import
+	// and (worse) cause `--delete-source` to fail the second pass.
 	for source, paths := range roots {
 		seen := make(map[string]struct{}, len(paths))
 		deduped := paths[:0]
@@ -131,7 +130,7 @@ func TranscriptFiles(root string) ([]string, error) {
 		// every one of them as "no transcript array" and clutter import
 		// output.
 		name := strings.ToLower(filepath.Base(path))
-		if strings.HasSuffix(name, ".meta.json") {
+		if strings.HasSuffix(name, ".meta.json") || name == "sessions-index.json" {
 			return nil
 		}
 		switch strings.ToLower(filepath.Ext(path)) {
@@ -402,7 +401,7 @@ func parseJSONTranscript(source string, path string) (repository.CreateChatSessi
 		// transcript array keys, so arbitrary agent config/state JSON
 		// under a scanned root doesn't get silently imported as an empty
 		// chat session.
-		return repository.CreateChatSessionInput{}, nil, fmt.Errorf("parse %s: no transcript array (expected one of messages/items/transcript)", path)
+		return repository.CreateChatSessionInput{}, nil, fmt.Errorf("no transcript array (expected one of messages/items/transcript)")
 	}
 	items := make([]repository.CreateChatItemInput, 0, len(rawItems))
 	for i, raw := range rawItems {

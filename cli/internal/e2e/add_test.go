@@ -10,7 +10,7 @@ import (
 func TestAddMinimalRecord(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
-	runPCSuccess(t, homeDir, "project", "add", "test/default-project")
+	runPCSuccess(t, homeDir, "project", "register", "test/default-project")
 	runPCSuccess(t, homeDir, "device", "register", "test-device")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
@@ -88,7 +88,7 @@ func TestAddProjectFlagMustMatchMetadata(t *testing.T) {
 func TestAddWithDateFlag(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
-	runPCSuccess(t, homeDir, "project", "add", "test/default-project")
+	runPCSuccess(t, homeDir, "project", "register", "test/default-project")
 	runPCSuccess(t, homeDir, "device", "register", "test-device")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
@@ -217,7 +217,7 @@ func TestAddPositionFirst(t *testing.T) {
 func TestAddInvalidDate(t *testing.T) {
 	homeDir := t.TempDir()
 	runPCSuccess(t, homeDir, "setup")
-	runPCSuccess(t, homeDir, "project", "add", "test/default-project")
+	runPCSuccess(t, homeDir, "project", "register", "test/default-project")
 	runPCSuccess(t, homeDir, "device", "register", "test-device")
 
 	inputDir := createInputFolder(t, inputFolderOpts{})
