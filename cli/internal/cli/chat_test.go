@@ -686,6 +686,8 @@ func TestRunChatImportBailsOnCancelledContextAfterIndex(t *testing.T) {
 
 	origNewSQLiteRepo := newSQLiteRepoFn
 	t.Cleanup(func() { newSQLiteRepoFn = origNewSQLiteRepo })
+	ctx, cancel := context.WithCancel(context.Background())
+	indexLoaded := false
 	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
 		return &mockRepo{
 			getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
@@ -695,12 +697,12 @@ func TestRunChatImportBailsOnCancelledContextAfterIndex(t *testing.T) {
 				return nil, nil
 			},
 			listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+				indexLoaded = true
+				cancel()
 				return nil, nil
 			},
 		}, nil
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
 	err := runChatImport(ctx, &bytes.Buffer{}, &bytes.Buffer{}, chatImportOptions{
 		DeviceID: "test-device",
 		Agent:    "codex",
@@ -708,6 +710,9 @@ func TestRunChatImportBailsOnCancelledContextAfterIndex(t *testing.T) {
 	})
 	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled after index load, got %v", err)
+	}
+	if !indexLoaded {
+		t.Fatal("expected index load to occur before cancellation")
 	}
 }
 

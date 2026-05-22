@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-05-22 j4n7p3: Make screenshot fake-Chrome test scripts cross-platform
+    Priority: Low. Area: cli/internal/cli/screenshot_test.go
+    Description: `writeFakeChromeScript` and `writeFakeChromePNGScript` emit POSIX shell scripts (`#!/bin/sh`, `dd if=/dev/zero`) and are invoked by `TestScreenshotHappyPath`, `TestScreenshotDefaultOutput`, and the pre-existing `TestScreenshotPreservesRelativeFigurePaths`. CI runs Linux only (`.github/workflows/ci.yml` is ubuntu-latest), so this passes today, but a Windows test run would fail because `screenshotWithChrome` exec's the script directly.
+    Next step: Replace the shell scripts with a Go-level fake (e.g., write a minimal PNG via `os.WriteFile` and return a stubbed `screenshotWithChrome` impl), or add `runtime.GOOS == "windows"` skip guards to all callers including the pre-existing test.
+
 - Issue 2026-05-22 h9k2m4: Replace per-import hash of managed raw with schema-backed fingerprint
     Priority: Low. Area: cli/internal/cli/chat.go, schema
     Description: Unchanged chat imports now skip parse/DB/item/raw replacement work by comparing source bytes to the managed raw copy, but each candidate still pays source + managed file hashing cost, plus an O(N) `ListChatSessions(IncludeDeleted: true)` load per source per import to populate the lookup index. See: s4w9x2.

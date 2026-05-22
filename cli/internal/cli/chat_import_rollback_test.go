@@ -687,7 +687,7 @@ func TestSourceMatchesManagedRawBranches(t *testing.T) {
 		t.Fatal("expected invalid raw source key to fail")
 	}
 
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
 		writeBoth(t, ``, ``)
 		if err := os.Chmod(source, 0o000); err != nil {
 			t.Fatalf("chmod source unreadable: %v", err)
