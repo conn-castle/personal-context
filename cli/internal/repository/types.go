@@ -1,6 +1,9 @@
 package repository
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // Record is a row from the records table.
 type Record struct {
@@ -202,6 +205,37 @@ type CreateChatSessionInput struct {
 type UpsertChatSessionInput struct {
 	CreateChatSessionInput
 	ClearDeleted bool
+}
+
+// ChatImportItemMode selects how imported items should be applied for one
+// chat session inside a batch import write.
+type ChatImportItemMode string
+
+const (
+	ChatImportItemModeReplace ChatImportItemMode = "replace"
+	ChatImportItemModeAppend  ChatImportItemMode = "append"
+)
+
+// ChatImportOp contains one session upsert plus its normalized item mutation
+// for a local chat import batch.
+type ChatImportOp struct {
+	Session  UpsertChatSessionInput
+	ItemMode ChatImportItemMode
+	Items    []CreateChatItemInput
+}
+
+// ChatImportResult reports the stored session for one batch operation.
+type ChatImportResult struct {
+	Session ChatSession
+	Created bool
+}
+
+// ChatImportBatchWriter is required by pc chat import: the local repository
+// must implement it so many session/item changes commit in one SQLite
+// transaction. Cloud-mode imports do not use this interface — they go through
+// the standard Repository methods over the API server.
+type ChatImportBatchWriter interface {
+	WriteChatImportBatch(ctx context.Context, ops []ChatImportOp) ([]ChatImportResult, error)
 }
 
 // CreateChatItemInput contains required and optional chat item fields.

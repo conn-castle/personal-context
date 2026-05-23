@@ -14,6 +14,8 @@ import (
 
 const chatSessionColumns = `id, source, source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at`
 const chatItemColumns = `id, session_id, ordinal, role, item_type, text, search_text, raw_json, created_at`
+const insertChatItemSQL = `INSERT INTO chat_item (session_id, ordinal, role, item_type, text, search_text, raw_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')));`
 
 // UpsertProjectPath registers a project path and reports whether a row was inserted.
 func (r *Repository) UpsertProjectPath(ctx context.Context, input repository.CreateProjectPathInput) (repository.ProjectPath, bool, error) {
@@ -113,10 +115,8 @@ func (r *Repository) getProjectPath(ctx context.Context, projectID string, path 
 
 // UpsertChatSession creates or updates a chat session by source identity.
 func (r *Repository) UpsertChatSession(ctx context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
-	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.Source) == "" ||
-		strings.TrimSpace(input.SourceSessionID) == "" || strings.TrimSpace(input.SourceDeviceID) == "" ||
-		input.StartedAt.IsZero() || input.LastActivityAt.IsZero() {
-		return repository.ChatSession{}, false, repository.ErrInvalidArgument
+	if err := validateUpsertChatSessionInput(input); err != nil {
+		return repository.ChatSession{}, false, err
 	}
 	_, existingErr := r.GetChatSessionBySource(ctx, input.Source, input.SourceSessionID)
 	if existingErr != nil && !errors.Is(existingErr, repository.ErrNotFound) {
@@ -155,6 +155,15 @@ func (r *Repository) UpsertChatSession(ctx context.Context, input repository.Ups
 	}
 	session, err := r.GetChatSessionBySource(ctx, input.Source, input.SourceSessionID)
 	return session, created, err
+}
+
+func validateUpsertChatSessionInput(input repository.UpsertChatSessionInput) error {
+	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.Source) == "" ||
+		strings.TrimSpace(input.SourceSessionID) == "" || strings.TrimSpace(input.SourceDeviceID) == "" ||
+		input.StartedAt.IsZero() || input.LastActivityAt.IsZero() {
+		return repository.ErrInvalidArgument
+	}
+	return nil
 }
 
 // GetChatSessionByID fetches one chat session by PC chat ID.
@@ -312,7 +321,7 @@ func (r *Repository) MaxChatItemOrdinal(ctx context.Context, sessionID string) (
 
 // CreateChatItem inserts one chat item.
 func (r *Repository) CreateChatItem(ctx context.Context, input repository.CreateChatItemInput) (repository.ChatItem, error) {
-	if strings.TrimSpace(input.SessionID) == "" || input.Ordinal < 0 || strings.TrimSpace(input.Role) == "" || strings.TrimSpace(input.ItemType) == "" {
+	if strings.TrimSpace(input.SessionID) == "" || !validChatItemInput(input) {
 		return repository.ChatItem{}, repository.ErrInvalidArgument
 	}
 	searchText := input.SearchText
@@ -320,8 +329,7 @@ func (r *Repository) CreateChatItem(ctx context.Context, input repository.Create
 		searchText = *input.Text
 	}
 	result, err := r.db.ExecContext(ctx,
-		`INSERT INTO chat_item (session_id, ordinal, role, item_type, text, search_text, raw_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')));`,
+		insertChatItemSQL,
 		input.SessionID, input.Ordinal, input.Role, input.ItemType, nullableString(input.Text), searchText, nullableString(input.RawJSON), nullableTime(input.CreatedAt))
 	if err != nil {
 		return repository.ChatItem{}, mapSQLiteError(err)
@@ -332,6 +340,10 @@ func (r *Repository) CreateChatItem(ctx context.Context, input repository.Create
 	}
 	row := r.db.QueryRowContext(ctx, `SELECT `+chatItemColumns+` FROM chat_item WHERE id = ?;`, id)
 	return scanChatItem(row)
+}
+
+func validChatItemInput(input repository.CreateChatItemInput) bool {
+	return input.Ordinal >= 0 && strings.TrimSpace(input.Role) != "" && strings.TrimSpace(input.ItemType) != ""
 }
 
 // AppendChatItems inserts normalized items for an existing chat session atomically.
@@ -349,21 +361,8 @@ func (r *Repository) AppendChatItems(ctx context.Context, sessionID string, item
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM chat_session WHERE id = ?;`, sessionID).Scan(&exists); err != nil {
 		return mapSQLiteError(err)
 	}
-	for _, item := range items {
-		if item.Ordinal < 0 || strings.TrimSpace(item.Role) == "" || strings.TrimSpace(item.ItemType) == "" {
-			return repository.ErrInvalidArgument
-		}
-		searchText := item.SearchText
-		if searchText == "" && item.Text != nil {
-			searchText = *item.Text
-		}
-		createdAt := nullableTime(item.CreatedAt)
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO chat_item (session_id, ordinal, role, item_type, text, search_text, raw_json, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')));`,
-			sessionID, item.Ordinal, item.Role, item.ItemType, nullableString(item.Text), searchText, nullableString(item.RawJSON), createdAt); err != nil {
-			return mapSQLiteError(err)
-		}
+	if err := insertChatItemsTx(ctx, tx, sessionID, items); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return mapSQLiteError(err)
@@ -389,8 +388,18 @@ func (r *Repository) ReplaceChatItems(ctx context.Context, sessionID string, ite
 	if _, err := tx.ExecContext(ctx, `DELETE FROM chat_item WHERE session_id = ?;`, sessionID); err != nil {
 		return mapSQLiteError(err)
 	}
+	if err := insertChatItemsTx(ctx, tx, sessionID, items); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return mapSQLiteError(err)
+	}
+	return nil
+}
+
+func insertChatItemsTx(ctx context.Context, tx *sql.Tx, sessionID string, items []repository.CreateChatItemInput) error {
 	for _, item := range items {
-		if item.Ordinal < 0 || strings.TrimSpace(item.Role) == "" || strings.TrimSpace(item.ItemType) == "" {
+		if !validChatItemInput(item) {
 			return repository.ErrInvalidArgument
 		}
 		searchText := item.SearchText
@@ -399,16 +408,110 @@ func (r *Repository) ReplaceChatItems(ctx context.Context, sessionID string, ite
 		}
 		createdAt := nullableTime(item.CreatedAt)
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO chat_item (session_id, ordinal, role, item_type, text, search_text, raw_json, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')));`,
+			insertChatItemSQL,
 			sessionID, item.Ordinal, item.Role, item.ItemType, nullableString(item.Text), searchText, nullableString(item.RawJSON), createdAt); err != nil {
 			return mapSQLiteError(err)
 		}
 	}
+	return nil
+}
+
+// WriteChatImportBatch writes multiple chat session/item import operations in
+// one SQLite transaction. Existing schema triggers maintain FTS and sync state.
+func (r *Repository) WriteChatImportBatch(ctx context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
+	for _, op := range ops {
+		if err := validateChatImportOp(op); err != nil {
+			return nil, err
+		}
+	}
+	if len(ops) == 0 {
+		return []repository.ChatImportResult{}, nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, mapSQLiteError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	results := make([]repository.ChatImportResult, 0, len(ops))
+	for _, op := range ops {
+		stored, created, err := upsertChatSessionTx(ctx, tx, op.Session)
+		if err != nil {
+			return nil, err
+		}
+		if op.ItemMode == repository.ChatImportItemModeReplace {
+			if _, err := tx.ExecContext(ctx, `DELETE FROM chat_item WHERE session_id = ?;`, stored.ID); err != nil {
+				return nil, mapSQLiteError(err)
+			}
+		}
+		if err := insertChatItemsTx(ctx, tx, stored.ID, op.Items); err != nil {
+			return nil, err
+		}
+		results = append(results, repository.ChatImportResult{Session: stored, Created: created})
+	}
+
 	if err := tx.Commit(); err != nil {
-		return mapSQLiteError(err)
+		return nil, mapSQLiteError(err)
+	}
+	return results, nil
+}
+
+func validateChatImportOp(op repository.ChatImportOp) error {
+	if err := validateUpsertChatSessionInput(op.Session); err != nil {
+		return err
+	}
+	switch op.ItemMode {
+	case repository.ChatImportItemModeReplace, repository.ChatImportItemModeAppend:
+	default:
+		return repository.ErrInvalidArgument
+	}
+	for _, item := range op.Items {
+		if !validChatItemInput(item) {
+			return repository.ErrInvalidArgument
+		}
 	}
 	return nil
+}
+
+func upsertChatSessionTx(ctx context.Context, tx *sql.Tx, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+	var existingID string
+	existingErr := tx.QueryRowContext(ctx, `SELECT id FROM chat_session WHERE source = ? AND source_session_id = ?;`, input.Source, input.SourceSessionID).Scan(&existingID)
+	if existingErr != nil && !errors.Is(mapSQLiteError(existingErr), repository.ErrNotFound) {
+		return repository.ChatSession{}, false, mapSQLiteError(existingErr)
+	}
+	created := errors.Is(mapSQLiteError(existingErr), repository.ErrNotFound)
+	if created {
+		var recordExists int
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM records WHERE id = ?);`, input.ID).Scan(&recordExists); err != nil {
+			return repository.ChatSession{}, false, mapSQLiteError(err)
+		}
+		if recordExists == 1 {
+			return repository.ChatSession{}, false, fmt.Errorf("%w: id %s already exists as record", repository.ErrConflict, input.ID)
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO chat_session (id, source, source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), ?)
+         ON CONFLICT(source, source_session_id) DO UPDATE SET
+             source_device_id = excluded.source_device_id,
+             project_id = COALESCE(excluded.project_id, chat_session.project_id),
+             cwd = COALESCE(excluded.cwd, chat_session.cwd),
+             title = COALESCE(excluded.title, chat_session.title),
+             started_at = MIN(chat_session.started_at, excluded.started_at),
+             last_activity_at = MAX(chat_session.last_activity_at, excluded.last_activity_at),
+             original_source_path = excluded.original_source_path,
+             raw_source_key = COALESCE(excluded.raw_source_key, chat_session.raw_source_key),
+             updated_at = COALESCE(excluded.updated_at, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
+             deleted_at = CASE WHEN ? THEN NULL ELSE excluded.deleted_at END;`,
+		input.ID, input.Source, input.SourceSessionID, input.SourceDeviceID, nullableString(input.ProjectID), nullableString(input.CWD),
+		nullableString(input.Title), timeutil.FormatUTCMillis(input.StartedAt), timeutil.FormatUTCMillis(input.LastActivityAt),
+		nullableString(input.OriginalSourcePath), nullableString(input.RawSourceKey), nullableTime(input.CreatedAt), nullableTime(input.UpdatedAt), nullableTime(input.DeletedAt), input.ClearDeleted); err != nil {
+		return repository.ChatSession{}, false, mapSQLiteError(err)
+	}
+	row := tx.QueryRowContext(ctx, `SELECT `+chatSessionColumns+` FROM chat_session WHERE source = ? AND source_session_id = ?;`, input.Source, input.SourceSessionID)
+	session, err := scanChatSession(row)
+	return session, created, err
 }
 
 // ListChatItems returns all items in ordinal order for a session.

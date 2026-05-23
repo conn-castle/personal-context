@@ -236,6 +236,10 @@ func configure(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("unexpected journal mode %q", mode)
 	}
 
+	if _, err := db.ExecContext(ctx, `PRAGMA synchronous = NORMAL;`); err != nil {
+		return fmt.Errorf("set synchronous mode: %w", err)
+	}
+
 	if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout = 5000;`); err != nil {
 		return fmt.Errorf("set busy timeout: %w", err)
 	}

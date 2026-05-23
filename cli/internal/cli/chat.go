@@ -27,6 +27,7 @@ import (
 const (
 	defaultChatListLimit = 50
 	maxChatListLimit     = 500
+	chatImportBatchSize  = 50
 )
 
 type chatShowOptions struct {
@@ -129,7 +130,99 @@ type chatImportSessionIndex struct {
 	bySourceSession map[chatImportSourceSessionKey]repository.ChatSession
 }
 
-func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts chatImportOptions) error {
+type pendingChatImport struct {
+	op             repository.ChatImportOp
+	stage          filesystem.ChatSourceStage
+	sourcePath     string
+	deleteSource   bool
+	sessionIndex   *chatImportSessionIndex
+	priorItemCount int
+}
+
+type chatImportBatch struct {
+	writer  repository.ChatImportBatchWriter
+	fs      *filesystem.Client
+	summary *chatImportSummary
+	entries []pendingChatImport
+}
+
+func (b *chatImportBatch) add(ctx context.Context, pending pendingChatImport) error {
+	b.entries = append(b.entries, pending)
+	if len(b.entries) >= chatImportBatchSize {
+		return b.flush(ctx)
+	}
+	return nil
+}
+
+func (b *chatImportBatch) hasSourceSession(source string, sourceSessionID string) bool {
+	for _, entry := range b.entries {
+		session := entry.op.Session.CreateChatSessionInput
+		if session.Source == source && session.SourceSessionID == sourceSessionID {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *chatImportBatch) discardPending() {
+	for _, entry := range b.entries {
+		_ = b.fs.DeleteChatSourceStage(entry.stage)
+	}
+	b.entries = nil
+}
+
+func (b *chatImportBatch) flush(ctx context.Context) error {
+	if len(b.entries) == 0 {
+		return nil
+	}
+	entries := b.entries
+	b.entries = nil
+	ops := make([]repository.ChatImportOp, len(entries))
+	for i, entry := range entries {
+		ops[i] = entry.op
+	}
+	results, err := b.writer.WriteChatImportBatch(ctx, ops)
+	if err != nil {
+		for _, entry := range entries {
+			_ = b.fs.DeleteChatSourceStage(entry.stage)
+		}
+		return fmt.Errorf("write chat import batch: %w", err)
+	}
+	for i, result := range results {
+		entry := entries[i]
+		if _, err := b.fs.PromoteChatSourceStage(entry.stage); err != nil {
+			_ = b.fs.DeleteChatSourceStage(entry.stage)
+			for j := i + 1; j < len(entries); j++ {
+				_ = b.fs.DeleteChatSourceStage(entries[j].stage)
+			}
+			return fmt.Errorf("promote chat source for %s from staged file %s: %w", result.Session.ID, entry.stage.StagedPath, err)
+		}
+		b.summary.RawSourcesCopied++
+		if result.Created {
+			b.summary.SessionsCreated++
+			b.summary.ItemsCreated += len(entry.op.Items)
+		} else {
+			b.summary.SessionsUpdated++
+			switch entry.op.ItemMode {
+			case repository.ChatImportItemModeAppend:
+				b.summary.ItemsCreated += len(entry.op.Items)
+			case repository.ChatImportItemModeReplace:
+				if len(entry.op.Items) > entry.priorItemCount {
+					b.summary.ItemsCreated += len(entry.op.Items) - entry.priorItemCount
+				}
+			}
+		}
+		if err := entry.sessionIndex.remember(result.Session); err != nil {
+			return err
+		}
+		if entry.deleteSource {
+			deleteImportedChatSourceIfSafe(b.summary, b.fs, result.Session.ID, entry.stage.RawSourceKey, entry.sourcePath)
+		}
+	}
+	return nil
+}
+
+func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts chatImportOptions) (rerr error) {
 	deviceID := strings.TrimSpace(opts.DeviceID)
 	if deviceID == "" {
 		return fmt.Errorf("--device is required")
@@ -154,6 +247,10 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 	if stack.FS == nil {
 		return fmt.Errorf("filesystem client is not configured")
 	}
+	batchWriter, ok := stack.Repo.(repository.ChatImportBatchWriter)
+	if !ok {
+		return fmt.Errorf("local repository does not support batched chat import writes")
+	}
 	if err := validateActiveDevice(ctx, stack.Repo, deviceID); err != nil {
 		return err
 	}
@@ -166,6 +263,16 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 		return err
 	}
 	summary := chatImportSummary{}
+	batch := chatImportBatch{
+		writer:  batchWriter,
+		fs:      stack.FS,
+		summary: &summary,
+	}
+	defer func() {
+		if rerr != nil {
+			batch.discardPending()
+		}
+	}()
 	hadMutations := false
 	for source, sourceRoots := range roots {
 		sessionIndex, err := loadChatImportSessionIndex(ctx, stack.Repo, source, deviceID)
@@ -182,12 +289,15 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 					return err
 				}
 				summary.FilesScanned++
+				var priorSession *repository.ChatSession
 				existing, ok, err := sessionIndex.existingByOriginalPath(source, deviceID, file)
 				if err != nil {
 					return err
 				}
 				if ok {
-					handled, mutated, err := handleExistingChatImport(ctx, stack, &summary, existing, file, deviceID, projectPaths, opts.DeleteSource)
+					prior := existing
+					priorSession = &prior
+					handled, mutated, err := handleExistingChatImport(ctx, stack, &batch, &sessionIndex, existing, file, deviceID, projectPaths, opts.DeleteSource)
 					if err != nil {
 						return err
 					}
@@ -205,8 +315,15 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 				session.SourceDeviceID = deviceID
 				session.ProjectID = chatimport.MatchProjectPath(projectPaths, session.CWD, deviceID)
 				sourceSessionKey := chatImportSourceSessionKey{source: session.Source, sourceSessionID: session.SourceSessionID}
+				if batch.hasSourceSession(session.Source, session.SourceSessionID) {
+					if err := batch.flush(ctx); err != nil {
+						return err
+					}
+				}
 				if existing, ok := sessionIndex.bySourceSession[sourceSessionKey]; ok {
-					handled, mutated, err := handleExistingChatImport(ctx, stack, &summary, existing, file, deviceID, projectPaths, opts.DeleteSource)
+					prior := existing
+					priorSession = &prior
+					handled, mutated, err := handleExistingChatImport(ctx, stack, &batch, &sessionIndex, existing, file, deviceID, projectPaths, opts.DeleteSource)
 					if err != nil {
 						return err
 					}
@@ -218,9 +335,11 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 					}
 				}
 				if session.ID == "" {
-					if existing, ok := sessionIndex.bySourceSession[sourceSessionKey]; ok {
-						session.ID = existing.ID
+					if priorSession != nil {
+						session.ID = priorSession.ID
 					} else if existing, err := stack.Repo.GetChatSessionBySource(ctx, session.Source, session.SourceSessionID); err == nil {
+						prior := existing
+						priorSession = &prior
 						session.ID = existing.ID
 					} else if !errors.Is(err, repository.ErrNotFound) {
 						return fmt.Errorf("look up existing chat session: %w", err)
@@ -232,63 +351,22 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 						session.ID = id
 					}
 				}
-				stage, err := stack.FS.CopyChatSourceToStage(session.ID, file)
-				if err != nil {
-					return fmt.Errorf("stage chat source %s: %w", file, err)
+				priorItemCount := 0
+				if priorSession != nil {
+					existingItems, err := stack.Repo.ListChatItems(ctx, priorSession.ID)
+					if err != nil {
+						return fmt.Errorf("list existing chat items before import: %w", err)
+					}
+					priorItemCount = len(existingItems)
 				}
-				rollbackState, err := captureChatImportRollback(ctx, stack, session.Source, session.SourceSessionID)
-				if err != nil {
-					_ = stack.FS.DeleteChatSourceStage(stage)
+				if err := queueReplaceChatImport(ctx, stack, &batch, &sessionIndex, session, items, file, priorItemCount, opts.DeleteSource); err != nil {
 					return err
 				}
-				stagedKey := stage.RawSourceKey
-				session.RawSourceKey = &stagedKey
-				stored, created, err := stack.Repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
-					CreateChatSessionInput: session,
-					ClearDeleted:           true,
-				})
-				if err != nil {
-					_ = stack.FS.DeleteChatSourceStage(stage)
-					rollbackState.cleanup(stack)
-					return fmt.Errorf("upsert chat session %s/%s: %w", session.Source, session.SourceSessionID, err)
-				}
-				if !rollbackState.existed {
-					rollbackState.session = stored
-				}
-				if _, err := stack.FS.PromoteChatSourceStage(stage); err != nil {
-					// Promote restores any previous active dir from its backup,
-					// but it does not delete the staged dir on failure — clean
-					// it up here so re-running `pc chat import` does not leave
-					// behind an ever-growing pile of .staging-* directories.
-					_ = stack.FS.DeleteChatSourceStage(stage)
-					rollbackState.restore(ctx, stack)
-					return fmt.Errorf("promote chat source for %s: %w", stored.ID, err)
-				}
-				summary.RawSourcesCopied++
 				hadMutations = true
-				if created {
-					summary.SessionsCreated++
-				} else {
-					summary.SessionsUpdated++
-				}
-				if err := replaceChatItems(ctx, stack.Repo, stored.ID, items); err != nil {
-					rollbackState.restore(ctx, stack)
-					return fmt.Errorf("replace chat items: %w", err)
-				}
-				if err := sessionIndex.remember(stored); err != nil {
-					rollbackState.restore(ctx, stack)
-					return err
-				}
-				rollbackState.cleanup(stack)
-				if created {
-					summary.ItemsCreated += len(items)
-				} else if len(items) > len(rollbackState.items) {
-					summary.ItemsCreated += len(items) - len(rollbackState.items)
-				}
-				if opts.DeleteSource {
-					deleteImportedChatSourceIfSafe(&summary, stack.FS, stored.ID, stagedKey, file)
-				}
 			}
+		}
+		if err := batch.flush(ctx); err != nil {
+			return err
 		}
 	}
 	if hadMutations {
@@ -360,7 +438,7 @@ type chatImportSourceComparison struct {
 // handleExistingChatImport processes fast paths for an existing imported
 // source: byte-identical sources are skipped, while append-only JSONL/NDJSON
 // sources import just the appended suffix.
-func handleExistingChatImport(ctx context.Context, stack *localStack, summary *chatImportSummary, existing repository.ChatSession, sourcePath string, deviceID string, projectPaths []repository.ProjectPath, deleteSource bool) (bool, bool, error) {
+func handleExistingChatImport(ctx context.Context, stack *localStack, batch *chatImportBatch, sessionIndex *chatImportSessionIndex, existing repository.ChatSession, sourcePath string, deviceID string, projectPaths []repository.ProjectPath, deleteSource bool) (bool, bool, error) {
 	if existing.RawSourceKey == nil {
 		return false, false, nil
 	}
@@ -369,14 +447,25 @@ func handleExistingChatImport(ctx context.Context, stack *localStack, summary *c
 		return false, false, fmt.Errorf("compare chat source with managed raw %s: %w", sourcePath, err)
 	}
 	if comparison.matches {
-		summary.SessionsSkipped++
+		batch.summary.SessionsSkipped++
 		if deleteSource {
-			deleteImportedChatSourceIfSafe(summary, stack.FS, existing.ID, *existing.RawSourceKey, sourcePath)
+			deleteImportedChatSourceIfSafe(batch.summary, stack.FS, existing.ID, *existing.RawSourceKey, sourcePath)
 		}
 		return true, false, nil
 	}
 	if comparison.appendOnly {
-		if err := appendJSONLChatImport(ctx, stack, summary, existing, sourcePath, comparison, deviceID, projectPaths, deleteSource); err != nil {
+		// Append ops compute ordinals from pre-batch DB state. If the same
+		// (source, source_session_id) is already queued (e.g., duplicate
+		// --root entries or overlapping scan roots), the second op would
+		// reuse those ordinals and trip the chat_item UNIQUE constraint
+		// when WriteChatImportBatch flushes. Flush the pending batch first
+		// so the next ordinal calculation sees the prior items committed.
+		if batch.hasSourceSession(existing.Source, existing.SourceSessionID) {
+			if err := batch.flush(ctx); err != nil {
+				return false, false, err
+			}
+		}
+		if err := queueAppendJSONLChatImport(ctx, stack, batch, sessionIndex, existing, sourcePath, comparison, deviceID, projectPaths, deleteSource); err != nil {
 			return false, false, err
 		}
 		return true, true, nil
@@ -513,10 +602,18 @@ func filePrefixMatches(ctx context.Context, prefixPath string, fullPath string, 
 	return true, nil
 }
 
-func appendJSONLChatImport(ctx context.Context, stack *localStack, summary *chatImportSummary, existing repository.ChatSession, sourcePath string, comparison chatImportSourceComparison, deviceID string, projectPaths []repository.ProjectPath, deleteSource bool) error {
+func queueAppendJSONLChatImport(ctx context.Context, stack *localStack, batch *chatImportBatch, sessionIndex *chatImportSessionIndex, existing repository.ChatSession, sourcePath string, comparison chatImportSourceComparison, deviceID string, projectPaths []repository.ProjectPath, deleteSource bool) error {
 	maxOrdinal, err := stack.Repo.MaxChatItemOrdinal(ctx, existing.ID)
 	if err != nil {
 		return fmt.Errorf("find existing chat item ordinal: %w", err)
+	}
+	existingItems, err := stack.Repo.ListChatItems(ctx, existing.ID)
+	if err != nil {
+		return fmt.Errorf("list existing chat items before append: %w", err)
+	}
+	_, managedItems, err := chatimport.ParseTranscriptFile(existing.Source, comparison.managedPath)
+	if err != nil {
+		return fmt.Errorf("parse managed chat raw source %s: %w", comparison.managedPath, err)
 	}
 	absSourcePath, err := filepath.Abs(sourcePath)
 	if err != nil {
@@ -536,9 +633,15 @@ func appendJSONLChatImport(ctx context.Context, stack *localStack, summary *chat
 		OriginalSourcePath: &absSourcePath,
 		RawSourceKey:       &rawSourceKey,
 	}
-	session, items, err := chatimport.ParseAppendedJSONLTranscript(existing.Source, sourcePath, comparison.managedSize, comparison.sourceSize-comparison.managedSize, base, maxOrdinal+1)
+	ordinalStart := len(managedItems)
+	session, items, err := chatimport.ParseAppendedJSONLTranscript(existing.Source, sourcePath, comparison.managedSize, comparison.sourceSize-comparison.managedSize, base, ordinalStart)
 	if err != nil {
 		return fmt.Errorf("parse appended chat source %s: %w", sourcePath, err)
+	}
+	if chatImportItemsAlreadyStored(existingItems, items) {
+		items = nil
+	} else if maxOrdinal+1 != ordinalStart {
+		return fmt.Errorf("append-only chat import item state mismatch for %s/%s: managed raw has %d normalized items, database max ordinal is %d", existing.Source, existing.SourceSessionID, ordinalStart, maxOrdinal)
 	}
 	session.ID = existing.ID
 	session.Source = existing.Source
@@ -548,101 +651,99 @@ func appendJSONLChatImport(ctx context.Context, stack *localStack, summary *chat
 	if session.ProjectID == nil {
 		session.ProjectID = existing.ProjectID
 	}
-	session.RawSourceKey = &rawSourceKey
 
-	rollbackRaw, err := appendManagedRawSuffix(ctx, comparison.managedPath, sourcePath, comparison.managedSize, comparison.sourceSize)
+	stage, err := stack.FS.CopyChatSourceToStage(session.ID, sourcePath)
 	if err != nil {
-		return fmt.Errorf("append managed chat raw source: %w", err)
+		return fmt.Errorf("stage appended chat source %s: %w", sourcePath, err)
 	}
-	stored, created, err := stack.Repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
-		CreateChatSessionInput: session,
-		ClearDeleted:           true,
-	})
-	if err != nil {
-		rollbackRaw()
-		return fmt.Errorf("upsert appended chat session %s/%s: %w", session.Source, session.SourceSessionID, err)
-	}
-	if err := appendChatItems(ctx, stack.Repo, stored.ID, items); err != nil {
-		rollbackRaw()
-		restoreChatSessionState(ctx, stack.Repo, existing)
-		return fmt.Errorf("append chat items: %w", err)
-	}
-	if created {
-		summary.SessionsCreated++
-	} else {
-		summary.SessionsUpdated++
-	}
-	summary.ItemsCreated += len(items)
-	if deleteSource {
-		deleteImportedChatSourceIfSafe(summary, stack.FS, stored.ID, rawSourceKey, sourcePath)
+	rawSourceKey = stage.RawSourceKey
+	session.RawSourceKey = &rawSourceKey
+	if err := batch.add(ctx, pendingChatImport{
+		op: repository.ChatImportOp{
+			Session: repository.UpsertChatSessionInput{
+				CreateChatSessionInput: session,
+				ClearDeleted:           true,
+			},
+			ItemMode: repository.ChatImportItemModeAppend,
+			Items:    items,
+		},
+		stage:        stage,
+		sourcePath:   sourcePath,
+		deleteSource: deleteSource,
+		sessionIndex: sessionIndex,
+	}); err != nil {
+		return err
 	}
 	return nil
 }
 
-func appendManagedRawSuffix(ctx context.Context, managedPath string, sourcePath string, offset int64, sourceSize int64) (func(), error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
+func chatImportItemsAlreadyStored(existing []repository.ChatItem, appended []repository.CreateChatItemInput) bool {
+	if len(appended) == 0 {
+		return true
 	}
-	managedInfo, err := os.Stat(managedPath)
-	if err != nil {
-		return nil, err
+	byOrdinal := make(map[int]repository.ChatItem, len(existing))
+	for _, item := range existing {
+		byOrdinal[item.Ordinal] = item
 	}
-	if managedInfo.Size() != offset {
-		return nil, fmt.Errorf("managed raw source changed during import: size=%d want=%d", managedInfo.Size(), offset)
+	for _, item := range appended {
+		stored, ok := byOrdinal[item.Ordinal]
+		if !ok || !chatImportItemMatches(stored, item) {
+			return false
+		}
 	}
-	sourceFile, err := os.Open(sourcePath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = sourceFile.Close() }()
-	if _, err := sourceFile.Seek(offset, io.SeekStart); err != nil {
-		return nil, err
-	}
-	managedFile, err := os.OpenFile(managedPath, os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	rollback := func() {
-		_ = os.Truncate(managedPath, offset)
-	}
-	written, copyErr := io.Copy(managedFile, io.LimitReader(sourceFile, sourceSize-offset))
-	if err := errors.Join(copyErr, managedFile.Sync(), managedFile.Close()); err != nil {
-		rollback()
-		return nil, err
-	}
-	if written != sourceSize-offset {
-		rollback()
-		return nil, io.ErrUnexpectedEOF
-	}
-	return rollback, nil
+	return true
 }
 
-// restoreChatSessionState re-applies the session row exactly as it was before
-// an append-only import mutated it. Used when AppendChatItems fails after
-// UpsertChatSession succeeded so that ClearDeleted, last_activity_at, and
-// updated_at don't drift ahead of the items.
-func restoreChatSessionState(ctx context.Context, repo repository.Repository, prior repository.ChatSession) {
-	createdAt := prior.CreatedAt
-	updatedAt := prior.UpdatedAt
-	_, _, _ = repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
-		CreateChatSessionInput: repository.CreateChatSessionInput{
-			ID:                 prior.ID,
-			Source:             prior.Source,
-			SourceSessionID:    prior.SourceSessionID,
-			SourceDeviceID:     prior.SourceDeviceID,
-			ProjectID:          prior.ProjectID,
-			CWD:                prior.CWD,
-			Title:              prior.Title,
-			StartedAt:          prior.StartedAt,
-			LastActivityAt:     prior.LastActivityAt,
-			OriginalSourcePath: prior.OriginalSourcePath,
-			RawSourceKey:       prior.RawSourceKey,
-			CreatedAt:          &createdAt,
-			UpdatedAt:          &updatedAt,
-			DeletedAt:          prior.DeletedAt,
+func chatImportItemMatches(stored repository.ChatItem, input repository.CreateChatItemInput) bool {
+	return stored.Role == input.Role &&
+		stored.ItemType == input.ItemType &&
+		stored.SearchText == chatImportSearchText(input) &&
+		nullableTextEqual(stored.Text, input.Text) &&
+		nullableTextEqual(stored.RawJSON, input.RawJSON)
+}
+
+func chatImportSearchText(input repository.CreateChatItemInput) string {
+	if input.SearchText != "" {
+		return input.SearchText
+	}
+	if input.Text != nil {
+		return *input.Text
+	}
+	return ""
+}
+
+func nullableTextEqual(left *string, right *string) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
+}
+
+func queueReplaceChatImport(ctx context.Context, stack *localStack, batch *chatImportBatch, sessionIndex *chatImportSessionIndex, session repository.CreateChatSessionInput, items []repository.CreateChatItemInput, sourcePath string, priorItemCount int, deleteSource bool) error {
+	stage, err := stack.FS.CopyChatSourceToStage(session.ID, sourcePath)
+	if err != nil {
+		return fmt.Errorf("stage chat source %s: %w", sourcePath, err)
+	}
+	rawSourceKey := stage.RawSourceKey
+	session.RawSourceKey = &rawSourceKey
+	if err := batch.add(ctx, pendingChatImport{
+		op: repository.ChatImportOp{
+			Session: repository.UpsertChatSessionInput{
+				CreateChatSessionInput: session,
+				ClearDeleted:           true,
+			},
+			ItemMode: repository.ChatImportItemModeReplace,
+			Items:    items,
 		},
-		ClearDeleted: prior.DeletedAt == nil,
-	})
+		stage:          stage,
+		sourcePath:     sourcePath,
+		deleteSource:   deleteSource,
+		sessionIndex:   sessionIndex,
+		priorItemCount: priorItemCount,
+	}); err != nil {
+		return err
+	}
+	return nil
 }
 
 // deleteImportedChatSourceIfSafe removes the original source only when it is
@@ -663,34 +764,6 @@ type chatImportRollbackState struct {
 	session   repository.ChatSession
 	items     []repository.ChatItem
 	rawBackup *filesystem.ChatSourceStage
-}
-
-func captureChatImportRollback(ctx context.Context, stack *localStack, source string, sourceSessionID string) (chatImportRollbackState, error) {
-	existing, err := stack.Repo.GetChatSessionBySource(ctx, source, sourceSessionID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return chatImportRollbackState{}, nil
-		}
-		return chatImportRollbackState{}, fmt.Errorf("look up existing chat rollback state: %w", err)
-	}
-	items, err := stack.Repo.ListChatItems(ctx, existing.ID)
-	if err != nil {
-		return chatImportRollbackState{}, fmt.Errorf("list existing chat items for rollback: %w", err)
-	}
-	state := chatImportRollbackState{existed: true, session: existing, items: items}
-	if existing.RawSourceKey != nil && stack.FS != nil {
-		rawPath, err := stack.FS.ResolveChatSourcePath(existing.ID, *existing.RawSourceKey)
-		if err != nil {
-			return chatImportRollbackState{}, fmt.Errorf("resolve existing chat raw source for rollback: %w", err)
-		}
-		backup, err := stack.FS.CopyChatSourceToStage(existing.ID, rawPath)
-		if err == nil {
-			state.rawBackup = &backup
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return chatImportRollbackState{}, fmt.Errorf("back up existing chat raw source for rollback: %w", err)
-		}
-	}
-	return state, nil
 }
 
 func (s chatImportRollbackState) restore(ctx context.Context, stack *localStack) {
@@ -752,15 +825,6 @@ func replaceChatItems(ctx context.Context, repo repository.Repository, sessionID
 		inputs[i] = item
 	}
 	return repo.ReplaceChatItems(ctx, sessionID, inputs)
-}
-
-func appendChatItems(ctx context.Context, repo repository.Repository, sessionID string, items []repository.CreateChatItemInput) error {
-	inputs := make([]repository.CreateChatItemInput, len(items))
-	for i, item := range items {
-		item.SessionID = sessionID
-		inputs[i] = item
-	}
-	return repo.AppendChatItems(ctx, sessionID, inputs)
 }
 
 func chatItemInputs(items []repository.ChatItem) []repository.CreateChatItemInput {

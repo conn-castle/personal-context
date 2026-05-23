@@ -43,6 +43,14 @@ func TestOpenConfiguresForeignKeysAndWAL(t *testing.T) {
 		t.Fatalf("expected journal_mode=wal, got %q", journalMode)
 	}
 
+	var synchronous int
+	if err := connection.DB().QueryRow(`PRAGMA synchronous;`).Scan(&synchronous); err != nil {
+		t.Fatalf("query synchronous pragma failed: %v", err)
+	}
+	if synchronous != 1 {
+		t.Fatalf("expected synchronous=NORMAL(1), got %d", synchronous)
+	}
+
 	var busyTimeout int
 	if err := connection.DB().QueryRow(`PRAGMA busy_timeout;`).Scan(&busyTimeout); err != nil {
 		t.Fatalf("query busy_timeout pragma failed: %v", err)
