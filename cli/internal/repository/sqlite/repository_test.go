@@ -1678,6 +1678,170 @@ func TestWriteChatImportBatchRollsBackOnItemConflict(t *testing.T) {
 	}
 }
 
+func TestWriteChatImportBatchRejectsConflictWithExistingRecordID(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newConcreteRepo(t)
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "batch-project"}); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "batch-device"}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+	if _, err := repo.CreateRecord(ctx, repository.CreateRecordInput{
+		ID:             "20260514-cccccccc",
+		Date:           "2026-05-14",
+		DayOrder:       "a",
+		ProjectID:      "batch-project",
+		SourceDeviceID: "batch-device",
+	}); err != nil {
+		t.Fatalf("CreateRecord() error = %v", err)
+	}
+	_, err := repo.WriteChatImportBatch(ctx, []repository.ChatImportOp{{
+		Session: repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              "20260514-cccccccc",
+				Source:          "codex",
+				SourceSessionID: "id-collision",
+				SourceDeviceID:  "batch-device",
+				StartedAt:       now,
+				LastActivityAt:  now,
+			},
+			ClearDeleted: true,
+		},
+		ItemMode: repository.ChatImportItemModeReplace,
+	}})
+	if !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("WriteChatImportBatch(id-collision) error = %v, want ErrConflict", err)
+	}
+}
+
+func TestUpsertChatSessionTxPropagatesSchemaErrors(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	input := repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260514-aaaa9999",
+			Source:          "codex",
+			SourceSessionID: "schema-err",
+			SourceDeviceID:  "batch-device",
+			StartedAt:       now,
+			LastActivityAt:  now,
+		},
+		ClearDeleted: true,
+	}
+
+	{
+		_, db := newConcreteRepo(t)
+		if _, err := db.Exec(`DROP TABLE chat_session;`); err != nil {
+			t.Fatalf("drop chat_session: %v", err)
+		}
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("BeginTx: %v", err)
+		}
+		t.Cleanup(func() { _ = tx.Rollback() })
+		if _, _, err := upsertChatSessionTx(ctx, tx, input); err == nil {
+			t.Fatalf("upsertChatSessionTx(missing chat_session) expected error, got nil")
+		}
+	}
+
+	{
+		_, db := newConcreteRepo(t)
+		if _, err := db.Exec(`DROP TABLE records;`); err != nil {
+			t.Fatalf("drop records: %v", err)
+		}
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("BeginTx: %v", err)
+		}
+		t.Cleanup(func() { _ = tx.Rollback() })
+		if _, _, err := upsertChatSessionTx(ctx, tx, input); err == nil {
+			t.Fatalf("upsertChatSessionTx(missing records) expected error, got nil")
+		}
+	}
+}
+
+func TestWriteChatImportBatchPropagatesDBClosedError(t *testing.T) {
+	ctx := context.Background()
+	repo, db := newConcreteRepo(t)
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+	if _, err := repo.WriteChatImportBatch(ctx, []repository.ChatImportOp{{
+		Session: repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              "20260514-77777777",
+				Source:          "codex",
+				SourceSessionID: "closed-db",
+				SourceDeviceID:  "batch-device",
+				StartedAt:       now,
+				LastActivityAt:  now,
+			},
+			ClearDeleted: true,
+		},
+		ItemMode: repository.ChatImportItemModeReplace,
+	}}); err == nil {
+		t.Fatalf("WriteChatImportBatch(closed db) expected error, got nil")
+	}
+}
+
+func TestWriteChatImportBatchValidationAndEmpty(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newConcreteRepo(t)
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "batch-device"}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+
+	emptyResults, err := repo.WriteChatImportBatch(ctx, nil)
+	if err != nil {
+		t.Fatalf("WriteChatImportBatch(empty) error = %v", err)
+	}
+	if len(emptyResults) != 0 {
+		t.Fatalf("WriteChatImportBatch(empty) results = %v, want empty", emptyResults)
+	}
+
+	validSession := repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260514-99999999",
+			Source:          "codex",
+			SourceSessionID: "validation",
+			SourceDeviceID:  "batch-device",
+			StartedAt:       now,
+			LastActivityAt:  now,
+		},
+		ClearDeleted: true,
+	}
+
+	if _, err := repo.WriteChatImportBatch(ctx, []repository.ChatImportOp{{
+		Session:  repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{StartedAt: now, LastActivityAt: now}},
+		ItemMode: repository.ChatImportItemModeReplace,
+	}}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("WriteChatImportBatch(missing session fields) error = %v, want ErrInvalidArgument", err)
+	}
+
+	if _, err := repo.WriteChatImportBatch(ctx, []repository.ChatImportOp{{
+		Session:  validSession,
+		ItemMode: repository.ChatImportItemMode("bogus"),
+	}}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("WriteChatImportBatch(bad ItemMode) error = %v, want ErrInvalidArgument", err)
+	}
+
+	if _, err := repo.WriteChatImportBatch(ctx, []repository.ChatImportOp{{
+		Session:  validSession,
+		ItemMode: repository.ChatImportItemModeReplace,
+		Items: []repository.CreateChatItemInput{{
+			Ordinal:  0,
+			Role:     "",
+			ItemType: "message",
+		}},
+	}}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("WriteChatImportBatch(bad item) error = %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestSQLiteChatSmallHelperBranches(t *testing.T) {
 	if got := sqliteFTSQuery(`quoted "needle"`); got != `"quoted" """needle"""` {
 		t.Fatalf("sqliteFTSQuery() = %q", got)
