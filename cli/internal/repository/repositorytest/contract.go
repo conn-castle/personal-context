@@ -276,6 +276,17 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if len(items) != 1 || items[0].SearchText != replacementText {
 			t.Fatalf("unexpected replaced chat items: %+v", items)
 		}
+		appendedText := "contract appended chat transcript text"
+		if err := repo.AppendChatItems(ctx, session.ID, []repository.CreateChatItemInput{{SessionID: session.ID, Ordinal: 1, Role: "user", ItemType: "message", Text: &appendedText, SearchText: appendedText, CreatedAt: &now}}); err != nil {
+			t.Fatalf("AppendChatItems() error = %v", err)
+		}
+		items, err = repo.ListChatItems(ctx, session.ID)
+		if err != nil {
+			t.Fatalf("ListChatItems(appended) error = %v", err)
+		}
+		if len(items) != 2 || items[1].SearchText != appendedText {
+			t.Fatalf("unexpected appended chat items: %+v", items)
+		}
 		results, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle"})
 		if err != nil {
 			t.Fatalf("SearchChatItems() error = %v", err)

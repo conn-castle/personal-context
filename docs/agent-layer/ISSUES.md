@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-05-23 b4q8n2: Chat import raw/session updates can get ahead of items after a crash
+    Priority: Medium. Area: cli/internal/cli/chat.go
+    Description: Full and append-only chat imports publish managed raw content and upsert chat_session before normalized items are replaced/appended. Non-crash errors are rolled back, but a process crash in that window can leave raw content ahead of chat_item rows; a later exact-match import can then skip instead of repairing items.
+    Next step: Make chat import recovery compare item state with raw-source state, or introduce a repository-level import transaction/repair marker so the next import can detect and repair incomplete item writes.
+
 - Issue 2026-05-22 j4n7p3: Make screenshot fake-Chrome test scripts cross-platform
     Priority: Low. Area: cli/internal/cli/screenshot_test.go
     Description: `writeFakeChromeScript` and `writeFakeChromePNGScript` emit POSIX shell scripts (`#!/bin/sh`, `dd if=/dev/zero`) and are invoked by `TestScreenshotHappyPath`, `TestScreenshotDefaultOutput`, and the pre-existing `TestScreenshotPreservesRelativeFigurePaths`. CI runs Linux only (`.github/workflows/ci.yml` is ubuntu-latest), so this passes today, but a Windows test run would fail because `screenshotWithChrome` exec's the script directly.
@@ -34,8 +39,8 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 - Issue 2026-05-22 h9k2m4: Replace per-import hash of managed raw with schema-backed fingerprint
     Priority: Low. Area: cli/internal/cli/chat.go, schema
-    Description: Unchanged chat imports now skip parse/DB/item/raw replacement work by comparing source bytes to the managed raw copy, but each candidate still pays source + managed file hashing cost, plus an O(N) `ListChatSessions(IncludeDeleted: true)` load per source per import to populate the lookup index. See: s4w9x2.
-    Next step: If large-history profiling shows hashing or the per-source list load remains expensive, design a schema-backed source fingerprint with explicit migration handling and consider a narrower index-load filter.
+    Description: Exact unchanged chat imports still pay source + managed file hashing cost, plus an O(N) `ListChatSessions(IncludeDeleted: true)` load per source per import to populate the lookup index. Append-only JSONL/NDJSON now uses a suffix import path, so this is a remaining optimization rather than the active-session bottleneck. See: s4w9x2.
+    Next step: If large-history profiling shows exact-match hashing or the per-source list load remains expensive, design a schema-backed source fingerprint with explicit migration handling and consider a narrower index-load filter.
 
 - Issue 2026-05-17 s4w9x2: SearchAll fetches full match set into Go memory before pagination
     Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/chat.go

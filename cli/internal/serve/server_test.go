@@ -160,6 +160,9 @@ func (m *mockRepo) MaxChatItemOrdinal(_ context.Context, _ string) (int, error) 
 func (m *mockRepo) CreateChatItem(_ context.Context, _ repository.CreateChatItemInput) (repository.ChatItem, error) {
 	return repository.ChatItem{}, nil
 }
+func (m *mockRepo) AppendChatItems(_ context.Context, _ string, _ []repository.CreateChatItemInput) error {
+	return nil
+}
 func (m *mockRepo) ReplaceChatItems(_ context.Context, _ string, _ []repository.CreateChatItemInput) error {
 	return nil
 }

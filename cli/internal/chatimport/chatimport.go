@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -186,16 +187,43 @@ func parseJSONLTranscript(source string, path string) (repository.CreateChatSess
 		return repository.CreateChatSessionInput{}, nil, err
 	}
 	defer func() { _ = file.Close() }()
+	session := newTranscriptSession(source, path)
+	return parseJSONLTranscriptReader(source, path, file, session, 0, session.SourceSessionID)
+}
+
+// ParseAppendedJSONLTranscript parses only the appended byte range of a JSONL
+// or NDJSON transcript. The base session is used as the canonical session
+// metadata, so appended rows cannot accidentally change the source identity
+// that was established by an earlier full import.
+func ParseAppendedJSONLTranscript(source string, path string, offset int64, limit int64, base repository.CreateChatSessionInput, ordinalStart int) (repository.CreateChatSessionInput, []repository.CreateChatItemInput, error) {
+	if offset < 0 || limit < 0 || ordinalStart < 0 {
+		return repository.CreateChatSessionInput{}, nil, fmt.Errorf("invalid appended transcript range")
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext != ".jsonl" && ext != ".ndjson" {
+		return repository.CreateChatSessionInput{}, nil, fmt.Errorf("unsupported append transcript extension %q", ext)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return repository.CreateChatSessionInput{}, nil, err
+	}
+	defer func() { _ = file.Close() }()
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return repository.CreateChatSessionInput{}, nil, fmt.Errorf("seek appended transcript range: %w", err)
+	}
+	reader := io.Reader(io.LimitReader(file, limit))
+	return parseJSONLTranscriptReader(source, path, reader, base, ordinalStart, "")
+}
+
+func parseJSONLTranscriptReader(source string, path string, reader io.Reader, session repository.CreateChatSessionInput, ordinalStart int, fallbackSourceSessionID string) (repository.CreateChatSessionInput, []repository.CreateChatItemInput, error) {
 	var items []repository.CreateChatItemInput
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(reader)
 	// Cap at 256 MiB so a single oversized JSONL row (e.g., a Claude tool
 	// output embedding a large pasted file) doesn't fail with the default
 	// 64 KiB Scanner limit. Truly larger lines surface as a wrapped
 	// bufio.ErrTooLong with the source path so users can locate the offender.
 	scanner.Buffer(make([]byte, 0, 64*1024), maxJSONLLineBytes)
-	ordinal := 0
-	session := newTranscriptSession(source, path)
-	fallbackSourceSessionID := session.SourceSessionID
+	ordinal := ordinalStart
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++

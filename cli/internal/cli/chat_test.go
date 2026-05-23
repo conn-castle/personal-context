@@ -268,6 +268,211 @@ func TestChatImportSkipsIdenticalSecondImport(t *testing.T) {
 	}
 }
 
+func TestChatImportAppendedJSONLDoesNotReplaceExistingItems(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "append-session.jsonl")
+	initialLines := []string{
+		`{"session_id":"append-session","role":"user","content":"first append import needle","timestamp":"2026-05-14T12:00:00Z"}`,
+		`{"session_id":"append-session","role":"assistant","content":"first answer","timestamp":"2026-05-14T12:01:00Z"}`,
+	}
+	if err := os.WriteFile(transcriptPath, []byte(strings.Join(initialLines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.FilesScanned != 1 || firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 2 || firstSummary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	before := readChatImportTestSnapshot(t, "append-session")
+	beforeItemIDs := chatItemIDs(before.items)
+	if len(beforeItemIDs) != 2 {
+		t.Fatalf("expected two initial items, got %+v", before.items)
+	}
+
+	appendedLine := `{"session_id":"append-session","role":"user","content":"second append import needle","timestamp":"2026-05-14T12:02:00Z"}`
+	f, err := os.OpenFile(transcriptPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatalf("open transcript for append: %v", err)
+	}
+	if _, err := f.WriteString(appendedLine + "\n"); err != nil {
+		_ = f.Close()
+		t.Fatalf("append transcript: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close appended transcript: %v", err)
+	}
+
+	secondSummary := runChatImportSummaryForTest(t, root)
+	if secondSummary.FilesScanned != 1 || secondSummary.SessionsUpdated != 1 ||
+		secondSummary.SessionsCreated != 0 || secondSummary.SessionsSkipped != 0 ||
+		secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 0 {
+		t.Fatalf("unexpected appended second import summary: %+v", secondSummary)
+	}
+
+	after := readChatImportTestSnapshot(t, "append-session")
+	afterItemIDs := chatItemIDs(after.items)
+	if len(afterItemIDs) != 3 {
+		t.Fatalf("expected three items after append, got %+v", after.items)
+	}
+	if !equalInt64Slices(beforeItemIDs, afterItemIDs[:2]) {
+		t.Fatalf("existing item IDs changed on appended import: before=%+v after=%+v", beforeItemIDs, afterItemIDs)
+	}
+	if after.items[2].SearchText != "second append import needle" || after.items[2].Ordinal != 2 {
+		t.Fatalf("unexpected appended item: %+v", after.items[2])
+	}
+	sourceBytes, err := os.ReadFile(transcriptPath)
+	if err != nil {
+		t.Fatalf("read appended source: %v", err)
+	}
+	if !bytes.Equal(sourceBytes, after.rawBytes) {
+		t.Fatalf("managed raw source was not updated with appended bytes")
+	}
+}
+
+func TestChatImportAppendedJSONLDeleteSourceRemovesOriginal(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "append-delete-source.jsonl")
+	initial := `{"session_id":"append-delete-source","role":"user","content":"first item","timestamp":"2026-05-14T12:00:00Z"}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(initial), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	appended := `{"session_id":"append-delete-source","role":"assistant","content":"appended item","timestamp":"2026-05-14T12:01:00Z"}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(initial+appended), 0o644); err != nil {
+		t.Fatalf("append transcript: %v", err)
+	}
+	wantRaw := []byte(initial + appended)
+
+	secondSummary := runChatImportSummaryForTest(t, root, "--delete-source")
+	if secondSummary.SessionsUpdated != 1 || secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 0 || secondSummary.SourcesDeleted != 1 {
+		t.Fatalf("unexpected appended delete-source summary: %+v", secondSummary)
+	}
+	if _, err := os.Stat(transcriptPath); !os.IsNotExist(err) {
+		t.Fatalf("expected appended source to be deleted, stat err=%v", err)
+	}
+	after := readChatImportTestSnapshot(t, "append-delete-source")
+	if len(after.items) != 2 || after.items[1].SearchText != "appended item" {
+		t.Fatalf("unexpected items after append delete-source: %+v", after.items)
+	}
+	if !bytes.Equal(wantRaw, after.rawBytes) {
+		t.Fatalf("managed raw source was not updated before delete-source")
+	}
+}
+
+func TestChatImportInvalidAppendedJSONLLeavesExistingImport(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "append-invalid.jsonl")
+	initial := `{"session_id":"append-invalid","role":"user","content":"first item","timestamp":"2026-05-14T12:00:00Z"}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(initial), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	before := readChatImportTestSnapshot(t, "append-invalid")
+	beforeItemIDs := chatItemIDs(before.items)
+	if err := os.WriteFile(transcriptPath, []byte(initial+"{bad\n"), 0o644); err != nil {
+		t.Fatalf("write invalid appended transcript: %v", err)
+	}
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "parse appended chat source") {
+		t.Fatalf("expected appended parse error, got %v", err)
+	}
+	after := readChatImportTestSnapshot(t, "append-invalid")
+	if !equalInt64Slices(beforeItemIDs, chatItemIDs(after.items)) {
+		t.Fatalf("item IDs changed after invalid append: before=%+v after=%+v", beforeItemIDs, chatItemIDs(after.items))
+	}
+	if !bytes.Equal(before.rawBytes, after.rawBytes) {
+		t.Fatalf("managed raw source changed after invalid append")
+	}
+}
+
+func TestChatImportAppendedNDJSONDoesNotReplaceExistingItems(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "append-ndjson-session.ndjson")
+	initial := `{"session_id":"append-ndjson-session","role":"user","content":"ndjson first","timestamp":"2026-05-14T12:00:00Z"}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(initial), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 || firstSummary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	before := readChatImportTestSnapshot(t, "append-ndjson-session")
+	beforeItemIDs := chatItemIDs(before.items)
+
+	appended := `{"session_id":"append-ndjson-session","role":"assistant","content":"ndjson appended","timestamp":"2026-05-14T12:01:00Z"}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(initial+appended), 0o644); err != nil {
+		t.Fatalf("append transcript: %v", err)
+	}
+	secondSummary := runChatImportSummaryForTest(t, root)
+	if secondSummary.SessionsUpdated != 1 || secondSummary.SessionsCreated != 0 || secondSummary.SessionsSkipped != 0 ||
+		secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 0 {
+		t.Fatalf("unexpected appended ndjson summary: %+v", secondSummary)
+	}
+	after := readChatImportTestSnapshot(t, "append-ndjson-session")
+	afterItemIDs := chatItemIDs(after.items)
+	if len(afterItemIDs) != 2 || !equalInt64Slices(beforeItemIDs, afterItemIDs[:1]) {
+		t.Fatalf("ndjson append did not preserve existing item IDs: before=%+v after=%+v", beforeItemIDs, afterItemIDs)
+	}
+	if after.items[1].SearchText != "ndjson appended" || after.items[1].Ordinal != 1 {
+		t.Fatalf("unexpected appended ndjson item: %+v", after.items[1])
+	}
+	if !bytes.Equal([]byte(initial+appended), after.rawBytes) {
+		t.Fatalf("managed raw ndjson was not updated with appended bytes")
+	}
+}
+
+// TestChatImportAppendedJSONLWhitespaceOnlySuffixBumpsSession pins current
+// behavior: when the appended suffix is only whitespace/blank lines, the
+// append path still upserts the session and rewrites the managed raw even
+// though zero new items are produced. This matches DECISIONS.md
+// (`c4d5e6` tradeoffs): "Both changed paths bump sync state via the
+// `updated_at` trigger". A future optimization could skip the upsert when
+// len(items)==0; if that change is made, update this test intentionally.
+func TestChatImportAppendedJSONLWhitespaceOnlySuffixBumpsSession(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "append-whitespace.jsonl")
+	initial := `{"session_id":"append-whitespace","role":"user","content":"whitespace first","timestamp":"2026-05-14T12:00:00Z"}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(initial), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	before := readChatImportTestSnapshot(t, "append-whitespace")
+	beforeItemIDs := chatItemIDs(before.items)
+
+	whitespaceSuffix := "   \n\n"
+	if err := os.WriteFile(transcriptPath, []byte(initial+whitespaceSuffix), 0o644); err != nil {
+		t.Fatalf("append whitespace transcript: %v", err)
+	}
+	secondSummary := runChatImportSummaryForTest(t, root)
+	if secondSummary.SessionsUpdated != 1 || secondSummary.SessionsSkipped != 0 ||
+		secondSummary.ItemsCreated != 0 || secondSummary.RawSourcesCopied != 0 {
+		t.Fatalf("unexpected whitespace-append summary: %+v", secondSummary)
+	}
+	after := readChatImportTestSnapshot(t, "append-whitespace")
+	if !equalInt64Slices(beforeItemIDs, chatItemIDs(after.items)) {
+		t.Fatalf("existing item IDs changed on whitespace append: before=%+v after=%+v", beforeItemIDs, chatItemIDs(after.items))
+	}
+	if !bytes.Equal([]byte(initial+whitespaceSuffix), after.rawBytes) {
+		t.Fatalf("managed raw was not updated with whitespace suffix")
+	}
+}
+
 func TestChatImportSkipKeepsUnchangedSoftDeletedSessionDeleted(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()

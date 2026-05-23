@@ -326,6 +326,42 @@ func (r *Repository) CreateChatItem(ctx context.Context, input repository.Create
 	return scanChatItem(row)
 }
 
+// AppendChatItems inserts normalized items for an existing chat session atomically.
+func (r *Repository) AppendChatItems(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return repository.ErrInvalidArgument
+	}
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return mapPgError(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var exists int
+	if err := tx.QueryRow(ctx, `SELECT 1 FROM chat_session WHERE user_id = $1 AND id = $2`, r.userID, sessionID).Scan(&exists); err != nil {
+		return mapPgError(err)
+	}
+	for _, item := range items {
+		if item.Ordinal < 0 || strings.TrimSpace(item.Role) == "" || strings.TrimSpace(item.ItemType) == "" {
+			return repository.ErrInvalidArgument
+		}
+		searchText := item.SearchText
+		if searchText == "" && item.Text != nil {
+			searchText = *item.Text
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO chat_item (session_id, ordinal, role, item_type, text, search_text, raw_json, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, NOW()))`,
+			sessionID, item.Ordinal, item.Role, item.ItemType, item.Text, searchText, item.RawJSON, item.CreatedAt); err != nil {
+			return mapPgError(err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return mapPgError(err)
+	}
+	return nil
+}
+
 // ReplaceChatItems replaces all normalized items for a chat session atomically.
 func (r *Repository) ReplaceChatItems(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error {
 	if strings.TrimSpace(sessionID) == "" {
