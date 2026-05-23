@@ -795,17 +795,19 @@ func TestAppendManagedRawSuffixBranches(t *testing.T) {
 	if got, err := os.ReadFile(truncManaged); err != nil || string(got) != "one\n" {
 		t.Fatalf("managed should be rolled back after short-source error: got=%q err=%v", got, err)
 	}
-	roManaged := filepath.Join(root, "ro-managed.jsonl")
-	if err := os.WriteFile(roManaged, []byte("one\n"), 0o400); err != nil {
-		t.Fatalf("write ro-managed: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(roManaged, 0o600) })
-	roSource := filepath.Join(root, "ro-source.jsonl")
-	if err := os.WriteFile(roSource, []byte("one\ntwo\n"), 0o644); err != nil {
-		t.Fatalf("write ro-source: %v", err)
-	}
-	if _, err := appendManagedRawSuffix(context.Background(), roManaged, roSource, int64(len("one\n")), int64(len("one\ntwo\n"))); err == nil {
-		t.Fatal("expected error opening read-only managed file for append")
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		roManaged := filepath.Join(root, "ro-managed.jsonl")
+		if err := os.WriteFile(roManaged, []byte("one\n"), 0o400); err != nil {
+			t.Fatalf("write ro-managed: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(roManaged, 0o600) })
+		roSource := filepath.Join(root, "ro-source.jsonl")
+		if err := os.WriteFile(roSource, []byte("one\ntwo\n"), 0o644); err != nil {
+			t.Fatalf("write ro-source: %v", err)
+		}
+		if _, err := appendManagedRawSuffix(context.Background(), roManaged, roSource, int64(len("one\n")), int64(len("one\ntwo\n"))); err == nil {
+			t.Fatal("expected error opening read-only managed file for append")
+		}
 	}
 }
 
@@ -866,9 +868,11 @@ func TestAppendJSONLChatImportErrorBranches(t *testing.T) {
 		t.Fatalf("managed should be rolled back after upsert error: got=%q err=%v", got, err)
 	}
 
+	var upsertInputs []repository.UpsertChatSessionInput
 	repoAppendErr := &mockRepo{
-		maxChatOrdinalFn:    func(context.Context, string) (int, error) { return 0, nil },
+		maxChatOrdinalFn: func(context.Context, string) (int, error) { return 0, nil },
 		upsertChatSessionFn: func(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+			upsertInputs = append(upsertInputs, input)
 			return repository.ChatSession{ID: input.ID, Source: input.Source, SourceSessionID: input.SourceSessionID}, false, nil
 		},
 		appendChatItemsFn: func(context.Context, string, []repository.CreateChatItemInput) error {
@@ -880,6 +884,12 @@ func TestAppendJSONLChatImportErrorBranches(t *testing.T) {
 	}
 	if got, err := os.ReadFile(managedPath); err != nil || string(got) != initial {
 		t.Fatalf("managed should be rolled back after append items error: got=%q err=%v", got, err)
+	}
+	if len(upsertInputs) != 2 {
+		t.Fatalf("expected 2 upserts (mutate + restore) on append-items failure, got %d", len(upsertInputs))
+	}
+	if upsertInputs[1].ID != existing.ID || upsertInputs[1].SourceSessionID != existing.SourceSessionID {
+		t.Fatalf("expected restore upsert to use existing session identity, got %+v", upsertInputs[1])
 	}
 
 	summary := chatImportSummary{}

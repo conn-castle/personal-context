@@ -1259,8 +1259,8 @@ func TestSQLiteProjectPathChatAndUnifiedSearchBranches(t *testing.T) {
 	if err := repo.AppendChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: -1, Role: "user", ItemType: "message", Text: &appendedText, CreatedAt: &now}}); !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected invalid append item ordinal error, got %v", err)
 	}
-	if err := repo.AppendChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: 0, Role: "user", ItemType: "message", Text: &appendedText, CreatedAt: &now}}); err == nil {
-		t.Fatalf("expected duplicate-ordinal append item error")
+	if err := repo.AppendChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: 0, Role: "user", ItemType: "message", Text: &appendedText, CreatedAt: &now}}); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected duplicate-ordinal append item conflict, got %v", err)
 	}
 	if err := repo.AppendChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: 1, Role: "user", ItemType: "message", Text: &appendedText, CreatedAt: &now}}); err != nil {
 		t.Fatalf("AppendChatItems() error = %v", err)

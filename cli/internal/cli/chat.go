@@ -564,6 +564,7 @@ func appendJSONLChatImport(ctx context.Context, stack *localStack, summary *chat
 	}
 	if err := appendChatItems(ctx, stack.Repo, stored.ID, items); err != nil {
 		rollbackRaw()
+		restoreChatSessionState(ctx, stack.Repo, existing)
 		return fmt.Errorf("append chat items: %w", err)
 	}
 	if created {
@@ -597,7 +598,7 @@ func appendManagedRawSuffix(ctx context.Context, managedPath string, sourcePath 
 	if _, err := sourceFile.Seek(offset, io.SeekStart); err != nil {
 		return nil, err
 	}
-	managedFile, err := os.OpenFile(managedPath, os.O_WRONLY|os.O_APPEND, 0)
+	managedFile, err := os.OpenFile(managedPath, os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -614,6 +615,34 @@ func appendManagedRawSuffix(ctx context.Context, managedPath string, sourcePath 
 		return nil, io.ErrUnexpectedEOF
 	}
 	return rollback, nil
+}
+
+// restoreChatSessionState re-applies the session row exactly as it was before
+// an append-only import mutated it. Used when AppendChatItems fails after
+// UpsertChatSession succeeded so that ClearDeleted, last_activity_at, and
+// updated_at don't drift ahead of the items.
+func restoreChatSessionState(ctx context.Context, repo repository.Repository, prior repository.ChatSession) {
+	createdAt := prior.CreatedAt
+	updatedAt := prior.UpdatedAt
+	_, _, _ = repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:                 prior.ID,
+			Source:             prior.Source,
+			SourceSessionID:    prior.SourceSessionID,
+			SourceDeviceID:     prior.SourceDeviceID,
+			ProjectID:          prior.ProjectID,
+			CWD:                prior.CWD,
+			Title:              prior.Title,
+			StartedAt:          prior.StartedAt,
+			LastActivityAt:     prior.LastActivityAt,
+			OriginalSourcePath: prior.OriginalSourcePath,
+			RawSourceKey:       prior.RawSourceKey,
+			CreatedAt:          &createdAt,
+			UpdatedAt:          &updatedAt,
+			DeletedAt:          prior.DeletedAt,
+		},
+		ClearDeleted: prior.DeletedAt == nil,
+	})
 }
 
 // deleteImportedChatSourceIfSafe removes the original source only when it is
