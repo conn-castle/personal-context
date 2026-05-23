@@ -120,7 +120,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - CI schema equivalence guard (`scripts/check_schema_equivalence.sh`) prevents structural drift between the two schemas.
 - `created_at` and `updated_at` are DB-managed via defaults and triggers. `deleted_at` set by application code. See "DB-Managed Timestamps" below.
 - `PRAGMA foreign_keys = ON` required on every SQLite connection (otherwise `ON DELETE CASCADE` silently ignored).
-- SQLite WAL mode enabled for concurrent reads.
+- SQLite WAL mode is enabled for concurrent reads; local connections use `synchronous=NORMAL`.
 - Triggers reimplemented in SQLite syntax (per-row instead of per-statement).
 - `TIMESTAMPTZ` stored as ISO 8601 text with `Z` suffix in SQLite.
 - Child rows (`record_figures`, `record_data_files`) matched by `(record_id, filename)` during sync, NOT by auto-increment `id`.

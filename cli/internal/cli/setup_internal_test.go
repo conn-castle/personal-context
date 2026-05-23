@@ -54,6 +54,7 @@ type mockRepo struct {
 	createChatItemFn    func(ctx context.Context, input repository.CreateChatItemInput) (repository.ChatItem, error)
 	appendChatItemsFn   func(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error
 	replaceChatItemsFn  func(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error
+	writeChatBatchFn    func(ctx context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error)
 }
 
 func (m *mockRepo) GetTemplateByName(ctx context.Context, name string) (repository.Template, error) {
@@ -319,6 +320,33 @@ func (m *mockRepo) ReplaceChatItems(ctx context.Context, sessionID string, items
 		return m.replaceChatItemsFn(ctx, sessionID, items)
 	}
 	return nil
+}
+func (m *mockRepo) WriteChatImportBatch(ctx context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
+	if m.writeChatBatchFn != nil {
+		return m.writeChatBatchFn(ctx, ops)
+	}
+	results := make([]repository.ChatImportResult, 0, len(ops))
+	for _, op := range ops {
+		input := op.Session.CreateChatSessionInput
+		results = append(results, repository.ChatImportResult{
+			Session: repository.ChatSession{
+				ID:                 input.ID,
+				Source:             input.Source,
+				SourceSessionID:    input.SourceSessionID,
+				SourceDeviceID:     input.SourceDeviceID,
+				ProjectID:          input.ProjectID,
+				CWD:                input.CWD,
+				Title:              input.Title,
+				StartedAt:          input.StartedAt,
+				LastActivityAt:     input.LastActivityAt,
+				OriginalSourcePath: input.OriginalSourcePath,
+				RawSourceKey:       input.RawSourceKey,
+				DeletedAt:          input.DeletedAt,
+			},
+			Created: true,
+		})
+	}
+	return results, nil
 }
 func (m *mockRepo) ListChatItems(ctx context.Context, sessionID string) ([]repository.ChatItem, error) {
 	if m.listChatItemsFn != nil {

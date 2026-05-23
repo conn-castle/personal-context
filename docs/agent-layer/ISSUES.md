@@ -27,10 +27,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
-- Issue 2026-05-23 b4q8n2: Chat import raw/session updates can get ahead of items after a crash
+- Issue 2026-05-23 b4q8n2: Legacy chat import raw-ahead states can still skip item repair
     Priority: Medium. Area: cli/internal/cli/chat.go
-    Description: Full and append-only chat imports publish managed raw content and upsert chat_session before normalized items are replaced/appended. Non-crash errors are rolled back, but a process crash in that window can leave raw content ahead of chat_item rows; a later exact-match import can then skip instead of repairing items.
-    Next step: Make chat import recovery compare item state with raw-source state, or introduce a repository-level import transaction/repair marker so the next import can detect and repair incomplete item writes.
+    Description: Current chat import batches session/items before raw promotion, so new imports no longer create raw-ahead-of-items windows. Existing developer stores may still contain a legacy raw-ahead state from older import ordering; an exact-match re-import can skip because it compares source bytes to managed raw bytes without validating normalized item completeness.
+    Next step: Add an item/raw consistency repair path for exact-match chat imports, or introduce a repository-level import repair marker so old incomplete item writes can be detected and repaired.
 
 - Issue 2026-05-22 j4n7p3: Make screenshot fake-Chrome test scripts cross-platform
     Priority: Low. Area: cli/internal/cli/screenshot_test.go

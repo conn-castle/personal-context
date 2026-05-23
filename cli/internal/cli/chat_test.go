@@ -306,7 +306,7 @@ func TestChatImportAppendedJSONLDoesNotReplaceExistingItems(t *testing.T) {
 	secondSummary := runChatImportSummaryForTest(t, root)
 	if secondSummary.FilesScanned != 1 || secondSummary.SessionsUpdated != 1 ||
 		secondSummary.SessionsCreated != 0 || secondSummary.SessionsSkipped != 0 ||
-		secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 0 {
+		secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected appended second import summary: %+v", secondSummary)
 	}
 
@@ -349,7 +349,7 @@ func TestChatImportAppendedJSONLDeleteSourceRemovesOriginal(t *testing.T) {
 	wantRaw := []byte(initial + appended)
 
 	secondSummary := runChatImportSummaryForTest(t, root, "--delete-source")
-	if secondSummary.SessionsUpdated != 1 || secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 0 || secondSummary.SourcesDeleted != 1 {
+	if secondSummary.SessionsUpdated != 1 || secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 1 || secondSummary.SourcesDeleted != 1 {
 		t.Fatalf("unexpected appended delete-source summary: %+v", secondSummary)
 	}
 	if _, err := os.Stat(transcriptPath); !os.IsNotExist(err) {
@@ -417,7 +417,7 @@ func TestChatImportAppendedNDJSONDoesNotReplaceExistingItems(t *testing.T) {
 	}
 	secondSummary := runChatImportSummaryForTest(t, root)
 	if secondSummary.SessionsUpdated != 1 || secondSummary.SessionsCreated != 0 || secondSummary.SessionsSkipped != 0 ||
-		secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 0 {
+		secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected appended ndjson summary: %+v", secondSummary)
 	}
 	after := readChatImportTestSnapshot(t, "append-ndjson-session")
@@ -461,7 +461,7 @@ func TestChatImportAppendedJSONLWhitespaceOnlySuffixBumpsSession(t *testing.T) {
 	}
 	secondSummary := runChatImportSummaryForTest(t, root)
 	if secondSummary.SessionsUpdated != 1 || secondSummary.SessionsSkipped != 0 ||
-		secondSummary.ItemsCreated != 0 || secondSummary.RawSourcesCopied != 0 {
+		secondSummary.ItemsCreated != 0 || secondSummary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected whitespace-append summary: %+v", secondSummary)
 	}
 	after := readChatImportTestSnapshot(t, "append-whitespace")
@@ -918,6 +918,63 @@ func TestRunChatImportBailsOnCancelledContextAfterIndex(t *testing.T) {
 	}
 	if !indexLoaded {
 		t.Fatal("expected index load to occur before cancellation")
+	}
+}
+
+func TestRunChatImportWritesMultipleSessionsInOneBatch(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	for _, name := range []string{"batch-a.json", "batch-b.json"} {
+		body := `{"id":"` + strings.TrimSuffix(name, ".json") + `","started_at":"2026-05-14T12:00:00Z","messages":[{"role":"user","content":"` + name + ` needle"}]}`
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	origNewSQLiteRepo := newSQLiteRepoFn
+	t.Cleanup(func() { newSQLiteRepoFn = origNewSQLiteRepo })
+	var batchSizes []int
+	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
+		return &mockRepo{
+			getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+				return repository.Device{ID: "test-device"}, nil
+			},
+			listProjectPathsFn: func(context.Context, *string) ([]repository.ProjectPath, error) {
+				return nil, nil
+			},
+			listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+				return nil, nil
+			},
+			getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+				return repository.Record{}, repository.ErrNotFound
+			},
+			writeChatBatchFn: func(_ context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
+				batchSizes = append(batchSizes, len(ops))
+				results := make([]repository.ChatImportResult, 0, len(ops))
+				for _, op := range ops {
+					input := op.Session.CreateChatSessionInput
+					results = append(results, repository.ChatImportResult{Session: repository.ChatSession{
+						ID:                 input.ID,
+						Source:             input.Source,
+						SourceSessionID:    input.SourceSessionID,
+						SourceDeviceID:     input.SourceDeviceID,
+						OriginalSourcePath: input.OriginalSourcePath,
+						RawSourceKey:       input.RawSourceKey,
+						StartedAt:          input.StartedAt,
+						LastActivityAt:     input.LastActivityAt,
+					}, Created: true})
+				}
+				return results, nil
+			},
+		}, nil
+	}
+
+	summary := runChatImportSummaryForTest(t, root)
+	if summary.SessionsCreated != 2 || summary.RawSourcesCopied != 2 || summary.ItemsCreated != 2 {
+		t.Fatalf("unexpected batched import summary: %+v", summary)
+	}
+	if len(batchSizes) != 1 || batchSizes[0] != 2 {
+		t.Fatalf("expected one two-session batch, got sizes %+v", batchSizes)
 	}
 }
 
@@ -1382,10 +1439,10 @@ func TestChatImportRepositoryErrorBranches(t *testing.T) {
 		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
 			return repository.ChatSession{ID: "20260315-66666666"}, nil
 		},
-		upsertChatSessionFn: func(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
-			return repository.ChatSession{}, false, errors.New("upsert failed")
+		listChatItemsFn: func(context.Context, string) ([]repository.ChatItem, error) {
+			return nil, errors.New("items failed")
 		},
-	}, "upsert chat session")
+	}, "list existing chat items")
 
 	runWithRepo(t, &mockRepo{
 		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
@@ -1405,40 +1462,14 @@ func TestChatImportRepositoryErrorBranches(t *testing.T) {
 		},
 	}, "stage chat source")
 
-	rollbackLookups := 0
 	runWithRepo(t, &mockRepo{
 		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
 			return activeDevice, nil
 		},
-		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
-			rollbackLookups++
-			if rollbackLookups == 1 {
-				return repository.ChatSession{ID: "20260315-77777777"}, nil
-			}
-			return repository.ChatSession{}, errors.New("rollback lookup failed")
+		writeChatBatchFn: func(context.Context, []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
+			return nil, errors.New("batch failed")
 		},
-	}, "look up existing chat rollback state")
-
-	runWithRepo(t, &mockRepo{
-		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
-			return activeDevice, nil
-		},
-		upsertChatSessionFn: func(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
-			return repository.ChatSession{}, false, errors.New("upsert failed")
-		},
-	}, "upsert chat session")
-
-	runWithRepo(t, &mockRepo{
-		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
-			return activeDevice, nil
-		},
-		upsertChatSessionFn: func(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
-			return repository.ChatSession{ID: input.ID}, true, nil
-		},
-		replaceChatItemsFn: func(context.Context, string, []repository.CreateChatItemInput) error {
-			return errors.New("replace failed")
-		},
-	}, "replace chat items")
+	}, "write chat import batch")
 
 	t.Setenv(pcHomeEnvVar, homeDir)
 }

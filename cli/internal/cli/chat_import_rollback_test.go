@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/conn-castle/personal-context/cli/internal/filesystem"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
@@ -410,109 +411,6 @@ func TestChatImportRollbackRestoreReinstatesExistingSession(t *testing.T) {
 	}
 }
 
-func TestCaptureChatImportRollbackIgnoresMissingManagedRaw(t *testing.T) {
-	ctx := context.Background()
-	homeDir := setupEnv(t)
-	stack, err := openLocalStack(homeDir)
-	if err != nil {
-		t.Fatalf("openLocalStack: %v", err)
-	}
-	t.Cleanup(func() { _ = stack.Close() })
-
-	chatID := "20260315-eeeeffff"
-	rawKey := "chats/raw/" + chatID + "/source.json"
-	now := time.Date(2026, 3, 15, 12, 30, 0, 0, time.UTC)
-	if _, _, err := stack.Repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
-		CreateChatSessionInput: repository.CreateChatSessionInput{
-			ID:              chatID,
-			Source:          "codex",
-			SourceSessionID: "missing-raw-session",
-			SourceDeviceID:  "test-device",
-			StartedAt:       now,
-			LastActivityAt:  now,
-			RawSourceKey:    &rawKey,
-			CreatedAt:       &now,
-			UpdatedAt:       &now,
-		},
-		ClearDeleted: true,
-	}); err != nil {
-		t.Fatalf("seed chat session: %v", err)
-	}
-
-	state, err := captureChatImportRollback(ctx, stack, "codex", "missing-raw-session")
-	if err != nil {
-		t.Fatalf("captureChatImportRollback: %v", err)
-	}
-	if !state.existed || state.session.ID != chatID {
-		t.Fatalf("unexpected rollback state: %+v", state)
-	}
-	if state.rawBackup != nil {
-		t.Fatalf("expected missing managed raw source to skip backup, got %+v", state.rawBackup)
-	}
-}
-
-func TestCaptureChatImportRollbackErrorBranches(t *testing.T) {
-	ctx := context.Background()
-
-	_, err := captureChatImportRollback(ctx, &localStack{Repo: &mockRepo{
-		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
-			return repository.ChatSession{}, errors.New("lookup failed")
-		},
-	}}, "codex", "source")
-	if err == nil || !strings.Contains(err.Error(), "look up existing chat rollback state") {
-		t.Fatalf("captureChatImportRollback(lookup) error = %v, want lookup context", err)
-	}
-
-	_, err = captureChatImportRollback(ctx, &localStack{Repo: &mockRepo{
-		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
-			return repository.ChatSession{ID: "20260315-11112222"}, nil
-		},
-		listChatItemsFn: func(context.Context, string) ([]repository.ChatItem, error) {
-			return nil, errors.New("list failed")
-		},
-	}}, "codex", "source")
-	if err == nil || !strings.Contains(err.Error(), "list existing chat items for rollback") {
-		t.Fatalf("captureChatImportRollback(list items) error = %v, want list context", err)
-	}
-
-	homeDir := setupEnv(t)
-	stack, openErr := openLocalStack(homeDir)
-	if openErr != nil {
-		t.Fatalf("openLocalStack: %v", openErr)
-	}
-	t.Cleanup(func() { _ = stack.Close() })
-
-	invalidRawKey := "chats/raw/other/source.json"
-	stack.Repo = &mockRepo{
-		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
-			return repository.ChatSession{ID: "20260315-33334444", RawSourceKey: &invalidRawKey}, nil
-		},
-	}
-	_, err = captureChatImportRollback(ctx, stack, "codex", "source")
-	if err == nil || !strings.Contains(err.Error(), "resolve existing chat raw source for rollback") {
-		t.Fatalf("captureChatImportRollback(resolve raw) error = %v, want resolve context", err)
-	}
-
-	chatID := "20260315-55556666"
-	rawKey := "chats/raw/" + chatID + "/source.json"
-	rawPath, err := stack.FS.ResolveChatSourcePath(chatID, rawKey)
-	if err != nil {
-		t.Fatalf("ResolveChatSourcePath: %v", err)
-	}
-	if err := os.MkdirAll(rawPath, 0o700); err != nil {
-		t.Fatalf("create raw source directory: %v", err)
-	}
-	stack.Repo = &mockRepo{
-		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
-			return repository.ChatSession{ID: chatID, RawSourceKey: &rawKey}, nil
-		},
-	}
-	_, err = captureChatImportRollback(ctx, stack, "codex", "source")
-	if err == nil || !strings.Contains(err.Error(), "back up existing chat raw source for rollback") {
-		t.Fatalf("captureChatImportRollback(backup raw) error = %v, want backup context", err)
-	}
-}
-
 func TestChatItemInputsCopiesStoredItems(t *testing.T) {
 	createdAt := time.Date(2026, 3, 15, 13, 0, 0, 0, time.UTC)
 	text := "hello"
@@ -740,93 +638,24 @@ func TestSourceMatchesManagedRawBranches(t *testing.T) {
 	}
 }
 
-func TestAppendManagedRawSuffixBranches(t *testing.T) {
-	root := t.TempDir()
-	managed := filepath.Join(root, "managed.jsonl")
-	source := filepath.Join(root, "source.jsonl")
-	if err := os.WriteFile(managed, []byte("one\n"), 0o600); err != nil {
-		t.Fatalf("write managed: %v", err)
-	}
-	if err := os.WriteFile(source, []byte("one\ntwo\n"), 0o644); err != nil {
-		t.Fatalf("write source: %v", err)
-	}
-	rollback, err := appendManagedRawSuffix(context.Background(), managed, source, int64(len("one\n")), int64(len("one\ntwo\n")))
-	if err != nil {
-		t.Fatalf("appendManagedRawSuffix() error = %v", err)
-	}
-	if got, err := os.ReadFile(managed); err != nil || string(got) != "one\ntwo\n" {
-		t.Fatalf("managed after append = %q err=%v", got, err)
-	}
-	rollback()
-	if got, err := os.ReadFile(managed); err != nil || string(got) != "one\n" {
-		t.Fatalf("managed after rollback = %q err=%v", got, err)
-	}
-	if _, err := appendManagedRawSuffix(context.Background(), managed, source, int64(len("one\ntwo\n")), int64(len("one\ntwo\n"))); err == nil {
-		t.Fatal("expected changed managed size error")
-	}
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := appendManagedRawSuffix(canceled, managed, source, int64(len("one\n")), int64(len("one\ntwo\n"))); !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected canceled append error, got %v", err)
-	}
-	missingManaged := filepath.Join(root, "missing-managed.jsonl")
-	if _, err := appendManagedRawSuffix(context.Background(), missingManaged, source, 0, int64(len("one\n"))); err == nil {
-		t.Fatal("expected missing managed file error")
-	}
-	emptyManaged := filepath.Join(root, "empty-managed.jsonl")
-	if err := os.WriteFile(emptyManaged, []byte{}, 0o600); err != nil {
-		t.Fatalf("write empty managed: %v", err)
-	}
-	missingSource := filepath.Join(root, "missing-source.jsonl")
-	if _, err := appendManagedRawSuffix(context.Background(), emptyManaged, missingSource, 0, 0); err == nil {
-		t.Fatal("expected missing source file error")
-	}
-	truncManaged := filepath.Join(root, "trunc-managed.jsonl")
-	truncSource := filepath.Join(root, "trunc-source.jsonl")
-	if err := os.WriteFile(truncManaged, []byte("one\n"), 0o600); err != nil {
-		t.Fatalf("write trunc managed: %v", err)
-	}
-	if err := os.WriteFile(truncSource, []byte("one\ntw"), 0o644); err != nil {
-		t.Fatalf("write trunc source: %v", err)
-	}
-	if _, err := appendManagedRawSuffix(context.Background(), truncManaged, truncSource, int64(len("one\n")), int64(len("one\ntwo\n"))); !errors.Is(err, io.ErrUnexpectedEOF) {
-		t.Fatalf("expected unexpected EOF on short source, got %v", err)
-	}
-	if got, err := os.ReadFile(truncManaged); err != nil || string(got) != "one\n" {
-		t.Fatalf("managed should be rolled back after short-source error: got=%q err=%v", got, err)
-	}
-	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
-		roManaged := filepath.Join(root, "ro-managed.jsonl")
-		if err := os.WriteFile(roManaged, []byte("one\n"), 0o400); err != nil {
-			t.Fatalf("write ro-managed: %v", err)
-		}
-		t.Cleanup(func() { _ = os.Chmod(roManaged, 0o600) })
-		roSource := filepath.Join(root, "ro-source.jsonl")
-		if err := os.WriteFile(roSource, []byte("one\ntwo\n"), 0o644); err != nil {
-			t.Fatalf("write ro-source: %v", err)
-		}
-		if _, err := appendManagedRawSuffix(context.Background(), roManaged, roSource, int64(len("one\n")), int64(len("one\ntwo\n"))); err == nil {
-			t.Fatal("expected error opening read-only managed file for append")
-		}
-	}
+type chatImportBatchWriterFunc func(context.Context, []repository.ChatImportOp) ([]repository.ChatImportResult, error)
+
+func (f chatImportBatchWriterFunc) WriteChatImportBatch(ctx context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
+	return f(ctx, ops)
 }
 
-func TestAppendJSONLChatImportErrorBranches(t *testing.T) {
+func TestQueueAppendJSONLChatImportErrorBranches(t *testing.T) {
 	root := t.TempDir()
 	managedPath := filepath.Join(root, "managed.jsonl")
 	sourcePath := filepath.Join(root, "source.jsonl")
 	rawKey := "chats/raw/20260514-deadbeef/source.jsonl"
 	initial := `{"session_id":"existing","role":"user","content":"first","timestamp":"2026-05-14T12:00:00Z"}` + "\n"
 	appended := `{"session_id":"existing","role":"assistant","content":"second","timestamp":"2026-05-14T12:01:00Z"}` + "\n"
-	if err := os.WriteFile(managedPath, []byte(initial), 0o600); err != nil {
+	if err := os.WriteFile(managedPath, []byte(initial), 0o644); err != nil {
 		t.Fatalf("write managed: %v", err)
 	}
 	if err := os.WriteFile(sourcePath, []byte(initial+appended), 0o644); err != nil {
 		t.Fatalf("write source: %v", err)
-	}
-	managedInfo, err := os.Stat(managedPath)
-	if err != nil {
-		t.Fatalf("stat managed: %v", err)
 	}
 	sourceInfo, err := os.Stat(sourcePath)
 	if err != nil {
@@ -836,96 +665,175 @@ func TestAppendJSONLChatImportErrorBranches(t *testing.T) {
 	comparison := chatImportSourceComparison{
 		appendOnly:  true,
 		managedPath: managedPath,
-		managedSize: managedInfo.Size(),
+		managedSize: int64(len(initial)),
 		sourceSize:  sourceInfo.Size(),
 	}
 
 	repoOrdinalErr := &mockRepo{maxChatOrdinalFn: func(context.Context, string) (int, error) { return 0, errors.New("ordinal boom") }}
-	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoOrdinalErr}, &chatImportSummary{}, existing, sourcePath, comparison, "test-device", nil, false); err == nil || !strings.Contains(err.Error(), "find existing chat item ordinal") {
+	if err := queueAppendJSONLChatImport(context.Background(), &localStack{Repo: repoOrdinalErr}, &chatImportBatch{}, nil, existing, sourcePath, comparison, "test-device", nil, false); err == nil || !strings.Contains(err.Error(), "find existing chat item ordinal") {
 		t.Fatalf("expected wrapped ordinal error, got %v", err)
 	}
 
-	missingComparison := comparison
-	missingComparison.managedPath = filepath.Join(root, "missing.jsonl")
-	repoMissingManaged := &mockRepo{maxChatOrdinalFn: func(context.Context, string) (int, error) { return 0, nil }}
-	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoMissingManaged}, &chatImportSummary{}, existing, sourcePath, missingComparison, "test-device", nil, false); err == nil || !strings.Contains(err.Error(), "append managed chat raw source") {
-		t.Fatalf("expected wrapped managed append error, got %v", err)
+	fsClient, err := filesystem.NewClient(root)
+	if err != nil {
+		t.Fatalf("filesystem client: %v", err)
 	}
-	if got, err := os.ReadFile(managedPath); err != nil || string(got) != initial {
-		t.Fatalf("managed should be unchanged after missing-managed error: got=%q err=%v", got, err)
+	badExisting := existing
+	badExisting.ID = "bad-id"
+	repoStageErr := &mockRepo{maxChatOrdinalFn: func(context.Context, string) (int, error) { return 0, nil }}
+	if err := queueAppendJSONLChatImport(context.Background(), &localStack{Repo: repoStageErr, FS: fsClient}, &chatImportBatch{}, nil, badExisting, sourcePath, comparison, "test-device", nil, false); err == nil || !strings.Contains(err.Error(), "stage appended chat source") {
+		t.Fatalf("expected wrapped stage error, got %v", err)
 	}
-
-	repoUpsertErr := &mockRepo{
-		maxChatOrdinalFn:    func(context.Context, string) (int, error) { return 0, nil },
-		upsertChatSessionFn: func(context.Context, repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
-			return repository.ChatSession{}, false, errors.New("upsert boom")
-		},
-	}
-	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoUpsertErr}, &chatImportSummary{}, existing, sourcePath, comparison, "test-device", nil, false); err == nil || !strings.Contains(err.Error(), "upsert appended chat session") {
-		t.Fatalf("expected wrapped upsert error, got %v", err)
-	}
-	if got, err := os.ReadFile(managedPath); err != nil || string(got) != initial {
-		t.Fatalf("managed should be rolled back after upsert error: got=%q err=%v", got, err)
-	}
-
-	var upsertInputs []repository.UpsertChatSessionInput
-	repoAppendErr := &mockRepo{
-		maxChatOrdinalFn: func(context.Context, string) (int, error) { return 0, nil },
-		upsertChatSessionFn: func(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
-			upsertInputs = append(upsertInputs, input)
-			return repository.ChatSession{ID: input.ID, Source: input.Source, SourceSessionID: input.SourceSessionID}, false, nil
-		},
-		appendChatItemsFn: func(context.Context, string, []repository.CreateChatItemInput) error {
-			return errors.New("append items boom")
-		},
-	}
-	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoAppendErr}, &chatImportSummary{}, existing, sourcePath, comparison, "test-device", nil, false); err == nil || !strings.Contains(err.Error(), "append chat items") {
-		t.Fatalf("expected wrapped append items error, got %v", err)
-	}
-	if got, err := os.ReadFile(managedPath); err != nil || string(got) != initial {
-		t.Fatalf("managed should be rolled back after append items error: got=%q err=%v", got, err)
-	}
-	if len(upsertInputs) != 2 {
-		t.Fatalf("expected 2 upserts (mutate + restore) on append-items failure, got %d", len(upsertInputs))
-	}
-	if upsertInputs[1].ID != existing.ID || upsertInputs[1].SourceSessionID != existing.SourceSessionID {
-		t.Fatalf("expected restore upsert to use existing session identity, got %+v", upsertInputs[1])
-	}
-
 	summary := chatImportSummary{}
-	repoHappy := &mockRepo{
-		maxChatOrdinalFn:    func(context.Context, string) (int, error) { return 0, nil },
-		upsertChatSessionFn: func(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
-			return repository.ChatSession{ID: input.ID, Source: input.Source, SourceSessionID: input.SourceSessionID}, false, nil
-		},
-		appendChatItemsFn: func(context.Context, string, []repository.CreateChatItemInput) error { return nil },
+	errBatch := chatImportBatch{
+		writer: chatImportBatchWriterFunc(func(context.Context, []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
+			return nil, errors.New("batch boom")
+		}),
+		fs:      fsClient,
+		summary: &summary,
 	}
-	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoHappy}, &summary, existing, sourcePath, comparison, "test-device", nil, false); err != nil {
-		t.Fatalf("happy-path appendJSONLChatImport error = %v", err)
+	repoBatchErr := &mockRepo{maxChatOrdinalFn: func(context.Context, string) (int, error) { return 0, nil }}
+	idx := chatImportSessionIndex{byOriginalPath: make(map[chatImportSourcePathKey]repository.ChatSession), bySourceSession: make(map[chatImportSourceSessionKey]repository.ChatSession)}
+	if err := queueAppendJSONLChatImport(context.Background(), &localStack{Repo: repoBatchErr, FS: fsClient}, &errBatch, &idx, existing, sourcePath, comparison, "test-device", nil, false); err != nil {
+		t.Fatalf("queue append before explicit flush: %v", err)
 	}
-	if summary.SessionsUpdated != 1 || summary.ItemsCreated != 1 {
-		t.Fatalf("unexpected happy-path summary: %+v", summary)
+	if err := errBatch.flush(context.Background()); err == nil || !strings.Contains(err.Error(), "write chat import batch") {
+		t.Fatalf("expected wrapped batch error, got %v", err)
 	}
-	if got, err := os.ReadFile(managedPath); err != nil || string(got) != initial+appended {
-		t.Fatalf("managed should have appended bytes after happy path: got=%q err=%v", got, err)
+	if entries, readErr := os.ReadDir(filepath.Join(root, "chats", "raw")); readErr == nil {
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".staging-") {
+				t.Fatalf("expected failed batch to clean staged raw source, found %s", entry.Name())
+			}
+		}
 	}
+}
 
-	if err := os.WriteFile(managedPath, []byte(initial), 0o600); err != nil {
-		t.Fatalf("reset managed for created-branch case: %v", err)
+func TestQueueAppendJSONLChatImportPromotesStagedRawAfterBatchWrite(t *testing.T) {
+	root := t.TempDir()
+	managedPath := filepath.Join(root, "managed.jsonl")
+	sourcePath := filepath.Join(root, "source.jsonl")
+	initial := `{"session_id":"existing","role":"user","content":"first","timestamp":"2026-05-14T12:00:00Z"}` + "\n"
+	appended := `{"session_id":"existing","role":"assistant","content":"second","timestamp":"2026-05-14T12:01:00Z"}` + "\n"
+	if err := os.WriteFile(managedPath, []byte(initial), 0o644); err != nil {
+		t.Fatalf("write managed: %v", err)
 	}
-	createdSummary := chatImportSummary{}
-	repoCreated := &mockRepo{
-		maxChatOrdinalFn:    func(context.Context, string) (int, error) { return 0, nil },
-		upsertChatSessionFn: func(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
-			return repository.ChatSession{ID: input.ID, Source: input.Source, SourceSessionID: input.SourceSessionID}, true, nil
+	if err := os.WriteFile(sourcePath, []byte(initial+appended), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	fsClient, err := filesystem.NewClient(root)
+	if err != nil {
+		t.Fatalf("filesystem client: %v", err)
+	}
+	rawKey := "chats/raw/20260514-deadbeef/source.jsonl"
+	existing := repository.ChatSession{ID: "20260514-deadbeef", Source: "codex", SourceSessionID: "existing", SourceDeviceID: "test-device", RawSourceKey: &rawKey}
+	comparison := chatImportSourceComparison{appendOnly: true, managedPath: managedPath, managedSize: int64(len(initial)), sourceSize: int64(len(initial + appended))}
+	repo := &mockRepo{maxChatOrdinalFn: func(context.Context, string) (int, error) { return 0, nil }}
+	summary := chatImportSummary{}
+	batch := chatImportBatch{
+		writer: chatImportBatchWriterFunc(func(_ context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
+			if len(ops) != 1 || ops[0].ItemMode != repository.ChatImportItemModeAppend || len(ops[0].Items) != 1 {
+				t.Fatalf("unexpected append batch ops: %+v", ops)
+			}
+			input := ops[0].Session.CreateChatSessionInput
+			return []repository.ChatImportResult{{Session: repository.ChatSession{
+				ID:                 input.ID,
+				Source:             input.Source,
+				SourceSessionID:    input.SourceSessionID,
+				SourceDeviceID:     input.SourceDeviceID,
+				OriginalSourcePath: input.OriginalSourcePath,
+				RawSourceKey:       input.RawSourceKey,
+			}}}, nil
+		}),
+		fs:      fsClient,
+		summary: &summary,
+	}
+	idx := chatImportSessionIndex{byOriginalPath: make(map[chatImportSourcePathKey]repository.ChatSession), bySourceSession: make(map[chatImportSourceSessionKey]repository.ChatSession)}
+	if err := queueAppendJSONLChatImport(context.Background(), &localStack{Repo: repo, FS: fsClient}, &batch, &idx, existing, sourcePath, comparison, "test-device", nil, false); err != nil {
+		t.Fatalf("queueAppendJSONLChatImport: %v", err)
+	}
+	if err := batch.flush(context.Background()); err != nil {
+		t.Fatalf("flush append batch: %v", err)
+	}
+	if summary.SessionsUpdated != 1 || summary.ItemsCreated != 1 || summary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected append summary: %+v", summary)
+	}
+	promotedPath, err := fsClient.ResolveChatSourcePath(existing.ID, rawKey)
+	if err != nil {
+		t.Fatalf("resolve managed raw: %v", err)
+	}
+	if got, err := os.ReadFile(promotedPath); err != nil || string(got) != initial+appended {
+		t.Fatalf("managed should be full source after staged promotion: got=%q err=%v", got, err)
+	}
+}
+
+func TestQueueAppendJSONLChatImportRepairsDBAheadRawWithoutDuplicateItems(t *testing.T) {
+	root := t.TempDir()
+	managedPath := filepath.Join(root, "managed.jsonl")
+	sourcePath := filepath.Join(root, "source.jsonl")
+	initial := `{"session_id":"existing","role":"user","content":"first","timestamp":"2026-05-14T12:00:00Z"}` + "\n"
+	appended := `{"session_id":"existing","role":"assistant","content":"second","timestamp":"2026-05-14T12:01:00Z"}` + "\n"
+	if err := os.WriteFile(managedPath, []byte(initial), 0o644); err != nil {
+		t.Fatalf("write managed: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(initial+appended), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	fsClient, err := filesystem.NewClient(root)
+	if err != nil {
+		t.Fatalf("filesystem client: %v", err)
+	}
+	rawKey := "chats/raw/20260514-deadbeef/source.jsonl"
+	existing := repository.ChatSession{ID: "20260514-deadbeef", Source: "codex", SourceSessionID: "existing", SourceDeviceID: "test-device", RawSourceKey: &rawKey}
+	firstText := "first"
+	secondText := "second"
+	firstRaw := `{"content":"first","role":"user","session_id":"existing","timestamp":"2026-05-14T12:00:00Z"}`
+	secondRaw := `{"content":"second","role":"assistant","session_id":"existing","timestamp":"2026-05-14T12:01:00Z"}`
+	comparison := chatImportSourceComparison{appendOnly: true, managedPath: managedPath, managedSize: int64(len(initial)), sourceSize: int64(len(initial + appended))}
+	repo := &mockRepo{
+		maxChatOrdinalFn: func(context.Context, string) (int, error) { return 1, nil },
+		listChatItemsFn: func(context.Context, string) ([]repository.ChatItem, error) {
+			return []repository.ChatItem{
+				{SessionID: existing.ID, Ordinal: 0, Role: "user", ItemType: "message", Text: &firstText, SearchText: firstText, RawJSON: &firstRaw},
+				{SessionID: existing.ID, Ordinal: 1, Role: "assistant", ItemType: "message", Text: &secondText, SearchText: secondText, RawJSON: &secondRaw},
+			}, nil
 		},
-		appendChatItemsFn: func(context.Context, string, []repository.CreateChatItemInput) error { return nil },
 	}
-	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoCreated}, &createdSummary, existing, sourcePath, comparison, "test-device", nil, false); err != nil {
-		t.Fatalf("created-branch appendJSONLChatImport error = %v", err)
+	summary := chatImportSummary{}
+	batch := chatImportBatch{
+		writer: chatImportBatchWriterFunc(func(_ context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
+			if len(ops) != 1 || len(ops[0].Items) != 0 {
+				t.Fatalf("expected repair batch with no duplicate items, got %+v", ops)
+			}
+			input := ops[0].Session.CreateChatSessionInput
+			return []repository.ChatImportResult{{Session: repository.ChatSession{
+				ID:                 input.ID,
+				Source:             input.Source,
+				SourceSessionID:    input.SourceSessionID,
+				SourceDeviceID:     input.SourceDeviceID,
+				OriginalSourcePath: input.OriginalSourcePath,
+				RawSourceKey:       input.RawSourceKey,
+			}}}, nil
+		}),
+		fs:      fsClient,
+		summary: &summary,
 	}
-	if createdSummary.SessionsCreated != 1 || createdSummary.SessionsUpdated != 0 || createdSummary.ItemsCreated != 1 {
-		t.Fatalf("unexpected created-branch summary: %+v", createdSummary)
+	idx := chatImportSessionIndex{byOriginalPath: make(map[chatImportSourcePathKey]repository.ChatSession), bySourceSession: make(map[chatImportSourceSessionKey]repository.ChatSession)}
+	if err := queueAppendJSONLChatImport(context.Background(), &localStack{Repo: repo, FS: fsClient}, &batch, &idx, existing, sourcePath, comparison, "test-device", nil, false); err != nil {
+		t.Fatalf("queueAppendJSONLChatImport: %v", err)
+	}
+	if err := batch.flush(context.Background()); err != nil {
+		t.Fatalf("flush repair batch: %v", err)
+	}
+	if summary.SessionsUpdated != 1 || summary.ItemsCreated != 0 || summary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected repair summary: %+v", summary)
+	}
+	managed, err := fsClient.ResolveChatSourcePath(existing.ID, rawKey)
+	if err != nil {
+		t.Fatalf("resolve managed raw: %v", err)
+	}
+	if got, err := os.ReadFile(managed); err != nil || string(got) != initial+appended {
+		t.Fatalf("managed raw should be promoted without duplicate item write: got=%q err=%v", got, err)
 	}
 }
 
