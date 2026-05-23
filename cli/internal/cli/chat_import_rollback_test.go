@@ -922,6 +922,86 @@ func TestChatImportBatchFlushReportsPromoteFailureAndCleansRemainingStages(t *te
 	}
 }
 
+func TestHandleExistingChatImportFlushesPendingDuplicateAppend(t *testing.T) {
+	root := t.TempDir()
+	fsClient, err := filesystem.NewClient(root)
+	if err != nil {
+		t.Fatalf("filesystem client: %v", err)
+	}
+	chatID := "20260514-deadbeef"
+	rawKey := "chats/raw/" + chatID + "/source.jsonl"
+	initial := `{"session_id":"existing","role":"user","content":"first","timestamp":"2026-05-14T12:00:00Z"}` + "\n"
+	appended := `{"session_id":"existing","role":"assistant","content":"second","timestamp":"2026-05-14T12:01:00Z"}` + "\n"
+	managedPath, err := fsClient.ResolveChatSourcePath(chatID, rawKey)
+	if err != nil {
+		t.Fatalf("resolve managed: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(managedPath), 0o700); err != nil {
+		t.Fatalf("mkdir managed: %v", err)
+	}
+	if err := os.WriteFile(managedPath, []byte(initial), 0o644); err != nil {
+		t.Fatalf("write managed: %v", err)
+	}
+	sourceA := filepath.Join(root, "a.jsonl")
+	sourceB := filepath.Join(root, "b.jsonl")
+	for _, p := range []string{sourceA, sourceB} {
+		if err := os.WriteFile(p, []byte(initial+appended), 0o644); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+	}
+	existing := repository.ChatSession{ID: chatID, Source: "codex", SourceSessionID: "existing", SourceDeviceID: "test-device", RawSourceKey: &rawKey}
+	summary := chatImportSummary{}
+	flushCount := 0
+	maxOrdinal := 0
+	batch := chatImportBatch{
+		fs:      fsClient,
+		summary: &summary,
+	}
+	batch.writer = chatImportBatchWriterFunc(func(_ context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
+		flushCount++
+		results := make([]repository.ChatImportResult, len(ops))
+		for i, op := range ops {
+			input := op.Session.CreateChatSessionInput
+			results[i] = repository.ChatImportResult{Session: repository.ChatSession{ID: input.ID, Source: input.Source, SourceSessionID: input.SourceSessionID, RawSourceKey: input.RawSourceKey}}
+			maxOrdinal += len(op.Items)
+		}
+		return results, nil
+	})
+	idx := chatImportSessionIndex{byOriginalPath: make(map[chatImportSourcePathKey]repository.ChatSession), bySourceSession: make(map[chatImportSourceSessionKey]repository.ChatSession)}
+	repo := &mockRepo{
+		maxChatOrdinalFn: func(context.Context, string) (int, error) { return maxOrdinal, nil },
+	}
+	stack := &localStack{Repo: repo, FS: fsClient}
+
+	handled, _, err := handleExistingChatImport(context.Background(), stack, &batch, &idx, existing, sourceA, "test-device", nil, false)
+	if err != nil {
+		t.Fatalf("handleExistingChatImport(A) error = %v", err)
+	}
+	if !handled {
+		t.Fatalf("handleExistingChatImport(A) handled=false, want true")
+	}
+	if flushCount != 0 {
+		t.Fatalf("expected no flush after first append, got %d", flushCount)
+	}
+	if len(batch.entries) != 1 {
+		t.Fatalf("expected one pending entry after first append, got %d", len(batch.entries))
+	}
+
+	handled, _, err = handleExistingChatImport(context.Background(), stack, &batch, &idx, existing, sourceB, "test-device", nil, false)
+	if err != nil {
+		t.Fatalf("handleExistingChatImport(B) error = %v", err)
+	}
+	if !handled {
+		t.Fatalf("handleExistingChatImport(B) handled=false, want true")
+	}
+	if flushCount != 1 {
+		t.Fatalf("expected pre-flush before second append, got flushCount=%d", flushCount)
+	}
+	if len(batch.entries) != 1 {
+		t.Fatalf("expected the second op pending after pre-flush, got %d", len(batch.entries))
+	}
+}
+
 func TestQueueAppendJSONLChatImportExtraErrorBranches(t *testing.T) {
 	root := t.TempDir()
 	fsClient, err := filesystem.NewClient(root)

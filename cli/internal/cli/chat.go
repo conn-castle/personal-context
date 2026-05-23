@@ -454,6 +454,17 @@ func handleExistingChatImport(ctx context.Context, stack *localStack, batch *cha
 		return true, false, nil
 	}
 	if comparison.appendOnly {
+		// Append ops compute ordinals from pre-batch DB state. If the same
+		// (source, source_session_id) is already queued (e.g., duplicate
+		// --root entries or overlapping scan roots), the second op would
+		// reuse those ordinals and trip the chat_item UNIQUE constraint
+		// when WriteChatImportBatch flushes. Flush the pending batch first
+		// so the next ordinal calculation sees the prior items committed.
+		if batch.hasSourceSession(existing.Source, existing.SourceSessionID) {
+			if err := batch.flush(ctx); err != nil {
+				return false, false, err
+			}
+		}
 		if err := queueAppendJSONLChatImport(ctx, stack, batch, sessionIndex, existing, sourcePath, comparison, deviceID, projectPaths, deleteSource); err != nil {
 			return false, false, err
 		}
