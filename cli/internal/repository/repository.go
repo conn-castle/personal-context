@@ -70,6 +70,7 @@ type Repository interface {
 	DeleteChatSession(ctx context.Context, id string) error
 	MaxChatItemOrdinal(ctx context.Context, sessionID string) (int, error)
 	CreateChatItem(ctx context.Context, input CreateChatItemInput) (ChatItem, error)
+	AppendChatItems(ctx context.Context, sessionID string, items []CreateChatItemInput) error
 	ReplaceChatItems(ctx context.Context, sessionID string, items []CreateChatItemInput) error
 	ListChatItems(ctx context.Context, sessionID string) ([]ChatItem, error)
 	SearchChatItems(ctx context.Context, filter SearchChatItemsFilter) ([]ChatSearchResult, error)

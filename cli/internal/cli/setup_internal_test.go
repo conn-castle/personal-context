@@ -52,6 +52,7 @@ type mockRepo struct {
 	searchChatItemsFn   func(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error)
 	maxChatOrdinalFn    func(ctx context.Context, sessionID string) (int, error)
 	createChatItemFn    func(ctx context.Context, input repository.CreateChatItemInput) (repository.ChatItem, error)
+	appendChatItemsFn   func(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error
 	replaceChatItemsFn  func(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error
 }
 
@@ -306,6 +307,12 @@ func (m *mockRepo) CreateChatItem(ctx context.Context, input repository.CreateCh
 		return m.createChatItemFn(ctx, input)
 	}
 	return repository.ChatItem{}, nil
+}
+func (m *mockRepo) AppendChatItems(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error {
+	if m.appendChatItemsFn != nil {
+		return m.appendChatItemsFn(ctx, sessionID, items)
+	}
+	return nil
 }
 func (m *mockRepo) ReplaceChatItems(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error {
 	if m.replaceChatItemsFn != nil {

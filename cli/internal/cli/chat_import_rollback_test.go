@@ -663,6 +663,34 @@ func TestSourceMatchesManagedRawBranches(t *testing.T) {
 		t.Fatalf("different-size files: matches=%v err=%v", matches, err)
 	}
 
+	appendChatID := "20260315-abcd1234"
+	appendKey := "chats/raw/" + appendChatID + "/source.jsonl"
+	appendManaged, err := stack.FS.ResolveChatSourcePath(appendChatID, appendKey)
+	if err != nil {
+		t.Fatalf("resolve append managed raw: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(appendManaged), 0o700); err != nil {
+		t.Fatalf("mkdir append managed raw: %v", err)
+	}
+	appendSource := filepath.Join(t.TempDir(), "append.jsonl")
+	if err := os.WriteFile(appendManaged, []byte("one\n"), 0o600); err != nil {
+		t.Fatalf("write append managed raw: %v", err)
+	}
+	if err := os.WriteFile(appendSource, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatalf("write append source: %v", err)
+	}
+	comparison, err := compareChatImportSource(context.Background(), stack.FS, appendChatID, appendKey, appendSource)
+	if err != nil || !comparison.appendOnly || comparison.matches {
+		t.Fatalf("append-only comparison = %+v err=%v", comparison, err)
+	}
+	if err := os.WriteFile(appendSource, []byte("other\ntwo\n"), 0o644); err != nil {
+		t.Fatalf("write rewritten append source: %v", err)
+	}
+	comparison, err = compareChatImportSource(context.Background(), stack.FS, appendChatID, appendKey, appendSource)
+	if err != nil || comparison.appendOnly || comparison.matches {
+		t.Fatalf("rewritten comparison = %+v err=%v", comparison, err)
+	}
+
 	if err := os.Remove(managed); err != nil {
 		t.Fatalf("remove managed raw: %v", err)
 	}
@@ -709,6 +737,236 @@ func TestSourceMatchesManagedRawBranches(t *testing.T) {
 		if err := os.Chmod(managed, 0o600); err != nil {
 			t.Fatalf("restore managed permissions: %v", err)
 		}
+	}
+}
+
+func TestAppendManagedRawSuffixBranches(t *testing.T) {
+	root := t.TempDir()
+	managed := filepath.Join(root, "managed.jsonl")
+	source := filepath.Join(root, "source.jsonl")
+	if err := os.WriteFile(managed, []byte("one\n"), 0o600); err != nil {
+		t.Fatalf("write managed: %v", err)
+	}
+	if err := os.WriteFile(source, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	rollback, err := appendManagedRawSuffix(context.Background(), managed, source, int64(len("one\n")), int64(len("one\ntwo\n")))
+	if err != nil {
+		t.Fatalf("appendManagedRawSuffix() error = %v", err)
+	}
+	if got, err := os.ReadFile(managed); err != nil || string(got) != "one\ntwo\n" {
+		t.Fatalf("managed after append = %q err=%v", got, err)
+	}
+	rollback()
+	if got, err := os.ReadFile(managed); err != nil || string(got) != "one\n" {
+		t.Fatalf("managed after rollback = %q err=%v", got, err)
+	}
+	if _, err := appendManagedRawSuffix(context.Background(), managed, source, int64(len("one\ntwo\n")), int64(len("one\ntwo\n"))); err == nil {
+		t.Fatal("expected changed managed size error")
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := appendManagedRawSuffix(canceled, managed, source, int64(len("one\n")), int64(len("one\ntwo\n"))); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled append error, got %v", err)
+	}
+	missingManaged := filepath.Join(root, "missing-managed.jsonl")
+	if _, err := appendManagedRawSuffix(context.Background(), missingManaged, source, 0, int64(len("one\n"))); err == nil {
+		t.Fatal("expected missing managed file error")
+	}
+	emptyManaged := filepath.Join(root, "empty-managed.jsonl")
+	if err := os.WriteFile(emptyManaged, []byte{}, 0o600); err != nil {
+		t.Fatalf("write empty managed: %v", err)
+	}
+	missingSource := filepath.Join(root, "missing-source.jsonl")
+	if _, err := appendManagedRawSuffix(context.Background(), emptyManaged, missingSource, 0, 0); err == nil {
+		t.Fatal("expected missing source file error")
+	}
+	truncManaged := filepath.Join(root, "trunc-managed.jsonl")
+	truncSource := filepath.Join(root, "trunc-source.jsonl")
+	if err := os.WriteFile(truncManaged, []byte("one\n"), 0o600); err != nil {
+		t.Fatalf("write trunc managed: %v", err)
+	}
+	if err := os.WriteFile(truncSource, []byte("one\ntw"), 0o644); err != nil {
+		t.Fatalf("write trunc source: %v", err)
+	}
+	if _, err := appendManagedRawSuffix(context.Background(), truncManaged, truncSource, int64(len("one\n")), int64(len("one\ntwo\n"))); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected unexpected EOF on short source, got %v", err)
+	}
+	if got, err := os.ReadFile(truncManaged); err != nil || string(got) != "one\n" {
+		t.Fatalf("managed should be rolled back after short-source error: got=%q err=%v", got, err)
+	}
+	if runtime.GOOS != "windows" && os.Geteuid() != 0 {
+		roManaged := filepath.Join(root, "ro-managed.jsonl")
+		if err := os.WriteFile(roManaged, []byte("one\n"), 0o400); err != nil {
+			t.Fatalf("write ro-managed: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(roManaged, 0o600) })
+		roSource := filepath.Join(root, "ro-source.jsonl")
+		if err := os.WriteFile(roSource, []byte("one\ntwo\n"), 0o644); err != nil {
+			t.Fatalf("write ro-source: %v", err)
+		}
+		if _, err := appendManagedRawSuffix(context.Background(), roManaged, roSource, int64(len("one\n")), int64(len("one\ntwo\n"))); err == nil {
+			t.Fatal("expected error opening read-only managed file for append")
+		}
+	}
+}
+
+func TestAppendJSONLChatImportErrorBranches(t *testing.T) {
+	root := t.TempDir()
+	managedPath := filepath.Join(root, "managed.jsonl")
+	sourcePath := filepath.Join(root, "source.jsonl")
+	rawKey := "chats/raw/20260514-deadbeef/source.jsonl"
+	initial := `{"session_id":"existing","role":"user","content":"first","timestamp":"2026-05-14T12:00:00Z"}` + "\n"
+	appended := `{"session_id":"existing","role":"assistant","content":"second","timestamp":"2026-05-14T12:01:00Z"}` + "\n"
+	if err := os.WriteFile(managedPath, []byte(initial), 0o600); err != nil {
+		t.Fatalf("write managed: %v", err)
+	}
+	if err := os.WriteFile(sourcePath, []byte(initial+appended), 0o644); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	managedInfo, err := os.Stat(managedPath)
+	if err != nil {
+		t.Fatalf("stat managed: %v", err)
+	}
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		t.Fatalf("stat source: %v", err)
+	}
+	existing := repository.ChatSession{ID: "20260514-deadbeef", Source: "codex", SourceSessionID: "existing", SourceDeviceID: "test-device", RawSourceKey: &rawKey}
+	comparison := chatImportSourceComparison{
+		appendOnly:  true,
+		managedPath: managedPath,
+		managedSize: managedInfo.Size(),
+		sourceSize:  sourceInfo.Size(),
+	}
+
+	repoOrdinalErr := &mockRepo{maxChatOrdinalFn: func(context.Context, string) (int, error) { return 0, errors.New("ordinal boom") }}
+	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoOrdinalErr}, &chatImportSummary{}, existing, sourcePath, comparison, "test-device", nil, false); err == nil || !strings.Contains(err.Error(), "find existing chat item ordinal") {
+		t.Fatalf("expected wrapped ordinal error, got %v", err)
+	}
+
+	missingComparison := comparison
+	missingComparison.managedPath = filepath.Join(root, "missing.jsonl")
+	repoMissingManaged := &mockRepo{maxChatOrdinalFn: func(context.Context, string) (int, error) { return 0, nil }}
+	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoMissingManaged}, &chatImportSummary{}, existing, sourcePath, missingComparison, "test-device", nil, false); err == nil || !strings.Contains(err.Error(), "append managed chat raw source") {
+		t.Fatalf("expected wrapped managed append error, got %v", err)
+	}
+	if got, err := os.ReadFile(managedPath); err != nil || string(got) != initial {
+		t.Fatalf("managed should be unchanged after missing-managed error: got=%q err=%v", got, err)
+	}
+
+	repoUpsertErr := &mockRepo{
+		maxChatOrdinalFn:    func(context.Context, string) (int, error) { return 0, nil },
+		upsertChatSessionFn: func(context.Context, repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+			return repository.ChatSession{}, false, errors.New("upsert boom")
+		},
+	}
+	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoUpsertErr}, &chatImportSummary{}, existing, sourcePath, comparison, "test-device", nil, false); err == nil || !strings.Contains(err.Error(), "upsert appended chat session") {
+		t.Fatalf("expected wrapped upsert error, got %v", err)
+	}
+	if got, err := os.ReadFile(managedPath); err != nil || string(got) != initial {
+		t.Fatalf("managed should be rolled back after upsert error: got=%q err=%v", got, err)
+	}
+
+	var upsertInputs []repository.UpsertChatSessionInput
+	repoAppendErr := &mockRepo{
+		maxChatOrdinalFn: func(context.Context, string) (int, error) { return 0, nil },
+		upsertChatSessionFn: func(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+			upsertInputs = append(upsertInputs, input)
+			return repository.ChatSession{ID: input.ID, Source: input.Source, SourceSessionID: input.SourceSessionID}, false, nil
+		},
+		appendChatItemsFn: func(context.Context, string, []repository.CreateChatItemInput) error {
+			return errors.New("append items boom")
+		},
+	}
+	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoAppendErr}, &chatImportSummary{}, existing, sourcePath, comparison, "test-device", nil, false); err == nil || !strings.Contains(err.Error(), "append chat items") {
+		t.Fatalf("expected wrapped append items error, got %v", err)
+	}
+	if got, err := os.ReadFile(managedPath); err != nil || string(got) != initial {
+		t.Fatalf("managed should be rolled back after append items error: got=%q err=%v", got, err)
+	}
+	if len(upsertInputs) != 2 {
+		t.Fatalf("expected 2 upserts (mutate + restore) on append-items failure, got %d", len(upsertInputs))
+	}
+	if upsertInputs[1].ID != existing.ID || upsertInputs[1].SourceSessionID != existing.SourceSessionID {
+		t.Fatalf("expected restore upsert to use existing session identity, got %+v", upsertInputs[1])
+	}
+
+	summary := chatImportSummary{}
+	repoHappy := &mockRepo{
+		maxChatOrdinalFn:    func(context.Context, string) (int, error) { return 0, nil },
+		upsertChatSessionFn: func(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+			return repository.ChatSession{ID: input.ID, Source: input.Source, SourceSessionID: input.SourceSessionID}, false, nil
+		},
+		appendChatItemsFn: func(context.Context, string, []repository.CreateChatItemInput) error { return nil },
+	}
+	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoHappy}, &summary, existing, sourcePath, comparison, "test-device", nil, false); err != nil {
+		t.Fatalf("happy-path appendJSONLChatImport error = %v", err)
+	}
+	if summary.SessionsUpdated != 1 || summary.ItemsCreated != 1 {
+		t.Fatalf("unexpected happy-path summary: %+v", summary)
+	}
+	if got, err := os.ReadFile(managedPath); err != nil || string(got) != initial+appended {
+		t.Fatalf("managed should have appended bytes after happy path: got=%q err=%v", got, err)
+	}
+
+	if err := os.WriteFile(managedPath, []byte(initial), 0o600); err != nil {
+		t.Fatalf("reset managed for created-branch case: %v", err)
+	}
+	createdSummary := chatImportSummary{}
+	repoCreated := &mockRepo{
+		maxChatOrdinalFn:    func(context.Context, string) (int, error) { return 0, nil },
+		upsertChatSessionFn: func(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+			return repository.ChatSession{ID: input.ID, Source: input.Source, SourceSessionID: input.SourceSessionID}, true, nil
+		},
+		appendChatItemsFn: func(context.Context, string, []repository.CreateChatItemInput) error { return nil },
+	}
+	if err := appendJSONLChatImport(context.Background(), &localStack{Repo: repoCreated}, &createdSummary, existing, sourcePath, comparison, "test-device", nil, false); err != nil {
+		t.Fatalf("created-branch appendJSONLChatImport error = %v", err)
+	}
+	if createdSummary.SessionsCreated != 1 || createdSummary.SessionsUpdated != 0 || createdSummary.ItemsCreated != 1 {
+		t.Fatalf("unexpected created-branch summary: %+v", createdSummary)
+	}
+}
+
+func TestFilePrefixMatchesBranches(t *testing.T) {
+	root := t.TempDir()
+	prefix := filepath.Join(root, "prefix")
+	full := filepath.Join(root, "full")
+	if err := os.WriteFile(prefix, []byte("one\n"), 0o600); err != nil {
+		t.Fatalf("write prefix: %v", err)
+	}
+	if err := os.WriteFile(full, []byte("one\ntwo\n"), 0o600); err != nil {
+		t.Fatalf("write full: %v", err)
+	}
+	matches, err := filePrefixMatches(context.Background(), prefix, full, int64(len("one\n")))
+	if err != nil || !matches {
+		t.Fatalf("expected prefix match, got matches=%v err=%v", matches, err)
+	}
+	if _, err := filePrefixMatches(context.Background(), filepath.Join(root, "missing-prefix"), full, 1); err == nil {
+		t.Fatal("expected missing prefix open error")
+	}
+	if _, err := filePrefixMatches(context.Background(), prefix, filepath.Join(root, "missing-full"), 1); err == nil {
+		t.Fatal("expected missing full open error")
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := filePrefixMatches(canceled, prefix, full, int64(len("one\n"))); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected canceled prefix match error, got %v", err)
+	}
+	shortFull := filepath.Join(root, "short-full")
+	if err := os.WriteFile(shortFull, []byte("on"), 0o600); err != nil {
+		t.Fatalf("write short full: %v", err)
+	}
+	if _, err := filePrefixMatches(context.Background(), prefix, shortFull, int64(len("one\n"))); err == nil {
+		t.Fatal("expected short full read error")
+	}
+	emptyPrefix := filepath.Join(root, "empty-prefix")
+	if err := os.WriteFile(emptyPrefix, []byte{}, 0o600); err != nil {
+		t.Fatalf("write empty prefix: %v", err)
+	}
+	if _, err := filePrefixMatches(context.Background(), emptyPrefix, full, int64(len("one\n"))); err == nil {
+		t.Fatal("expected short prefix read error")
 	}
 }
 
@@ -766,5 +1024,32 @@ func TestChatImportSessionIndexAndSkipHelperBranches(t *testing.T) {
 	skipped, err = skipUnchangedChatImport(context.Background(), stack.FS, &summary, repository.ChatSession{ID: "20260315-33333333", RawSourceKey: &badKey}, sourcePath, false)
 	if err == nil || skipped {
 		t.Fatalf("expected invalid raw key error, skipped=%v err=%v", skipped, err)
+	}
+	goodKey := "chats/raw/20260315-33333333/source.json"
+	managedPath, err := stack.FS.ResolveChatSourcePath("20260315-33333333", goodKey)
+	if err != nil {
+		t.Fatalf("resolve managed source: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(managedPath), 0o700); err != nil {
+		t.Fatalf("mkdir managed source: %v", err)
+	}
+	if err := os.WriteFile(managedPath, []byte(`{"messages":[]}`), 0o600); err != nil {
+		t.Fatalf("write managed source: %v", err)
+	}
+	summary = chatImportSummary{}
+	skipped, err = skipUnchangedChatImport(context.Background(), stack.FS, &summary, repository.ChatSession{ID: "20260315-33333333", RawSourceKey: &goodKey}, sourcePath, false)
+	if err != nil || !skipped || summary.SessionsSkipped != 1 {
+		t.Fatalf("expected matching source to skip, skipped=%v summary=%+v err=%v", skipped, summary, err)
+	}
+	deleteSourcePath := filepath.Join(t.TempDir(), "delete-source.json")
+	if err := os.WriteFile(deleteSourcePath, []byte(`{"messages":[]}`), 0o644); err != nil {
+		t.Fatalf("write delete source: %v", err)
+	}
+	skipped, err = skipUnchangedChatImport(context.Background(), stack.FS, &summary, repository.ChatSession{ID: "20260315-33333333", RawSourceKey: &goodKey}, deleteSourcePath, true)
+	if err != nil || !skipped || summary.SourcesDeleted != 1 {
+		t.Fatalf("expected matching delete-source to skip and delete, skipped=%v summary=%+v err=%v", skipped, summary, err)
+	}
+	if _, err := os.Stat(deleteSourcePath); !os.IsNotExist(err) {
+		t.Fatalf("expected delete source path removed, stat err=%v", err)
 	}
 }

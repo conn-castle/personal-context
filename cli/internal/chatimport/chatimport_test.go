@@ -110,6 +110,60 @@ func TestJSONLItemSessionScopedFieldsCanFillFallbackMetadata(t *testing.T) {
 	}
 }
 
+func TestParseAppendedJSONLTranscriptUsesBaseSession(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "append-session.jsonl")
+	initial := strings.Join([]string{
+		`{"session_id":"append-session","role":"user","content":"first item","timestamp":"2026-05-14T12:00:00Z"}`,
+		`{"session_id":"append-session","role":"assistant","content":"second item","timestamp":"2026-05-14T12:01:00Z"}`,
+	}, "\n") + "\n"
+	appended := `{"session_id":"different-session","role":"user","content":"appended item","timestamp":"2026-05-14T12:02:00Z"}` + "\n"
+	if err := os.WriteFile(path, []byte(initial+appended), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	cwd := "/tmp/append-project"
+	title := "Existing title"
+	base := repository.CreateChatSessionInput{
+		ID:                 "20260514-abcdef12",
+		Source:             "codex",
+		SourceSessionID:    "append-session",
+		SourceDeviceID:     "test-device",
+		CWD:                &cwd,
+		Title:              &title,
+		StartedAt:          time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC),
+		LastActivityAt:     time.Date(2026, 5, 14, 12, 1, 0, 0, time.UTC),
+		OriginalSourcePath: &path,
+	}
+
+	session, items, err := ParseAppendedJSONLTranscript("codex", path, int64(len(initial)), int64(len(appended)), base, 7)
+	if err != nil {
+		t.Fatalf("ParseAppendedJSONLTranscript() error = %v", err)
+	}
+	if session.SourceSessionID != "append-session" || session.CWD == nil || *session.CWD != cwd || session.Title == nil || *session.Title != title {
+		t.Fatalf("expected base session metadata to be preserved, got %+v", session)
+	}
+	if !session.StartedAt.Equal(base.StartedAt) || !session.LastActivityAt.Equal(time.Date(2026, 5, 14, 12, 2, 0, 0, time.UTC)) {
+		t.Fatalf("unexpected appended session times: %+v", session)
+	}
+	if len(items) != 1 || items[0].Ordinal != 7 || items[0].SearchText != "appended item" {
+		t.Fatalf("unexpected appended items: %+v", items)
+	}
+
+	if _, _, err := ParseAppendedJSONLTranscript("codex", path, -1, int64(len(appended)), base, 0); err == nil {
+		t.Fatal("expected invalid append range error")
+	}
+	unsupported := filepath.Join(root, "append.json")
+	if err := os.WriteFile(unsupported, []byte(`{}`), 0o644); err != nil {
+		t.Fatalf("write unsupported transcript: %v", err)
+	}
+	if _, _, err := ParseAppendedJSONLTranscript("codex", unsupported, 0, 0, base, 0); err == nil {
+		t.Fatal("expected unsupported append transcript extension error")
+	}
+	if _, _, err := ParseAppendedJSONLTranscript("codex", filepath.Join(root, "missing.jsonl"), 0, 0, base, 0); err == nil {
+		t.Fatal("expected missing appended transcript error")
+	}
+}
+
 func TestTranscriptFilesSkipsGeminiLogsJSON(t *testing.T) {
 	root := t.TempDir()
 	transcriptPath := filepath.Join(root, "gemini-session.json")

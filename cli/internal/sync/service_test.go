@@ -4523,6 +4523,24 @@ func (m *memoryRepo) CreateChatItem(_ context.Context, input repository.CreateCh
 	m.chatItems[input.SessionID] = append(m.chatItems[input.SessionID], item)
 	return item, nil
 }
+func (m *memoryRepo) AppendChatItems(_ context.Context, sessionID string, inputs []repository.CreateChatItemInput) error {
+	for _, input := range inputs {
+		item := repository.ChatItem{
+			ID:         m.nextChatItemID,
+			SessionID:  sessionID,
+			Ordinal:    input.Ordinal,
+			Role:       input.Role,
+			ItemType:   input.ItemType,
+			Text:       cloneStringPtr(input.Text),
+			SearchText: input.SearchText,
+			RawJSON:    cloneStringPtr(input.RawJSON),
+			CreatedAt:  derefTime(input.CreatedAt),
+		}
+		m.nextChatItemID++
+		m.chatItems[sessionID] = append(m.chatItems[sessionID], item)
+	}
+	return nil
+}
 func (m *memoryRepo) ReplaceChatItems(_ context.Context, sessionID string, inputs []repository.CreateChatItemInput) error {
 	if m.replaceChatItemsErr != nil {
 		return m.replaceChatItemsErr

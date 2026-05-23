@@ -187,11 +187,14 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 					return err
 				}
 				if ok {
-					skipped, err := skipUnchangedChatImport(ctx, stack.FS, &summary, existing, file, opts.DeleteSource)
+					handled, mutated, err := handleExistingChatImport(ctx, stack, &summary, existing, file, deviceID, projectPaths, opts.DeleteSource)
 					if err != nil {
 						return err
 					}
-					if skipped {
+					if mutated {
+						hadMutations = true
+					}
+					if handled {
 						continue
 					}
 				}
@@ -203,11 +206,14 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 				session.ProjectID = chatimport.MatchProjectPath(projectPaths, session.CWD, deviceID)
 				sourceSessionKey := chatImportSourceSessionKey{source: session.Source, sourceSessionID: session.SourceSessionID}
 				if existing, ok := sessionIndex.bySourceSession[sourceSessionKey]; ok {
-					skipped, err := skipUnchangedChatImport(ctx, stack.FS, &summary, existing, file, opts.DeleteSource)
+					handled, mutated, err := handleExistingChatImport(ctx, stack, &summary, existing, file, deviceID, projectPaths, opts.DeleteSource)
 					if err != nil {
 						return err
 					}
-					if skipped {
+					if mutated {
+						hadMutations = true
+					}
+					if handled {
 						continue
 					}
 				}
@@ -343,6 +349,103 @@ func (idx chatImportSessionIndex) existingByOriginalPath(source string, deviceID
 	return session, ok, nil
 }
 
+type chatImportSourceComparison struct {
+	matches     bool
+	appendOnly  bool
+	managedPath string
+	managedSize int64
+	sourceSize  int64
+}
+
+// handleExistingChatImport processes fast paths for an existing imported
+// source: byte-identical sources are skipped, while append-only JSONL/NDJSON
+// sources import just the appended suffix.
+func handleExistingChatImport(ctx context.Context, stack *localStack, summary *chatImportSummary, existing repository.ChatSession, sourcePath string, deviceID string, projectPaths []repository.ProjectPath, deleteSource bool) (bool, bool, error) {
+	if existing.RawSourceKey == nil {
+		return false, false, nil
+	}
+	comparison, err := compareChatImportSource(ctx, stack.FS, existing.ID, *existing.RawSourceKey, sourcePath)
+	if err != nil {
+		return false, false, fmt.Errorf("compare chat source with managed raw %s: %w", sourcePath, err)
+	}
+	if comparison.matches {
+		summary.SessionsSkipped++
+		if deleteSource {
+			deleteImportedChatSourceIfSafe(summary, stack.FS, existing.ID, *existing.RawSourceKey, sourcePath)
+		}
+		return true, false, nil
+	}
+	if comparison.appendOnly {
+		if err := appendJSONLChatImport(ctx, stack, summary, existing, sourcePath, comparison, deviceID, projectPaths, deleteSource); err != nil {
+			return false, false, err
+		}
+		return true, true, nil
+	}
+	return false, false, nil
+}
+
+// compareChatImportSource compares sourcePath with the managed raw source. A
+// missing managed raw file is reported as neither matching nor append-only so
+// the full import path can repair the managed copy.
+func compareChatImportSource(ctx context.Context, fs *filesystem.Client, chatID string, rawSourceKey string, sourcePath string) (chatImportSourceComparison, error) {
+	managedPath, err := fs.ResolveChatSourcePath(chatID, rawSourceKey)
+	if err != nil {
+		return chatImportSourceComparison{}, err
+	}
+	managedInfo, err := os.Stat(managedPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return chatImportSourceComparison{}, nil
+	}
+	if err != nil {
+		return chatImportSourceComparison{}, err
+	}
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return chatImportSourceComparison{}, err
+	}
+	comparison := chatImportSourceComparison{
+		managedPath: managedPath,
+		managedSize: managedInfo.Size(),
+		sourceSize:  sourceInfo.Size(),
+	}
+	if managedInfo.Size() != sourceInfo.Size() {
+		if sourceInfo.Size() > managedInfo.Size() && isAppendableChatSourcePath(sourcePath) && isAppendableChatSourcePath(managedPath) {
+			matches, err := filePrefixMatches(ctx, managedPath, sourcePath, managedInfo.Size())
+			if err != nil {
+				return chatImportSourceComparison{}, err
+			}
+			comparison.appendOnly = matches
+		}
+		return comparison, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return chatImportSourceComparison{}, err
+	}
+	sourceHash, err := recordio.HashFile(sourcePath)
+	if err != nil {
+		return chatImportSourceComparison{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return chatImportSourceComparison{}, err
+	}
+	managedHash, err := recordio.HashFile(managedPath)
+	if err != nil {
+		return chatImportSourceComparison{}, err
+	}
+	comparison.matches = sourceHash == managedHash
+	return comparison, nil
+}
+
+// sourceMatchesManagedRaw reports whether sourcePath has the same bytes as the
+// managed raw source.
+func sourceMatchesManagedRaw(ctx context.Context, fs *filesystem.Client, chatID string, rawSourceKey string, sourcePath string) (bool, error) {
+	comparison, err := compareChatImportSource(ctx, fs, chatID, rawSourceKey, sourcePath)
+	if err != nil {
+		return false, err
+	}
+	return comparison.matches, nil
+}
+
 // skipUnchangedChatImport compares the scanned source with the managed raw
 // source and records a skipped import when the bytes are identical.
 func skipUnchangedChatImport(ctx context.Context, fs *filesystem.Client, summary *chatImportSummary, existing repository.ChatSession, sourcePath string, deleteSource bool) (bool, error) {
@@ -363,43 +466,183 @@ func skipUnchangedChatImport(ctx context.Context, fs *filesystem.Client, summary
 	return true, nil
 }
 
-// sourceMatchesManagedRaw reports whether sourcePath has the same bytes as the
-// managed raw source. A missing managed raw file is reported as "not matching"
-// so the full import path can repair the managed copy.
-func sourceMatchesManagedRaw(ctx context.Context, fs *filesystem.Client, chatID string, rawSourceKey string, sourcePath string) (bool, error) {
-	managedPath, err := fs.ResolveChatSourcePath(chatID, rawSourceKey)
+func isAppendableChatSourcePath(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".jsonl", ".ndjson":
+		return true
+	default:
+		return false
+	}
+}
+
+func filePrefixMatches(ctx context.Context, prefixPath string, fullPath string, prefixSize int64) (bool, error) {
+	prefixFile, err := os.Open(prefixPath)
 	if err != nil {
 		return false, err
+	}
+	defer func() { _ = prefixFile.Close() }()
+	fullFile, err := os.Open(fullPath)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = fullFile.Close() }()
+	prefixBuffer := make([]byte, 1024*1024)
+	fullBuffer := make([]byte, 1024*1024)
+	remaining := prefixSize
+	for remaining > 0 {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		chunkSize := int64(len(prefixBuffer))
+		if remaining < chunkSize {
+			chunkSize = remaining
+		}
+		prefixChunk := prefixBuffer[:chunkSize]
+		fullChunk := fullBuffer[:chunkSize]
+		if _, err := io.ReadFull(prefixFile, prefixChunk); err != nil {
+			return false, err
+		}
+		if _, err := io.ReadFull(fullFile, fullChunk); err != nil {
+			return false, err
+		}
+		if !bytes.Equal(prefixChunk, fullChunk) {
+			return false, nil
+		}
+		remaining -= chunkSize
+	}
+	return true, nil
+}
+
+func appendJSONLChatImport(ctx context.Context, stack *localStack, summary *chatImportSummary, existing repository.ChatSession, sourcePath string, comparison chatImportSourceComparison, deviceID string, projectPaths []repository.ProjectPath, deleteSource bool) error {
+	maxOrdinal, err := stack.Repo.MaxChatItemOrdinal(ctx, existing.ID)
+	if err != nil {
+		return fmt.Errorf("find existing chat item ordinal: %w", err)
+	}
+	absSourcePath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return fmt.Errorf("resolve chat source path %q: %w", sourcePath, err)
+	}
+	rawSourceKey := *existing.RawSourceKey
+	base := repository.CreateChatSessionInput{
+		ID:                 existing.ID,
+		Source:             existing.Source,
+		SourceSessionID:    existing.SourceSessionID,
+		SourceDeviceID:     deviceID,
+		ProjectID:          existing.ProjectID,
+		CWD:                existing.CWD,
+		Title:              existing.Title,
+		StartedAt:          existing.StartedAt,
+		LastActivityAt:     existing.LastActivityAt,
+		OriginalSourcePath: &absSourcePath,
+		RawSourceKey:       &rawSourceKey,
+	}
+	session, items, err := chatimport.ParseAppendedJSONLTranscript(existing.Source, sourcePath, comparison.managedSize, comparison.sourceSize-comparison.managedSize, base, maxOrdinal+1)
+	if err != nil {
+		return fmt.Errorf("parse appended chat source %s: %w", sourcePath, err)
+	}
+	session.ID = existing.ID
+	session.Source = existing.Source
+	session.SourceSessionID = existing.SourceSessionID
+	session.SourceDeviceID = deviceID
+	session.ProjectID = chatimport.MatchProjectPath(projectPaths, session.CWD, deviceID)
+	if session.ProjectID == nil {
+		session.ProjectID = existing.ProjectID
+	}
+	session.RawSourceKey = &rawSourceKey
+
+	rollbackRaw, err := appendManagedRawSuffix(ctx, comparison.managedPath, sourcePath, comparison.managedSize, comparison.sourceSize)
+	if err != nil {
+		return fmt.Errorf("append managed chat raw source: %w", err)
+	}
+	stored, created, err := stack.Repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: session,
+		ClearDeleted:           true,
+	})
+	if err != nil {
+		rollbackRaw()
+		return fmt.Errorf("upsert appended chat session %s/%s: %w", session.Source, session.SourceSessionID, err)
+	}
+	if err := appendChatItems(ctx, stack.Repo, stored.ID, items); err != nil {
+		rollbackRaw()
+		restoreChatSessionState(ctx, stack.Repo, existing)
+		return fmt.Errorf("append chat items: %w", err)
+	}
+	if created {
+		summary.SessionsCreated++
+	} else {
+		summary.SessionsUpdated++
+	}
+	summary.ItemsCreated += len(items)
+	if deleteSource {
+		deleteImportedChatSourceIfSafe(summary, stack.FS, stored.ID, rawSourceKey, sourcePath)
+	}
+	return nil
+}
+
+func appendManagedRawSuffix(ctx context.Context, managedPath string, sourcePath string, offset int64, sourceSize int64) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	managedInfo, err := os.Stat(managedPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	sourceInfo, err := os.Stat(sourcePath)
+	if managedInfo.Size() != offset {
+		return nil, fmt.Errorf("managed raw source changed during import: size=%d want=%d", managedInfo.Size(), offset)
+	}
+	sourceFile, err := os.Open(sourcePath)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	if managedInfo.Size() != sourceInfo.Size() {
-		return false, nil
+	defer func() { _ = sourceFile.Close() }()
+	if _, err := sourceFile.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	sourceHash, err := recordio.HashFile(sourcePath)
+	managedFile, err := os.OpenFile(managedPath, os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	if err := ctx.Err(); err != nil {
-		return false, err
+	rollback := func() {
+		_ = os.Truncate(managedPath, offset)
 	}
-	managedHash, err := recordio.HashFile(managedPath)
-	if err != nil {
-		return false, err
+	written, copyErr := io.Copy(managedFile, io.LimitReader(sourceFile, sourceSize-offset))
+	if err := errors.Join(copyErr, managedFile.Sync(), managedFile.Close()); err != nil {
+		rollback()
+		return nil, err
 	}
-	return sourceHash == managedHash, nil
+	if written != sourceSize-offset {
+		rollback()
+		return nil, io.ErrUnexpectedEOF
+	}
+	return rollback, nil
+}
+
+// restoreChatSessionState re-applies the session row exactly as it was before
+// an append-only import mutated it. Used when AppendChatItems fails after
+// UpsertChatSession succeeded so that ClearDeleted, last_activity_at, and
+// updated_at don't drift ahead of the items.
+func restoreChatSessionState(ctx context.Context, repo repository.Repository, prior repository.ChatSession) {
+	createdAt := prior.CreatedAt
+	updatedAt := prior.UpdatedAt
+	_, _, _ = repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:                 prior.ID,
+			Source:             prior.Source,
+			SourceSessionID:    prior.SourceSessionID,
+			SourceDeviceID:     prior.SourceDeviceID,
+			ProjectID:          prior.ProjectID,
+			CWD:                prior.CWD,
+			Title:              prior.Title,
+			StartedAt:          prior.StartedAt,
+			LastActivityAt:     prior.LastActivityAt,
+			OriginalSourcePath: prior.OriginalSourcePath,
+			RawSourceKey:       prior.RawSourceKey,
+			CreatedAt:          &createdAt,
+			UpdatedAt:          &updatedAt,
+			DeletedAt:          prior.DeletedAt,
+		},
+		ClearDeleted: prior.DeletedAt == nil,
+	})
 }
 
 // deleteImportedChatSourceIfSafe removes the original source only when it is
@@ -509,6 +752,15 @@ func replaceChatItems(ctx context.Context, repo repository.Repository, sessionID
 		inputs[i] = item
 	}
 	return repo.ReplaceChatItems(ctx, sessionID, inputs)
+}
+
+func appendChatItems(ctx context.Context, repo repository.Repository, sessionID string, items []repository.CreateChatItemInput) error {
+	inputs := make([]repository.CreateChatItemInput, len(items))
+	for i, item := range items {
+		item.SessionID = sessionID
+		inputs[i] = item
+	}
+	return repo.AppendChatItems(ctx, sessionID, inputs)
 }
 
 func chatItemInputs(items []repository.ChatItem) []repository.CreateChatItemInput {

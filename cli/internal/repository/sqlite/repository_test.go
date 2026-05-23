@@ -1249,6 +1249,29 @@ func TestSQLiteProjectPathChatAndUnifiedSearchBranches(t *testing.T) {
 	if len(replacedItems) != 1 || replacedItems[0].SearchText != replacementText {
 		t.Fatalf("unexpected replaced items: %+v", replacedItems)
 	}
+	if err := repo.AppendChatItems(ctx, "", nil); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid append chat items session error, got %v", err)
+	}
+	if err := repo.AppendChatItems(ctx, "20260514-deadbeef", nil); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected missing append chat items session error, got %v", err)
+	}
+	appendedText := "appended text fallback"
+	if err := repo.AppendChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: -1, Role: "user", ItemType: "message", Text: &appendedText, CreatedAt: &now}}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid append item ordinal error, got %v", err)
+	}
+	if err := repo.AppendChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: 0, Role: "user", ItemType: "message", Text: &appendedText, CreatedAt: &now}}); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected duplicate-ordinal append item conflict, got %v", err)
+	}
+	if err := repo.AppendChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: 1, Role: "user", ItemType: "message", Text: &appendedText, CreatedAt: &now}}); err != nil {
+		t.Fatalf("AppendChatItems() error = %v", err)
+	}
+	appendedItems, err := repo.ListChatItems(ctx, sessionTwo.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems(appended) error = %v", err)
+	}
+	if len(appendedItems) != 2 || appendedItems[1].SearchText != appendedText {
+		t.Fatalf("unexpected appended items: %+v", appendedItems)
+	}
 	if maxOrdinal, err := repo.MaxChatItemOrdinal(ctx, session.ID); err != nil || maxOrdinal != 1 {
 		t.Fatalf("max ordinal after inserts = %d err=%v, want 1", maxOrdinal, err)
 	}
@@ -1655,6 +1678,9 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 		}},
 		{name: "ReplaceChatItems", run: func() error {
 			return repo.ReplaceChatItems(ctx, "20260320-abcd5678", []repository.CreateChatItemInput{{Ordinal: 0, Role: "user", ItemType: "message"}})
+		}},
+		{name: "AppendChatItems", run: func() error {
+			return repo.AppendChatItems(ctx, "20260320-abcd5678", []repository.CreateChatItemInput{{Ordinal: 0, Role: "user", ItemType: "message"}})
 		}},
 		{name: "ListChatItems", run: func() error { _, err := repo.ListChatItems(ctx, "20260320-abcd5678"); return err }},
 		{name: "SearchChatItems", run: func() error {
