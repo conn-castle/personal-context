@@ -579,9 +579,6 @@ func appendJSONLChatImport(ctx context.Context, stack *localStack, summary *chat
 }
 
 func appendManagedRawSuffix(ctx context.Context, managedPath string, sourcePath string, offset int64, sourceSize int64) (func(), error) {
-	if offset < 0 || sourceSize < offset {
-		return nil, fmt.Errorf("invalid append range")
-	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -608,17 +605,9 @@ func appendManagedRawSuffix(ctx context.Context, managedPath string, sourcePath 
 		_ = os.Truncate(managedPath, offset)
 	}
 	written, copyErr := io.Copy(managedFile, io.LimitReader(sourceFile, sourceSize-offset))
-	syncErr := managedFile.Sync()
-	closeErr := managedFile.Close()
-	if copyErr != nil || syncErr != nil || closeErr != nil {
+	if err := errors.Join(copyErr, managedFile.Sync(), managedFile.Close()); err != nil {
 		rollback()
-		if copyErr != nil {
-			return nil, copyErr
-		}
-		if syncErr != nil {
-			return nil, syncErr
-		}
-		return nil, closeErr
+		return nil, err
 	}
 	if written != sourceSize-offset {
 		rollback()

@@ -1256,6 +1256,12 @@ func TestSQLiteProjectPathChatAndUnifiedSearchBranches(t *testing.T) {
 		t.Fatalf("expected missing append chat items session error, got %v", err)
 	}
 	appendedText := "appended text fallback"
+	if err := repo.AppendChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: -1, Role: "user", ItemType: "message", Text: &appendedText, CreatedAt: &now}}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected invalid append item ordinal error, got %v", err)
+	}
+	if err := repo.AppendChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: 0, Role: "user", ItemType: "message", Text: &appendedText, CreatedAt: &now}}); err == nil {
+		t.Fatalf("expected duplicate-ordinal append item error")
+	}
 	if err := repo.AppendChatItems(ctx, sessionTwo.ID, []repository.CreateChatItemInput{{Ordinal: 1, Role: "user", ItemType: "message", Text: &appendedText, CreatedAt: &now}}); err != nil {
 		t.Fatalf("AppendChatItems() error = %v", err)
 	}
@@ -1672,6 +1678,9 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 		}},
 		{name: "ReplaceChatItems", run: func() error {
 			return repo.ReplaceChatItems(ctx, "20260320-abcd5678", []repository.CreateChatItemInput{{Ordinal: 0, Role: "user", ItemType: "message"}})
+		}},
+		{name: "AppendChatItems", run: func() error {
+			return repo.AppendChatItems(ctx, "20260320-abcd5678", []repository.CreateChatItemInput{{Ordinal: 0, Role: "user", ItemType: "message"}})
 		}},
 		{name: "ListChatItems", run: func() error { _, err := repo.ListChatItems(ctx, "20260320-abcd5678"); return err }},
 		{name: "SearchChatItems", run: func() error {
