@@ -12,6 +12,7 @@ import (
 
 	"github.com/conn-castle/personal-context/cli/internal/config"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
+	"github.com/conn-castle/personal-context/cli/internal/syncengine"
 
 	_ "modernc.org/sqlite"
 )
@@ -811,6 +812,39 @@ func TestOpenLocalStackFailsLoudlyWhenChatFTSTriggerMissing(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "interrupted") {
 		t.Fatalf("expected error to mention interrupted schema state, got: %v", err)
+	}
+}
+
+func TestOpenLocalStackReportsActiveImportLockWhenChatFTSTriggerMissing(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err != nil {
+		t.Fatalf("initial setup failed: %v", err)
+	}
+
+	lock, err := syncengine.AcquireFileLock(filepath.Join(basePath(homeDir), ".pc", "sync.lock"))
+	if err != nil {
+		t.Fatalf("acquire sync lock: %v", err)
+	}
+	defer func() { _ = lock.Release() }()
+
+	db := openTestDBInternal(t, homeDir)
+	if _, err := db.Exec(`DROP TRIGGER chat_item_fts_after_insert;`); err != nil {
+		t.Fatalf("drop chat_item_fts_after_insert: %v", err)
+	}
+	_ = db.Close()
+
+	stack, err := openLocalStack(homeDir)
+	if err == nil {
+		_ = stack.Close()
+		t.Fatal("expected openLocalStack to report the active import lock")
+	}
+	if !strings.Contains(err.Error(), "temporarily locked") {
+		t.Fatalf("expected active-lock error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "predates") {
+		t.Fatalf("expected transient lock error rather than stale-schema guidance, got: %v", err)
 	}
 }
 

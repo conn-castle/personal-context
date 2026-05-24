@@ -927,9 +927,6 @@ func (r *Repository) RunChatImportBulkMode(ctx context.Context, fn func(context.
 	if fn == nil {
 		return repository.ErrInvalidArgument
 	}
-	if err := r.createChatItemFTSTriggers(ctx); err != nil {
-		return fmt.Errorf("restore chat FTS triggers before bulk load: %w", err)
-	}
 	if err := r.dropChatItemFTSTriggers(ctx); err != nil {
 		return fmt.Errorf("drop chat FTS triggers for bulk load: %w", err)
 	}

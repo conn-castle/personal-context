@@ -1809,25 +1809,6 @@ func TestRunChatImportBulkModeJoinsCallbackAndRestoreErrors(t *testing.T) {
 	}
 }
 
-func TestRunChatImportBulkModeReportsInitialTriggerRestoreFailure(t *testing.T) {
-	ctx := context.Background()
-	repo, db := newConcreteRepo(t)
-	if err := db.Close(); err != nil {
-		t.Fatalf("close db: %v", err)
-	}
-
-	err := repo.RunChatImportBulkMode(ctx, func(context.Context) (bool, error) {
-		t.Fatal("callback should not run when initial trigger restore fails")
-		return false, nil
-	})
-	if err == nil {
-		t.Fatal("expected initial trigger restore failure")
-	}
-	if !strings.Contains(err.Error(), "restore chat FTS triggers before bulk load") {
-		t.Fatalf("expected initial trigger restore failure context, got %v", err)
-	}
-}
-
 func TestDropChatItemFTSTriggersReportsExecError(t *testing.T) {
 	ctx := context.Background()
 	repo, db := newConcreteRepo(t)
