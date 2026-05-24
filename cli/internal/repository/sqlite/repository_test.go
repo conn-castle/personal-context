@@ -1664,6 +1664,183 @@ func TestRunChatImportBulkModeRestoresFTSTriggers(t *testing.T) {
 	}
 }
 
+func TestRunChatImportBulkModeRebuildsFTSAfterMutatingError(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newConcreteRepo(t)
+	now := time.Date(2026, 5, 24, 13, 0, 0, 0, time.UTC)
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "bulk-error-device"}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+
+	callbackErr := errors.New("callback stopped after mutation")
+	err := repo.RunChatImportBulkMode(ctx, func(ctx context.Context) (bool, error) {
+		session, _, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              "20260524-ccccdddd",
+				Source:          "codex",
+				SourceSessionID: "bulk-error-rebuild",
+				SourceDeviceID:  "bulk-error-device",
+				StartedAt:       now,
+				LastActivityAt:  now,
+			},
+			ClearDeleted: true,
+		})
+		if err != nil {
+			return false, err
+		}
+		text := "bulk rebuild after callback error"
+		if _, err := repo.CreateChatItem(ctx, repository.CreateChatItemInput{
+			SessionID:  session.ID,
+			Ordinal:    0,
+			Role:       "user",
+			ItemType:   "message",
+			Text:       &text,
+			SearchText: text,
+			CreatedAt:  &now,
+		}); err != nil {
+			return false, err
+		}
+		return true, callbackErr
+	})
+	if !errors.Is(err, callbackErr) {
+		t.Fatalf("expected callback error, got %v", err)
+	}
+
+	results, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "callback"})
+	if err != nil {
+		t.Fatalf("SearchChatItems(callback) error = %v", err)
+	}
+	if len(results) != 1 || results[0].Session.ID != "20260524-ccccdddd" {
+		t.Fatalf("expected mutating failed bulk import to rebuild FTS, got %+v", results)
+	}
+}
+
+func TestRunChatImportBulkModeRejectsNilCallback(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newConcreteRepo(t)
+
+	err := repo.RunChatImportBulkMode(ctx, nil)
+	if !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got %v", err)
+	}
+}
+
+func TestRunChatImportBulkModeReportsRebuildFailure(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newConcreteRepo(t)
+
+	callbackErr := errors.New("callback after corrupting fts")
+	err := repo.RunChatImportBulkMode(ctx, func(ctx context.Context) (bool, error) {
+		if _, err := repo.db.ExecContext(ctx, `
+DROP TRIGGER IF EXISTS chat_item_fts_after_insert;
+DROP TRIGGER IF EXISTS chat_item_fts_after_update;
+DROP TRIGGER IF EXISTS chat_item_fts_after_delete;
+DROP TABLE chat_item_fts;
+`); err != nil {
+			return false, err
+		}
+		return true, callbackErr
+	})
+	if !errors.Is(err, callbackErr) {
+		t.Fatalf("expected callback error to be preserved, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "rebuild chat FTS after import") {
+		t.Fatalf("expected rebuild failure context, got %v", err)
+	}
+}
+
+func TestRunChatImportBulkModeReportsRebuildFailureWithoutCallbackError(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newConcreteRepo(t)
+
+	err := repo.RunChatImportBulkMode(ctx, func(ctx context.Context) (bool, error) {
+		if _, err := repo.db.ExecContext(ctx, `
+DROP TRIGGER IF EXISTS chat_item_fts_after_insert;
+DROP TRIGGER IF EXISTS chat_item_fts_after_update;
+DROP TRIGGER IF EXISTS chat_item_fts_after_delete;
+DROP TABLE chat_item_fts;
+`); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+	if err == nil {
+		t.Fatal("expected rebuild failure after chat_item_fts was dropped")
+	}
+	if !strings.Contains(err.Error(), "rebuild chat FTS after import") {
+		t.Fatalf("expected rebuild failure context, got %v", err)
+	}
+}
+
+func TestRunChatImportBulkModeReportsDeferredTriggerRestoreFailure(t *testing.T) {
+	ctx := context.Background()
+	repo, db := newConcreteRepo(t)
+
+	err := repo.RunChatImportBulkMode(ctx, func(context.Context) (bool, error) {
+		if err := db.Close(); err != nil {
+			return false, err
+		}
+		return false, nil
+	})
+	if err == nil {
+		t.Fatal("expected deferred trigger restore failure after database close")
+	}
+	if !strings.Contains(err.Error(), "restore chat FTS triggers") {
+		t.Fatalf("expected trigger restore failure context, got %v", err)
+	}
+}
+
+func TestRunChatImportBulkModeJoinsCallbackAndRestoreErrors(t *testing.T) {
+	ctx := context.Background()
+	repo, db := newConcreteRepo(t)
+
+	callbackErr := errors.New("callback failed before restore")
+	err := repo.RunChatImportBulkMode(ctx, func(context.Context) (bool, error) {
+		if err := db.Close(); err != nil {
+			return false, err
+		}
+		return false, callbackErr
+	})
+	if !errors.Is(err, callbackErr) {
+		t.Fatalf("expected callback error to be preserved, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "restore chat FTS triggers") {
+		t.Fatalf("expected trigger restore failure context, got %v", err)
+	}
+}
+
+func TestRunChatImportBulkModeReportsInitialTriggerRestoreFailure(t *testing.T) {
+	ctx := context.Background()
+	repo, db := newConcreteRepo(t)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	err := repo.RunChatImportBulkMode(ctx, func(context.Context) (bool, error) {
+		t.Fatal("callback should not run when initial trigger restore fails")
+		return false, nil
+	})
+	if err == nil {
+		t.Fatal("expected initial trigger restore failure")
+	}
+	if !strings.Contains(err.Error(), "restore chat FTS triggers before bulk load") {
+		t.Fatalf("expected initial trigger restore failure context, got %v", err)
+	}
+}
+
+func TestDropChatItemFTSTriggersReportsExecError(t *testing.T) {
+	ctx := context.Background()
+	repo, db := newConcreteRepo(t)
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	err := repo.dropChatItemFTSTriggers(ctx)
+	if err == nil {
+		t.Fatal("expected drop trigger error after database close")
+	}
+}
+
 func TestWriteChatImportBatchRollsBackOnItemConflict(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := newConcreteRepo(t)

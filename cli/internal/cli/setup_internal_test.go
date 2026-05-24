@@ -719,6 +719,74 @@ CREATE VIRTUAL TABLE chat_item_fts USING fts5(
 	}
 }
 
+func TestOpenLocalStackFailsLoudlyWhenChatFTSTableMissing(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err != nil {
+		t.Fatalf("initial setup failed: %v", err)
+	}
+
+	db := openTestDBInternal(t, homeDir)
+	if _, err := db.Exec(`
+DROP TRIGGER IF EXISTS chat_item_fts_after_insert;
+DROP TRIGGER IF EXISTS chat_item_fts_after_update;
+DROP TRIGGER IF EXISTS chat_item_fts_after_delete;
+DROP TABLE chat_item_fts;
+`); err != nil {
+		t.Fatalf("drop chat_item_fts table: %v", err)
+	}
+	_ = db.Close()
+
+	stack, err := openLocalStack(homeDir)
+	if err == nil {
+		_ = stack.Close()
+		t.Fatal("expected openLocalStack to fail when chat_item_fts is missing")
+	}
+	if !strings.Contains(err.Error(), "chat_item_fts") {
+		t.Fatalf("expected error to name chat_item_fts, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "predates") {
+		t.Fatalf("expected error to mention stale schema, got: %v", err)
+	}
+}
+
+func TestVerifyChatItemFTSShapeReportsTableQueryError(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "closed.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	err = verifyChatItemFTSShape(context.Background(), db, t.TempDir())
+	if err == nil {
+		t.Fatal("expected closed database query to fail")
+	}
+	if !strings.Contains(err.Error(), `verify schema table "chat_item_fts"`) {
+		t.Fatalf("expected table verification context, got %v", err)
+	}
+}
+
+func TestVerifyCanonicalSchemaTablesReportsTableQueryError(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "closed.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	err = verifyCanonicalSchemaTables(context.Background(), db, t.TempDir())
+	if err == nil {
+		t.Fatal("expected closed database query to fail")
+	}
+	if !strings.Contains(err.Error(), `verify schema table`) {
+		t.Fatalf("expected schema table verification context, got %v", err)
+	}
+}
+
 func TestOpenLocalStackFailsLoudlyWhenChatFTSTriggerMissing(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("PC_HOME", homeDir)

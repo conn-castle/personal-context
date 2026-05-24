@@ -213,6 +213,31 @@ func TestChatImportFailsWhileLocalSyncLockHeld(t *testing.T) {
 	}
 }
 
+func TestChatImportFailsWhenChatFTSTableMissing(t *testing.T) {
+	homeDir := setupEnv(t)
+	root := t.TempDir()
+	writeTestChatTranscript(t, root, "session.json", importTranscriptBody)
+
+	db := openTestDBInternal(t, homeDir)
+	if _, err := db.Exec(`
+DROP TRIGGER IF EXISTS chat_item_fts_after_insert;
+DROP TRIGGER IF EXISTS chat_item_fts_after_update;
+DROP TRIGGER IF EXISTS chat_item_fts_after_delete;
+DROP TABLE chat_item_fts;
+`); err != nil {
+		t.Fatalf("drop chat_item_fts table: %v", err)
+	}
+	_ = db.Close()
+
+	err := runImportFor(t, root)
+	if err == nil {
+		t.Fatal("expected chat import to fail when chat_item_fts is missing")
+	}
+	if !strings.Contains(err.Error(), "chat_item_fts") {
+		t.Fatalf("expected error to name chat_item_fts, got %v", err)
+	}
+}
+
 // TestChatImportAutoSyncWarningSurfacesOnStderr injects an auto-sync hook
 // that emits a warning and verifies the warning reaches the user via stderr,
 // matching the existing record-mutation auto-sync convention.
