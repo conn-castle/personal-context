@@ -10,6 +10,8 @@ Release entries must use this format so the release workflow can extract notes:
 
 ## Unreleased
 
+- Optimized SQLite chat imports by suspending per-row chat FTS trigger maintenance during the import, rebuilding the chat search index once afterward, and serializing imports with the local sync lock.
+- Made local setup and CLI startup fail loudly when a pre-release SQLite store has the old standalone `chat_item_fts` table shape or missing chat FTS triggers.
 - Changed the pre-release project registry command from `pc project add` to `pc project register` for consistency with `pc device register`; no compatibility alias is exposed.
 - Narrowed default project-path chat import roots to Claude and Gemini transcript directories so config/cache JSON under `.claude/` and `.gemini/` is not parsed as chat data.
 - Documented the pre-release `pc chat list --format json` envelope rename from `sessions` to the canonical `{items,total,next_cursor}` shape used by domain list/search commands.

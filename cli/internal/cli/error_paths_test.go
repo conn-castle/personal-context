@@ -550,8 +550,47 @@ func corruptTable(t *testing.T, homeDir, table string) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
+	if table == "chat_session" {
+		// chat_item_fts is external-content over chat_item; its DELETE trigger
+		// fires when DROPing chat_session cascades into chat_item rows.
+		// Restore the triggers afterward so runtime schema checks still let the
+		// command surface the intended missing-chat-session error path.
+		if _, err := db.Exec(`
+DROP TRIGGER IF EXISTS chat_item_fts_after_insert;
+DROP TRIGGER IF EXISTS chat_item_fts_after_update;
+DROP TRIGGER IF EXISTS chat_item_fts_after_delete;
+`); err != nil {
+			t.Fatalf("drop chat FTS triggers: %v", err)
+		}
+	}
 	if _, err := db.Exec("DROP TABLE " + table); err != nil {
 		t.Fatalf("drop %s: %v", table, err)
+	}
+	if table == "chat_session" {
+		if _, err := db.Exec(`
+CREATE TRIGGER IF NOT EXISTS chat_item_fts_after_insert
+AFTER INSERT ON chat_item
+BEGIN
+    INSERT INTO chat_item_fts(rowid, search_text) VALUES (NEW.id, NEW.search_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_item_fts_after_update
+AFTER UPDATE ON chat_item
+FOR EACH ROW
+WHEN OLD.search_text != NEW.search_text
+BEGIN
+    INSERT INTO chat_item_fts(chat_item_fts, rowid, search_text) VALUES('delete', OLD.id, OLD.search_text);
+    INSERT INTO chat_item_fts(rowid, search_text) VALUES (NEW.id, NEW.search_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_item_fts_after_delete
+AFTER DELETE ON chat_item
+BEGIN
+    INSERT INTO chat_item_fts(chat_item_fts, rowid, search_text) VALUES('delete', OLD.id, OLD.search_text);
+END;
+`); err != nil {
+			t.Fatalf("restore chat FTS triggers: %v", err)
+		}
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)

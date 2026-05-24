@@ -19,6 +19,7 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/recordid"
 	"github.com/conn-castle/personal-context/cli/internal/recordio"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
+	"github.com/conn-castle/personal-context/cli/internal/syncengine"
 	"github.com/conn-castle/personal-context/cli/internal/timeutil"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -239,7 +240,11 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 	if len(opts.Roots) > 0 && sourceFilter == "" {
 		return fmt.Errorf("--agent is required when --root is set (codex, claude, or gemini)")
 	}
-	stack, err := openLocalStackFromHome()
+	homeDir, err := resolveHomeDir()
+	if err != nil {
+		return err
+	}
+	stack, err := openLocalStack(homeDir)
 	if err != nil {
 		return err
 	}
@@ -273,101 +278,118 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 			batch.discardPending()
 		}
 	}()
+	lock, err := syncengine.AcquireFileLock(filepath.Join(basePath(homeDir), ".pc", "sync.lock"))
+	if err != nil {
+		return fmt.Errorf("acquire local sync lock for chat import: %w", err)
+	}
 	hadMutations := false
-	for source, sourceRoots := range roots {
-		sessionIndex, err := loadChatImportSessionIndex(ctx, stack.Repo, source, deviceID)
-		if err != nil {
-			return err
-		}
-		for _, root := range sourceRoots {
-			files, err := chatimport.TranscriptFiles(root)
+	bulkErr := batchWriter.RunChatImportBulkMode(ctx, func(ctx context.Context) (bool, error) {
+		for source, sourceRoots := range roots {
+			sessionIndex, err := loadChatImportSessionIndex(ctx, stack.Repo, source, deviceID)
 			if err != nil {
-				return err
+				return hadMutations, err
 			}
-			for _, file := range files {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				summary.FilesScanned++
-				var priorSession *repository.ChatSession
-				existing, ok, err := sessionIndex.existingByOriginalPath(source, deviceID, file)
+			for _, root := range sourceRoots {
+				files, err := chatimport.TranscriptFiles(root)
 				if err != nil {
-					return err
+					return hadMutations, err
 				}
-				if ok {
-					prior := existing
-					priorSession = &prior
-					handled, mutated, err := handleExistingChatImport(ctx, stack, &batch, &sessionIndex, existing, file, deviceID, projectPaths, opts.DeleteSource)
+				for _, file := range files {
+					if err := ctx.Err(); err != nil {
+						return hadMutations, err
+					}
+					summary.FilesScanned++
+					var priorSession *repository.ChatSession
+					existing, ok, err := sessionIndex.existingByOriginalPath(source, deviceID, file)
 					if err != nil {
-						return err
+						return hadMutations, err
 					}
-					if mutated {
-						hadMutations = true
-					}
-					if handled {
-						continue
-					}
-				}
-				session, items, err := chatimport.ParseTranscriptFile(source, file)
-				if err != nil {
-					return fmt.Errorf("parse %s: %w", file, err)
-				}
-				session.SourceDeviceID = deviceID
-				session.ProjectID = chatimport.MatchProjectPath(projectPaths, session.CWD, deviceID)
-				sourceSessionKey := chatImportSourceSessionKey{source: session.Source, sourceSessionID: session.SourceSessionID}
-				if batch.hasSourceSession(session.Source, session.SourceSessionID) {
-					if err := batch.flush(ctx); err != nil {
-						return err
-					}
-				}
-				if existing, ok := sessionIndex.bySourceSession[sourceSessionKey]; ok {
-					prior := existing
-					priorSession = &prior
-					handled, mutated, err := handleExistingChatImport(ctx, stack, &batch, &sessionIndex, existing, file, deviceID, projectPaths, opts.DeleteSource)
-					if err != nil {
-						return err
-					}
-					if mutated {
-						hadMutations = true
-					}
-					if handled {
-						continue
-					}
-				}
-				if session.ID == "" {
-					if priorSession != nil {
-						session.ID = priorSession.ID
-					} else if existing, err := stack.Repo.GetChatSessionBySource(ctx, session.Source, session.SourceSessionID); err == nil {
+					if ok {
 						prior := existing
 						priorSession = &prior
-						session.ID = existing.ID
-					} else if !errors.Is(err, repository.ErrNotFound) {
-						return fmt.Errorf("look up existing chat session: %w", err)
-					} else {
-						id, err := generateUniqueChatID(ctx, stack.Repo, session.LastActivityAt)
+						handled, mutated, err := handleExistingChatImport(ctx, stack, &batch, &sessionIndex, existing, file, deviceID, projectPaths, opts.DeleteSource)
 						if err != nil {
-							return err
+							return hadMutations, err
 						}
-						session.ID = id
+						if mutated {
+							hadMutations = true
+						}
+						if handled {
+							continue
+						}
 					}
-				}
-				priorItemCount := 0
-				if priorSession != nil {
-					existingItems, err := stack.Repo.ListChatItems(ctx, priorSession.ID)
+					session, items, err := chatimport.ParseTranscriptFile(source, file)
 					if err != nil {
-						return fmt.Errorf("list existing chat items before import: %w", err)
+						return hadMutations, fmt.Errorf("parse %s: %w", file, err)
 					}
-					priorItemCount = len(existingItems)
+					session.SourceDeviceID = deviceID
+					session.ProjectID = chatimport.MatchProjectPath(projectPaths, session.CWD, deviceID)
+					sourceSessionKey := chatImportSourceSessionKey{source: session.Source, sourceSessionID: session.SourceSessionID}
+					if batch.hasSourceSession(session.Source, session.SourceSessionID) {
+						if err := batch.flush(ctx); err != nil {
+							return hadMutations, err
+						}
+					}
+					if existing, ok := sessionIndex.bySourceSession[sourceSessionKey]; ok {
+						prior := existing
+						priorSession = &prior
+						handled, mutated, err := handleExistingChatImport(ctx, stack, &batch, &sessionIndex, existing, file, deviceID, projectPaths, opts.DeleteSource)
+						if err != nil {
+							return hadMutations, err
+						}
+						if mutated {
+							hadMutations = true
+						}
+						if handled {
+							continue
+						}
+					}
+					if session.ID == "" {
+						if priorSession != nil {
+							session.ID = priorSession.ID
+						} else if existing, err := stack.Repo.GetChatSessionBySource(ctx, session.Source, session.SourceSessionID); err == nil {
+							prior := existing
+							priorSession = &prior
+							session.ID = existing.ID
+						} else if !errors.Is(err, repository.ErrNotFound) {
+							return hadMutations, fmt.Errorf("look up existing chat session: %w", err)
+						} else {
+							id, err := generateUniqueChatID(ctx, stack.Repo, session.LastActivityAt)
+							if err != nil {
+								return hadMutations, err
+							}
+							session.ID = id
+						}
+					}
+					priorItemCount := 0
+					if priorSession != nil {
+						existingItems, err := stack.Repo.ListChatItems(ctx, priorSession.ID)
+						if err != nil {
+							return hadMutations, fmt.Errorf("list existing chat items before import: %w", err)
+						}
+						priorItemCount = len(existingItems)
+					}
+					if err := queueReplaceChatImport(ctx, stack, &batch, &sessionIndex, session, items, file, priorItemCount, opts.DeleteSource); err != nil {
+						return hadMutations, err
+					}
+					hadMutations = true
 				}
-				if err := queueReplaceChatImport(ctx, stack, &batch, &sessionIndex, session, items, file, priorItemCount, opts.DeleteSource); err != nil {
-					return err
-				}
-				hadMutations = true
+			}
+			if err := batch.flush(ctx); err != nil {
+				return hadMutations, err
 			}
 		}
-		if err := batch.flush(ctx); err != nil {
-			return err
+		return hadMutations, nil
+	})
+	releaseErr := lock.Release()
+	if bulkErr != nil {
+		if releaseErr != nil {
+			return errors.Join(bulkErr, releaseErr)
 		}
+		return bulkErr
+	}
+	if releaseErr != nil {
+		return releaseErr
 	}
 	if hadMutations {
 		_ = runAutoSyncFn(ctx, stderr)

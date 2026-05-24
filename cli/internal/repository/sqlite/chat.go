@@ -570,10 +570,10 @@ func (r *Repository) SearchChatItems(ctx context.Context, filter repository.Sear
 		args = append(args, timeutil.FormatUTCMillis(*filter.DateTo))
 	}
 	sqlQuery := `SELECT ` + prefixedChatSessionColumns("cs") + `, ` + prefixedChatItemColumns("ci") + `,
-            snippet(chat_item_fts, 2, '', '', '...', 12),
+            snippet(chat_item_fts, 0, '', '', '...', 12),
             -bm25(chat_item_fts)
         FROM chat_item_fts
-        INNER JOIN chat_item AS ci ON ci.session_id = chat_item_fts.session_id AND ci.ordinal = chat_item_fts.ordinal
+        INNER JOIN chat_item AS ci ON ci.id = chat_item_fts.rowid
         INNER JOIN chat_session AS cs ON cs.id = ci.session_id ` + where.String() + `
         ORDER BY -bm25(chat_item_fts) DESC, cs.last_activity_at DESC, ci.ordinal`
 	if filter.Limit > 0 {
@@ -919,4 +919,84 @@ func prefixedChatItemColumns(alias string) string {
 		cols[i] = alias + "." + col
 	}
 	return strings.Join(cols, ", ")
+}
+
+// RunChatImportBulkMode executes fn with per-row chat FTS maintenance
+// suspended, then rebuilds chat_item_fts and restores its triggers.
+func (r *Repository) RunChatImportBulkMode(ctx context.Context, fn func(context.Context) (bool, error)) (rerr error) {
+	if fn == nil {
+		return repository.ErrInvalidArgument
+	}
+	if err := r.dropChatItemFTSTriggers(ctx); err != nil {
+		return fmt.Errorf("drop chat FTS triggers for bulk load: %w", err)
+	}
+	rebuildFTS := false
+	defer func() {
+		if rebuildFTS {
+			if err := r.rebuildChatItemFTS(context.Background()); err != nil {
+				err = fmt.Errorf("rebuild chat FTS after import: %w", err)
+				if rerr != nil {
+					rerr = errors.Join(rerr, err)
+				} else {
+					rerr = err
+				}
+			}
+		}
+		if err := r.createChatItemFTSTriggers(context.Background()); err != nil {
+			err = fmt.Errorf("restore chat FTS triggers: %w", err)
+			if rerr != nil {
+				rerr = errors.Join(rerr, err)
+			} else {
+				rerr = err
+			}
+		}
+	}()
+	rebuildFTS, rerr = fn(ctx)
+	return rerr
+}
+
+func (r *Repository) dropChatItemFTSTriggers(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, `
+DROP TRIGGER IF EXISTS chat_item_fts_after_insert;
+DROP TRIGGER IF EXISTS chat_item_fts_after_update;
+DROP TRIGGER IF EXISTS chat_item_fts_after_delete;
+`); err != nil {
+		return mapSQLiteError(err)
+	}
+	return nil
+}
+
+func (r *Repository) createChatItemFTSTriggers(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, `
+CREATE TRIGGER IF NOT EXISTS chat_item_fts_after_insert
+AFTER INSERT ON chat_item
+BEGIN
+    INSERT INTO chat_item_fts(rowid, search_text) VALUES (NEW.id, NEW.search_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_item_fts_after_update
+AFTER UPDATE ON chat_item
+FOR EACH ROW
+WHEN OLD.search_text != NEW.search_text
+BEGIN
+    INSERT INTO chat_item_fts(chat_item_fts, rowid, search_text) VALUES('delete', OLD.id, OLD.search_text);
+    INSERT INTO chat_item_fts(rowid, search_text) VALUES (NEW.id, NEW.search_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_item_fts_after_delete
+AFTER DELETE ON chat_item
+BEGIN
+    INSERT INTO chat_item_fts(chat_item_fts, rowid, search_text) VALUES('delete', OLD.id, OLD.search_text);
+END;
+`); err != nil {
+		return mapSQLiteError(err)
+	}
+	return nil
+}
+
+func (r *Repository) rebuildChatItemFTS(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, `INSERT INTO chat_item_fts(chat_item_fts) VALUES('rebuild');`); err != nil {
+		return mapSQLiteError(err)
+	}
+	return nil
 }

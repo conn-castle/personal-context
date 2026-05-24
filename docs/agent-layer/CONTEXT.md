@@ -309,7 +309,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Current chat expo
 - `pc records list` — bounded newest-first record summaries with cursor pagination, date/project/deleted filters, `--query`, `--has-html`, `--has-data`, `--all`, and `--format table|ids|json`; JSON returns `{items,total,next_cursor}`.
 - `pc records stats` — local record statistics with active/deleted counts, content/attachment counts, oldest/newest dates, and explicit size fields (`recorded_data_file_bytes`, `local_attachment_bytes`, `store_file_bytes`, `local_total_bytes`)
 - `pc records files list` — local record attachment inventory with figure/data rows, recorded data-file size, local file size/path, and present/missing status
-- `pc chat import --device <id>` — full-scan import for Codex, Claude Code, and Gemini transcripts; `--agent` narrows and `--root` overrides default roots while requiring `--agent`.
+- `pc chat import --device <id>` — full-scan import for Codex, Claude Code, and Gemini transcripts; uses the local sync lock and bulk chat FTS rebuild for mutating imports; `--agent` narrows and `--root` overrides default roots while requiring `--agent`.
 - `pc chat list|search|show|delete|restore` — chat browsing, item search, transcript rendering, soft deletion, and restore. `pc chat show` uses `$PAGER` only when stdout is a TTY.
 - `pc project list|register|archive|restore` — manage registered projects; optional `pc project register <id> [path] --device <id>` registers a project path and backfills matching unassigned chats.
 - `pc device list|register|archive|restore` — manage registered source devices

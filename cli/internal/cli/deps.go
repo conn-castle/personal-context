@@ -111,6 +111,10 @@ func openLocalStack(homeDir string) (*localStack, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("apply migrations: %w", err)
 	}
+	if err := verifyChatItemFTSShapeDuringOpen(context.Background(), conn.DB(), basePath(homeDir)); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
 
 	repo, err := newSQLiteRepoFn(conn.DB())
 	if err != nil {
