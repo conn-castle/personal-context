@@ -1585,6 +1585,85 @@ func TestWriteChatImportBatchReplaceAppendSearchAndSyncVersion(t *testing.T) {
 	}
 }
 
+func TestRunChatImportBulkModeRestoresFTSTriggers(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newConcreteRepo(t)
+	now := time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC)
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "bulk-device"}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+	if err := repo.RunChatImportBulkMode(ctx, func(context.Context) (bool, error) {
+		return false, nil
+	}); err != nil {
+		t.Fatalf("RunChatImportBulkMode() error = %v", err)
+	}
+
+	session, _, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260524-aaaabbbb",
+			Source:          "codex",
+			SourceSessionID: "restored-triggers",
+			SourceDeviceID:  "bulk-device",
+			StartedAt:       now,
+			LastActivityAt:  now,
+		},
+		ClearDeleted: true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertChatSession() error = %v", err)
+	}
+	first := "runtime trigger original needle"
+	item, err := repo.CreateChatItem(ctx, repository.CreateChatItemInput{
+		SessionID:  session.ID,
+		Ordinal:    0,
+		Role:       "user",
+		ItemType:   "message",
+		Text:       &first,
+		SearchText: first,
+		CreatedAt:  &now,
+	})
+	if err != nil {
+		t.Fatalf("CreateChatItem() error = %v", err)
+	}
+	results, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "original"})
+	if err != nil {
+		t.Fatalf("SearchChatItems(original) error = %v", err)
+	}
+	if len(results) != 1 || results[0].Item.ID != item.ID {
+		t.Fatalf("expected restored insert trigger to index item, got %+v", results)
+	}
+
+	updated := "runtime trigger updated needle"
+	if _, err := repo.db.ExecContext(ctx, `UPDATE chat_item SET search_text = ? WHERE id = ?`, updated, item.ID); err != nil {
+		t.Fatalf("update chat_item search_text: %v", err)
+	}
+	results, err = repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "updated"})
+	if err != nil {
+		t.Fatalf("SearchChatItems(updated) error = %v", err)
+	}
+	if len(results) != 1 || results[0].Item.ID != item.ID {
+		t.Fatalf("expected restored update trigger to reindex item, got %+v", results)
+	}
+	results, err = repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "original"})
+	if err != nil {
+		t.Fatalf("SearchChatItems(old original) error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected restored update trigger to remove old tokens, got %+v", results)
+	}
+
+	if _, err := repo.db.ExecContext(ctx, `DELETE FROM chat_item WHERE id = ?`, item.ID); err != nil {
+		t.Fatalf("delete chat_item: %v", err)
+	}
+	results, err = repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "updated"})
+	if err != nil {
+		t.Fatalf("SearchChatItems(after delete) error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("expected restored delete trigger to remove tokens, got %+v", results)
+	}
+}
+
 func TestWriteChatImportBatchRollsBackOnItemConflict(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := newConcreteRepo(t)

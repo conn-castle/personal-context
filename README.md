@@ -161,7 +161,7 @@ above with `--api-key`.
 - `pc records list` — list bounded record summaries newest-first (`--query`, `--limit`, `--cursor`, `--from`, `--to`, `--project`, `--deleted`, `--has-html`, `--has-data`, `--all`, `--format table|ids|json`; JSON returns `{items,total,next_cursor}`)
 - `pc records stats` — show local record counts, attachment counts, date range, and explicit size components (`--from`, `--to`, `--project`, `--deleted`, `--format text|json`)
 - `pc records files list` — inventory record attachments with local path/status (`--record`, `--from`, `--to`, `--project`, `--deleted`, `--format table|json`)
-- `pc chat import --device <id>` — import Codex, Claude Code, and Gemini transcript files; copies each raw transcript into `<PC_HOME>/personal-context/chats/raw/{chat_session_id}/source.{ext}` and records the original imported path as `original_source_path`. `--agent` narrows the scan, `--root` overrides default roots and requires `--agent`, and `--delete-source` removes each original transcript file only after the managed copy and DB writes succeed.
+- `pc chat import --device <id>` — import Codex, Claude Code, and Gemini transcript files; copies each raw transcript into `<PC_HOME>/personal-context/chats/raw/{chat_session_id}/source.{ext}` and records the original imported path as `original_source_path`. Imports take the local sync lock and rebuild chat search indexing after mutating batches. `--agent` narrows the scan, `--root` overrides default roots and requires `--agent`, and `--delete-source` removes each original transcript file only after the managed copy and DB writes succeed.
 - `pc chat list|search|show|delete|restore` — browse, search, render, soft-delete, and restore imported chat sessions; list/search JSON returns `{items,total,next_cursor}`. For `pc chat search --format json`, `total` is the current page size, not the overall match count; paginate via `next_cursor`. `show` uses `$PAGER` when stdout is a TTY
 - `pc trash` — list soft-deleted records and chats
 - `pc gc` — hard-delete trash older than 30 days (cascades child rows, removes files including chat raw sources; cloud-aware: deletes from cloud first to prevent sync re-creation)
@@ -233,7 +233,7 @@ This migration path is intentionally manual today; treat it as a planned mainten
 
 ### Local Schema Mismatch Troubleshooting
 
-If `pc setup` reports that the local store is missing a required table such as `chat_session`, the database predates the current local schema and is not upgraded in place. Back up your existing store (for example, `mv ~/personal-context ~/personal-context.backup-$(date +%Y%m%dT%H%M%S)`) and re-run `pc setup` to initialize a fresh store.
+If `pc setup` or CLI startup reports that the local store is missing a required table such as `chat_session`, has an incompatible `chat_item_fts` search table, or is missing a required chat FTS trigger, the database predates or was interrupted while applying the current local schema and is not upgraded in place. Back up your existing store (for example, `mv ~/personal-context ~/personal-context.backup-$(date +%Y%m%dT%H%M%S)`) and re-run `pc setup` to initialize a fresh store.
 
 ### Local Dev Mode (`pc serve`)
 

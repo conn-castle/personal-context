@@ -109,10 +109,11 @@ CREATE TABLE IF NOT EXISTS chat_item (
 
 CREATE INDEX IF NOT EXISTS idx_chat_item_session ON chat_item (session_id, ordinal);
 
+-- chat_item remains the content table for chat_item_fts and supports bulk rebuilds.
 CREATE VIRTUAL TABLE IF NOT EXISTS chat_item_fts USING fts5(
-    session_id UNINDEXED,
-    ordinal UNINDEXED,
-    search_text
+    search_text,
+    content='chat_item',
+    content_rowid='id'
 );
 
 
@@ -503,30 +504,26 @@ BEGIN
     WHERE id = 1;
 END;
 
+-- Maintain chat_item_fts for single-row writes; bulk imports drop these triggers and rebuild once.
 CREATE TRIGGER IF NOT EXISTS chat_item_fts_after_insert
 AFTER INSERT ON chat_item
 BEGIN
-    INSERT INTO chat_item_fts (session_id, ordinal, search_text)
-    VALUES (NEW.session_id, NEW.ordinal, NEW.search_text);
+    INSERT INTO chat_item_fts(rowid, search_text) VALUES (NEW.id, NEW.search_text);
 END;
 
 CREATE TRIGGER IF NOT EXISTS chat_item_fts_after_update
 AFTER UPDATE ON chat_item
 FOR EACH ROW
-WHEN
-    OLD.session_id != NEW.session_id OR
-    OLD.ordinal != NEW.ordinal OR
-    OLD.search_text != NEW.search_text
+WHEN OLD.search_text != NEW.search_text
 BEGIN
-    DELETE FROM chat_item_fts WHERE session_id = OLD.session_id AND ordinal = OLD.ordinal;
-    INSERT INTO chat_item_fts (session_id, ordinal, search_text)
-    VALUES (NEW.session_id, NEW.ordinal, NEW.search_text);
+    INSERT INTO chat_item_fts(chat_item_fts, rowid, search_text) VALUES('delete', OLD.id, OLD.search_text);
+    INSERT INTO chat_item_fts(rowid, search_text) VALUES (NEW.id, NEW.search_text);
 END;
 
 CREATE TRIGGER IF NOT EXISTS chat_item_fts_after_delete
 AFTER DELETE ON chat_item
 BEGIN
-    DELETE FROM chat_item_fts WHERE session_id = OLD.session_id AND ordinal = OLD.ordinal;
+    INSERT INTO chat_item_fts(chat_item_fts, rowid, search_text) VALUES('delete', OLD.id, OLD.search_text);
 END;
 
 CREATE TRIGGER IF NOT EXISTS records_auto_update_updated_at

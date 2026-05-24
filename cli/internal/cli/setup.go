@@ -253,6 +253,8 @@ func seedTemplates(ctx context.Context, repo repository.Repository) error {
 // the chat-tables clean-cut schema update (DECISIONS.md n2p3q4). It includes:
 //   - chat_session, chat_item: the tables a v0.1.1-vintage store will be
 //     missing - the actual failure mode we want to surface.
+//   - chat_item_fts: the search table whose pre-release shape changed from
+//     standalone FTS5 to external-content FTS5.
 //   - records, project_paths: sanity-check tables that any working store
 //     must have; absent means the migration runner did not run at all.
 //
@@ -282,6 +284,54 @@ func verifyCanonicalSchemaTables(ctx context.Context, db *sql.DB, base string) e
 		if err != nil {
 			return fmt.Errorf("verify schema table %q: %w", table, err)
 		}
+	}
+	if err := verifyChatItemFTSShape(ctx, db, base); err != nil {
+		return err
+	}
+	return nil
+}
+
+func verifyChatItemFTSShape(ctx context.Context, db *sql.DB, base string) error {
+	if err := verifyChatItemFTSExternalContentShape(ctx, db, base); err != nil {
+		return err
+	}
+	for _, trigger := range []string{
+		"chat_item_fts_after_insert",
+		"chat_item_fts_after_update",
+		"chat_item_fts_after_delete",
+	} {
+		var name string
+		err := db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='trigger' AND name=?`, trigger).Scan(&name)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf(
+				"local store is missing required trigger %q: this database predates or was interrupted while applying the current Personal Context schema and cannot be upgraded in place. Back up your existing store (e.g. `mv %s %s.backup-$(date +%%Y%%m%%dT%%H%%M%%S)`) and re-run `pc setup` to initialize a fresh store",
+				trigger, base, base,
+			)
+		}
+		if err != nil {
+			return fmt.Errorf("verify schema trigger %q: %w", trigger, err)
+		}
+	}
+	return nil
+}
+
+func verifyChatItemFTSExternalContentShape(ctx context.Context, db *sql.DB, base string) error {
+	var ddl string
+	err := db.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='table' AND name='chat_item_fts'`).Scan(&ddl)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf(
+			"local store is missing required table %q: this database predates the current Personal Context schema and cannot be upgraded in place. Back up your existing store (e.g. `mv %s %s.backup-$(date +%%Y%%m%%dT%%H%%M%%S)`) and re-run `pc setup` to initialize a fresh store",
+			"chat_item_fts", base, base,
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("verify schema table %q: %w", "chat_item_fts", err)
+	}
+	if !strings.Contains(ddl, "content='chat_item'") || !strings.Contains(ddl, "content_rowid='id'") {
+		return fmt.Errorf(
+			"local store has incompatible table %q: this database predates the current Personal Context schema and cannot be upgraded in place. Back up your existing store (e.g. `mv %s %s.backup-$(date +%%Y%%m%%dT%%H%%M%%S)`) and re-run `pc setup` to initialize a fresh store",
+			"chat_item_fts", base, base,
+		)
 	}
 	return nil
 }

@@ -348,6 +348,10 @@ func (m *mockRepo) WriteChatImportBatch(ctx context.Context, ops []repository.Ch
 	}
 	return results, nil
 }
+func (m *mockRepo) RunChatImportBulkMode(ctx context.Context, fn func(context.Context) (bool, error)) error {
+	_, err := fn(ctx)
+	return err
+}
 func (m *mockRepo) ListChatItems(ctx context.Context, sessionID string) ([]repository.ChatItem, error) {
 	if m.listChatItemsFn != nil {
 		return m.listChatItemsFn(ctx, sessionID)
@@ -630,6 +634,115 @@ func TestRunSetupFailsLoudlyAgainstPreChatTableStore(t *testing.T) {
 	// The success message must not have been printed.
 	if strings.Contains(stdout.String(), "Personal Context initialized at") {
 		t.Fatalf("setup printed success message despite schema mismatch: %q", stdout.String())
+	}
+}
+
+func TestRunSetupFailsLoudlyAgainstStandaloneChatFTSStore(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	stdout := &bytes.Buffer{}
+	if err := runSetup(context.Background(), stdout, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err != nil {
+		t.Fatalf("initial setup failed: %v", err)
+	}
+
+	db := openTestDBInternal(t, homeDir)
+	if _, err := db.Exec(`
+DROP TRIGGER IF EXISTS chat_item_fts_after_insert;
+DROP TRIGGER IF EXISTS chat_item_fts_after_update;
+DROP TRIGGER IF EXISTS chat_item_fts_after_delete;
+DROP TABLE chat_item_fts;
+CREATE VIRTUAL TABLE chat_item_fts USING fts5(
+    session_id UNINDEXED,
+    ordinal UNINDEXED,
+    search_text
+);
+`); err != nil {
+		t.Fatalf("replace chat_item_fts with old shape: %v", err)
+	}
+	_ = db.Close()
+
+	stdout.Reset()
+	err := runSetup(context.Background(), stdout, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts())
+	if err == nil {
+		t.Fatal("expected setup to fail when chat_item_fts has the old standalone shape, got nil")
+	}
+	if !strings.Contains(err.Error(), "chat_item_fts") {
+		t.Fatalf("expected error to name chat_item_fts, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "predates") {
+		t.Fatalf("expected error to mention that the store predates the current schema, got: %v", err)
+	}
+	expectedBase := basePath(homeDir)
+	if !strings.Contains(err.Error(), expectedBase) {
+		t.Fatalf("expected error to name the actual store path %q (honoring PC_HOME), got: %v", expectedBase, err)
+	}
+	if strings.Contains(stdout.String(), "Personal Context initialized at") {
+		t.Fatalf("setup printed success message despite schema mismatch: %q", stdout.String())
+	}
+}
+
+func TestOpenLocalStackFailsLoudlyAgainstStandaloneChatFTSStore(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err != nil {
+		t.Fatalf("initial setup failed: %v", err)
+	}
+
+	db := openTestDBInternal(t, homeDir)
+	if _, err := db.Exec(`
+DROP TRIGGER IF EXISTS chat_item_fts_after_insert;
+DROP TRIGGER IF EXISTS chat_item_fts_after_update;
+DROP TRIGGER IF EXISTS chat_item_fts_after_delete;
+DROP TABLE chat_item_fts;
+CREATE VIRTUAL TABLE chat_item_fts USING fts5(
+    session_id UNINDEXED,
+    ordinal UNINDEXED,
+    search_text
+);
+`); err != nil {
+		t.Fatalf("replace chat_item_fts with old shape: %v", err)
+	}
+	_ = db.Close()
+
+	stack, err := openLocalStack(homeDir)
+	if err == nil {
+		_ = stack.Close()
+		t.Fatal("expected openLocalStack to fail when chat_item_fts has the old standalone shape")
+	}
+	if !strings.Contains(err.Error(), "chat_item_fts") {
+		t.Fatalf("expected error to name chat_item_fts, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "predates") {
+		t.Fatalf("expected error to mention that the store predates the current schema, got: %v", err)
+	}
+}
+
+func TestOpenLocalStackFailsLoudlyWhenChatFTSTriggerMissing(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err != nil {
+		t.Fatalf("initial setup failed: %v", err)
+	}
+
+	db := openTestDBInternal(t, homeDir)
+	if _, err := db.Exec(`DROP TRIGGER chat_item_fts_after_insert;`); err != nil {
+		t.Fatalf("drop chat_item_fts_after_insert: %v", err)
+	}
+	_ = db.Close()
+
+	stack, err := openLocalStack(homeDir)
+	if err == nil {
+		_ = stack.Close()
+		t.Fatal("expected openLocalStack to fail when chat_item_fts trigger is missing")
+	}
+	if !strings.Contains(err.Error(), "chat_item_fts_after_insert") {
+		t.Fatalf("expected error to name missing trigger, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "interrupted") {
+		t.Fatalf("expected error to mention interrupted schema state, got: %v", err)
 	}
 }
 

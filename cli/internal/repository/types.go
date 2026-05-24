@@ -236,6 +236,9 @@ type ChatImportResult struct {
 // the standard Repository methods over the API server.
 type ChatImportBatchWriter interface {
 	WriteChatImportBatch(ctx context.Context, ops []ChatImportOp) ([]ChatImportResult, error)
+	// RunChatImportBulkMode executes fn with repository-level bulk import
+	// optimizations and restores search invariants after mutating imports.
+	RunChatImportBulkMode(ctx context.Context, fn func(context.Context) (bool, error)) error
 }
 
 // CreateChatItemInput contains required and optional chat item fields.

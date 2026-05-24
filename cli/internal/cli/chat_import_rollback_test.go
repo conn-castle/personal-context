@@ -16,6 +16,7 @@ import (
 
 	"github.com/conn-castle/personal-context/cli/internal/filesystem"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
+	"github.com/conn-castle/personal-context/cli/internal/syncengine"
 )
 
 // readSyncVersionUnit returns the current sync_version value from the local DB.
@@ -155,6 +156,60 @@ func TestChatImportCleansUpStagingOnDBFailure(t *testing.T) {
 		if strings.HasPrefix(e.Name(), ".staging-") {
 			t.Fatalf("expected no leftover staging dir, found %s", e.Name())
 		}
+	}
+}
+
+func TestChatImportRebuildsFTSAfterCommittedBatchThenParseError(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	for i := range chatImportBatchSize {
+		body := fmt.Sprintf(`{
+  "id": "committed-before-error-%02d",
+  "cwd": "/tmp/committed-before-error",
+  "title": "Committed before error",
+  "started_at": "2026-05-14T12:%02d:00Z",
+  "messages": [{"role": "user", "content": "rescue-needle-%02d"}]
+}`, i, i%60, i)
+		writeTestChatTranscript(t, root, fmt.Sprintf("%03d-valid.json", i), body)
+	}
+	writeTestChatTranscript(t, root, "zzz-broken.json", "{not json")
+
+	err := runImportFor(t, root)
+	if err == nil || !strings.Contains(err.Error(), "parse") {
+		t.Fatalf("expected parse error after committed batch, got %v", err)
+	}
+
+	stack, err := openLocalStackFromHome()
+	if err != nil {
+		t.Fatalf("open local stack: %v", err)
+	}
+	defer func() { _ = stack.Close() }()
+	results, err := stack.Repo.SearchChatItems(context.Background(), repository.SearchChatItemsFilter{Query: "rescue-needle-00"})
+	if err != nil {
+		t.Fatalf("search committed import: %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected committed batch to be searchable after failed import cleanup")
+	}
+}
+
+func TestChatImportFailsWhileLocalSyncLockHeld(t *testing.T) {
+	homeDir := setupEnv(t)
+	root := t.TempDir()
+	writeTestChatTranscript(t, root, "session.json", importTranscriptBody)
+
+	lock, err := syncengine.AcquireFileLock(filepath.Join(basePath(homeDir), ".pc", "sync.lock"))
+	if err != nil {
+		t.Fatalf("acquire sync lock: %v", err)
+	}
+	defer func() { _ = lock.Release() }()
+
+	err = runImportFor(t, root)
+	if err == nil {
+		t.Fatal("expected chat import to fail while sync lock is held")
+	}
+	if !strings.Contains(err.Error(), "acquire local sync lock for chat import") {
+		t.Fatalf("expected chat import lock error, got %v", err)
 	}
 }
 
@@ -643,6 +698,11 @@ type chatImportBatchWriterFunc func(context.Context, []repository.ChatImportOp) 
 
 func (f chatImportBatchWriterFunc) WriteChatImportBatch(ctx context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
 	return f(ctx, ops)
+}
+
+func (f chatImportBatchWriterFunc) RunChatImportBulkMode(ctx context.Context, fn func(context.Context) (bool, error)) error {
+	_, err := fn(ctx)
+	return err
 }
 
 func TestQueueAppendJSONLChatImportErrorBranches(t *testing.T) {
