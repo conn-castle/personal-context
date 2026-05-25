@@ -10,12 +10,31 @@ Release entries must use this format so the release workflow can extract notes:
 
 ## Unreleased
 
-- Optimized SQLite chat imports by suspending per-row chat FTS trigger maintenance during the import, rebuilding the chat search index once afterward, and serializing imports with the local sync lock.
-- Made local setup and CLI startup fail loudly when a pre-release SQLite store has the old standalone `chat_item_fts` table shape or missing chat FTS triggers.
-- Changed the pre-release project registry command from `pc project add` to `pc project register` for consistency with `pc device register`; no compatibility alias is exposed.
-- Narrowed default project-path chat import roots to Claude and Gemini transcript directories so config/cache JSON under `.claude/` and `.gemini/` is not parsed as chat data.
-- Documented the pre-release `pc chat list --format json` envelope rename from `sessions` to the canonical `{items,total,next_cursor}` shape used by domain list/search commands.
-- Clarified that `pc chat search --format json` reports `total` as the current page size and uses `next_cursor` for pagination.
+## v0.1.2 - 2026-05-25
+
+### Breaking Changes
+
+- Moved record-specific commands under `pc records ...`: use `pc records add|list|show|edit|delete|restore|move|stats|files list` instead of the previous top-level record commands. Top-level `pc show` and `pc search` now operate across records and chats.
+- Changed `pc project add` to `pc project register`; no compatibility alias is exposed. `pc project register <id> [path] --device <id>` can also associate a source path with a project for chat import attribution.
+- Changed `pc search --format json` from the record-only paginated envelope to a cross-domain JSON array with a `domain` field on each result. Use `pc records list --query ... --format json` for the record-list `{items,total,next_cursor}` envelope.
+- Made the chat schema a clean-cut local SQLite update. Stores created before the chat tables, external-content `chat_item_fts`, or chat FTS triggers exist now fail loudly during `pc setup` or CLI startup and must be backed up and recreated instead of silently running with a partial schema.
+
+### Added
+
+- Added `pc chat import --device <id>` for Codex, Claude Code, and Gemini transcript files, including managed raw transcript copies under `chats/raw/{chat_session_id}/`, project-path matching, optional `--agent` / `--root`, and safe `--delete-source` cleanup after Personal Context owns a copy.
+- Added `pc chat list|search|show|delete|restore`, chat-aware `pc trash` and `pc gc`, pager support for chat display, and JSON list/search envelopes for chat browsing.
+- Added chat persistence across SQLite, Postgres, cloud sync, and deterministic git export/import. Snapshots now include `chats/` metadata, normalized `items.jsonl`, and raw transcript sources.
+- Added cross-domain search for records and chats, including `--domain records|chats`, `--offset`, and `--include-tool-outputs`.
+- Added `pc fetch --all` to download every non-deleted cloud record data file into the canonical local data path, skip files that already match recorded size/hash metadata, and report per-file failures without stopping the full scan.
+
+### Changed
+
+- Optimized chat imports by skipping unchanged managed sources, appending only new JSONL/NDJSON rows when transcripts grow, batching SQLite writes, serializing imports with the local sync lock, and rebuilding chat FTS once after bulk import work.
+- Narrowed default project-path chat import roots to agent transcript directories so config/cache JSON under `.claude/`, `.claude-config/`, and `.gemini/` is not parsed as chat data.
+- Hardened fetch downloads by rejecting invalid record/file path metadata, enforcing canonical S3 keys, verifying downloaded size/hash, and removing unverified files after failed integrity checks.
+- Hardened sync and lifecycle handling with stale sync-lock recovery, chat raw-source validation, chat raw-source cloud transfer warnings, and cloud-first cleanup for hard-deleted records and chats.
+- Hardened web and local API request handling with bounded JSON request bodies, consistent 413 responses, stricter bearer token parsing, and safer local-mode/auth edge cases.
+- Updated release automation so release preflight requires a matching changelog section and release artifact generation refuses stale files in `DIST_DIR`.
 
 ## v0.1.1 - 2026-05-09
 
