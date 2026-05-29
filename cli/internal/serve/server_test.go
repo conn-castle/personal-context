@@ -151,6 +151,10 @@ func (m *mockRepo) CountChatSessions(_ context.Context, _ repository.ListChatSes
 	return 0, nil
 }
 
+func (m *mockRepo) CountChatItems(_ context.Context, _ repository.CountChatItemsFilter) (int, error) {
+	return 0, nil
+}
+
 func (m *mockRepo) SoftDeleteChatSession(_ context.Context, _ string) error { return nil }
 func (m *mockRepo) RestoreChatSession(_ context.Context, _ string) error    { return nil }
 func (m *mockRepo) DeleteChatSession(_ context.Context, _ string) error     { return nil }

@@ -841,7 +841,7 @@ func TestQueueAppendJSONLChatImportPromotesStagedRawAfterBatchWrite(t *testing.T
 	if err := batch.flush(context.Background()); err != nil {
 		t.Fatalf("flush append batch: %v", err)
 	}
-	if summary.SessionsUpdated != 1 || summary.ItemsCreated != 1 || summary.RawSourcesCopied != 1 {
+	if summary.SessionsUpdated != 1 || summary.ItemsImported != 1 || summary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected append summary: %+v", summary)
 	}
 	promotedPath, err := fsClient.ResolveChatSourcePath(existing.ID, rawKey)
@@ -911,7 +911,7 @@ func TestQueueAppendJSONLChatImportRepairsDBAheadRawWithoutDuplicateItems(t *tes
 	if err := batch.flush(context.Background()); err != nil {
 		t.Fatalf("flush repair batch: %v", err)
 	}
-	if summary.SessionsUpdated != 1 || summary.ItemsCreated != 0 || summary.RawSourcesCopied != 1 {
+	if summary.SessionsUpdated != 1 || summary.ItemsImported != 0 || summary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected repair summary: %+v", summary)
 	}
 	managed, err := fsClient.ResolveChatSourcePath(existing.ID, rawKey)
@@ -1148,7 +1148,7 @@ func TestQueueReplaceAndQueueAppendStageErrors(t *testing.T) {
 		SourceDeviceID:  "test-device",
 	}
 	stack := &localStack{Repo: &mockRepo{}, FS: fsClient}
-	if err := queueReplaceChatImport(context.Background(), stack, &batch, &idx, session, nil, missingSource, 0, false); err == nil || !strings.Contains(err.Error(), "stage chat source") {
+	if err := queueReplaceChatImport(context.Background(), stack, &batch, &idx, session, nil, missingSource, false); err == nil || !strings.Contains(err.Error(), "stage chat source") {
 		t.Fatalf("queueReplaceChatImport(missing source) error = %v, want stage error", err)
 	}
 

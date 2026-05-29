@@ -2287,6 +2287,7 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 			return repo.AppendChatItems(ctx, "20260320-abcd5678", []repository.CreateChatItemInput{{Ordinal: 0, Role: "user", ItemType: "message"}})
 		}},
 		{name: "ListChatItems", run: func() error { _, err := repo.ListChatItems(ctx, "20260320-abcd5678"); return err }},
+		{name: "CountChatItems", run: func() error { _, err := repo.CountChatItems(ctx, repository.CountChatItemsFilter{}); return err }},
 		{name: "SearchChatItems", run: func() error {
 			_, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "x"})
 			return err

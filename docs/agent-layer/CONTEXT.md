@@ -84,7 +84,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 | `devices` | `id` TEXT (`user_id`, `id` in Postgres) | Source-device registry with archived state. |
 | `project_paths` | `id` auto-increment | Absolute normalized project paths per source device; used to assign imported chats without prompting. |
 | `records` | `id` TEXT (`YYYYMMDD-8hex`) | Optional HTML content, notes, project_id, source_device_id, source_ref, git fields, date, day_order, user_id (Postgres), soft delete |
-| `chat_session` | `id` TEXT (`YYYYMMDD-8hex`) | Imported agent chat session keyed idempotently by `(source, source_session_id)`; nullable project assignment, cwd/title/source path, source device, soft delete. |
+| `chat_session` | `id` TEXT (`YYYYMMDD-8hex`) | Imported agent chat session keyed idempotently by `(source, source_session_id)`; nullable indexed `parent_source_session_id` links a subagent transcript to its parent; nullable project assignment, cwd/title/source path, source device, soft delete. |
 | `chat_item` | `id` auto-increment | Normalized chat messages/tool events with ordinal, role, item_type, text/search_text, raw_json. |
 | `record_figures` | `id` auto-increment | Image refs: filename, s3_key, alt_text. FK -> records CASCADE |
 | `record_data_files` | `id` auto-increment | Data file refs: filename, s3_key, size, SHA-256 hash, description. FK -> records CASCADE |
@@ -107,6 +107,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - **No title. No tags.** Organization is by project and date only.
 - **Chat source values**: use unambiguous product identifiers in storage (`codex`, `claude_code`, `gemini`). CLI `--agent claude` maps to `claude_code`.
 - **Chat project assignment**: import is non-interactive. Sessions whose `cwd` does not match a registered `project_paths` row are stored with `project_id = NULL`; registering a path via `pc project register <id> [path] --device <id>` backfills matching NULL sessions.
+- **Chat source identity & subagents**: `source_session_id` is derived per source — the internal session id for Codex/Claude, and the file path (project-key dir + basename) for Gemini (no internal id). Claude Task-tool subagent transcripts (files under `subagents/`, or `isSidechain` rows) get `source_session_id = <parent_sid>:<subagent_basename>` plus nullable `parent_source_session_id` linking to the parent (metadata, never a FK — the parent row may be absent). Exact byte-identical duplicate files are collapsed (`duplicates_skipped`); a file colliding with a different file's existing identity and diverging is warn-and-skipped (`collisions_skipped`), never overwritten. Gemini `gemini`/`info`/`error` rows normalize to `message`/`event` item types; empty/metadata-only transcripts create no session. The import summary separates work performed (`items_imported`) from authoritative stored state (`items_delta`, `items_after_import` via repository `CountChatItems`); `raw_sources_copied` counts distinct retained sessions.
 
 ### Figure References in HTML
 - `html_content` references figures as `figures/{filename}` (relative path, no record_id — implicit from context).
@@ -310,7 +311,8 @@ Data files stay in S3 only; `metadata.json` lists what exists. Current chat expo
 - `pc records stats` — local record statistics with active/deleted counts, content/attachment counts, oldest/newest dates, and explicit size fields (`recorded_data_file_bytes`, `local_attachment_bytes`, `store_file_bytes`, `local_total_bytes`)
 - `pc records files list` — local record attachment inventory with figure/data rows, recorded data-file size, local file size/path, and present/missing status
 - `pc chat import --device <id>` — full-scan import for Codex, Claude Code, and Gemini transcripts; uses the local sync lock and bulk chat FTS rebuild for mutating imports; `--agent` narrows and `--root` overrides default roots while requiring `--agent`.
-- `pc chat list|search|show|delete|restore` — chat browsing, item search, transcript rendering, soft deletion, and restore. `pc chat show` uses `$PAGER` only when stdout is a TTY.
+- `pc chat list|search|show|delete|restore` — chat browsing, item search, transcript rendering, soft deletion, and restore. `pc chat show` uses `$PAGER` only when stdout is a TTY, and shows a subagent list/count for a parent plus the parent for a subagent (text + JSON). `pc chat list`/`pc chat search` accept `--parent-source-session-id <sid>` to scope to one parent's subagents.
+- `pc docs [topic]` / `pc docs search <query>` — print embedded concept reference (chat-import, item-types, schema, search-syntax, project-device-registry) that matches the installed binary; markdown lives in `cli/internal/docs/*.md`, embedded via `//go:embed`.
 - `pc project list|register|archive|restore` — manage registered projects; optional `pc project register <id> [path] --device <id>` registers a project path and backfills matching unassigned chats.
 - `pc device list|register|archive|restore` — manage registered source devices
 

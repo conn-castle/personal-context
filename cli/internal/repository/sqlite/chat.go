@@ -12,7 +12,7 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/timeutil"
 )
 
-const chatSessionColumns = `id, source, source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at`
+const chatSessionColumns = `id, source, source_session_id, parent_source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at`
 const chatItemColumns = `id, session_id, ordinal, role, item_type, text, search_text, raw_json, created_at`
 const insertChatItemSQL = `INSERT INTO chat_item (session_id, ordinal, role, item_type, text, search_text, raw_json, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')));`
@@ -131,9 +131,10 @@ func (r *Repository) UpsertChatSession(ctx context.Context, input repository.Ups
 		}
 	}
 	result, err := r.db.ExecContext(ctx,
-		`INSERT INTO chat_session (id, source, source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), ?)
+		`INSERT INTO chat_session (id, source, source_session_id, parent_source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), ?)
          ON CONFLICT(source, source_session_id) DO UPDATE SET
+             parent_source_session_id = COALESCE(excluded.parent_source_session_id, chat_session.parent_source_session_id),
              source_device_id = excluded.source_device_id,
              project_id = COALESCE(excluded.project_id, chat_session.project_id),
              cwd = COALESCE(excluded.cwd, chat_session.cwd),
@@ -144,7 +145,7 @@ func (r *Repository) UpsertChatSession(ctx context.Context, input repository.Ups
              raw_source_key = COALESCE(excluded.raw_source_key, chat_session.raw_source_key),
              updated_at = COALESCE(excluded.updated_at, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
              deleted_at = CASE WHEN ? THEN NULL ELSE excluded.deleted_at END;`,
-		input.ID, input.Source, input.SourceSessionID, input.SourceDeviceID, nullableString(input.ProjectID), nullableString(input.CWD),
+		input.ID, input.Source, input.SourceSessionID, nullableString(input.ParentSourceSessionID), input.SourceDeviceID, nullableString(input.ProjectID), nullableString(input.CWD),
 		nullableString(input.Title), timeutil.FormatUTCMillis(input.StartedAt), timeutil.FormatUTCMillis(input.LastActivityAt),
 		nullableString(input.OriginalSourcePath), nullableString(input.RawSourceKey), nullableTime(input.CreatedAt), nullableTime(input.UpdatedAt), nullableTime(input.DeletedAt), input.ClearDeleted)
 	if err != nil {
@@ -261,6 +262,10 @@ func chatSessionPredicateSQLite(filter repository.ListChatSessionsFilter) (strin
 	if filter.DeviceID != nil {
 		builder.WriteString(` AND source_device_id = ?`)
 		args = append(args, *filter.DeviceID)
+	}
+	if filter.ParentSourceSessionID != nil {
+		builder.WriteString(` AND parent_source_session_id = ?`)
+		args = append(args, *filter.ParentSourceSessionID)
 	}
 	if filter.DateFrom != nil {
 		builder.WriteString(` AND last_activity_at >= ?`)
@@ -491,9 +496,10 @@ func upsertChatSessionTx(ctx context.Context, tx *sql.Tx, input repository.Upser
 		}
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO chat_session (id, source, source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), ?)
+		`INSERT INTO chat_session (id, source, source_session_id, parent_source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), ?)
          ON CONFLICT(source, source_session_id) DO UPDATE SET
+             parent_source_session_id = COALESCE(excluded.parent_source_session_id, chat_session.parent_source_session_id),
              source_device_id = excluded.source_device_id,
              project_id = COALESCE(excluded.project_id, chat_session.project_id),
              cwd = COALESCE(excluded.cwd, chat_session.cwd),
@@ -504,7 +510,7 @@ func upsertChatSessionTx(ctx context.Context, tx *sql.Tx, input repository.Upser
              raw_source_key = COALESCE(excluded.raw_source_key, chat_session.raw_source_key),
              updated_at = COALESCE(excluded.updated_at, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')),
              deleted_at = CASE WHEN ? THEN NULL ELSE excluded.deleted_at END;`,
-		input.ID, input.Source, input.SourceSessionID, input.SourceDeviceID, nullableString(input.ProjectID), nullableString(input.CWD),
+		input.ID, input.Source, input.SourceSessionID, nullableString(input.ParentSourceSessionID), input.SourceDeviceID, nullableString(input.ProjectID), nullableString(input.CWD),
 		nullableString(input.Title), timeutil.FormatUTCMillis(input.StartedAt), timeutil.FormatUTCMillis(input.LastActivityAt),
 		nullableString(input.OriginalSourcePath), nullableString(input.RawSourceKey), nullableTime(input.CreatedAt), nullableTime(input.UpdatedAt), nullableTime(input.DeletedAt), input.ClearDeleted); err != nil {
 		return repository.ChatSession{}, false, mapSQLiteError(err)
@@ -538,6 +544,21 @@ func (r *Repository) ListChatItems(ctx context.Context, sessionID string) ([]rep
 	return items, nil
 }
 
+// CountChatItems returns the authoritative number of chat items. When
+// filter.IncludeDeleted is false, items in soft-deleted sessions are excluded
+// so the count matches what users can see.
+func (r *Repository) CountChatItems(ctx context.Context, filter repository.CountChatItemsFilter) (int, error) {
+	query := `SELECT COUNT(*) FROM chat_item`
+	if !filter.IncludeDeleted {
+		query += ` WHERE session_id IN (SELECT id FROM chat_session WHERE deleted_at IS NULL)`
+	}
+	var count int
+	if err := r.db.QueryRowContext(ctx, query).Scan(&count); err != nil {
+		return 0, mapSQLiteError(err)
+	}
+	return count, nil
+}
+
 // SearchChatItems searches chat item text.
 func (r *Repository) SearchChatItems(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
 	query := strings.TrimSpace(filter.Query)
@@ -560,6 +581,10 @@ func (r *Repository) SearchChatItems(ctx context.Context, filter repository.Sear
 	if filter.Source != nil {
 		where.WriteString(` AND cs.source = ?`)
 		args = append(args, *filter.Source)
+	}
+	if filter.ParentSourceSessionID != nil {
+		where.WriteString(` AND cs.parent_source_session_id = ?`)
+		args = append(args, *filter.ParentSourceSessionID)
 	}
 	if filter.DateFrom != nil {
 		where.WriteString(` AND cs.last_activity_at >= ?`)
@@ -747,20 +772,21 @@ func (r projectPathRow) toModel() (repository.ProjectPath, error) {
 }
 
 type chatSessionRow struct {
-	ID                 string
-	Source             string
-	SourceSessionID    string
-	SourceDeviceID     string
-	ProjectID          sql.NullString
-	CWD                sql.NullString
-	Title              sql.NullString
-	StartedAt          string
-	LastActivityAt     string
-	OriginalSourcePath sql.NullString
-	RawSourceKey       sql.NullString
-	CreatedAt          string
-	UpdatedAt          string
-	DeletedAt          sql.NullString
+	ID                    string
+	Source                string
+	SourceSessionID       string
+	ParentSourceSessionID sql.NullString
+	SourceDeviceID        string
+	ProjectID             sql.NullString
+	CWD                   sql.NullString
+	Title                 sql.NullString
+	StartedAt             string
+	LastActivityAt        string
+	OriginalSourcePath    sql.NullString
+	RawSourceKey          sql.NullString
+	CreatedAt             string
+	UpdatedAt             string
+	DeletedAt             sql.NullString
 }
 
 func (r chatSessionRow) toModel() (repository.ChatSession, error) {
@@ -785,8 +811,10 @@ func (r chatSessionRow) toModel() (repository.ChatSession, error) {
 		return repository.ChatSession{}, err
 	}
 	return repository.ChatSession{
-		ID: r.ID, Source: r.Source, SourceSessionID: r.SourceSessionID, SourceDeviceID: r.SourceDeviceID,
-		ProjectID: nullableStringPtr(r.ProjectID), CWD: nullableStringPtr(r.CWD), Title: nullableStringPtr(r.Title),
+		ID: r.ID, Source: r.Source, SourceSessionID: r.SourceSessionID,
+		ParentSourceSessionID: nullableStringPtr(r.ParentSourceSessionID),
+		SourceDeviceID:        r.SourceDeviceID,
+		ProjectID:             nullableStringPtr(r.ProjectID), CWD: nullableStringPtr(r.CWD), Title: nullableStringPtr(r.Title),
 		StartedAt: startedAt, LastActivityAt: lastActivityAt,
 		OriginalSourcePath: nullableStringPtr(r.OriginalSourcePath),
 		RawSourceKey:       nullableStringPtr(r.RawSourceKey),
@@ -796,7 +824,7 @@ func (r chatSessionRow) toModel() (repository.ChatSession, error) {
 
 func scanChatSession(row *sql.Row) (repository.ChatSession, error) {
 	var scanned chatSessionRow
-	if err := row.Scan(&scanned.ID, &scanned.Source, &scanned.SourceSessionID, &scanned.SourceDeviceID, &scanned.ProjectID, &scanned.CWD, &scanned.Title, &scanned.StartedAt, &scanned.LastActivityAt, &scanned.OriginalSourcePath, &scanned.RawSourceKey, &scanned.CreatedAt, &scanned.UpdatedAt, &scanned.DeletedAt); err != nil {
+	if err := row.Scan(&scanned.ID, &scanned.Source, &scanned.SourceSessionID, &scanned.ParentSourceSessionID, &scanned.SourceDeviceID, &scanned.ProjectID, &scanned.CWD, &scanned.Title, &scanned.StartedAt, &scanned.LastActivityAt, &scanned.OriginalSourcePath, &scanned.RawSourceKey, &scanned.CreatedAt, &scanned.UpdatedAt, &scanned.DeletedAt); err != nil {
 		return repository.ChatSession{}, mapSQLiteError(err)
 	}
 	return scanned.toModel()
@@ -804,7 +832,7 @@ func scanChatSession(row *sql.Row) (repository.ChatSession, error) {
 
 func scanChatSessionRows(rows *sql.Rows) (repository.ChatSession, error) {
 	var scanned chatSessionRow
-	if err := rows.Scan(&scanned.ID, &scanned.Source, &scanned.SourceSessionID, &scanned.SourceDeviceID, &scanned.ProjectID, &scanned.CWD, &scanned.Title, &scanned.StartedAt, &scanned.LastActivityAt, &scanned.OriginalSourcePath, &scanned.RawSourceKey, &scanned.CreatedAt, &scanned.UpdatedAt, &scanned.DeletedAt); err != nil {
+	if err := rows.Scan(&scanned.ID, &scanned.Source, &scanned.SourceSessionID, &scanned.ParentSourceSessionID, &scanned.SourceDeviceID, &scanned.ProjectID, &scanned.CWD, &scanned.Title, &scanned.StartedAt, &scanned.LastActivityAt, &scanned.OriginalSourcePath, &scanned.RawSourceKey, &scanned.CreatedAt, &scanned.UpdatedAt, &scanned.DeletedAt); err != nil {
 		return repository.ChatSession{}, mapSQLiteError(err)
 	}
 	return scanned.toModel()
@@ -856,7 +884,7 @@ func scanChatSearchRows(rows *sql.Rows) ([]repository.ChatSearchResult, error) {
 		var item chatItemRow
 		var snippet string
 		var rank float64
-		if err := rows.Scan(&session.ID, &session.Source, &session.SourceSessionID, &session.SourceDeviceID, &session.ProjectID, &session.CWD, &session.Title, &session.StartedAt, &session.LastActivityAt, &session.OriginalSourcePath, &session.RawSourceKey, &session.CreatedAt, &session.UpdatedAt, &session.DeletedAt, &item.ID, &item.SessionID, &item.Ordinal, &item.Role, &item.ItemType, &item.Text, &item.SearchText, &item.RawJSON, &item.CreatedAt, &snippet, &rank); err != nil {
+		if err := rows.Scan(&session.ID, &session.Source, &session.SourceSessionID, &session.ParentSourceSessionID, &session.SourceDeviceID, &session.ProjectID, &session.CWD, &session.Title, &session.StartedAt, &session.LastActivityAt, &session.OriginalSourcePath, &session.RawSourceKey, &session.CreatedAt, &session.UpdatedAt, &session.DeletedAt, &item.ID, &item.SessionID, &item.Ordinal, &item.Role, &item.ItemType, &item.Text, &item.SearchText, &item.RawJSON, &item.CreatedAt, &snippet, &rank); err != nil {
 			return nil, mapSQLiteError(err)
 		}
 		sessionModel, err := session.toModel()

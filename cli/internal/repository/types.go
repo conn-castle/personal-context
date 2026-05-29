@@ -57,21 +57,22 @@ type ProjectPath struct {
 // <PC_HOME>/personal-context/ and used as the S3 object suffix after
 // users/{user_id}/ in cloud mode.
 type ChatSession struct {
-	ID                 string
-	UserID             string // Postgres only; empty in SQLite (local mode)
-	Source             string
-	SourceSessionID    string
-	SourceDeviceID     string
-	ProjectID          *string
-	CWD                *string
-	Title              *string
-	StartedAt          time.Time
-	LastActivityAt     time.Time
-	OriginalSourcePath *string
-	RawSourceKey       *string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	DeletedAt          *time.Time
+	ID                    string
+	UserID                string // Postgres only; empty in SQLite (local mode)
+	Source                string
+	SourceSessionID       string
+	ParentSourceSessionID *string // parent transcript's source_session_id for subagent sessions; nil otherwise
+	SourceDeviceID        string
+	ProjectID             *string
+	CWD                   *string
+	Title                 *string
+	StartedAt             time.Time
+	LastActivityAt        time.Time
+	OriginalSourcePath    *string
+	RawSourceKey          *string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	DeletedAt             *time.Time
 }
 
 // ChatItem is one normalized message/tool event inside a chat session.
@@ -185,20 +186,21 @@ type CreateProjectPathInput struct {
 
 // CreateChatSessionInput contains required and optional chat session fields.
 type CreateChatSessionInput struct {
-	ID                 string
-	Source             string
-	SourceSessionID    string
-	SourceDeviceID     string
-	ProjectID          *string
-	CWD                *string
-	Title              *string
-	StartedAt          time.Time
-	LastActivityAt     time.Time
-	OriginalSourcePath *string
-	RawSourceKey       *string
-	CreatedAt          *time.Time
-	UpdatedAt          *time.Time
-	DeletedAt          *time.Time
+	ID                    string
+	Source                string
+	SourceSessionID       string
+	ParentSourceSessionID *string // parent transcript's source_session_id for subagent sessions; nil otherwise
+	SourceDeviceID        string
+	ProjectID             *string
+	CWD                   *string
+	Title                 *string
+	StartedAt             time.Time
+	LastActivityAt        time.Time
+	OriginalSourcePath    *string
+	RawSourceKey          *string
+	CreatedAt             *time.Time
+	UpdatedAt             *time.Time
+	DeletedAt             *time.Time
 }
 
 // UpsertChatSessionInput creates or updates an imported chat by source identity.
@@ -261,11 +263,14 @@ type ListChatSessionsFilter struct {
 	Unassigned     bool
 	Source         *string
 	DeviceID       *string
-	DateFrom       *time.Time
-	DateTo         *time.Time
-	Limit          int
-	Offset         int
-	UpdatedAfter   *time.Time
+	// ParentSourceSessionID, when set, restricts results to sessions whose
+	// parent_source_session_id equals this value (the subagents of one parent).
+	ParentSourceSessionID *string
+	DateFrom              *time.Time
+	DateTo                *time.Time
+	Limit                 int
+	Offset                int
+	UpdatedAfter          *time.Time
 }
 
 // SearchChatItemsFilter controls chat FTS query behavior.
@@ -275,10 +280,22 @@ type SearchChatItemsFilter struct {
 	IncludeToolOutputs bool
 	ProjectID          *string
 	Source             *string
-	DateFrom           *time.Time
-	DateTo             *time.Time
-	Limit              int
-	Offset             int
+	// ParentSourceSessionID, when set, restricts matches to items whose session
+	// has parent_source_session_id equal to this value (one parent's subagents).
+	ParentSourceSessionID *string
+	DateFrom              *time.Time
+	DateTo                *time.Time
+	Limit                 int
+	Offset                int
+}
+
+// CountChatItemsFilter controls the authoritative chat-item count used to
+// reconcile import summaries with stored state.
+type CountChatItemsFilter struct {
+	// IncludeDeleted counts items belonging to soft-deleted sessions too. When
+	// false, only items in non-deleted sessions are counted (the user-visible
+	// total).
+	IncludeDeleted bool
 }
 
 // UnifiedSearchFilter controls top-level cross-domain search.

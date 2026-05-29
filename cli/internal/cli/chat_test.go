@@ -119,7 +119,7 @@ func TestChatImportListSearchShowDelete(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &importSummary); err != nil {
 		t.Fatalf("parse first import summary: %v\n%s", err, stdout.String())
 	}
-	if importSummary.SessionsCreated != 1 || importSummary.ItemsCreated != 2 {
+	if importSummary.SessionsCreated != 1 || importSummary.ItemsImported != 2 {
 		t.Fatalf("unexpected first import summary: %+v", importSummary)
 	}
 
@@ -132,7 +132,7 @@ func TestChatImportListSearchShowDelete(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &importSummary); err != nil {
 		t.Fatalf("parse second import summary: %v\n%s", err, stdout.String())
 	}
-	if importSummary.FilesScanned != 1 || importSummary.SessionsSkipped != 1 || importSummary.SessionsUpdated != 0 || importSummary.ItemsCreated != 0 {
+	if importSummary.FilesScanned != 1 || importSummary.SessionsSkipped != 1 || importSummary.SessionsUpdated != 0 || importSummary.ItemsImported != 0 {
 		t.Fatalf("unexpected second import summary: %+v", importSummary)
 	}
 	updatedTranscript := `{
@@ -237,7 +237,7 @@ func TestChatImportSkipsIdenticalSecondImport(t *testing.T) {
 	}
 
 	firstSummary := runChatImportSummaryForTest(t, root)
-	if firstSummary.FilesScanned != 1 || firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 2 || firstSummary.RawSourcesCopied != 1 {
+	if firstSummary.FilesScanned != 1 || firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 2 || firstSummary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected first import summary: %+v", firstSummary)
 	}
 	before := readChatImportTestSnapshot(t, "identical-session")
@@ -246,7 +246,7 @@ func TestChatImportSkipsIdenticalSecondImport(t *testing.T) {
 	secondSummary := runChatImportSummaryForTest(t, root)
 	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 1 ||
 		secondSummary.SessionsCreated != 0 || secondSummary.SessionsUpdated != 0 ||
-		secondSummary.ItemsCreated != 0 || secondSummary.RawSourcesCopied != 0 {
+		secondSummary.ItemsImported != 0 || secondSummary.RawSourcesCopied != 0 {
 		t.Fatalf("unexpected unchanged second import summary: %+v", secondSummary)
 	}
 	if syncCalls != 1 {
@@ -281,7 +281,7 @@ func TestChatImportAppendedJSONLDoesNotReplaceExistingItems(t *testing.T) {
 	}
 
 	firstSummary := runChatImportSummaryForTest(t, root)
-	if firstSummary.FilesScanned != 1 || firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 2 || firstSummary.RawSourcesCopied != 1 {
+	if firstSummary.FilesScanned != 1 || firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 2 || firstSummary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected first import summary: %+v", firstSummary)
 	}
 	before := readChatImportTestSnapshot(t, "append-session")
@@ -306,7 +306,7 @@ func TestChatImportAppendedJSONLDoesNotReplaceExistingItems(t *testing.T) {
 	secondSummary := runChatImportSummaryForTest(t, root)
 	if secondSummary.FilesScanned != 1 || secondSummary.SessionsUpdated != 1 ||
 		secondSummary.SessionsCreated != 0 || secondSummary.SessionsSkipped != 0 ||
-		secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 1 {
+		secondSummary.ItemsImported != 1 || secondSummary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected appended second import summary: %+v", secondSummary)
 	}
 
@@ -339,7 +339,7 @@ func TestChatImportAppendedJSONLDeleteSourceRemovesOriginal(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 	firstSummary := runChatImportSummaryForTest(t, root)
-	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 {
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 1 {
 		t.Fatalf("unexpected first import summary: %+v", firstSummary)
 	}
 	appended := `{"session_id":"append-delete-source","role":"assistant","content":"appended item","timestamp":"2026-05-14T12:01:00Z"}` + "\n"
@@ -349,7 +349,7 @@ func TestChatImportAppendedJSONLDeleteSourceRemovesOriginal(t *testing.T) {
 	wantRaw := []byte(initial + appended)
 
 	secondSummary := runChatImportSummaryForTest(t, root, "--delete-source")
-	if secondSummary.SessionsUpdated != 1 || secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 1 || secondSummary.SourcesDeleted != 1 {
+	if secondSummary.SessionsUpdated != 1 || secondSummary.ItemsImported != 1 || secondSummary.RawSourcesCopied != 1 || secondSummary.SourcesDeleted != 1 {
 		t.Fatalf("unexpected appended delete-source summary: %+v", secondSummary)
 	}
 	if _, err := os.Stat(transcriptPath); !os.IsNotExist(err) {
@@ -373,7 +373,7 @@ func TestChatImportInvalidAppendedJSONLLeavesExistingImport(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 	firstSummary := runChatImportSummaryForTest(t, root)
-	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 {
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 1 {
 		t.Fatalf("unexpected first import summary: %+v", firstSummary)
 	}
 	before := readChatImportTestSnapshot(t, "append-invalid")
@@ -405,7 +405,7 @@ func TestChatImportAppendedNDJSONDoesNotReplaceExistingItems(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 	firstSummary := runChatImportSummaryForTest(t, root)
-	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 || firstSummary.RawSourcesCopied != 1 {
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 1 || firstSummary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected first import summary: %+v", firstSummary)
 	}
 	before := readChatImportTestSnapshot(t, "append-ndjson-session")
@@ -417,7 +417,7 @@ func TestChatImportAppendedNDJSONDoesNotReplaceExistingItems(t *testing.T) {
 	}
 	secondSummary := runChatImportSummaryForTest(t, root)
 	if secondSummary.SessionsUpdated != 1 || secondSummary.SessionsCreated != 0 || secondSummary.SessionsSkipped != 0 ||
-		secondSummary.ItemsCreated != 1 || secondSummary.RawSourcesCopied != 1 {
+		secondSummary.ItemsImported != 1 || secondSummary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected appended ndjson summary: %+v", secondSummary)
 	}
 	after := readChatImportTestSnapshot(t, "append-ndjson-session")
@@ -449,7 +449,7 @@ func TestChatImportAppendedJSONLWhitespaceOnlySuffixBumpsSession(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 	firstSummary := runChatImportSummaryForTest(t, root)
-	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 {
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 1 {
 		t.Fatalf("unexpected first import summary: %+v", firstSummary)
 	}
 	before := readChatImportTestSnapshot(t, "append-whitespace")
@@ -461,7 +461,7 @@ func TestChatImportAppendedJSONLWhitespaceOnlySuffixBumpsSession(t *testing.T) {
 	}
 	secondSummary := runChatImportSummaryForTest(t, root)
 	if secondSummary.SessionsUpdated != 1 || secondSummary.SessionsSkipped != 0 ||
-		secondSummary.ItemsCreated != 0 || secondSummary.RawSourcesCopied != 1 {
+		secondSummary.ItemsImported != 0 || secondSummary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected whitespace-append summary: %+v", secondSummary)
 	}
 	after := readChatImportTestSnapshot(t, "append-whitespace")
@@ -485,7 +485,7 @@ func TestChatImportSkipKeepsUnchangedSoftDeletedSessionDeleted(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 	firstSummary := runChatImportSummaryForTest(t, root)
-	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 {
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 1 {
 		t.Fatalf("unexpected first import summary: %+v", firstSummary)
 	}
 
@@ -502,7 +502,7 @@ func TestChatImportSkipKeepsUnchangedSoftDeletedSessionDeleted(t *testing.T) {
 
 	secondSummary := runChatImportSummaryForTest(t, root)
 	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 1 ||
-		secondSummary.SessionsCreated != 0 || secondSummary.SessionsUpdated != 0 || secondSummary.ItemsCreated != 0 {
+		secondSummary.SessionsCreated != 0 || secondSummary.SessionsUpdated != 0 || secondSummary.ItemsImported != 0 {
 		t.Fatalf("unexpected unchanged soft-deleted import summary: %+v", secondSummary)
 	}
 	after := readChatImportTestSnapshot(t, "soft-deleted-unchanged-session")
@@ -524,14 +524,14 @@ func TestChatImportDeleteSourceRemovesSkippedUnchangedOriginal(t *testing.T) {
 		t.Fatalf("write transcript: %v", err)
 	}
 	firstSummary := runChatImportSummaryForTest(t, root)
-	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 {
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 1 {
 		t.Fatalf("unexpected first import summary: %+v", firstSummary)
 	}
 	before := readChatImportTestSnapshot(t, "delete-skipped-unchanged")
 
 	secondSummary := runChatImportSummaryForTest(t, root, "--delete-source")
 	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 1 || secondSummary.SourcesDeleted != 1 ||
-		secondSummary.SessionsCreated != 0 || secondSummary.SessionsUpdated != 0 || secondSummary.ItemsCreated != 0 || secondSummary.RawSourcesCopied != 0 {
+		secondSummary.SessionsCreated != 0 || secondSummary.SessionsUpdated != 0 || secondSummary.ItemsImported != 0 || secondSummary.RawSourcesCopied != 0 {
 		t.Fatalf("unexpected delete-source skipped import summary: %+v", secondSummary)
 	}
 	if _, err := os.Stat(transcriptPath); !os.IsNotExist(err) {
@@ -574,7 +574,7 @@ func TestChatImportPostParseSkipForLegacyOriginalSourcePath(t *testing.T) {
 
 	secondSummary := runChatImportSummaryForTest(t, root)
 	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 1 ||
-		secondSummary.SessionsUpdated != 0 || secondSummary.RawSourcesCopied != 0 || secondSummary.ItemsCreated != 0 {
+		secondSummary.SessionsUpdated != 0 || secondSummary.RawSourcesCopied != 0 || secondSummary.ItemsImported != 0 {
 		t.Fatalf("unexpected legacy-path unchanged import summary: %+v", secondSummary)
 	}
 }
@@ -601,7 +601,8 @@ func TestChatImportRepairsMissingManagedRawSource(t *testing.T) {
 
 	secondSummary := runChatImportSummaryForTest(t, root)
 	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 0 ||
-		secondSummary.SessionsUpdated != 1 || secondSummary.RawSourcesCopied != 1 || secondSummary.ItemsCreated != 0 {
+		secondSummary.SessionsUpdated != 1 || secondSummary.RawSourcesCopied != 1 ||
+		secondSummary.ItemsImported != 1 || secondSummary.ItemsDelta != 0 || secondSummary.ItemsAfterImport != 1 {
 		t.Fatalf("unexpected missing-raw repair summary: %+v", secondSummary)
 	}
 	after := readChatImportTestSnapshot(t, "missing-managed-raw-session")
@@ -665,7 +666,7 @@ func TestChatImportDefaultScanIncludesRegisteredClaudeConfigProjectRoot(t *testi
 	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
 		t.Fatalf("parse import summary: %v\n%s", err, stdout.String())
 	}
-	if summary.FilesScanned != 1 || summary.SessionsCreated != 1 || summary.ItemsCreated != 1 {
+	if summary.FilesScanned != 1 || summary.SessionsCreated != 1 || summary.ItemsImported != 1 {
 		t.Fatalf("unexpected import summary: %+v", summary)
 	}
 
@@ -970,7 +971,7 @@ func TestRunChatImportWritesMultipleSessionsInOneBatch(t *testing.T) {
 	}
 
 	summary := runChatImportSummaryForTest(t, root)
-	if summary.SessionsCreated != 2 || summary.RawSourcesCopied != 2 || summary.ItemsCreated != 2 {
+	if summary.SessionsCreated != 2 || summary.RawSourcesCopied != 2 || summary.ItemsImported != 2 {
 		t.Fatalf("unexpected batched import summary: %+v", summary)
 	}
 	if len(batchSizes) != 1 || batchSizes[0] != 2 {
@@ -1001,7 +1002,7 @@ func TestChatImportDeleteSourceRemovesOriginal(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
 		t.Fatalf("parse import summary: %v\n%s", err, stdout.String())
 	}
-	if summary.SessionsCreated != 1 || summary.ItemsCreated != 1 || summary.SourcesDeleted != 1 {
+	if summary.SessionsCreated != 1 || summary.ItemsImported != 1 || summary.SourcesDeleted != 1 {
 		t.Fatalf("unexpected import summary: %+v", summary)
 	}
 	if _, err := os.Stat(transcriptPath); !os.IsNotExist(err) {
@@ -1065,7 +1066,7 @@ func TestChatImportReplacementCountsOnlyNewItems(t *testing.T) {
 	}
 
 	firstSummary := runChatImportSummaryForTest(t, root)
-	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsCreated != 1 || firstSummary.RawSourcesCopied != 1 {
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 1 || firstSummary.RawSourcesCopied != 1 {
 		t.Fatalf("unexpected first import summary: %+v", firstSummary)
 	}
 	before := readChatImportTestSnapshot(t, "count-session")
@@ -1084,7 +1085,11 @@ func TestChatImportReplacementCountsOnlyNewItems(t *testing.T) {
 	}
 
 	summary := runChatImportSummaryForTest(t, root)
-	if summary.SessionsUpdated != 1 || summary.ItemsCreated != 1 || summary.RawSourcesCopied != 1 || summary.SessionsSkipped != 0 {
+	// Replacing a 1-item session with a 2-item transcript re-writes both rows
+	// (items_imported=2, work performed) but the stored total only grows by one
+	// (items_delta=1, items_after_import=2).
+	if summary.SessionsUpdated != 1 || summary.ItemsImported != 2 || summary.ItemsDelta != 1 ||
+		summary.ItemsAfterImport != 2 || summary.RawSourcesCopied != 1 || summary.SessionsSkipped != 0 {
 		t.Fatalf("unexpected replacement import summary: %+v", summary)
 	}
 	after := readChatImportTestSnapshot(t, "count-session")
@@ -1327,7 +1332,7 @@ func TestChatImportGeneratedIDAndParseErrorBranches(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
 		t.Fatalf("parse generated import summary: %v\n%s", err, stdout.String())
 	}
-	if summary.SessionsCreated != 1 || summary.ItemsCreated != 1 {
+	if summary.SessionsCreated != 1 || summary.ItemsImported != 1 {
 		t.Fatalf("unexpected generated import summary: %+v", summary)
 	}
 
@@ -1395,6 +1400,15 @@ func TestChatImportRepositoryErrorBranches(t *testing.T) {
 		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
 			return activeDevice, nil
 		},
+		countChatItemsFn: func(context.Context, repository.CountChatItemsFilter) (int, error) {
+			return 0, errors.New("count failed")
+		},
+	}, "count chat items before import")
+
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
 		listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
 			return nil, errors.New("existing chats failed")
 		},
@@ -1431,18 +1445,6 @@ func TestChatImportRepositoryErrorBranches(t *testing.T) {
 			}}, nil
 		},
 	}, "compare chat source with managed raw")
-
-	runWithRepo(t, &mockRepo{
-		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
-			return activeDevice, nil
-		},
-		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
-			return repository.ChatSession{ID: "20260315-66666666"}, nil
-		},
-		listChatItemsFn: func(context.Context, string) ([]repository.ChatItem, error) {
-			return nil, errors.New("items failed")
-		},
-	}, "list existing chat items")
 
 	runWithRepo(t, &mockRepo{
 		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
@@ -1659,7 +1661,7 @@ func TestChatWritersAndGeneratedID(t *testing.T) {
 		Role:     "tool",
 		ItemType: "tool_output",
 		Text:     strPtr(strings.Repeat("tool output ", 40)),
-	}}, chatShowOptions{}); err != nil {
+	}}, nil, chatShowOptions{}); err != nil {
 		t.Fatalf("writeChatTranscript(project/tool) error = %v", err)
 	}
 	if out := transcriptOut.String(); !strings.Contains(out, transcriptProject) || !strings.Contains(out, "...") {
@@ -1684,7 +1686,7 @@ func TestChatWritersAndGeneratedID(t *testing.T) {
 		Source:          "codex",
 		SourceSessionID: "source",
 		LastActivityAt:  millisTime,
-	}, []repository.ChatItem{{Ordinal: 0, Role: "user", ItemType: "message", Text: strPtr("paged text")}}, chatShowOptions{}); err != nil {
+	}, []repository.ChatItem{{Ordinal: 0, Role: "user", ItemType: "message", Text: strPtr("paged text")}}, nil, chatShowOptions{}); err != nil {
 		t.Fatalf("writeChatTranscript(paged) error = %v", err)
 	}
 	if !strings.Contains(paged, "paged text") || transcriptOut.Len() != 0 {
@@ -1701,7 +1703,7 @@ func TestChatWritersAndGeneratedID(t *testing.T) {
 		Source:          "codex",
 		SourceSessionID: "source",
 		LastActivityAt:  millisTime,
-	}, []repository.ChatItem{{Ordinal: 0, Role: "user", ItemType: "message", Text: strPtr("direct terminal text")}}, chatShowOptions{}); err != nil {
+	}, []repository.ChatItem{{Ordinal: 0, Role: "user", ItemType: "message", Text: strPtr("direct terminal text")}}, nil, chatShowOptions{}); err != nil {
 		t.Fatalf("writeChatTranscript(terminal without pager) error = %v", err)
 	}
 	if out := transcriptOut.String(); !strings.Contains(out, "direct terminal text") {
@@ -1715,7 +1717,7 @@ func TestChatWritersAndGeneratedID(t *testing.T) {
 		Source:          "codex",
 		SourceSessionID: "source",
 		LastActivityAt:  millisTime,
-	}, nil, chatShowOptions{}); err == nil || !strings.Contains(err.Error(), "page chat transcript") {
+	}, nil, nil, chatShowOptions{}); err == nil || !strings.Contains(err.Error(), "page chat transcript") {
 		t.Fatalf("expected pager error, got %v", err)
 	}
 

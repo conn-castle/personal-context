@@ -29,6 +29,9 @@ func ApplySchema(ctx context.Context, pool *pgxpool.Pool) error {
 			reason,
 		)
 	}
+	if err := detectIncompatibleChatSchema(ctx, pool); err != nil {
+		return err
+	}
 
 	_, err = pool.Exec(ctx, schemaSQL)
 	if err != nil {
@@ -78,6 +81,24 @@ func detectLegacyPreAuthSchema(ctx context.Context, pool *pgxpool.Pool) (bool, s
 	}
 
 	return false, "", nil
+}
+
+func detectIncompatibleChatSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	chatSessionExists, err := tableExists(ctx, pool, "chat_session")
+	if err != nil {
+		return err
+	}
+	if !chatSessionExists {
+		return nil
+	}
+	hasParentSourceSessionID, err := columnExists(ctx, pool, "chat_session", "parent_source_session_id")
+	if err != nil {
+		return err
+	}
+	if !hasParentSourceSessionID {
+		return fmt.Errorf("cloud schema is missing chat_session.parent_source_session_id: this database predates the current Personal Context schema and cannot be upgraded in place; initialize a fresh cloud schema before using this binary")
+	}
+	return nil
 }
 
 func tableExists(ctx context.Context, pool *pgxpool.Pool, tableName string) (bool, error) {

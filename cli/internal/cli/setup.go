@@ -269,10 +269,23 @@ var canonicalSchemaTables = []string{
 	"project_paths",
 }
 
+const chatSessionParentSourceColumn = "parent_source_session_id"
+
 // verifyCanonicalSchemaTables fails loudly when expected tables are missing
 // after schema application. The recovery message names the actual store
 // directory (`base`, which honors PC_HOME) so users back up the right path.
 func verifyCanonicalSchemaTables(ctx context.Context, db *sql.DB, base string) error {
+	return verifyCanonicalSchemaTablesWithLock(ctx, db, base, "")
+}
+
+func verifyCanonicalSchemaTablesDuringOpen(ctx context.Context, db *sql.DB, base string) error {
+	if err := verifyChatSessionParentSourceColumnForExistingTable(ctx, db, base); err != nil {
+		return err
+	}
+	return verifyChatItemFTSShapeWithLock(ctx, db, base, filepath.Join(base, ".pc", "sync.lock"))
+}
+
+func verifyCanonicalSchemaTablesWithLock(ctx context.Context, db *sql.DB, base string, lockPath string) error {
 	for _, table := range canonicalSchemaTables {
 		var name string
 		err := db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&name)
@@ -286,18 +299,56 @@ func verifyCanonicalSchemaTables(ctx context.Context, db *sql.DB, base string) e
 			return fmt.Errorf("verify schema table %q: %w", table, err)
 		}
 	}
-	if err := verifyChatItemFTSShape(ctx, db, base); err != nil {
+	if err := verifyChatSessionParentSourceColumn(ctx, db, base); err != nil {
+		return err
+	}
+	if err := verifyChatItemFTSShapeWithLock(ctx, db, base, lockPath); err != nil {
 		return err
 	}
 	return nil
 }
 
-func verifyChatItemFTSShape(ctx context.Context, db *sql.DB, base string) error {
-	return verifyChatItemFTSShapeWithLock(ctx, db, base, "")
+func verifyChatSessionParentSourceColumn(ctx context.Context, db *sql.DB, base string) error {
+	found, err := chatSessionParentSourceColumnExists(ctx, db)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return missingChatSessionParentSourceColumnError(base)
+	}
+	return nil
 }
 
-func verifyChatItemFTSShapeDuringOpen(ctx context.Context, db *sql.DB, base string) error {
-	return verifyChatItemFTSShapeWithLock(ctx, db, base, filepath.Join(base, ".pc", "sync.lock"))
+func verifyChatSessionParentSourceColumnForExistingTable(ctx context.Context, db *sql.DB, base string) error {
+	var name string
+	err := db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name=?`, "chat_session").Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("verify schema table %q: %w", "chat_session", err)
+	}
+	return verifyChatSessionParentSourceColumn(ctx, db, base)
+}
+
+func missingChatSessionParentSourceColumnError(base string) error {
+	return fmt.Errorf(
+		"local store is missing required column %q on table %q: this database predates the current Personal Context schema and cannot be upgraded in place. Back up your existing store (e.g. `mv %s %s.backup-$(date +%%Y%%m%%dT%%H%%M%%S)`) and re-run `pc setup` to initialize a fresh store",
+		chatSessionParentSourceColumn, "chat_session", base, base,
+	)
+}
+
+func chatSessionParentSourceColumnExists(ctx context.Context, db *sql.DB) (bool, error) {
+	var count int
+	err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('chat_session') WHERE name = ?`, chatSessionParentSourceColumn).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("verify schema columns for table %q: %w", "chat_session", err)
+	}
+	return count > 0, nil
+}
+
+func verifyChatItemFTSShape(ctx context.Context, db *sql.DB, base string) error {
+	return verifyChatItemFTSShapeWithLock(ctx, db, base, "")
 }
 
 func verifyChatItemFTSShapeWithLock(ctx context.Context, db *sql.DB, base string, lockPath string) error {

@@ -87,6 +87,7 @@ interface ChatSession {
   user_id?: string;          // Postgres only; absent in SQLite
   source: "codex" | "claude_code" | "gemini" | string;
   source_session_id: string;
+  parent_source_session_id: string | null; // parent transcript's source_session_id for subagent sessions; null otherwise
   source_device_id: string;
   project_id: string | null;
   cwd: string | null;
@@ -192,10 +193,11 @@ interface DataFileExport {
 }
 
 interface ChatExport {
-  format_version: 2;  // v2 renamed source_path→original_source_path, added raw_source_key.
+  format_version: 2;  // v2 renamed source_path→original_source_path, added raw_source_key; parent_source_session_id added later (additive, omitted when null).
   id: string;
   source: string;
   source_session_id: string;
+  parent_source_session_id?: string; // parent transcript's source_session_id for subagent sessions; omitted when null
   source_device_id: string;
   project_id?: string;
   cwd?: string;

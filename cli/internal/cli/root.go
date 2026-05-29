@@ -58,6 +58,7 @@ func NewRootCommand(opts RootCommandOptions) *cobra.Command {
 	root.AddCommand(newSetupCommand(stdout, stderr, stdin))
 	root.AddCommand(newRecordsCommand(stdout, stderr))
 	root.AddCommand(newChatCommand(stdout, stderr))
+	root.AddCommand(newDocsCommand(stdout))
 	root.AddCommand(newShowCommand(stdout, stderr))
 	root.AddCommand(newRestoreDBCommand(stdout, stderr))
 	root.AddCommand(newTrashCommand(stdout, stderr))

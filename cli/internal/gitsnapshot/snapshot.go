@@ -21,7 +21,9 @@ const FormatVersion = 1
 
 // ChatFormatVersion is the chat metadata format version. v2 renamed source_path
 // to original_source_path and added raw_source_key; v1 chat metadata is
-// intentionally rejected on import (clean-cut pre-release schema change).
+// intentionally rejected on import (clean-cut pre-release schema change). The
+// optional parent_source_session_id field was later added within v2 (additive,
+// omitted when null), so existing v2 snapshots remain compatible.
 const ChatFormatVersion = 2
 
 // Snapshot is the deterministic git-export representation of Personal Context data.
@@ -84,21 +86,22 @@ type DataFile struct {
 
 // ChatSession is an exported chat directory with metadata and normalized items.
 type ChatSession struct {
-	ID                 string
-	Source             string
-	SourceSessionID    string
-	SourceDeviceID     string
-	ProjectID          *string
-	CWD                *string
-	Title              *string
-	StartedAt          time.Time
-	LastActivityAt     time.Time
-	OriginalSourcePath *string
-	RawSourceKey       *string
-	RawSourceContent   []byte
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	Items              []ChatItem
+	ID                    string
+	Source                string
+	SourceSessionID       string
+	ParentSourceSessionID *string
+	SourceDeviceID        string
+	ProjectID             *string
+	CWD                   *string
+	Title                 *string
+	StartedAt             time.Time
+	LastActivityAt        time.Time
+	OriginalSourcePath    *string
+	RawSourceKey          *string
+	RawSourceContent      []byte
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	Items                 []ChatItem
 }
 
 // ChatItem is a normalized exported chat item.
@@ -151,18 +154,19 @@ type dataFile struct {
 }
 
 type chatMetadataFile struct {
-	FormatVersion      int     `json:"format_version"`
-	ID                 string  `json:"id"`
-	Source             string  `json:"source"`
-	SourceSessionID    string  `json:"source_session_id"`
-	SourceDeviceID     string  `json:"source_device_id"`
-	ProjectID          *string `json:"project_id,omitempty"`
-	CWD                *string `json:"cwd,omitempty"`
-	Title              *string `json:"title,omitempty"`
-	StartedAt          string  `json:"started_at"`
-	LastActivityAt     string  `json:"last_activity_at"`
-	OriginalSourcePath *string `json:"original_source_path,omitempty"`
-	RawSourceKey       *string `json:"raw_source_key,omitempty"`
+	FormatVersion         int     `json:"format_version"`
+	ID                    string  `json:"id"`
+	Source                string  `json:"source"`
+	SourceSessionID       string  `json:"source_session_id"`
+	ParentSourceSessionID *string `json:"parent_source_session_id,omitempty"`
+	SourceDeviceID        string  `json:"source_device_id"`
+	ProjectID             *string `json:"project_id,omitempty"`
+	CWD                   *string `json:"cwd,omitempty"`
+	Title                 *string `json:"title,omitempty"`
+	StartedAt             string  `json:"started_at"`
+	LastActivityAt        string  `json:"last_activity_at"`
+	OriginalSourcePath    *string `json:"original_source_path,omitempty"`
+	RawSourceKey          *string `json:"raw_source_key,omitempty"`
 	// SourcePathLegacy is populated when decoding a v1 snapshot; it triggers an
 	// import-time rejection so legacy snapshots are not silently re-imported.
 	SourcePathLegacy *string `json:"source_path,omitempty"`
@@ -363,20 +367,21 @@ func writeSnapshotContents(root string, snapshot Snapshot) error {
 			return fmt.Errorf("create chat dir %s: %w", chat.ID, err)
 		}
 		metadataBytes, err := json.MarshalIndent(chatMetadataFile{
-			FormatVersion:      ChatFormatVersion,
-			ID:                 chat.ID,
-			Source:             chat.Source,
-			SourceSessionID:    chat.SourceSessionID,
-			SourceDeviceID:     chat.SourceDeviceID,
-			ProjectID:          chat.ProjectID,
-			CWD:                chat.CWD,
-			Title:              chat.Title,
-			StartedAt:          chat.StartedAt.UTC().Format(time.RFC3339Nano),
-			LastActivityAt:     chat.LastActivityAt.UTC().Format(time.RFC3339Nano),
-			OriginalSourcePath: chat.OriginalSourcePath,
-			RawSourceKey:       chat.RawSourceKey,
-			CreatedAt:          chat.CreatedAt.UTC().Format(time.RFC3339Nano),
-			UpdatedAt:          chat.UpdatedAt.UTC().Format(time.RFC3339Nano),
+			FormatVersion:         ChatFormatVersion,
+			ID:                    chat.ID,
+			Source:                chat.Source,
+			SourceSessionID:       chat.SourceSessionID,
+			ParentSourceSessionID: chat.ParentSourceSessionID,
+			SourceDeviceID:        chat.SourceDeviceID,
+			ProjectID:             chat.ProjectID,
+			CWD:                   chat.CWD,
+			Title:                 chat.Title,
+			StartedAt:             chat.StartedAt.UTC().Format(time.RFC3339Nano),
+			LastActivityAt:        chat.LastActivityAt.UTC().Format(time.RFC3339Nano),
+			OriginalSourcePath:    chat.OriginalSourcePath,
+			RawSourceKey:          chat.RawSourceKey,
+			CreatedAt:             chat.CreatedAt.UTC().Format(time.RFC3339Nano),
+			UpdatedAt:             chat.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		}, "", "  ")
 		if err != nil {
 			return fmt.Errorf("marshal chat metadata for %s: %w", chat.ID, err)
@@ -786,21 +791,22 @@ func readChat(dir string, chatID string) (ChatSession, error) {
 		}
 	}
 	return ChatSession{
-		ID:                 chatID,
-		Source:             metadata.Source,
-		SourceSessionID:    metadata.SourceSessionID,
-		SourceDeviceID:     metadata.SourceDeviceID,
-		ProjectID:          metadata.ProjectID,
-		CWD:                metadata.CWD,
-		Title:              metadata.Title,
-		StartedAt:          startedAt.UTC(),
-		LastActivityAt:     lastActivityAt.UTC(),
-		OriginalSourcePath: metadata.OriginalSourcePath,
-		RawSourceKey:       metadata.RawSourceKey,
-		RawSourceContent:   rawSourceContent,
-		CreatedAt:          createdAt.UTC(),
-		UpdatedAt:          updatedAt.UTC(),
-		Items:              items,
+		ID:                    chatID,
+		Source:                metadata.Source,
+		SourceSessionID:       metadata.SourceSessionID,
+		ParentSourceSessionID: metadata.ParentSourceSessionID,
+		SourceDeviceID:        metadata.SourceDeviceID,
+		ProjectID:             metadata.ProjectID,
+		CWD:                   metadata.CWD,
+		Title:                 metadata.Title,
+		StartedAt:             startedAt.UTC(),
+		LastActivityAt:        lastActivityAt.UTC(),
+		OriginalSourcePath:    metadata.OriginalSourcePath,
+		RawSourceKey:          metadata.RawSourceKey,
+		RawSourceContent:      rawSourceContent,
+		CreatedAt:             createdAt.UTC(),
+		UpdatedAt:             updatedAt.UTC(),
+		Items:                 items,
 	}, nil
 }
 

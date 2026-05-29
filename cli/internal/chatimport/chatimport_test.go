@@ -1,6 +1,7 @@
 package chatimport
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -676,6 +677,173 @@ func TestRootsIncludesClaudeProjectDirsForPerProjectScans(t *testing.T) {
 	for _, r := range claudeRoots {
 		if r == filepath.Join(projectPath, ".claude") {
 			t.Fatalf("per-project claude roots must not scan broad .claude root: %+v", claudeRoots)
+		}
+	}
+}
+
+// TestClaudeSubagentFilesGetDistinctIdentities verifies that two Task-tool
+// subagent transcripts under the same parent (which both carry the PARENT
+// sessionId on every row) get file-unique source identities plus the parent
+// recorded in ParentSourceSessionID — instead of colliding and overwriting
+// each other (round-6 Issue 1).
+func TestClaudeSubagentFilesGetDistinctIdentities(t *testing.T) {
+	root := t.TempDir()
+	parentSID := "2dbd6fef-2d8a-4ba9-9eef-32585b350874"
+	subDir := filepath.Join(root, parentSID, "subagents")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	row := func(text string) string {
+		return `{"type":"assistant","isSidechain":true,"sessionId":"` + parentSID +
+			`","cwd":"/repo","timestamp":"2026-05-17T10:00:00Z","message":{"role":"assistant","content":"` + text + `"}}`
+	}
+	files := map[string]string{
+		"agent-aaa.jsonl": row("alpha subagent text"),
+		"agent-bbb.jsonl": row("beta subagent text"),
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(subDir, name), []byte(content+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	for name, wantSuffix := range map[string]string{"agent-aaa.jsonl": "agent-aaa", "agent-bbb.jsonl": "agent-bbb"} {
+		session, items, err := ParseTranscriptFile("claude_code", filepath.Join(subDir, name))
+		if err != nil {
+			t.Fatalf("ParseTranscriptFile(%s) error = %v", name, err)
+		}
+		wantSID := parentSID + ":" + wantSuffix
+		if session.SourceSessionID != wantSID {
+			t.Fatalf("%s SourceSessionID = %q, want %q", name, session.SourceSessionID, wantSID)
+		}
+		if session.ParentSourceSessionID == nil || *session.ParentSourceSessionID != parentSID {
+			t.Fatalf("%s ParentSourceSessionID = %v, want %q", name, session.ParentSourceSessionID, parentSID)
+		}
+		if len(items) != 1 {
+			t.Fatalf("%s items = %d, want 1", name, len(items))
+		}
+	}
+}
+
+// TestClaudeNonSubagentKeepsParentNil confirms a normal Claude transcript (not
+// under subagents/, no isSidechain) resolves its source id from sessionId and
+// leaves ParentSourceSessionID nil.
+func TestClaudeNonSubagentKeepsParentNil(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.jsonl")
+	content := `{"type":"assistant","sessionId":"main-sid","timestamp":"2026-05-17T10:00:00Z","message":{"role":"assistant","content":"hello"}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	session, _, err := ParseTranscriptFile("claude_code", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.SourceSessionID != "main-sid" {
+		t.Fatalf("SourceSessionID = %q, want main-sid", session.SourceSessionID)
+	}
+	if session.ParentSourceSessionID != nil {
+		t.Fatalf("ParentSourceSessionID = %v, want nil", session.ParentSourceSessionID)
+	}
+}
+
+// TestGeminiItemTypeNormalization verifies Gemini's model/info/error labels are
+// normalized so no agent-specific value leaks into item_type (round-6 Issue 3).
+func TestGeminiItemTypeNormalization(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "session-norm.jsonl")
+	lines := []string{
+		`{"sessionId":"abc","kind":"main","startTime":"2026-05-17T10:00:00Z"}`,
+		`{"type":"user","content":"hi there","timestamp":"2026-05-17T10:00:01Z"}`,
+		`{"type":"gemini","content":"hello from the model","timestamp":"2026-05-17T10:00:02Z"}`,
+		`{"type":"info","content":"mcp server list","timestamp":"2026-05-17T10:00:03Z"}`,
+		`{"type":"error","content":"something failed","timestamp":"2026-05-17T10:00:04Z"}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, items, err := ParseTranscriptFile("gemini", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if len(items) != 4 {
+		t.Fatalf("items = %d, want 4: %+v", len(items), items)
+	}
+	want := []struct{ role, itemType string }{
+		{"user", "message"},
+		{"assistant", "message"},
+		{"info", "event"},
+		{"error", "event"},
+	}
+	for i, w := range want {
+		if items[i].Role != w.role || items[i].ItemType != w.itemType {
+			t.Fatalf("item %d = role=%q type=%q, want role=%q type=%q", i, items[i].Role, items[i].ItemType, w.role, w.itemType)
+		}
+	}
+	for _, item := range items {
+		switch item.ItemType {
+		case "gemini", "info", "error":
+			t.Fatalf("agent-specific item_type leaked: %q", item.ItemType)
+		}
+	}
+}
+
+// TestEmptyTranscriptsReturnErrEmptyTranscript verifies metadata-only / empty
+// transcript files report ErrEmptyTranscript so the caller skips session
+// creation (round-6 Issue 4).
+func TestEmptyTranscriptsReturnErrEmptyTranscript(t *testing.T) {
+	root := t.TempDir()
+	cases := map[string]struct {
+		source, name, content string
+	}{
+		"claude cursor marker": {"claude_code", "marker.jsonl", `{"type":"last-prompt","leafUuid":"x","sessionId":"y"}` + "\n"},
+		"gemini header only":   {"gemini", "session-empty.jsonl", `{"sessionId":"z","kind":"main","startTime":"2026-05-17T10:00:00Z"}` + "\n"},
+		"empty json messages":  {"gemini", "empty.json", `{"messages":[]}`},
+		"zero bytes":           {"claude_code", "zero.jsonl", ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(root, tc.name)
+			if err := os.WriteFile(path, []byte(tc.content), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			_, _, err := ParseTranscriptFile(tc.source, path)
+			if !errors.Is(err, ErrEmptyTranscript) {
+				t.Fatalf("error = %v, want ErrEmptyTranscript", err)
+			}
+		})
+	}
+}
+
+// TestGeminiDuplicatePathsGetDistinctIdentities verifies the project-name and
+// project-hash copies of one Gemini session get distinct, path-derived source
+// identities instead of colliding on the shared basename (round-6 Issue 6).
+func TestGeminiDuplicatePathsGetDistinctIdentities(t *testing.T) {
+	root := t.TempDir()
+	body := `{"messages":[{"author":"user","content":"%s"}]}`
+	paths := map[string]string{
+		filepath.Join(root, "castle-steward", "chats", "session-X.json"): "name-copy text",
+		filepath.Join(root, "hash123abc", "chats", "session-X.json"):     "hash-copy text",
+	}
+	var ids []string
+	for p, text := range paths {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte(strings.Replace(body, "%s", text, 1)), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		session, _, err := ParseTranscriptFile("gemini", p)
+		if err != nil {
+			t.Fatalf("ParseTranscriptFile(%s) error = %v", p, err)
+		}
+		ids = append(ids, session.SourceSessionID)
+	}
+	if ids[0] == ids[1] {
+		t.Fatalf("expected distinct source ids for divergent duplicate paths, both = %q", ids[0])
+	}
+	for _, id := range ids {
+		if !strings.HasSuffix(id, "chats/session-X") {
+			t.Fatalf("source id %q should be path-derived (chats/session-X suffix)", id)
 		}
 	}
 }
