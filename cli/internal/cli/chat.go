@@ -49,9 +49,6 @@ var runChatPager = func(content string) error {
 		return nil
 	}
 	fields := strings.Fields(pager)
-	if len(fields) == 0 {
-		return nil
-	}
 	cmd := exec.Command(fields[0], fields[1:]...)
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = os.Stdout
@@ -104,13 +101,39 @@ type chatImportOptions struct {
 	DeleteSource bool
 }
 
+// chatImportSummary reports both work performed and the resulting stored state.
+//
+// Work-performed counters (sessions_created/updated, items_imported,
+// raw_sources_copied, *_skipped) describe what the run did. The state counters
+// items_delta and items_after_import are derived from the repository's
+// authoritative CountChatItems so the summary reconciles with the database
+// instead of accumulating CLI-side guesses.
 type chatImportSummary struct {
-	SessionsCreated      int      `json:"sessions_created"`
-	SessionsUpdated      int      `json:"sessions_updated"`
-	SessionsSkipped      int      `json:"sessions_skipped,omitempty"`
-	ItemsCreated         int      `json:"items_created"`
-	FilesScanned         int      `json:"files_scanned"`
-	RawSourcesCopied     int      `json:"raw_sources_copied"`
+	SessionsCreated int `json:"sessions_created"`
+	SessionsUpdated int `json:"sessions_updated"`
+	SessionsSkipped int `json:"sessions_skipped,omitempty"`
+	// DuplicatesSkipped counts files collapsed as exact byte-identical
+	// duplicates scanned under a different path (e.g. Gemini's project-name vs
+	// project-hash copies of one session).
+	DuplicatesSkipped int `json:"duplicates_skipped,omitempty"`
+	// CollisionsSkipped counts files skipped because they collided on an
+	// existing (source, source_session_id) owned by a different source file and
+	// diverged from it; the run refuses to overwrite the unrelated source.
+	CollisionsSkipped int `json:"collisions_skipped,omitempty"`
+	// ItemsImported is the number of chat item rows written this run (work
+	// performed). Replaced sessions count every re-inserted row.
+	ItemsImported int `json:"items_imported"`
+	// ItemsDelta is the signed net change in stored chat items (after - before),
+	// derived from CountChatItems.
+	ItemsDelta int `json:"items_delta"`
+	// ItemsAfterImport is the authoritative absolute number of stored chat items
+	// (in non-deleted sessions) after the run.
+	ItemsAfterImport int `json:"items_after_import"`
+	FilesScanned     int `json:"files_scanned"`
+	// RawSourcesCopied is the number of distinct chat sessions whose managed raw
+	// source was written this run (retained state, not per-file work).
+	RawSourcesCopied     int `json:"raw_sources_copied"`
+	rawSourceSessions    map[string]struct{}
 	SourcesDeleted       int      `json:"sources_deleted,omitempty"`
 	SourceDeleteWarnings []string `json:"source_delete_warnings,omitempty"`
 }
@@ -126,18 +149,22 @@ type chatImportSourceSessionKey struct {
 	sourceSessionID string
 }
 
+type chatImportContentHashKey struct {
+	source string
+	hash   string
+}
+
 type chatImportSessionIndex struct {
 	byOriginalPath  map[chatImportSourcePathKey]repository.ChatSession
 	bySourceSession map[chatImportSourceSessionKey]repository.ChatSession
 }
 
 type pendingChatImport struct {
-	op             repository.ChatImportOp
-	stage          filesystem.ChatSourceStage
-	sourcePath     string
-	deleteSource   bool
-	sessionIndex   *chatImportSessionIndex
-	priorItemCount int
+	op           repository.ChatImportOp
+	stage        filesystem.ChatSourceStage
+	sourcePath   string
+	deleteSource bool
+	sessionIndex *chatImportSessionIndex
 }
 
 type chatImportBatch struct {
@@ -198,20 +225,19 @@ func (b *chatImportBatch) flush(ctx context.Context) error {
 			}
 			return fmt.Errorf("promote chat source for %s from staged file %s: %w", result.Session.ID, entry.stage.StagedPath, err)
 		}
-		b.summary.RawSourcesCopied++
+		if b.summary.rawSourceSessions == nil {
+			b.summary.rawSourceSessions = make(map[string]struct{})
+		}
+		b.summary.rawSourceSessions[result.Session.ID] = struct{}{}
+		b.summary.RawSourcesCopied = len(b.summary.rawSourceSessions)
+		// items_imported is work performed: every row written this run, whether
+		// inserted into a new session, appended, or re-inserted on replace. Net
+		// state is reported separately via items_delta/items_after_import.
+		b.summary.ItemsImported += len(entry.op.Items)
 		if result.Created {
 			b.summary.SessionsCreated++
-			b.summary.ItemsCreated += len(entry.op.Items)
 		} else {
 			b.summary.SessionsUpdated++
-			switch entry.op.ItemMode {
-			case repository.ChatImportItemModeAppend:
-				b.summary.ItemsCreated += len(entry.op.Items)
-			case repository.ChatImportItemModeReplace:
-				if len(entry.op.Items) > entry.priorItemCount {
-					b.summary.ItemsCreated += len(entry.op.Items) - entry.priorItemCount
-				}
-			}
 		}
 		if err := entry.sessionIndex.remember(result.Session); err != nil {
 			return err
@@ -283,7 +309,16 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 		return fmt.Errorf("acquire local sync lock for chat import: %w", err)
 	}
 	hadMutations := false
+	var itemsBefore int
 	bulkErr := batchWriter.RunChatImportBulkMode(ctx, func(ctx context.Context) (bool, error) {
+		before, err := stack.Repo.CountChatItems(ctx, repository.CountChatItemsFilter{})
+		if err != nil {
+			return hadMutations, fmt.Errorf("count chat items before import: %w", err)
+		}
+		itemsBefore = before
+		// seenContentHashes collapses exact byte-identical duplicate files that
+		// are scanned under different paths within this run (round-6 Issue 6).
+		seenContentHashes := map[chatImportContentHashKey]struct{}{}
 		for source, sourceRoots := range roots {
 			sessionIndex, err := loadChatImportSessionIndex(ctx, stack.Repo, source, deviceID)
 			if err != nil {
@@ -305,6 +340,10 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 						return hadMutations, err
 					}
 					if ok {
+						existingHash, hashErr := recordio.HashFile(file)
+						if hashErr != nil {
+							return hadMutations, fmt.Errorf("hash existing chat source %s: %w", file, hashErr)
+						}
 						prior := existing
 						priorSession = &prior
 						handled, mutated, err := handleExistingChatImport(ctx, stack, &batch, &sessionIndex, existing, file, deviceID, projectPaths, opts.DeleteSource)
@@ -315,11 +354,17 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 							hadMutations = true
 						}
 						if handled {
+							seenContentHashes[chatImportContentHashKey{source: source, hash: existingHash}] = struct{}{}
 							continue
 						}
 					}
 					session, items, err := chatimport.ParseTranscriptFile(source, file)
 					if err != nil {
+						if errors.Is(err, chatimport.ErrEmptyTranscript) {
+							// Metadata-only / empty transcript: counted as scanned
+							// (above) but never creates a chat session (round-6 Issue 4).
+							continue
+						}
 						return hadMutations, fmt.Errorf("parse %s: %w", file, err)
 					}
 					session.SourceDeviceID = deviceID
@@ -331,6 +376,18 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 						}
 					}
 					if existing, ok := sessionIndex.bySourceSession[sourceSessionKey]; ok {
+						if priorSession == nil {
+							// Cross-file collision: a DIFFERENT source file already
+							// owns this (source, source_session_id). After the
+							// subagent/Gemini identity fixes this should not happen;
+							// when it does, never overwrite the unrelated managed
+							// source — collapse byte-identical duplicates, warn-and-
+							// skip divergent ones (round-6 Issues 1 & 6 / Fix B).
+							if err := defendChatImportCollision(ctx, stack, &batch, stderr, existing, file, opts.DeleteSource); err != nil {
+								return hadMutations, err
+							}
+							continue
+						}
 						prior := existing
 						priorSession = &prior
 						handled, mutated, err := handleExistingChatImport(ctx, stack, &batch, &sessionIndex, existing, file, deviceID, projectPaths, opts.DeleteSource)
@@ -344,15 +401,37 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 							continue
 						}
 					}
+					// Link a not-yet-indexed existing session for this source id
+					// before deciding whether this is a brand-new session.
+					if priorSession == nil {
+						if existing, lookupErr := stack.Repo.GetChatSessionBySource(ctx, session.Source, session.SourceSessionID); lookupErr == nil {
+							prior := existing
+							priorSession = &prior
+						} else if !errors.Is(lookupErr, repository.ErrNotFound) {
+							return hadMutations, fmt.Errorf("look up existing chat session: %w", lookupErr)
+						}
+					}
+					if priorSession == nil {
+						// Brand-new session: collapse exact byte-identical duplicate
+						// files scanned under a different path this run. The first
+						// file in scan order is the deterministic representative.
+						hash, hashErr := recordio.HashFile(file)
+						if hashErr != nil {
+							return hadMutations, fmt.Errorf("hash chat source %s: %w", file, hashErr)
+						}
+						hashKey := chatImportContentHashKey{source: source, hash: hash}
+						if _, dup := seenContentHashes[hashKey]; dup {
+							summary.DuplicatesSkipped++
+							if opts.DeleteSource {
+								deleteOriginalChatSource(&summary, file)
+							}
+							continue
+						}
+						seenContentHashes[hashKey] = struct{}{}
+					}
 					if session.ID == "" {
 						if priorSession != nil {
 							session.ID = priorSession.ID
-						} else if existing, err := stack.Repo.GetChatSessionBySource(ctx, session.Source, session.SourceSessionID); err == nil {
-							prior := existing
-							priorSession = &prior
-							session.ID = existing.ID
-						} else if !errors.Is(err, repository.ErrNotFound) {
-							return hadMutations, fmt.Errorf("look up existing chat session: %w", err)
 						} else {
 							id, err := generateUniqueChatID(ctx, stack.Repo, session.LastActivityAt)
 							if err != nil {
@@ -361,15 +440,7 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 							session.ID = id
 						}
 					}
-					priorItemCount := 0
-					if priorSession != nil {
-						existingItems, err := stack.Repo.ListChatItems(ctx, priorSession.ID)
-						if err != nil {
-							return hadMutations, fmt.Errorf("list existing chat items before import: %w", err)
-						}
-						priorItemCount = len(existingItems)
-					}
-					if err := queueReplaceChatImport(ctx, stack, &batch, &sessionIndex, session, items, file, priorItemCount, opts.DeleteSource); err != nil {
+					if err := queueReplaceChatImport(ctx, stack, &batch, &sessionIndex, session, items, file, opts.DeleteSource); err != nil {
 						return hadMutations, err
 					}
 					hadMutations = true
@@ -391,6 +462,14 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 	if releaseErr != nil {
 		return releaseErr
 	}
+	// Reconcile the summary with stored state using the authoritative item
+	// count rather than CLI-side accumulators (round-6 Fix C).
+	itemsAfter, err := stack.Repo.CountChatItems(ctx, repository.CountChatItemsFilter{})
+	if err != nil {
+		return fmt.Errorf("count chat items after import: %w", err)
+	}
+	summary.ItemsAfterImport = itemsAfter
+	summary.ItemsDelta = itemsAfter - itemsBefore
 	if hadMutations {
 		_ = runAutoSyncFn(ctx, stderr)
 	}
@@ -741,7 +820,7 @@ func nullableTextEqual(left *string, right *string) bool {
 	return *left == *right
 }
 
-func queueReplaceChatImport(ctx context.Context, stack *localStack, batch *chatImportBatch, sessionIndex *chatImportSessionIndex, session repository.CreateChatSessionInput, items []repository.CreateChatItemInput, sourcePath string, priorItemCount int, deleteSource bool) error {
+func queueReplaceChatImport(ctx context.Context, stack *localStack, batch *chatImportBatch, sessionIndex *chatImportSessionIndex, session repository.CreateChatSessionInput, items []repository.CreateChatItemInput, sourcePath string, deleteSource bool) error {
 	stage, err := stack.FS.CopyChatSourceToStage(session.ID, sourcePath)
 	if err != nil {
 		return fmt.Errorf("stage chat source %s: %w", sourcePath, err)
@@ -757,14 +836,45 @@ func queueReplaceChatImport(ctx context.Context, stack *localStack, batch *chatI
 			ItemMode: repository.ChatImportItemModeReplace,
 			Items:    items,
 		},
-		stage:          stage,
-		sourcePath:     sourcePath,
-		deleteSource:   deleteSource,
-		sessionIndex:   sessionIndex,
-		priorItemCount: priorItemCount,
+		stage:        stage,
+		sourcePath:   sourcePath,
+		deleteSource: deleteSource,
+		sessionIndex: sessionIndex,
 	}); err != nil {
 		return err
 	}
+	return nil
+}
+
+// defendChatImportCollision handles a scanned file whose parsed identity
+// collides with an existing chat session owned by a DIFFERENT source file. It
+// never overwrites the existing managed source: byte-identical content is
+// collapsed as a duplicate, divergent content is reported on stderr and skipped
+// so distinct transcripts can never silently replace one another.
+func defendChatImportCollision(ctx context.Context, stack *localStack, batch *chatImportBatch, stderr io.Writer, existing repository.ChatSession, sourcePath string, deleteSource bool) error {
+	if existing.RawSourceKey != nil {
+		matches, err := sourceMatchesManagedRaw(ctx, stack.FS, existing.ID, *existing.RawSourceKey, sourcePath)
+		if err != nil {
+			return fmt.Errorf("compare chat source with managed raw %s: %w", sourcePath, err)
+		}
+		if matches {
+			// Same content already imported (e.g. a session whose
+			// original_source_path was lost, re-scanned under a different
+			// path): treat as an unchanged skip and let --delete-source reclaim
+			// the redundant source.
+			batch.summary.SessionsSkipped++
+			if deleteSource {
+				deleteImportedChatSourceIfSafe(batch.summary, stack.FS, existing.ID, *existing.RawSourceKey, sourcePath)
+			}
+			return nil
+		}
+	}
+	batch.summary.CollisionsSkipped++
+	owner := "an earlier import"
+	if existing.OriginalSourcePath != nil {
+		owner = *existing.OriginalSourcePath
+	}
+	_, _ = fmt.Fprintf(stderr, "warning: skipping %s: source session %q is already imported from %s with different content; not overwriting\n", sourcePath, existing.SourceSessionID, owner)
 	return nil
 }
 
@@ -774,6 +884,10 @@ func deleteImportedChatSourceIfSafe(summary *chatImportSummary, fs *filesystem.C
 	if isSameAsManagedFile(fs, chatID, rawSourceKey, sourcePath) {
 		return
 	}
+	deleteOriginalChatSource(summary, sourcePath)
+}
+
+func deleteOriginalChatSource(summary *chatImportSummary, sourcePath string) {
 	if err := os.Remove(sourcePath); err != nil {
 		summary.SourceDeleteWarnings = append(summary.SourceDeleteWarnings, fmt.Sprintf("%s: %v", sourcePath, err))
 	} else {
@@ -892,6 +1006,7 @@ func newChatListCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	var source string
 	var project string
 	var unassigned bool
+	var parentSourceSessionID string
 	var limit int
 	var offset int
 	cmd := &cobra.Command{
@@ -899,40 +1014,51 @@ func newChatListCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 		Short: "List chat sessions",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runChatList(cmd.Context(), stdout, stderr, chatListOptions{Format: format, Source: source, ProjectID: project, Unassigned: unassigned, Limit: limit, Offset: offset})
+			return runChatList(cmd.Context(), stdout, stderr, chatListOptions{Format: format, Source: source, ProjectID: project, Unassigned: unassigned, ParentSourceSessionID: parentSourceSessionID, Limit: limit, Offset: offset})
 		},
 	}
 	cmd.Flags().StringVar(&format, "format", "table", "Output format (table|json|ids)")
 	cmd.Flags().StringVar(&source, "agent", "", "Filter by agent (codex|claude|gemini)")
 	cmd.Flags().StringVar(&project, "project", "", "Filter by project ID")
 	cmd.Flags().BoolVar(&unassigned, "unassigned", false, "Show only sessions without a project")
+	cmd.Flags().StringVar(&parentSourceSessionID, "parent-source-session-id", "", "Show only subagent sessions whose parent has this source session ID")
 	cmd.Flags().IntVar(&limit, "limit", defaultChatListLimit, "Maximum sessions to return")
 	cmd.Flags().IntVar(&offset, "offset", 0, "Offset for pagination")
 	return cmd
 }
 
 type chatListOptions struct {
-	Format     string
-	Source     string
-	ProjectID  string
-	Unassigned bool
-	Limit      int
-	Offset     int
+	Format                string
+	Source                string
+	ProjectID             string
+	Unassigned            bool
+	ParentSourceSessionID string
+	Limit                 int
+	Offset                int
 }
 
 type chatSessionJSON struct {
-	ID                 string  `json:"id"`
-	Source             string  `json:"source"`
-	SourceSessionID    string  `json:"source_session_id"`
-	SourceDeviceID     string  `json:"source_device_id"`
-	ProjectID          *string `json:"project_id"`
-	CWD                *string `json:"cwd"`
-	Title              *string `json:"title"`
-	StartedAt          string  `json:"started_at"`
-	LastActivityAt     string  `json:"last_activity_at"`
-	OriginalSourcePath *string `json:"original_source_path"`
-	RawSourceKey       *string `json:"raw_source_key"`
-	DeletedAt          *string `json:"deleted_at"`
+	ID                    string  `json:"id"`
+	Source                string  `json:"source"`
+	SourceSessionID       string  `json:"source_session_id"`
+	ParentSourceSessionID *string `json:"parent_source_session_id"`
+	SourceDeviceID        string  `json:"source_device_id"`
+	ProjectID             *string `json:"project_id"`
+	CWD                   *string `json:"cwd"`
+	Title                 *string `json:"title"`
+	StartedAt             string  `json:"started_at"`
+	LastActivityAt        string  `json:"last_activity_at"`
+	OriginalSourcePath    *string `json:"original_source_path"`
+	RawSourceKey          *string `json:"raw_source_key"`
+	DeletedAt             *string `json:"deleted_at"`
+}
+
+// chatRelationJSON is a concise reference to a related chat session (e.g. a
+// subagent of a parent transcript) for pc chat show JSON output.
+type chatRelationJSON struct {
+	ID              string  `json:"id"`
+	SourceSessionID string  `json:"source_session_id"`
+	Title           *string `json:"title"`
 }
 
 func runChatList(ctx context.Context, stdout io.Writer, _ io.Writer, opts chatListOptions) error {
@@ -958,6 +1084,10 @@ func runChatList(ctx context.Context, stdout io.Writer, _ io.Writer, opts chatLi
 	if strings.TrimSpace(opts.ProjectID) != "" {
 		project := strings.TrimSpace(opts.ProjectID)
 		filter.ProjectID = &project
+	}
+	if strings.TrimSpace(opts.ParentSourceSessionID) != "" {
+		parent := strings.TrimSpace(opts.ParentSourceSessionID)
+		filter.ParentSourceSessionID = &parent
 	}
 	total, err := stack.Repo.CountChatSessions(ctx, filter)
 	if err != nil {
@@ -991,6 +1121,7 @@ func newChatSearchCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	var source string
 	var project string
 	var includeTools bool
+	var parentSourceSessionID string
 	var limit int
 	var offset int
 	cmd := &cobra.Command{
@@ -998,25 +1129,27 @@ func newChatSearchCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 		Short: "Search chat transcripts",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runChatSearch(cmd.Context(), stdout, stderr, args[0], chatSearchOptions{Format: format, Source: source, ProjectID: project, IncludeTools: includeTools, Limit: limit, Offset: offset})
+			return runChatSearch(cmd.Context(), stdout, stderr, args[0], chatSearchOptions{Format: format, Source: source, ProjectID: project, IncludeTools: includeTools, ParentSourceSessionID: parentSourceSessionID, Limit: limit, Offset: offset})
 		},
 	}
 	cmd.Flags().StringVar(&format, "format", "table", "Output format (table|json)")
 	cmd.Flags().StringVar(&source, "agent", "", "Filter by agent (codex|claude|gemini)")
 	cmd.Flags().StringVar(&project, "project", "", "Filter by project ID")
 	cmd.Flags().BoolVar(&includeTools, "include-tool-outputs", false, "Include tool output items")
+	cmd.Flags().StringVar(&parentSourceSessionID, "parent-source-session-id", "", "Search only subagent sessions whose parent has this source session ID")
 	cmd.Flags().IntVar(&limit, "limit", defaultChatListLimit, "Maximum results to return")
 	cmd.Flags().IntVar(&offset, "offset", 0, "Offset for pagination")
 	return cmd
 }
 
 type chatSearchOptions struct {
-	Format       string
-	Source       string
-	ProjectID    string
-	IncludeTools bool
-	Limit        int
-	Offset       int
+	Format                string
+	Source                string
+	ProjectID             string
+	IncludeTools          bool
+	ParentSourceSessionID string
+	Limit                 int
+	Offset                int
 }
 
 type chatSearchJSON struct {
@@ -1057,6 +1190,10 @@ func runChatSearch(ctx context.Context, stdout io.Writer, _ io.Writer, query str
 	if strings.TrimSpace(opts.ProjectID) != "" {
 		project := strings.TrimSpace(opts.ProjectID)
 		filter.ProjectID = &project
+	}
+	if strings.TrimSpace(opts.ParentSourceSessionID) != "" {
+		parent := strings.TrimSpace(opts.ParentSourceSessionID)
+		filter.ParentSourceSessionID = &parent
 	}
 	results, err := stack.Repo.SearchChatItems(ctx, filter)
 	if err != nil {
@@ -1145,14 +1282,32 @@ func showChatFromStack(ctx context.Context, stdout io.Writer, stack *localStack,
 	if err != nil {
 		return fmt.Errorf("list chat items: %w", err)
 	}
+	// A session is a parent transcript when other sessions name it as their
+	// parent. Surface those subagents so the relationship is navigable.
+	subagents, err := stack.Repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{
+		Source:                &session.Source,
+		ParentSourceSessionID: &session.SourceSessionID,
+	})
+	if err != nil {
+		return fmt.Errorf("list subagent chats: %w", err)
+	}
 	switch opts.Format {
 	case "json":
+		relations := make([]chatRelationJSON, 0, len(subagents))
+		for _, subagent := range subagents {
+			relations = append(relations, chatRelationJSON{
+				ID:              subagent.ID,
+				SourceSessionID: subagent.SourceSessionID,
+				Title:           subagent.Title,
+			})
+		}
 		return writeIndentedJSON(stdout, struct {
-			Session chatSessionJSON       `json:"session"`
-			Items   []repository.ChatItem `json:"items"`
-		}{Session: chatSessionToJSON(session), Items: items})
+			Session   chatSessionJSON       `json:"session"`
+			Subagents []chatRelationJSON    `json:"subagents,omitempty"`
+			Items     []repository.ChatItem `json:"items"`
+		}{Session: chatSessionToJSON(session), Subagents: relations, Items: items})
 	case "text":
-		return writeChatTranscript(stdout, session, items, opts)
+		return writeChatTranscript(stdout, session, items, subagents, opts)
 	default:
 		return fmt.Errorf("unknown format %q: expected text or json", opts.Format)
 	}
@@ -1226,7 +1381,8 @@ func generateUniqueChatID(ctx context.Context, repo repository.Repository, at ti
 func chatSessionToJSON(session repository.ChatSession) chatSessionJSON {
 	return chatSessionJSON{
 		ID: session.ID, Source: session.Source, SourceSessionID: session.SourceSessionID,
-		SourceDeviceID: session.SourceDeviceID, ProjectID: session.ProjectID, CWD: session.CWD,
+		ParentSourceSessionID: session.ParentSourceSessionID,
+		SourceDeviceID:        session.SourceDeviceID, ProjectID: session.ProjectID, CWD: session.CWD,
 		Title: session.Title, StartedAt: timeutil.FormatUTCMillis(session.StartedAt),
 		LastActivityAt:     timeutil.FormatUTCMillis(session.LastActivityAt),
 		OriginalSourcePath: session.OriginalSourcePath,
@@ -1273,12 +1429,10 @@ func writeChatSearchTable(w io.Writer, results []repository.ChatSearchResult) er
 	return tw.Flush()
 }
 
-func writeChatTranscript(w io.Writer, session repository.ChatSession, items []repository.ChatItem, opts chatShowOptions) error {
+func writeChatTranscript(w io.Writer, session repository.ChatSession, items []repository.ChatItem, subagents []repository.ChatSession, opts chatShowOptions) error {
 	if chatStdoutIsTerminal(w) {
 		buffer := &bytes.Buffer{}
-		if err := renderChatTranscript(buffer, session, items, opts); err != nil {
-			return err
-		}
+		_ = renderChatTranscript(buffer, session, items, subagents, opts)
 		if err := runChatPager(buffer.String()); err != nil {
 			return fmt.Errorf("page chat transcript: %w", err)
 		}
@@ -1288,17 +1442,31 @@ func writeChatTranscript(w io.Writer, session repository.ChatSession, items []re
 		_, err := io.WriteString(w, buffer.String())
 		return err
 	}
-	return renderChatTranscript(w, session, items, opts)
+	return renderChatTranscript(w, session, items, subagents, opts)
 }
 
-func renderChatTranscript(w io.Writer, session repository.ChatSession, items []repository.ChatItem, opts chatShowOptions) error {
+func renderChatTranscript(w io.Writer, session repository.ChatSession, items []repository.ChatItem, subagents []repository.ChatSession, opts chatShowOptions) error {
 	_, _ = fmt.Fprintf(w, "ID:              %s\n", session.ID)
 	_, _ = fmt.Fprintf(w, "Agent:           %s\n", session.Source)
 	_, _ = fmt.Fprintf(w, "Source Session:  %s\n", session.SourceSessionID)
+	if session.ParentSourceSessionID != nil {
+		_, _ = fmt.Fprintf(w, "Parent Session:  %s\n", *session.ParentSourceSessionID)
+	}
 	if session.ProjectID != nil {
 		_, _ = fmt.Fprintf(w, "Project:         %s\n", *session.ProjectID)
 	}
-	_, _ = fmt.Fprintf(w, "Last Activity:   %s\n\n", timeutil.FormatUTCMillis(session.LastActivityAt))
+	_, _ = fmt.Fprintf(w, "Last Activity:   %s\n", timeutil.FormatUTCMillis(session.LastActivityAt))
+	if len(subagents) > 0 {
+		_, _ = fmt.Fprintf(w, "Subagents:       %d\n", len(subagents))
+		for _, sub := range subagents {
+			title := ""
+			if sub.Title != nil {
+				title = " " + truncate(*sub.Title, 60)
+			}
+			_, _ = fmt.Fprintf(w, "  - %s (%s)%s\n", sub.ID, sub.SourceSessionID, title)
+		}
+	}
+	_, _ = fmt.Fprintln(w)
 	for _, item := range items {
 		_, _ = fmt.Fprintf(w, "[%d] %s/%s\n", item.Ordinal, item.Role, item.ItemType)
 		if opts.Raw && item.RawJSON != nil {

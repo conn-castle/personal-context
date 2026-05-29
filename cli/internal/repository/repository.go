@@ -73,6 +73,11 @@ type Repository interface {
 	AppendChatItems(ctx context.Context, sessionID string, items []CreateChatItemInput) error
 	ReplaceChatItems(ctx context.Context, sessionID string, items []CreateChatItemInput) error
 	ListChatItems(ctx context.Context, sessionID string) ([]ChatItem, error)
+	// CountChatItems returns the authoritative number of chat items matching the
+	// filter. It is the single source of truth for absolute post-import item
+	// counts so summaries reconcile with stored state instead of accumulating
+	// CLI-side deltas.
+	CountChatItems(ctx context.Context, filter CountChatItemsFilter) (int, error)
 	SearchChatItems(ctx context.Context, filter SearchChatItemsFilter) ([]ChatSearchResult, error)
 	SearchAll(ctx context.Context, filter UnifiedSearchFilter) ([]DomainSearchResult, error)
 

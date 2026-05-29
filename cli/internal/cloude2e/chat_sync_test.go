@@ -56,7 +56,7 @@ func TestCloudSyncChatRoundTripAndSnapshotExport(t *testing.T) {
 	}
 
 	importOut := runPCSuccessNoStderr(t, homeA, userHomeA, "chat", "import", "--device", deviceID, "--agent", "codex", "--root", transcriptRoot)
-	if !strings.Contains(importOut, `"sessions_created": 1`) || !strings.Contains(importOut, `"items_created": 2`) {
+	if !strings.Contains(importOut, `"sessions_created": 1`) || !strings.Contains(importOut, `"items_imported": 2`) {
 		t.Fatalf("unexpected chat import summary:\n%s", importOut)
 	}
 	runPCSuccessNoStderr(t, homeA, userHomeA, "sync")

@@ -49,6 +49,7 @@ type mockRepo struct {
 	getChatBySourceFn   func(ctx context.Context, source string, sourceSessionID string) (repository.ChatSession, error)
 	listChatSessionsFn  func(ctx context.Context, filter repository.ListChatSessionsFilter) ([]repository.ChatSession, error)
 	countChatSessionsFn func(ctx context.Context, filter repository.ListChatSessionsFilter) (int, error)
+	countChatItemsFn    func(ctx context.Context, filter repository.CountChatItemsFilter) (int, error)
 	listChatItemsFn     func(ctx context.Context, sessionID string) ([]repository.ChatItem, error)
 	searchChatItemsFn   func(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error)
 	maxChatOrdinalFn    func(ctx context.Context, sessionID string) (int, error)
@@ -292,6 +293,12 @@ func (m *mockRepo) ListChatSessions(ctx context.Context, filter repository.ListC
 func (m *mockRepo) CountChatSessions(ctx context.Context, filter repository.ListChatSessionsFilter) (int, error) {
 	if m.countChatSessionsFn != nil {
 		return m.countChatSessionsFn(ctx, filter)
+	}
+	return 0, nil
+}
+func (m *mockRepo) CountChatItems(ctx context.Context, filter repository.CountChatItemsFilter) (int, error) {
+	if m.countChatItemsFn != nil {
+		return m.countChatItemsFn(ctx, filter)
 	}
 	return 0, nil
 }
@@ -635,6 +642,100 @@ func TestRunSetupFailsLoudlyAgainstPreChatTableStore(t *testing.T) {
 	// The success message must not have been printed.
 	if strings.Contains(stdout.String(), "Personal Context initialized at") {
 		t.Fatalf("setup printed success message despite schema mismatch: %q", stdout.String())
+	}
+}
+
+func TestVerifyCanonicalSchemaTablesFailsWhenChatParentColumnMissing(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "old-shape.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.Exec(`
+CREATE TABLE records (id TEXT PRIMARY KEY);
+CREATE TABLE chat_session (
+	id TEXT PRIMARY KEY,
+	source TEXT NOT NULL,
+	source_session_id TEXT NOT NULL
+);
+CREATE TABLE chat_item (id INTEGER PRIMARY KEY, session_id TEXT);
+CREATE TABLE project_paths (id INTEGER PRIMARY KEY);
+`); err != nil {
+		t.Fatalf("create old-shape schema: %v", err)
+	}
+
+	err = verifyCanonicalSchemaTables(context.Background(), db, t.TempDir())
+	if err == nil {
+		t.Fatal("expected missing parent_source_session_id column to fail")
+	}
+	if !strings.Contains(err.Error(), "parent_source_session_id") {
+		t.Fatalf("expected error to name missing parent_source_session_id, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "predates") {
+		t.Fatalf("expected stale schema guidance, got %v", err)
+	}
+}
+
+func TestVerifyCanonicalSchemaTablesDuringOpenFailsWhenChatParentColumnMissing(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "old-runtime-shape.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	if _, err := db.Exec(`
+CREATE TABLE chat_session (
+	id TEXT PRIMARY KEY,
+	source TEXT NOT NULL,
+	source_session_id TEXT NOT NULL
+);
+`); err != nil {
+		t.Fatalf("create old chat_session schema: %v", err)
+	}
+
+	err = verifyCanonicalSchemaTablesDuringOpen(context.Background(), db, t.TempDir())
+	if err == nil {
+		t.Fatal("expected runtime schema validation to fail before repository queries")
+	}
+	if !strings.Contains(err.Error(), "parent_source_session_id") {
+		t.Fatalf("expected error to name missing parent_source_session_id, got %v", err)
+	}
+}
+
+func TestVerifyCanonicalSchemaTablesDuringOpenPassesForCurrentSchema(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("PC_HOME", homeDir)
+
+	if err := runSetup(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, strings.NewReader("n\n"), defaultSetupOpts()); err != nil {
+		t.Fatalf("setup current schema: %v", err)
+	}
+
+	db := openTestDBInternal(t, homeDir)
+	defer func() { _ = db.Close() }()
+
+	if err := verifyCanonicalSchemaTablesDuringOpen(context.Background(), db, basePath(homeDir)); err != nil {
+		t.Fatalf("current schema should pass runtime validation: %v", err)
+	}
+}
+
+func TestChatSessionParentSourceColumnChecksReportQueryErrors(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "closed-column-check.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	_, err = chatSessionParentSourceColumnExists(context.Background(), db)
+	if err == nil || !strings.Contains(err.Error(), "verify schema columns") {
+		t.Fatalf("expected column verification error, got %v", err)
+	}
+
+	err = verifyChatSessionParentSourceColumnForExistingTable(context.Background(), db, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "verify schema table") {
+		t.Fatalf("expected table verification error, got %v", err)
 	}
 }
 

@@ -110,14 +110,15 @@ func TestWriteReadAndManifestRoundTrip(t *testing.T) {
 				CreatedAt:  time.Date(2026, 3, 9, 14, 5, 0, 0, time.UTC),
 			}},
 		}, {
-			ID:              "20260309-eeeeffff",
-			Source:          "gemini",
-			SourceSessionID: "session-two",
-			SourceDeviceID:  "device/unit",
-			StartedAt:       time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
-			LastActivityAt:  time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
-			CreatedAt:       time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
-			UpdatedAt:       time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
+			ID:                    "20260309-eeeeffff",
+			Source:                "claude_code",
+			SourceSessionID:       "parent-session-id:agent-aaa",
+			ParentSourceSessionID: strPtrSnapshot("parent-session-id"),
+			SourceDeviceID:        "device/unit",
+			StartedAt:             time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
+			LastActivityAt:        time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
+			CreatedAt:             time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
+			UpdatedAt:             time.Date(2026, 3, 9, 15, 0, 0, 0, time.UTC),
 		}},
 	}
 

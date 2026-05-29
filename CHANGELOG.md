@@ -10,6 +10,23 @@ Release entries must use this format so the release workflow can extract notes:
 
 ## Unreleased
 
+### Added
+
+- Added `pc docs [topic]` and `pc docs search <query>`: embedded concept reference (chat-import, item-types, schema, search-syntax, project-device-registry) that matches the installed binary and is pipeable/searchable.
+- Added `parent_source_session_id` chat metadata so Claude Task-tool subagent transcripts import as distinct sessions linked to their parent, with `pc chat list --parent-source-session-id` / `pc chat search --parent-source-session-id` navigation and a parent/subagent view in `pc chat show` (text + JSON). The field round-trips through snapshot export/import and cloud sync.
+
+### Changed
+
+- Changed the `pc chat import` JSON summary to separate work performed from stored state: renamed `items_created` to `items_imported` (rows written this run) and added `items_delta` and `items_after_import` (authoritative, derived from the repository item count). Added `duplicates_skipped` and `collisions_skipped`, and redefined `raw_sources_copied` to count distinct retained sessions rather than per-file copy operations.
+- Normalized chat item types so agent-specific labels no longer leak into `item_type`: Gemini model turns become `message`/`assistant` and Gemini info/error lines become `event` with role `info`/`error`.
+
+### Fixed
+
+- Fixed Claude Code subagent transcripts silently overwriting each other: each subagent file now gets a file-unique source identity instead of colliding on the shared parent session id, so re-importing preserves every subagent as its own session (run a wipe-and-reimport to recover previously lost subagent content from on-disk source files).
+- Fixed Gemini project-name vs project-hash duplicate paths: divergent copies now get distinct, path-derived source identities (never overwriting each other) and exact byte-identical copies are collapsed.
+- Added defense-in-depth for source-identity collisions: a scanned file that collides with a different file's existing session and diverges is reported and skipped instead of overwriting the unrelated managed source.
+- Stopped empty or metadata-only transcript files from creating empty chat sessions.
+
 ## v0.1.2 - 2026-05-25
 
 ### Breaking Changes

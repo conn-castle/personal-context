@@ -12,7 +12,7 @@ import (
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
-const chatSessionColumns = `id, user_id, source, source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at`
+const chatSessionColumns = `id, user_id, source, source_session_id, parent_source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at`
 const chatItemColumns = `id, session_id, ordinal, role, item_type, text, search_text, raw_json, created_at`
 
 // UpsertProjectPath registers a project path and reports whether a row was inserted.
@@ -130,9 +130,10 @@ func (r *Repository) UpsertChatSession(ctx context.Context, input repository.Ups
 		}
 	}
 	_, err := r.pool.Exec(ctx,
-		`INSERT INTO chat_session (id, user_id, source, source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, NOW()), COALESCE($14, NOW()), $15)
+		`INSERT INTO chat_session (id, user_id, source, source_session_id, parent_source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($14, NOW()), COALESCE($15, NOW()), $16)
          ON CONFLICT (user_id, source, source_session_id) DO UPDATE SET
+             parent_source_session_id = COALESCE(EXCLUDED.parent_source_session_id, chat_session.parent_source_session_id),
              source_device_id = EXCLUDED.source_device_id,
              project_id = COALESCE(EXCLUDED.project_id, chat_session.project_id),
              cwd = COALESCE(EXCLUDED.cwd, chat_session.cwd),
@@ -142,8 +143,8 @@ func (r *Repository) UpsertChatSession(ctx context.Context, input repository.Ups
              original_source_path = EXCLUDED.original_source_path,
              raw_source_key = COALESCE(EXCLUDED.raw_source_key, chat_session.raw_source_key),
              updated_at = COALESCE(EXCLUDED.updated_at, NOW()),
-             deleted_at = CASE WHEN $16 THEN NULL ELSE EXCLUDED.deleted_at END`,
-		input.ID, r.userID, input.Source, input.SourceSessionID, input.SourceDeviceID, input.ProjectID, input.CWD,
+             deleted_at = CASE WHEN $17 THEN NULL ELSE EXCLUDED.deleted_at END`,
+		input.ID, r.userID, input.Source, input.SourceSessionID, input.ParentSourceSessionID, input.SourceDeviceID, input.ProjectID, input.CWD,
 		input.Title, input.StartedAt.UTC(), input.LastActivityAt.UTC(), input.OriginalSourcePath, input.RawSourceKey, input.CreatedAt, input.UpdatedAt, input.DeletedAt, input.ClearDeleted)
 	if err != nil {
 		return repository.ChatSession{}, false, mapPgError(err)
@@ -247,6 +248,9 @@ func (r *Repository) chatSessionPredicate(filter repository.ListChatSessionsFilt
 	}
 	if filter.DeviceID != nil {
 		addString(` AND source_device_id = $%d`, *filter.DeviceID)
+	}
+	if filter.ParentSourceSessionID != nil {
+		addString(` AND parent_source_session_id = $%d`, *filter.ParentSourceSessionID)
 	}
 	if filter.DateFrom != nil {
 		fmt.Fprintf(&builder, ` AND last_activity_at >= $%d`, next)
@@ -430,6 +434,21 @@ func (r *Repository) ListChatItems(ctx context.Context, sessionID string) ([]rep
 	return items, nil
 }
 
+// CountChatItems returns the authoritative number of chat items for this user.
+// When filter.IncludeDeleted is false, items in soft-deleted sessions are
+// excluded so the count matches what users can see.
+func (r *Repository) CountChatItems(ctx context.Context, filter repository.CountChatItemsFilter) (int, error) {
+	query := `SELECT COUNT(*) FROM chat_item AS ci INNER JOIN chat_session AS cs ON cs.id = ci.session_id WHERE cs.user_id = $1`
+	if !filter.IncludeDeleted {
+		query += ` AND cs.deleted_at IS NULL`
+	}
+	var count int
+	if err := r.pool.QueryRow(ctx, query, r.userID).Scan(&count); err != nil {
+		return 0, mapPgError(err)
+	}
+	return count, nil
+}
+
 // SearchChatItems searches chat item text.
 func (r *Repository) SearchChatItems(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
 	query := strings.TrimSpace(filter.Query)
@@ -454,6 +473,11 @@ func (r *Repository) SearchChatItems(ctx context.Context, filter repository.Sear
 	if filter.Source != nil {
 		fmt.Fprintf(&where, ` AND cs.source = $%d`, next)
 		args = append(args, *filter.Source)
+		next++
+	}
+	if filter.ParentSourceSessionID != nil {
+		fmt.Fprintf(&where, ` AND cs.parent_source_session_id = $%d`, next)
+		args = append(args, *filter.ParentSourceSessionID)
 		next++
 	}
 	if filter.DateFrom != nil {
@@ -625,7 +649,7 @@ func scanProjectPath(rs rowScanner) (repository.ProjectPath, error) {
 
 func scanChatSession(rs rowScanner) (repository.ChatSession, error) {
 	var s repository.ChatSession
-	if err := rs.Scan(&s.ID, &s.UserID, &s.Source, &s.SourceSessionID, &s.SourceDeviceID, &s.ProjectID, &s.CWD, &s.Title, &s.StartedAt, &s.LastActivityAt, &s.OriginalSourcePath, &s.RawSourceKey, &s.CreatedAt, &s.UpdatedAt, &s.DeletedAt); err != nil {
+	if err := rs.Scan(&s.ID, &s.UserID, &s.Source, &s.SourceSessionID, &s.ParentSourceSessionID, &s.SourceDeviceID, &s.ProjectID, &s.CWD, &s.Title, &s.StartedAt, &s.LastActivityAt, &s.OriginalSourcePath, &s.RawSourceKey, &s.CreatedAt, &s.UpdatedAt, &s.DeletedAt); err != nil {
 		return repository.ChatSession{}, mapPgError(err)
 	}
 	s.StartedAt = s.StartedAt.UTC()
@@ -668,7 +692,7 @@ func scanChatSearchRow(rs rowScanner) (repository.ChatSession, repository.ChatIt
 	var item repository.ChatItem
 	var snippet string
 	var rank float64
-	if err := rs.Scan(&session.ID, &session.UserID, &session.Source, &session.SourceSessionID, &session.SourceDeviceID, &session.ProjectID, &session.CWD, &session.Title, &session.StartedAt, &session.LastActivityAt, &session.OriginalSourcePath, &session.RawSourceKey, &session.CreatedAt, &session.UpdatedAt, &session.DeletedAt, &item.ID, &item.SessionID, &item.Ordinal, &item.Role, &item.ItemType, &item.Text, &item.SearchText, &item.RawJSON, &item.CreatedAt, &snippet, &rank); err != nil {
+	if err := rs.Scan(&session.ID, &session.UserID, &session.Source, &session.SourceSessionID, &session.ParentSourceSessionID, &session.SourceDeviceID, &session.ProjectID, &session.CWD, &session.Title, &session.StartedAt, &session.LastActivityAt, &session.OriginalSourcePath, &session.RawSourceKey, &session.CreatedAt, &session.UpdatedAt, &session.DeletedAt, &item.ID, &item.SessionID, &item.Ordinal, &item.Role, &item.ItemType, &item.Text, &item.SearchText, &item.RawJSON, &item.CreatedAt, &snippet, &rank); err != nil {
 		return repository.ChatSession{}, repository.ChatItem{}, "", 0, mapPgError(err)
 	}
 	session.StartedAt = session.StartedAt.UTC()

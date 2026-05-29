@@ -304,7 +304,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 		t.Fatalf("expected ErrInvalidArgument for invalid figure create, got %v", err)
 	}
 	_, err = repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-		RecordID:  "20260305-missing00",
+		RecordID: "20260305-missing00",
 		Filename: "x.png",
 		S3Key:    "figures/20260305-missing00/x.png",
 	})
@@ -313,7 +313,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 	}
 
 	figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-		RecordID:  record.ID,
+		RecordID: record.ID,
 		Filename: "x.png",
 		S3Key:    "figures/20260305-11112222/x.png",
 	})
@@ -338,7 +338,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 		t.Fatalf("expected ErrInvalidArgument for invalid data file create, got %v", err)
 	}
 	_, err = repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-		RecordID:  "20260305-missing00",
+		RecordID: "20260305-missing00",
 		Filename: "missing.csv",
 		S3Key:    "data/20260305-missing00/missing.csv",
 		Size:     1,
@@ -349,7 +349,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 	}
 
 	_, err = repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-		RecordID:  record.ID,
+		RecordID: record.ID,
 		Filename: "x.csv",
 		S3Key:    "data/20260305-11112222/x.csv",
 		Size:     -1,
@@ -359,7 +359,7 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 		t.Fatalf("expected ErrInvalidArgument for negative file size, got %v", err)
 	}
 	dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-		RecordID:  record.ID,
+		RecordID: record.ID,
 		Filename: "x.csv",
 		S3Key:    "data/20260305-11112222/x.csv",
 		Size:     1,
@@ -414,7 +414,7 @@ func TestAssetQueriesAreUserScoped(t *testing.T) {
 	})
 
 	figureA, err := repoA.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-		RecordID:  recordA.ID,
+		RecordID: recordA.ID,
 		Filename: "a.png",
 		S3Key:    "figures/20260305-abcdd001/a.png",
 	})
@@ -422,7 +422,7 @@ func TestAssetQueriesAreUserScoped(t *testing.T) {
 		t.Fatalf("CreateRecordFigure() for user A error = %v", err)
 	}
 	if _, err := repoB.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-		RecordID:  recordA.ID,
+		RecordID: recordA.ID,
 		Filename: "cross.png",
 		S3Key:    "figures/20260305-abcdd001/cross.png",
 	}); !errors.Is(err, repository.ErrForeignKeyViolation) {
@@ -448,7 +448,7 @@ func TestAssetQueriesAreUserScoped(t *testing.T) {
 		t.Fatalf("expected ErrNotFound for cross-user figure delete, got %v", err)
 	}
 	if _, err := repoB.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-		RecordID:  recordB.ID,
+		RecordID: recordB.ID,
 		Filename: "b.png",
 		S3Key:    "figures/20260305-abcdd002/b.png",
 	}); err != nil {
@@ -456,7 +456,7 @@ func TestAssetQueriesAreUserScoped(t *testing.T) {
 	}
 
 	dataFileA, err := repoA.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-		RecordID:  recordA.ID,
+		RecordID: recordA.ID,
 		Filename: "a.csv",
 		S3Key:    "data/20260305-abcdd001/a.csv",
 		Size:     16,
@@ -466,7 +466,7 @@ func TestAssetQueriesAreUserScoped(t *testing.T) {
 		t.Fatalf("CreateRecordDataFile() for user A error = %v", err)
 	}
 	if _, err := repoB.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-		RecordID:  recordA.ID,
+		RecordID: recordA.ID,
 		Filename: "cross.csv",
 		S3Key:    "data/20260305-abcdd001/cross.csv",
 		Size:     1,
@@ -494,7 +494,7 @@ func TestAssetQueriesAreUserScoped(t *testing.T) {
 		t.Fatalf("expected ErrNotFound for cross-user data-file delete, got %v", err)
 	}
 	if _, err := repoB.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-		RecordID:  recordB.ID,
+		RecordID: recordB.ID,
 		Filename: "b.csv",
 		S3Key:    "data/20260305-abcdd002/b.csv",
 		Size:     8,
@@ -555,6 +555,48 @@ func TestApplySchemaRejectsLegacyPreAuthCloudSchema(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "legacy pre-auth cloud schema detected") {
 		t.Fatalf("expected explicit legacy schema guard error, got %v", err)
+	}
+}
+
+func TestApplySchemaRejectsChatSchemaMissingParentColumn(t *testing.T) {
+	ctx := context.Background()
+	schemaCounter++
+	schemaName := fmt.Sprintf("chat_missing_parent_%d_%d", time.Now().UnixNano(), schemaCounter)
+
+	adminPool, err := pgxpool.New(ctx, sharedContainer.connStr)
+	if err != nil {
+		t.Fatalf("pgxpool.New() error = %v", err)
+	}
+	if _, err := adminPool.Exec(ctx, fmt.Sprintf("CREATE SCHEMA %s", schemaName)); err != nil {
+		adminPool.Close()
+		t.Fatalf("CREATE SCHEMA error = %v", err)
+	}
+	adminPool.Close()
+
+	connStr := sharedContainer.connStr + fmt.Sprintf("&search_path=%s", schemaName)
+	pool, err := pgxpool.New(ctx, connStr)
+	if err != nil {
+		t.Fatalf("pgxpool.New(search_path) error = %v", err)
+	}
+	defer pool.Close()
+
+	if _, err := pool.Exec(ctx, `
+		CREATE TABLE chat_session (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL,
+			source TEXT NOT NULL,
+			source_session_id TEXT NOT NULL
+		);
+	`); err != nil {
+		t.Fatalf("create old chat_session schema fixture error = %v", err)
+	}
+
+	err = ApplySchema(ctx, pool)
+	if err == nil {
+		t.Fatal("expected ApplySchema to reject chat_session without parent_source_session_id")
+	}
+	if !strings.Contains(err.Error(), "chat_session.parent_source_session_id") {
+		t.Fatalf("expected explicit missing column error, got %v", err)
 	}
 }
 
@@ -628,7 +670,7 @@ func TestFigureAndDataFileNoOpUpdatesDoNotBumpSyncVersion(t *testing.T) {
 	})
 
 	figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-		RecordID:  record.ID,
+		RecordID: record.ID,
 		Filename: "plot.png",
 		S3Key:    "figures/20260305-dddd0002/plot.png",
 	})
@@ -637,7 +679,7 @@ func TestFigureAndDataFileNoOpUpdatesDoNotBumpSyncVersion(t *testing.T) {
 	}
 
 	dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
-		RecordID:  record.ID,
+		RecordID: record.ID,
 		Filename: "data.csv",
 		S3Key:    "data/20260305-dddd0002/data.csv",
 		Size:     4,

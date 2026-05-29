@@ -22,6 +22,22 @@ import (
 // realistic session while still bounding memory use on a malformed file.
 const maxJSONLLineBytes = 256 * 1024 * 1024
 
+// ErrEmptyTranscript is returned by ParseTranscriptFile when a transcript file
+// parses to zero chat items (for example a 0-byte file, a Claude cursor-marker
+// line, or a Gemini session-header-only file). Callers should count the file as
+// scanned but must not create or update a chat session for it.
+var ErrEmptyTranscript = errors.New("transcript has no chat items")
+
+// subagentContext describes whether a Claude Code transcript file is a
+// Task-tool subagent (sidechain) transcript and, if so, the file basename used
+// to derive a file-unique source identity. Claude writes every subagent row
+// with the PARENT transcript's sessionId, so without a per-file suffix sibling
+// subagents collide on (source, source_session_id) and overwrite each other.
+type subagentContext struct {
+	basename string // file basename (no extension) used as the subagent suffix
+	byPath   bool   // file lives under a subagents/ directory (definitive signal)
+}
+
 // NormalizeAgentName maps user-facing agent names to stable storage source IDs.
 func NormalizeAgentName(agent string) (string, error) {
 	switch strings.TrimSpace(strings.ToLower(agent)) {
@@ -188,7 +204,21 @@ func parseJSONLTranscript(source string, path string) (repository.CreateChatSess
 	}
 	defer func() { _ = file.Close() }()
 	session := newTranscriptSession(source, path)
-	return parseJSONLTranscriptReader(source, path, file, session, 0, session.SourceSessionID)
+	sub := subagentContext{}
+	if source == "claude_code" {
+		sub = subagentContext{
+			basename: strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+			byPath:   strings.Contains(filepath.ToSlash(path), "/subagents/"),
+		}
+	}
+	session, items, err := parseJSONLTranscriptReader(source, path, file, session, 0, session.SourceSessionID, sub)
+	if err != nil {
+		return repository.CreateChatSessionInput{}, nil, err
+	}
+	if len(items) == 0 {
+		return repository.CreateChatSessionInput{}, nil, ErrEmptyTranscript
+	}
+	return session, items, nil
 }
 
 // ParseAppendedJSONLTranscript parses only the appended byte range of a JSONL
@@ -212,10 +242,13 @@ func ParseAppendedJSONLTranscript(source string, path string, offset int64, limi
 		return repository.CreateChatSessionInput{}, nil, fmt.Errorf("seek appended transcript range: %w", err)
 	}
 	reader := io.Reader(io.LimitReader(file, limit))
-	return parseJSONLTranscriptReader(source, path, reader, base, ordinalStart, "")
+	// Appended parsing keeps the established base identity: pass an empty
+	// fallback and no subagent context so appended rows cannot change the
+	// source/parent identity fixed by the original full import.
+	return parseJSONLTranscriptReader(source, path, reader, base, ordinalStart, "", subagentContext{})
 }
 
-func parseJSONLTranscriptReader(source string, path string, reader io.Reader, session repository.CreateChatSessionInput, ordinalStart int, fallbackSourceSessionID string) (repository.CreateChatSessionInput, []repository.CreateChatItemInput, error) {
+func parseJSONLTranscriptReader(source string, path string, reader io.Reader, session repository.CreateChatSessionInput, ordinalStart int, fallbackSourceSessionID string, sub subagentContext) (repository.CreateChatSessionInput, []repository.CreateChatItemInput, error) {
 	var items []repository.CreateChatItemInput
 	scanner := bufio.NewScanner(reader)
 	// Cap at 256 MiB so a single oversized JSONL row (e.g., a Claude tool
@@ -243,7 +276,7 @@ func parseJSONLTranscriptReader(source string, path string, reader io.Reader, se
 			continue
 		}
 		if sessionPayload != nil {
-			applyItemSessionFields(&session, sessionPayload, fallbackSourceSessionID)
+			applyItemSessionFields(&session, sessionPayload, fallbackSourceSessionID, sub)
 		}
 		item := itemFromPayload(itemPayload, ordinal)
 		if item.SearchText != "" || item.RawJSON != nil {
@@ -261,13 +294,26 @@ func parseJSONLTranscriptReader(source string, path string, reader io.Reader, se
 	return session, items, nil
 }
 
-func applyItemSessionFields(session *repository.CreateChatSessionInput, payload map[string]any, fallbackSourceSessionID string) {
+func applyItemSessionFields(session *repository.CreateChatSessionInput, payload map[string]any, fallbackSourceSessionID string, sub subagentContext) {
 	// sessionId (camelCase) is the canonical key emitted in real Claude Code
 	// transcripts; session_id / conversation_id / chat_id cover snake_case
 	// variants used by other agents.
 	for _, key := range []string{"session_id", "sessionId", "conversation_id", "chat_id"} {
 		if value := stringField(payload, key); value != nil && *value != "" {
-			if session.SourceSessionID == fallbackSourceSessionID || session.SourceSessionID == *value {
+			isSidechain, _ := payload["isSidechain"].(bool)
+			if sub.basename != "" && (sub.byPath || isSidechain) {
+				// Subagent (Task-tool sidechain) transcript: every row carries
+				// the PARENT transcript's session id. Keep the parent id as
+				// relationship metadata and derive a file-unique source identity
+				// (parent_sid:subagent_basename) so sibling subagents of the same
+				// parent become distinct sessions instead of overwriting each
+				// other. Set once; the value is identical on every row.
+				if session.ParentSourceSessionID == nil {
+					parent := *value
+					session.ParentSourceSessionID = &parent
+					session.SourceSessionID = parent + ":" + sub.basename
+				}
+			} else if session.SourceSessionID == fallbackSourceSessionID || session.SourceSessionID == *value {
 				session.SourceSessionID = *value
 			}
 			break
@@ -371,8 +417,43 @@ func unwrapChatLine(source string, line map[string]any) (item map[string]any, se
 			return nil, nil
 		}
 		return line, line
+	case "gemini":
+		// Gemini labels model turns with type:"gemini" and emits type:"info" /
+		// type:"error" status/error lines that carry content. Normalize them so
+		// no agent-specific label leaks into item_type: model turns become
+		// role=assistant/item_type=message, and info/error become
+		// item_type=event with role=info/error. sessionMeta is intentionally nil
+		// so row fields never rewrite the path-derived Gemini source identity
+		// (Gemini transcripts carry no usable internal session id).
+		geminiType := strings.ToLower(firstString(line, "type"))
+		switch geminiType {
+		case "gemini":
+			return geminiItem(line, "assistant", "message"), nil
+		case "user":
+			return geminiItem(line, "user", "message"), nil
+		case "info", "error":
+			return geminiItem(line, geminiType, "event"), nil
+		}
+		// Unknown Gemini row: import its content if present (hasItemPayload drops
+		// contentless metadata such as the session-header line), without letting
+		// it alter the source identity.
+		return line, nil
 	}
 	return line, line
+}
+
+// geminiItem clones a Gemini transcript row with a normalized role and
+// item_type, dropping the agent-specific `type` label so it cannot leak into
+// item_type downstream.
+func geminiItem(line map[string]any, role string, itemType string) map[string]any {
+	flat := make(map[string]any, len(line)+2)
+	for k, v := range line {
+		flat[k] = v
+	}
+	flat["role"] = role
+	flat["item_type"] = itemType
+	delete(flat, "type")
+	return flat
 }
 
 func hasItemPayload(payload map[string]any) bool {
@@ -439,18 +520,48 @@ func parseJSONTranscript(source string, path string) (repository.CreateChatSessi
 			items = append(items, item)
 		}
 	}
+	if len(items) == 0 {
+		return repository.CreateChatSessionInput{}, nil, ErrEmptyTranscript
+	}
 	finalizeSessionTimes(&session, items)
 	return session, items, nil
 }
 
 func newTranscriptSession(source string, path string) repository.CreateChatSessionInput {
-	sourceSessionID := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	sourceSessionID := base
+	if source == "gemini" {
+		sourceSessionID = geminiSourceSessionID(path, base)
+	}
 	abs, _ := filepath.Abs(path)
 	return repository.CreateChatSessionInput{
 		Source:             source,
 		SourceSessionID:    sourceSessionID,
 		OriginalSourcePath: &abs,
 	}
+}
+
+// geminiSourceSessionID derives a stable, file-unique source identity for a
+// Gemini transcript. Gemini stores the same logical session under both a
+// project-name directory and a project-hash directory with an identical
+// basename (e.g. tmp/<name>/chats/session-X.json and tmp/<hash>/chats/
+// session-X.json). Keying on the basename alone collides those two paths and
+// silently overwrites one. Including the disambiguating parent directories (the
+// project-key segment, plus its container when present) gives each path a
+// distinct, human-readable identity that stays stable across re-imports. A JSON
+// transcript carrying an explicit conversation/session id still overrides this
+// via applySessionFields.
+func geminiSourceSessionID(path string, base string) string {
+	dir := filepath.Dir(path)
+	parent := filepath.Base(dir)
+	if parent == "." || parent == string(filepath.Separator) {
+		return base
+	}
+	grandparent := filepath.Base(filepath.Dir(dir))
+	if grandparent != "." && grandparent != string(filepath.Separator) {
+		return grandparent + "/" + parent + "/" + base
+	}
+	return parent + "/" + base
 }
 
 func applySessionFields(session *repository.CreateChatSessionInput, payload map[string]any) {

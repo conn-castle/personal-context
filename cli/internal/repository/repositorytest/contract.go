@@ -350,6 +350,130 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 	})
 
+	t.Run("chat parent metadata, filters, and item counts", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		now := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+
+		if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "parent-device", CreatedAt: &now, UpdatedAt: &now}); err != nil && !errors.Is(err, repository.ErrConflict) {
+			t.Fatalf("CreateDevice() error = %v", err)
+		}
+
+		// Parent transcript: no parent_source_session_id.
+		parent, _, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID: "20260528-aaaa0001", Source: "claude_code", SourceSessionID: "parent-sid",
+				SourceDeviceID: "parent-device", StartedAt: now, LastActivityAt: now, CreatedAt: &now, UpdatedAt: &now,
+			},
+			ClearDeleted: true,
+		})
+		if err != nil {
+			t.Fatalf("UpsertChatSession(parent) error = %v", err)
+		}
+		if parent.ParentSourceSessionID != nil {
+			t.Fatalf("expected nil ParentSourceSessionID for parent, got %v", parent.ParentSourceSessionID)
+		}
+
+		// Two subagent transcripts referencing the parent source session id.
+		parentSID := "parent-sid"
+		for _, sub := range []struct {
+			id, sourceSessionID, text string
+		}{
+			{"20260528-bbbb0001", "parent-sid:agent-aaa", "alpha subagent needle"},
+			{"20260528-bbbb0002", "parent-sid:agent-bbb", "beta subagent needle"},
+		} {
+			child, created, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+				CreateChatSessionInput: repository.CreateChatSessionInput{
+					ID: sub.id, Source: "claude_code", SourceSessionID: sub.sourceSessionID,
+					ParentSourceSessionID: &parentSID,
+					SourceDeviceID:        "parent-device", StartedAt: now, LastActivityAt: now, CreatedAt: &now, UpdatedAt: &now,
+				},
+				ClearDeleted: true,
+			})
+			if err != nil {
+				t.Fatalf("UpsertChatSession(%s) error = %v", sub.id, err)
+			}
+			if !created {
+				t.Fatalf("expected subagent %s created", sub.id)
+			}
+			if child.ParentSourceSessionID == nil || *child.ParentSourceSessionID != parentSID {
+				t.Fatalf("expected ParentSourceSessionID=%q for %s, got %v", parentSID, sub.id, child.ParentSourceSessionID)
+			}
+			text := sub.text
+			if err := repo.ReplaceChatItems(ctx, sub.id, []repository.CreateChatItemInput{
+				{SessionID: sub.id, Ordinal: 0, Role: "assistant", ItemType: "message", Text: &text, SearchText: text, CreatedAt: &now},
+			}); err != nil {
+				t.Fatalf("ReplaceChatItems(%s) error = %v", sub.id, err)
+			}
+		}
+
+		// Persisted parent metadata survives a re-fetch.
+		refetched, err := repo.GetChatSessionByID(ctx, "20260528-bbbb0001")
+		if err != nil {
+			t.Fatalf("GetChatSessionByID() error = %v", err)
+		}
+		if refetched.ParentSourceSessionID == nil || *refetched.ParentSourceSessionID != parentSID {
+			t.Fatalf("expected persisted ParentSourceSessionID=%q, got %v", parentSID, refetched.ParentSourceSessionID)
+		}
+
+		// ListChatSessions parent filter returns exactly the two subagents.
+		children, err := repo.ListChatSessions(ctx, repository.ListChatSessionsFilter{ParentSourceSessionID: &parentSID})
+		if err != nil {
+			t.Fatalf("ListChatSessions(parent filter) error = %v", err)
+		}
+		if len(children) != 2 {
+			t.Fatalf("expected 2 subagents for parent filter, got %d (%+v)", len(children), children)
+		}
+		for _, c := range children {
+			if c.ParentSourceSessionID == nil || *c.ParentSourceSessionID != parentSID {
+				t.Fatalf("ListChatSessions returned non-child %+v", c)
+			}
+		}
+
+		// SearchChatItems parent filter restricts hits to the parent's subagents.
+		hits, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle", ParentSourceSessionID: &parentSID})
+		if err != nil {
+			t.Fatalf("SearchChatItems(parent filter) error = %v", err)
+		}
+		if len(hits) != 2 {
+			t.Fatalf("expected 2 subagent search hits, got %d (%+v)", len(hits), hits)
+		}
+		for _, h := range hits {
+			if h.Session.ParentSourceSessionID == nil || *h.Session.ParentSourceSessionID != parentSID {
+				t.Fatalf("SearchChatItems returned non-child session %+v", h.Session)
+			}
+		}
+
+		// CountChatItems is the authoritative item count: two subagent items so far.
+		count, err := repo.CountChatItems(ctx, repository.CountChatItemsFilter{})
+		if err != nil {
+			t.Fatalf("CountChatItems() error = %v", err)
+		}
+		if count != 2 {
+			t.Fatalf("expected CountChatItems=2, got %d", count)
+		}
+
+		// Soft-deleting one subagent removes its item from the default count but
+		// keeps it when IncludeDeleted is set.
+		if err := repo.SoftDeleteChatSession(ctx, "20260528-bbbb0001"); err != nil {
+			t.Fatalf("SoftDeleteChatSession() error = %v", err)
+		}
+		visible, err := repo.CountChatItems(ctx, repository.CountChatItemsFilter{})
+		if err != nil {
+			t.Fatalf("CountChatItems(visible) error = %v", err)
+		}
+		if visible != 1 {
+			t.Fatalf("expected CountChatItems=1 after soft delete, got %d", visible)
+		}
+		all, err := repo.CountChatItems(ctx, repository.CountChatItemsFilter{IncludeDeleted: true})
+		if err != nil {
+			t.Fatalf("CountChatItems(IncludeDeleted) error = %v", err)
+		}
+		if all != 2 {
+			t.Fatalf("expected CountChatItems(IncludeDeleted)=2, got %d", all)
+		}
+	})
+
 	t.Run("figure and data-file get/list/update", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()

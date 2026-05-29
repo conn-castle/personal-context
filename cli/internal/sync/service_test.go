@@ -89,18 +89,20 @@ func TestServiceSyncPushesProjectPathsAndChatsToCloud(t *testing.T) {
 	title := "Sync chat"
 	cwd := "/tmp/sync-chat"
 	projectID := "sync/chat-project"
+	parentSID := "sync-parent"
 	localRepo.chatSessions["20260514-syncchat"] = repository.ChatSession{
-		ID:              "20260514-syncchat",
-		Source:          "codex",
-		SourceSessionID: "sync-source",
-		SourceDeviceID:  "sync-chat-device",
-		ProjectID:       &projectID,
-		CWD:             &cwd,
-		Title:           &title,
-		StartedAt:       now,
-		LastActivityAt:  now.Add(time.Minute),
-		CreatedAt:       now,
-		UpdatedAt:       now.Add(time.Minute),
+		ID:                    "20260514-syncchat",
+		Source:                "codex",
+		SourceSessionID:       "sync-source",
+		ParentSourceSessionID: &parentSID,
+		SourceDeviceID:        "sync-chat-device",
+		ProjectID:             &projectID,
+		CWD:                   &cwd,
+		Title:                 &title,
+		StartedAt:             now,
+		LastActivityAt:        now.Add(time.Minute),
+		CreatedAt:             now,
+		UpdatedAt:             now.Add(time.Minute),
 	}
 	text := "sync chat item"
 	localRepo.chatItems["20260514-syncchat"] = []repository.ChatItem{{
@@ -127,6 +129,9 @@ func TestServiceSyncPushesProjectPathsAndChatsToCloud(t *testing.T) {
 	}
 	if cloudSession.Title == nil || *cloudSession.Title != title {
 		t.Fatalf("unexpected synced chat session: %+v", cloudSession)
+	}
+	if cloudSession.ParentSourceSessionID == nil || *cloudSession.ParentSourceSessionID != parentSID {
+		t.Fatalf("expected parent_source_session_id to sync, got %+v", cloudSession.ParentSourceSessionID)
 	}
 	cloudItems := cloudRepo.chatItems["20260514-syncchat"]
 	if len(cloudItems) != 1 || cloudItems[0].SearchText != text {
@@ -4485,6 +4490,22 @@ func (m *memoryRepo) ListChatSessions(_ context.Context, filter repository.ListC
 func (m *memoryRepo) CountChatSessions(_ context.Context, _ repository.ListChatSessionsFilter) (int, error) {
 	return len(m.chatSessions), nil
 }
+func (m *memoryRepo) CountChatItems(_ context.Context, filter repository.CountChatItemsFilter) (int, error) {
+	count := 0
+	for sessionID, items := range m.chatItems {
+		session, ok := m.chatSessions[sessionID]
+		if !ok {
+			continue
+		}
+		if !filter.IncludeDeleted {
+			if session.DeletedAt != nil {
+				continue
+			}
+		}
+		count += len(items)
+	}
+	return count, nil
+}
 func (m *memoryRepo) SoftDeleteChatSession(_ context.Context, _ string) error { return nil }
 func (m *memoryRepo) RestoreChatSession(_ context.Context, _ string) error    { return nil }
 func (m *memoryRepo) DeleteChatSession(_ context.Context, id string) error {
@@ -4800,20 +4821,21 @@ func derefTime(value *time.Time) time.Time {
 
 func chatSessionFromInput(input repository.UpsertChatSessionInput) repository.ChatSession {
 	return repository.ChatSession{
-		ID:                 input.ID,
-		Source:             input.Source,
-		SourceSessionID:    input.SourceSessionID,
-		SourceDeviceID:     input.SourceDeviceID,
-		ProjectID:          cloneStringPtr(input.ProjectID),
-		CWD:                cloneStringPtr(input.CWD),
-		Title:              cloneStringPtr(input.Title),
-		StartedAt:          input.StartedAt,
-		LastActivityAt:     input.LastActivityAt,
-		OriginalSourcePath: cloneStringPtr(input.OriginalSourcePath),
-		RawSourceKey:       cloneStringPtr(input.RawSourceKey),
-		CreatedAt:          derefTime(input.CreatedAt),
-		UpdatedAt:          derefTime(input.UpdatedAt),
-		DeletedAt:          cloneTimePtr(input.DeletedAt),
+		ID:                    input.ID,
+		Source:                input.Source,
+		SourceSessionID:       input.SourceSessionID,
+		ParentSourceSessionID: cloneStringPtr(input.ParentSourceSessionID),
+		SourceDeviceID:        input.SourceDeviceID,
+		ProjectID:             cloneStringPtr(input.ProjectID),
+		CWD:                   cloneStringPtr(input.CWD),
+		Title:                 cloneStringPtr(input.Title),
+		StartedAt:             input.StartedAt,
+		LastActivityAt:        input.LastActivityAt,
+		OriginalSourcePath:    cloneStringPtr(input.OriginalSourcePath),
+		RawSourceKey:          cloneStringPtr(input.RawSourceKey),
+		CreatedAt:             derefTime(input.CreatedAt),
+		UpdatedAt:             derefTime(input.UpdatedAt),
+		DeletedAt:             cloneTimePtr(input.DeletedAt),
 	}
 }
 

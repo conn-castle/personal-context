@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS chat_session (
     user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     source          TEXT NOT NULL CHECK (length(source) > 0),
     source_session_id TEXT NOT NULL CHECK (length(source_session_id) > 0),
+    parent_source_session_id TEXT,
     source_device_id TEXT NOT NULL,
     project_id      TEXT,
     cwd             TEXT,
@@ -158,6 +159,7 @@ CREATE TABLE IF NOT EXISTS chat_session (
 
 CREATE INDEX IF NOT EXISTS idx_chat_session_project ON chat_session (project_id);
 CREATE INDEX IF NOT EXISTS idx_chat_session_source ON chat_session (source, source_session_id);
+CREATE INDEX IF NOT EXISTS idx_chat_session_parent ON chat_session (parent_source_session_id) WHERE parent_source_session_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_chat_session_device ON chat_session (source_device_id);
 CREATE INDEX IF NOT EXISTS idx_chat_session_activity ON chat_session (last_activity_at);
 CREATE INDEX IF NOT EXISTS idx_chat_session_deleted ON chat_session (deleted_at) WHERE deleted_at IS NOT NULL;
@@ -439,6 +441,7 @@ CREATE TRIGGER chat_session_sync_bump_after_update
         OLD.id IS DISTINCT FROM NEW.id OR
         OLD.source IS DISTINCT FROM NEW.source OR
         OLD.source_session_id IS DISTINCT FROM NEW.source_session_id OR
+        OLD.parent_source_session_id IS DISTINCT FROM NEW.parent_source_session_id OR
         OLD.source_device_id IS DISTINCT FROM NEW.source_device_id OR
         OLD.project_id IS DISTINCT FROM NEW.project_id OR
         OLD.cwd IS DISTINCT FROM NEW.cwd OR
