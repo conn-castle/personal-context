@@ -12,6 +12,14 @@ Release entries must use this format so the release workflow can extract notes:
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## v0.1.3 - 2026-05-29
+
+### Added
+
 - Added `pc docs [topic]` and `pc docs search <query>`: embedded concept reference (chat-import, item-types, schema, search-syntax, project-device-registry) that matches the installed binary and is pipeable/searchable.
 - Added `parent_source_session_id` chat metadata so Claude Task-tool subagent transcripts import as distinct sessions linked to their parent, with `pc chat list --parent-source-session-id` / `pc chat search --parent-source-session-id` navigation and a parent/subagent view in `pc chat show` (text + JSON). The field round-trips through snapshot export/import and cloud sync.
 
