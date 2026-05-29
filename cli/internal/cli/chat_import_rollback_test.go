@@ -1329,7 +1329,6 @@ func TestChatImportSessionIndexAndSkipHelperBranches(t *testing.T) {
 	if _, ok, err := idx.existingByOriginalPath(source, deviceID, originalPath); err != nil || !ok {
 		t.Fatalf("expected original path lookup to succeed, ok=%v err=%v", ok, err)
 	}
-
 	failingRepo := &mockRepo{
 		listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
 			return nil, errors.New("list failed")
@@ -1385,5 +1384,15 @@ func TestChatImportSessionIndexAndSkipHelperBranches(t *testing.T) {
 	}
 	if _, err := os.Stat(deleteSourcePath); !os.IsNotExist(err) {
 		t.Fatalf("expected delete source path removed, stat err=%v", err)
+	}
+
+	batch := chatImportBatch{summary: &chatImportSummary{}}
+	handled, mutated, err := handleExistingChatImport(context.Background(), stack, &batch, &idx, repository.ChatSession{ID: "20260315-44444444"}, sourcePath, deviceID, nil, false)
+	if err != nil || handled || mutated {
+		t.Fatalf("nil raw key existing import = handled %v mutated %v err %v", handled, mutated, err)
+	}
+	handled, mutated, err = handleExistingChatImport(context.Background(), stack, &batch, &idx, repository.ChatSession{ID: "20260315-44444444", RawSourceKey: &badKey}, sourcePath, deviceID, nil, false)
+	if err == nil || handled || mutated {
+		t.Fatalf("expected invalid raw key existing import error, handled %v mutated %v err %v", handled, mutated, err)
 	}
 }

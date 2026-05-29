@@ -90,3 +90,24 @@ func TestSearch(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchIgnoresHeadingsInsideFencedCode(t *testing.T) {
+	sections := splitSections("# Real Heading\nbody before\n```sh\n# not a heading\nneedle\n```\n## Next\nbody after")
+	if len(sections) != 2 {
+		t.Fatalf("expected two real sections, got %+v", sections)
+	}
+	if sections[0].heading != "Real Heading" {
+		t.Fatalf("unexpected first heading: %+v", sections[0])
+	}
+	if !strings.Contains(sections[0].body, "# not a heading") {
+		t.Fatalf("fenced heading line should stay in first section body: %+v", sections[0])
+	}
+	if sections[1].heading != "Next" {
+		t.Fatalf("unexpected second heading: %+v", sections[1])
+	}
+
+	sections = splitSections("# Tilde Heading\nbody before\n~~~sh\n# not a heading\nneedle\n~~~\n## Next\nbody after")
+	if len(sections) != 2 || !strings.Contains(sections[0].body, "# not a heading") {
+		t.Fatalf("tilde fenced heading line should stay in first section body: %+v", sections)
+	}
+}

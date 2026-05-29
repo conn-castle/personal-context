@@ -14,10 +14,10 @@ chat item text.
 
 ## Filters
 
-- `--agent codex|claude|gemini` restricts results to one source.
-- `--project <id>` restricts to one project.
-- `--parent-source-session-id <sid>` restricts results to the subagent sessions
-  of one parent transcript, so you can search within a parent's subagents.
+- Limit results to a single agent with `--agent codex|claude|gemini`.
+- Search within a specific project using `--project <id>`.
+- Show only subagent sessions from a given parent transcript with
+  `--parent-source-session-id <sid>`.
 - `--limit` / `--offset` paginate; `--format json` emits a structured envelope.
 
 ## Tips

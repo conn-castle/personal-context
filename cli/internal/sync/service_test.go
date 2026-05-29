@@ -4493,8 +4493,12 @@ func (m *memoryRepo) CountChatSessions(_ context.Context, _ repository.ListChatS
 func (m *memoryRepo) CountChatItems(_ context.Context, filter repository.CountChatItemsFilter) (int, error) {
 	count := 0
 	for sessionID, items := range m.chatItems {
+		session, ok := m.chatSessions[sessionID]
+		if !ok {
+			continue
+		}
 		if !filter.IncludeDeleted {
-			if session, ok := m.chatSessions[sessionID]; ok && session.DeletedAt != nil {
+			if session.DeletedAt != nil {
 				continue
 			}
 		}

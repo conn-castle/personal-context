@@ -258,6 +258,99 @@ func TestChatImportGeminiDuplicatePaths(t *testing.T) {
 	}
 }
 
+func TestChatImportGeminiDuplicatePathsStayCollapsedAcrossRuns(t *testing.T) {
+	setupEnv(t)
+
+	root := t.TempDir()
+	namePath := filepath.Join(root, "castle-steward", "chats", "session-Z.json")
+	hashPath := filepath.Join(root, "hash789", "chats", "session-Z.json")
+	writeGeminiCopy(t, namePath, "stable duplicate content")
+	writeGeminiCopy(t, hashPath, "stable duplicate content")
+
+	first, _ := runChatImportAgent(t, "gemini", root)
+	if first.SessionsCreated != 1 || first.DuplicatesSkipped != 1 {
+		t.Fatalf("first import should collapse identical copies, got %+v", first)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "gemini", "--root", root, "--delete-source"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("second chat import: %v", err)
+	}
+	var second chatImportSummary
+	if err := json.Unmarshal(stdout.Bytes(), &second); err != nil {
+		t.Fatalf("parse second import summary: %v\n%s", err, stdout.String())
+	}
+	if second.SessionsCreated != 0 || second.SessionsSkipped != 1 || second.DuplicatesSkipped != 1 || second.SourcesDeleted != 2 {
+		t.Fatalf("second import should skip existing representative and duplicate copy, got %+v", second)
+	}
+	for _, path := range []string{namePath, hashPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected %s deleted with --delete-source, stat err = %v", path, err)
+		}
+	}
+}
+
+func TestChatImportContentHashesAreScopedBySource(t *testing.T) {
+	homeDir := setupEnv(t)
+	t.Setenv("HOME", homeDir)
+
+	body := []byte(`{"id":"shared-bytes","started_at":"2026-05-17T10:00:00Z","messages":[{"role":"user","author":"user","content":"same bytes across agents"}]}`)
+	codexPath := filepath.Join(homeDir, ".codex", "sessions", "shared.json")
+	geminiPath := filepath.Join(homeDir, ".gemini", "tmp", "castle-steward", "chats", "shared.json")
+	for _, path := range []string{codexPath, geminiPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, body, 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import all sources: %v", err)
+	}
+	var summary chatImportSummary
+	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+		t.Fatalf("parse import summary: %v\n%s", err, stdout.String())
+	}
+	if summary.SessionsCreated != 2 || summary.DuplicatesSkipped != 0 {
+		t.Fatalf("byte-identical files from different sources must both import, got %+v", summary)
+	}
+}
+
+func TestChatImportOverlappingRootsFlushPendingSessionBeforeDuplicate(t *testing.T) {
+	setupEnv(t)
+
+	root := t.TempDir()
+	nested := filepath.Join(root, "nested")
+	transcriptPath := filepath.Join(nested, "overlap.json")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("mkdir nested root: %v", err)
+	}
+	if err := os.WriteFile(transcriptPath, []byte(`{"id":"overlap","started_at":"2026-05-17T10:00:00Z","messages":[{"role":"user","content":"same file through two roots"}]}`), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root, "--root", nested})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import overlapping roots: %v", err)
+	}
+	var summary chatImportSummary
+	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+		t.Fatalf("parse import summary: %v\n%s", err, stdout.String())
+	}
+	if summary.SessionsCreated != 1 || summary.SessionsSkipped != 1 || summary.ItemsImported != 1 {
+		t.Fatalf("overlapping roots should import once and skip the duplicate scan, got %+v", summary)
+	}
+}
+
 // TestChatImportByteIdenticalCollisionSkipsAndDeletes verifies that a second
 // file colliding on the same identity with byte-identical content is treated as
 // an unchanged skip (not a divergent collision), and that --delete-source

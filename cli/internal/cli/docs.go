@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/conn-castle/personal-context/cli/internal/docs"
 	"github.com/spf13/cobra"
@@ -27,8 +26,8 @@ func newDocsCommand(stdout io.Writer) *cobra.Command {
 				return err
 			}
 			// Embedded topic files always end with a trailing newline.
-			_, _ = io.WriteString(stdout, content)
-			return nil
+			_, err = io.WriteString(stdout, content)
+			return err
 		},
 	}
 	cmd.AddCommand(newDocsSearchCommand(stdout))
@@ -37,12 +36,13 @@ func newDocsCommand(stdout io.Writer) *cobra.Command {
 
 func writeDocsTopicList(stdout io.Writer) error {
 	// docs.Topics() is always non-empty: the topics are compiled in via go:embed.
-	_, _ = fmt.Fprintln(stdout, "Available docs topics (use `pc docs <topic>`):")
-	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	var out strings.Builder
+	out.WriteString("Available docs topics (use `pc docs <topic>`):\n")
 	for _, topic := range docs.Topics() {
-		_, _ = fmt.Fprintf(tw, "  %s\t%s\n", topic.Name, topic.Title)
+		_, _ = fmt.Fprintf(&out, "  %-24s %s\n", topic.Name, topic.Title)
 	}
-	return tw.Flush()
+	_, err := io.WriteString(stdout, out.String())
+	return err
 }
 
 func newDocsSearchCommand(stdout io.Writer) *cobra.Command {
@@ -53,17 +53,20 @@ func newDocsSearchCommand(stdout io.Writer) *cobra.Command {
 		RunE: func(_ *cobra.Command, args []string) error {
 			query := strings.Join(args, " ")
 			hits := docs.Search(query)
+			var out strings.Builder
 			if len(hits) == 0 {
-				_, _ = fmt.Fprintf(stdout, "No documentation matches for %q.\n", query)
-				return nil
+				_, _ = fmt.Fprintf(&out, "No documentation matches for %q.\n", query)
+				_, err := io.WriteString(stdout, out.String())
+				return err
 			}
 			for _, hit := range hits {
-				_, _ = fmt.Fprintf(stdout, "%s: %s\n", hit.Topic, hit.Heading)
+				_, _ = fmt.Fprintf(&out, "%s: %s\n", hit.Topic, hit.Heading)
 				if hit.Excerpt != "" {
-					_, _ = fmt.Fprintf(stdout, "    %s\n", hit.Excerpt)
+					_, _ = fmt.Fprintf(&out, "    %s\n", hit.Excerpt)
 				}
 			}
-			return nil
+			_, err := io.WriteString(stdout, out.String())
+			return err
 		},
 	}
 }

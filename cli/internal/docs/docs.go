@@ -99,6 +99,7 @@ func splitSections(content string) []section {
 	var sections []section
 	current := section{heading: "(intro)"}
 	var body []string
+	inFence := false
 	flush := func() {
 		current.body = strings.TrimSpace(strings.Join(body, "\n"))
 		if current.body != "" || current.heading != "(intro)" {
@@ -107,9 +108,13 @@ func splitSections(content string) []section {
 		body = nil
 	}
 	for _, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+		}
+		if !inFence && strings.HasPrefix(trimmed, "#") {
 			flush()
-			current = section{heading: strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#"))}
+			current = section{heading: strings.TrimSpace(strings.TrimLeft(trimmed, "#"))}
 		}
 		body = append(body, line)
 	}

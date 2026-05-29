@@ -2,9 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
+
+type failingDocsWriter struct{}
+
+func (failingDocsWriter) Write(_ []byte) (int, error) {
+	return 0, errors.New("docs write failed")
+}
 
 func runDocs(t *testing.T, args ...string) (string, error) {
 	t.Helper()
@@ -61,5 +68,27 @@ func TestDocsSearchNoHits(t *testing.T) {
 	}
 	if !strings.Contains(out, "No documentation matches") {
 		t.Fatalf("expected no-hit message, got %s", out)
+	}
+}
+
+func TestDocsPropagatesWriteErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+	}{
+		{name: "list"},
+		{name: "topic", args: []string{"chat-import"}},
+		{name: "search hit", args: []string{"search", "parent_source_session_id"}},
+		{name: "search miss", args: []string{"search", "zzqqxx-not-present"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := NewRootCommand(RootCommandOptions{Stdout: failingDocsWriter{}, Stderr: &bytes.Buffer{}})
+			cmd.SetArgs(append([]string{"docs"}, tc.args...))
+			err := cmd.Execute()
+			if err == nil || !strings.Contains(err.Error(), "docs write failed") {
+				t.Fatalf("expected docs write failure, got %v", err)
+			}
+		})
 	}
 }

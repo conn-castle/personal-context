@@ -49,9 +49,6 @@ var runChatPager = func(content string) error {
 		return nil
 	}
 	fields := strings.Fields(pager)
-	if len(fields) == 0 {
-		return nil
-	}
 	cmd := exec.Command(fields[0], fields[1:]...)
 	cmd.Stdin = strings.NewReader(content)
 	cmd.Stdout = os.Stdout
@@ -135,7 +132,8 @@ type chatImportSummary struct {
 	FilesScanned     int `json:"files_scanned"`
 	// RawSourcesCopied is the number of distinct chat sessions whose managed raw
 	// source was written this run (retained state, not per-file work).
-	RawSourcesCopied     int      `json:"raw_sources_copied"`
+	RawSourcesCopied     int `json:"raw_sources_copied"`
+	rawSourceSessions    map[string]struct{}
 	SourcesDeleted       int      `json:"sources_deleted,omitempty"`
 	SourceDeleteWarnings []string `json:"source_delete_warnings,omitempty"`
 }
@@ -149,6 +147,11 @@ type chatImportSourcePathKey struct {
 type chatImportSourceSessionKey struct {
 	source          string
 	sourceSessionID string
+}
+
+type chatImportContentHashKey struct {
+	source string
+	hash   string
 }
 
 type chatImportSessionIndex struct {
@@ -169,10 +172,6 @@ type chatImportBatch struct {
 	fs      *filesystem.Client
 	summary *chatImportSummary
 	entries []pendingChatImport
-	// rawSourceSessions records the distinct chat session IDs whose managed raw
-	// source was promoted this run, so raw_sources_copied reflects retained
-	// state rather than per-file promote operations.
-	rawSourceSessions map[string]struct{}
 }
 
 func (b *chatImportBatch) add(ctx context.Context, pending pendingChatImport) error {
@@ -226,11 +225,11 @@ func (b *chatImportBatch) flush(ctx context.Context) error {
 			}
 			return fmt.Errorf("promote chat source for %s from staged file %s: %w", result.Session.ID, entry.stage.StagedPath, err)
 		}
-		if b.rawSourceSessions == nil {
-			b.rawSourceSessions = make(map[string]struct{})
+		if b.summary.rawSourceSessions == nil {
+			b.summary.rawSourceSessions = make(map[string]struct{})
 		}
-		b.rawSourceSessions[result.Session.ID] = struct{}{}
-		b.summary.RawSourcesCopied = len(b.rawSourceSessions)
+		b.summary.rawSourceSessions[result.Session.ID] = struct{}{}
+		b.summary.RawSourcesCopied = len(b.summary.rawSourceSessions)
 		// items_imported is work performed: every row written this run, whether
 		// inserted into a new session, appended, or re-inserted on replace. Net
 		// state is reported separately via items_delta/items_after_import.
@@ -319,7 +318,7 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 		itemsBefore = before
 		// seenContentHashes collapses exact byte-identical duplicate files that
 		// are scanned under different paths within this run (round-6 Issue 6).
-		seenContentHashes := map[string]struct{}{}
+		seenContentHashes := map[chatImportContentHashKey]struct{}{}
 		for source, sourceRoots := range roots {
 			sessionIndex, err := loadChatImportSessionIndex(ctx, stack.Repo, source, deviceID)
 			if err != nil {
@@ -341,6 +340,10 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 						return hadMutations, err
 					}
 					if ok {
+						existingHash, hashErr := recordio.HashFile(file)
+						if hashErr != nil {
+							return hadMutations, fmt.Errorf("hash existing chat source %s: %w", file, hashErr)
+						}
 						prior := existing
 						priorSession = &prior
 						handled, mutated, err := handleExistingChatImport(ctx, stack, &batch, &sessionIndex, existing, file, deviceID, projectPaths, opts.DeleteSource)
@@ -351,6 +354,7 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 							hadMutations = true
 						}
 						if handled {
+							seenContentHashes[chatImportContentHashKey{source: source, hash: existingHash}] = struct{}{}
 							continue
 						}
 					}
@@ -415,11 +419,15 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 						if hashErr != nil {
 							return hadMutations, fmt.Errorf("hash chat source %s: %w", file, hashErr)
 						}
-						if _, dup := seenContentHashes[hash]; dup {
+						hashKey := chatImportContentHashKey{source: source, hash: hash}
+						if _, dup := seenContentHashes[hashKey]; dup {
 							summary.DuplicatesSkipped++
+							if opts.DeleteSource {
+								deleteOriginalChatSource(&summary, file)
+							}
 							continue
 						}
-						seenContentHashes[hash] = struct{}{}
+						seenContentHashes[hashKey] = struct{}{}
 					}
 					if session.ID == "" {
 						if priorSession != nil {
@@ -876,6 +884,10 @@ func deleteImportedChatSourceIfSafe(summary *chatImportSummary, fs *filesystem.C
 	if isSameAsManagedFile(fs, chatID, rawSourceKey, sourcePath) {
 		return
 	}
+	deleteOriginalChatSource(summary, sourcePath)
+}
+
+func deleteOriginalChatSource(summary *chatImportSummary, sourcePath string) {
 	if err := os.Remove(sourcePath); err != nil {
 		summary.SourceDeleteWarnings = append(summary.SourceDeleteWarnings, fmt.Sprintf("%s: %v", sourcePath, err))
 	} else {
@@ -1420,9 +1432,7 @@ func writeChatSearchTable(w io.Writer, results []repository.ChatSearchResult) er
 func writeChatTranscript(w io.Writer, session repository.ChatSession, items []repository.ChatItem, subagents []repository.ChatSession, opts chatShowOptions) error {
 	if chatStdoutIsTerminal(w) {
 		buffer := &bytes.Buffer{}
-		if err := renderChatTranscript(buffer, session, items, subagents, opts); err != nil {
-			return err
-		}
+		_ = renderChatTranscript(buffer, session, items, subagents, opts)
 		if err := runChatPager(buffer.String()); err != nil {
 			return fmt.Errorf("page chat transcript: %w", err)
 		}
