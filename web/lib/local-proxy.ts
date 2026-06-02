@@ -6,6 +6,7 @@
  * Neon/S3 directly. When not set, behavior is unchanged.
  */
 import { getLocalBackendURL, getLocalModeState } from "@/lib/local-mode";
+import { localBackendUnavailable } from "@/lib/api-error";
 
 /** Headers that must not be forwarded between hops (RFC 7230 §6.1). */
 const HOP_BY_HOP = new Set([
@@ -112,16 +113,7 @@ export async function proxyToLocal(request: Request): Promise<Response> {
   try {
     response = await fetch(targetUrl, init);
   } catch {
-    return new Response(
-      JSON.stringify({
-        error: "Local backend unavailable",
-        code: "LOCAL_BACKEND_UNAVAILABLE",
-      }),
-      {
-        status: 502,
-        headers: { "content-type": "application/json" },
-      }
-    );
+    return localBackendUnavailable();
   }
 
   // Return the Go server's response directly (arrayBuffer is encoding-safe

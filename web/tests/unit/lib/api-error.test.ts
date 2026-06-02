@@ -5,6 +5,12 @@ import {
   badRequest,
   invalidId,
   internalError,
+  unauthorized,
+  conflict,
+  invalidConfig,
+  localBackendUnavailable,
+  localModeAuthDisabled,
+  registrationDisabled,
 } from "@/lib/api-error";
 
 describe("API error helpers", () => {
@@ -45,6 +51,67 @@ describe("API error helpers", () => {
     const body = await res.json();
     expect(body.code).toBe("INTERNAL_ERROR");
     expect(body.error).toBe("unexpected");
+  });
+
+  it("unauthorized returns 401 with UNAUTHORIZED code and default message", async () => {
+    const res = unauthorized();
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body).toEqual({ error: "Unauthorized", code: "UNAUTHORIZED" });
+  });
+
+  it("unauthorized accepts a custom message", async () => {
+    const res = unauthorized("Invalid or revoked API key");
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.code).toBe("UNAUTHORIZED");
+    expect(body.error).toBe("Invalid or revoked API key");
+  });
+
+  it("conflict returns 409 with CONFLICT code", async () => {
+    const res = conflict("already exists");
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.code).toBe("CONFLICT");
+    expect(body.error).toBe("already exists");
+  });
+
+  it("invalidConfig returns 500 with INVALID_CONFIG code and default message", async () => {
+    const res = invalidConfig();
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body).toEqual({
+      error: "Invalid LOCAL_BACKEND_URL configuration",
+      code: "INVALID_CONFIG",
+    });
+  });
+
+  it("localBackendUnavailable returns 502 with LOCAL_BACKEND_UNAVAILABLE code", async () => {
+    const res = localBackendUnavailable();
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body).toEqual({
+      error: "Local backend unavailable",
+      code: "LOCAL_BACKEND_UNAVAILABLE",
+    });
+  });
+
+  it("localModeAuthDisabled returns 403 with LOCAL_MODE_AUTH_DISABLED code", async () => {
+    const res = localModeAuthDisabled("Authentication is unavailable in local mode.");
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.code).toBe("LOCAL_MODE_AUTH_DISABLED");
+    expect(body.error).toBe("Authentication is unavailable in local mode.");
+  });
+
+  it("registrationDisabled returns 403 with REGISTRATION_DISABLED code and default message", async () => {
+    const res = registrationDisabled();
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body).toEqual({
+      error: "Registration is disabled.",
+      code: "REGISTRATION_DISABLED",
+    });
   });
 
   it("response has application/json content type", () => {

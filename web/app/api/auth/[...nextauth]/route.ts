@@ -1,19 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
+import type { NextResponse } from "next/server";
 import { handlers } from "@/lib/auth";
 import { getLocalModeState } from "@/lib/local-mode";
+import { invalidConfig, localModeAuthDisabled } from "@/lib/api-error";
 
 function localModeDisabledResponse(): NextResponse {
-  return NextResponse.json(
-    { error: "Authentication is unavailable in local mode.", code: "LOCAL_MODE_AUTH_DISABLED" },
-    { status: 403 },
-  );
+  return localModeAuthDisabled("Authentication is unavailable in local mode.");
 }
 
 function invalidConfigResponse(): NextResponse {
-  return NextResponse.json(
-    { error: "Invalid LOCAL_BACKEND_URL configuration", code: "INVALID_CONFIG" },
-    { status: 500 },
-  );
+  return invalidConfig();
 }
 
 export async function GET(req: NextRequest): Promise<Response> {
