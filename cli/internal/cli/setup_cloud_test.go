@@ -476,10 +476,12 @@ func TestRunSetupNonInteractivePreservesActiveProject(t *testing.T) {
 		t.Fatalf("local setup failed: %v", err)
 	}
 
-	// Set an active project.
+	// Set an active project and a custom GC retention window.
 	store, _ := config.NewStore(homeDir)
 	cfg, _ := store.Read()
 	cfg.ActiveProject = "org/my-project"
+	customRetention := 7
+	cfg.GCRetentionDays = &customRetention
 	_ = store.Write(cfg)
 
 	// Now run cloud setup.
@@ -490,13 +492,16 @@ func TestRunSetupNonInteractivePreservesActiveProject(t *testing.T) {
 		t.Fatalf("cloud setup failed: %v", err)
 	}
 
-	// Verify ActiveProject was preserved.
+	// Verify ActiveProject and GCRetentionDays were preserved.
 	cfg, err = store.Read()
 	if err != nil {
 		t.Fatalf("Read() error = %v", err)
 	}
 	if cfg.ActiveProject != "org/my-project" {
 		t.Fatalf("expected ActiveProject preserved, got %q", cfg.ActiveProject)
+	}
+	if cfg.GCRetentionDays == nil || *cfg.GCRetentionDays != customRetention {
+		t.Fatalf("expected GCRetentionDays preserved as %d, got %v", customRetention, cfg.GCRetentionDays)
 	}
 }
 
@@ -543,15 +548,17 @@ func TestRunSetupRemoveCloudSuccess(t *testing.T) {
 		t.Fatalf("local setup failed: %v", err)
 	}
 
-	// Write cloud config manually.
+	// Write cloud config manually, including a custom GC retention window.
 	store, _ := config.NewStore(homeDir)
+	customRetention := 7
 	cloudCfg := config.Config{
-		NeonURL:       "postgres://user:pass@host/db",
-		S3Bucket:      "my-bucket",
-		S3Region:      "us-east-1",
-		AWSProfile:    awsProfileName,
-		APIKey:        "pc_key_valid",
-		ActiveProject: "org/proj",
+		NeonURL:         "postgres://user:pass@host/db",
+		S3Bucket:        "my-bucket",
+		S3Region:        "us-east-1",
+		AWSProfile:      awsProfileName,
+		APIKey:          "pc_key_valid",
+		ActiveProject:   "org/proj",
+		GCRetentionDays: &customRetention,
 	}
 	if err := store.Write(cloudCfg); err != nil {
 		t.Fatalf("Write cloud config: %v", err)
@@ -611,6 +618,9 @@ func TestRunSetupRemoveCloudSuccess(t *testing.T) {
 	}
 	if cfg.ActiveProject != "org/proj" {
 		t.Fatalf("expected ActiveProject preserved, got %q", cfg.ActiveProject)
+	}
+	if cfg.GCRetentionDays == nil || *cfg.GCRetentionDays != customRetention {
+		t.Fatalf("expected GCRetentionDays preserved as %d, got %v", customRetention, cfg.GCRetentionDays)
 	}
 
 	if !strings.Contains(stdout.String(), "Cloud configuration removed") {
