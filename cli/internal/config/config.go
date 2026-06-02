@@ -7,12 +7,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
 	configDirPermission  = 0o700
 	configFilePermission = 0o600
 )
+
+// DefaultGCRetentionDays is the product-specified default trash retention
+// window used by `pc gc` when gc_retention_days is not set in config.
+const DefaultGCRetentionDays = 30
 
 var (
 	chmodFileFn = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode) }
@@ -38,6 +43,10 @@ type Config struct {
 	S3Endpoint       string `json:"s3_endpoint,omitempty"`
 	S3ForcePathStyle bool   `json:"s3_force_path_style,omitempty"`
 	APIKey           string `json:"api_key,omitempty"`
+	// GCRetentionDays is the trash retention window in days used by `pc gc`.
+	// A pointer distinguishes "unset" (use DefaultGCRetentionDays) from an
+	// explicit value, avoiding a silent zero-day default for legacy configs.
+	GCRetentionDays *int `json:"gc_retention_days,omitempty"`
 }
 
 // Store reads and writes config under ~/personal-context/.pc/config.json.
@@ -81,7 +90,23 @@ func (s Store) Read() (Config, error) {
 		return Config{}, err
 	}
 
+	if err := ValidateGCRetentionDays(cfg.GCRetentionDays); err != nil {
+		return Config{}, fmt.Errorf("gc_retention_days: %w", err)
+	}
+
 	return cfg, nil
+}
+
+// GCRetention returns the effective trash retention window as a duration.
+// Args: none.
+// Returns: the configured retention when gc_retention_days is set, otherwise
+// DefaultGCRetentionDays. Assumes the value was validated by Read/Write.
+func (c Config) GCRetention() time.Duration {
+	days := DefaultGCRetentionDays
+	if c.GCRetentionDays != nil {
+		days = *c.GCRetentionDays
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 // Write persists configuration using 0600 permissions.
@@ -90,6 +115,9 @@ func (s Store) Read() (Config, error) {
 func (s Store) Write(cfg Config) error {
 	if _, err := cfg.Mode(); err != nil {
 		return err
+	}
+	if err := ValidateGCRetentionDays(cfg.GCRetentionDays); err != nil {
+		return fmt.Errorf("gc_retention_days: %w", err)
 	}
 
 	path := s.Path()

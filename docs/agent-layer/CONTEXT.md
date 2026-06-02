@@ -303,7 +303,7 @@ Data files stay in S3 only; `metadata.json` lists what exists. Current chat expo
 
 ### Trash
 - `pc trash` — list soft-deleted records and chats
-- `pc gc` — hard-delete trash > 30 days (cloud-first if configured: deletes from Neon/S3 before local to prevent sync re-creation, warns if cloud unreachable, removes local figure/data/chat raw-source files, runs auto-sync)
+- `pc gc` — hard-delete trash older than the configured retention window (default 30 days; `gc_retention_days` in `.pc/config.json` overrides it for records and chats alike; cloud-first if configured: deletes from Neon/S3 before local to prevent sync re-creation, warns if cloud unreachable, removes local figure/data/chat raw-source files, runs auto-sync)
 
 ### Search & Registries
 - `pc search <query>` — cross-domain records/chats search; `--json`/`--format json` emits a flat array with `domain` on every item.

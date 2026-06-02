@@ -28,12 +28,6 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
 
 <!-- ENTRIES START -->
 
-- Backlog 2026-05-16 configurable-gc-retention: Make trash retention configurable
-    Priority: Medium. Area: cli, config
-    Description: Let users configure the `pc gc` trash retention window instead of using the current hard-coded 30-day threshold, applying the same configured policy across records and chats.
-    Acceptance criteria: Config/docs/tests define the retention setting, `pc gc` uses it for both domains, and invalid values fail clearly without silent defaults.
-    Notes: Current threshold is hard-coded in `cli/internal/cli/gc.go`.
-
 - Backlog 2026-05-16 chat-git-export-policy: Decide normalized chat git export policy
     Priority: High. Area: cli, backup
     Description: Decide whether normalized chat metadata/items should remain in git snapshots, be excluded, become opt-in, or be limited to metadata to avoid GB-scale chat history exports.

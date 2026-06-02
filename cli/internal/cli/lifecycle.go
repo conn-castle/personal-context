@@ -229,7 +229,7 @@ func runGCAll(ctx context.Context, stdout io.Writer, stderr io.Writer, domains [
 	}
 	defer func() { _ = stack.Close() }()
 
-	const gcThreshold = 30 * 24 * time.Hour
+	gcThreshold := stack.Config.GCRetention()
 	now := time.Now()
 
 	var expired []trashedItem

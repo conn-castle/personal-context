@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/conn-castle/personal-context/cli/internal/config"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 
 	_ "modernc.org/sqlite"
@@ -401,6 +402,62 @@ func TestGCMixedAgesUnit(t *testing.T) {
 	}
 	if strings.Contains(out, idYoung) {
 		t.Fatalf("expected young record %s to NOT be deleted, got %q", idYoung, out)
+	}
+}
+
+func TestGCUsesConfiguredRetention(t *testing.T) {
+	homeDir := setupEnv(t)
+	id := addRecord(t)
+
+	delCmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	delCmd.SetArgs([]string{"records", "delete", id})
+	if err := delCmd.Execute(); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// Backdate 10 days: inside the default 30-day window, but outside a
+	// configured 7-day window.
+	backdateDeletedAtUnit(t, homeDir, id, 10)
+
+	// With the default retention, the record is too young to collect.
+	defaultOut := &bytes.Buffer{}
+	defaultGC := NewRootCommand(RootCommandOptions{Stdout: defaultOut, Stderr: &bytes.Buffer{}})
+	defaultGC.SetArgs([]string{"gc"})
+	if err := defaultGC.Execute(); err != nil {
+		t.Fatalf("gc (default): %v", err)
+	}
+	if !strings.Contains(defaultOut.String(), "No expired trash to clean up.") {
+		t.Fatalf("expected record to survive default retention, got %q", defaultOut.String())
+	}
+
+	// Shorten the retention window to 7 days; now the record is expired.
+	setGCRetentionDays(t, homeDir, 7)
+
+	shortOut := &bytes.Buffer{}
+	shortGC := NewRootCommand(RootCommandOptions{Stdout: shortOut, Stderr: &bytes.Buffer{}})
+	shortGC.SetArgs([]string{"gc"})
+	if err := shortGC.Execute(); err != nil {
+		t.Fatalf("gc (7-day): %v", err)
+	}
+	if !strings.Contains(shortOut.String(), "Deleted "+id) {
+		t.Fatalf("expected record to be collected under 7-day retention, got %q", shortOut.String())
+	}
+}
+
+// setGCRetentionDays updates the persisted config to use a custom gc retention.
+func setGCRetentionDays(t *testing.T, homeDir string, days int) {
+	t.Helper()
+	store, err := config.NewStore(homeDir)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	cfg, err := store.Read()
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	cfg.GCRetentionDays = &days
+	if err := store.Write(cfg); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 }
 
