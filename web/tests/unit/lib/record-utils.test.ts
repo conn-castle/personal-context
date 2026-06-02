@@ -4,15 +4,12 @@ import {
   formatDate,
   formatRelativeDate,
   formatFileSize,
-  getUniqueProjects,
   groupRecordsByDate,
   groupRecordsByDateDesc,
-  injectVirtualDateRecords,
   getFigureFilenames,
-  renderMarkdownToHtml,
   rewriteFigureSources,
 } from "@/lib/record-utils";
-import type { RecordSummary, RecordGroup } from "@/lib/types";
+import type { RecordSummary } from "@/lib/types";
 
 /** Helper to build a minimal RecordSummary for testing. */
 function makeSummary(overrides: Partial<RecordSummary> & { id: string; date: string }): RecordSummary {
@@ -99,29 +96,6 @@ describe("formatFileSize", () => {
 });
 
 // ---------------------------------------------------------------------------
-// getUniqueProjects
-// ---------------------------------------------------------------------------
-describe("getUniqueProjects", () => {
-  it("extracts unique non-null project IDs sorted", () => {
-    const records = [
-      { project_id: "org/beta" },
-      { project_id: null },
-      { project_id: "org/alpha" },
-      { project_id: "org/beta" },
-    ];
-    expect(getUniqueProjects(records)).toEqual(["org/alpha", "org/beta"]);
-  });
-
-  it("returns empty array when all null", () => {
-    expect(getUniqueProjects([{ project_id: null }])).toEqual([]);
-  });
-
-  it("returns empty array for empty input", () => {
-    expect(getUniqueProjects([])).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // groupRecordsByDateDesc
 // ---------------------------------------------------------------------------
 describe("groupRecordsByDateDesc", () => {
@@ -196,41 +170,6 @@ describe("groupRecordsByDate", () => {
 });
 
 // ---------------------------------------------------------------------------
-// injectVirtualDateRecords
-// ---------------------------------------------------------------------------
-describe("injectVirtualDateRecords", () => {
-  it("inserts date markers between groups", () => {
-    const groups: RecordGroup[] = [
-      { date: "2025-03-04", records: [makeSummary({ id: "s1", date: "2025-03-04" })] },
-      { date: "2025-03-03", records: [makeSummary({ id: "s2", date: "2025-03-03" })] },
-    ];
-
-    const result = injectVirtualDateRecords(groups);
-
-    expect(result).toHaveLength(4);
-    expect(result[0]).toEqual({ type: "date-marker", date: "2025-03-04" });
-    expect(result[1]).toEqual(groups[0]);
-    expect(result[2]).toEqual({ type: "date-marker", date: "2025-03-03" });
-    expect(result[3]).toEqual(groups[1]);
-  });
-
-  it("empty groups returns empty", () => {
-    expect(injectVirtualDateRecords([])).toEqual([]);
-  });
-
-  it("single group gets one marker", () => {
-    const groups: RecordGroup[] = [
-      { date: "2025-03-04", records: [makeSummary({ id: "s1", date: "2025-03-04" })] },
-    ];
-
-    const result = injectVirtualDateRecords(groups);
-    expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({ type: "date-marker", date: "2025-03-04" });
-    expect(result[1]).toEqual(groups[0]);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // getFigureFilenames
 // ---------------------------------------------------------------------------
 describe("getFigureFilenames", () => {
@@ -291,75 +230,5 @@ describe("rewriteFigureSources", () => {
     });
 
     expect(result).toBe('<img src="https://signed.example.com/plot.png">');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// renderMarkdownToHtml
-// ---------------------------------------------------------------------------
-describe("renderMarkdownToHtml", () => {
-  it("renders headings (h1-h3)", () => {
-    expect(renderMarkdownToHtml("# Title")).toBe("<h1>Title</h1>");
-    expect(renderMarkdownToHtml("## Subtitle")).toBe("<h2>Subtitle</h2>");
-    expect(renderMarkdownToHtml("### Section")).toBe("<h3>Section</h3>");
-  });
-
-  it("renders h4-h6", () => {
-    expect(renderMarkdownToHtml("#### H4")).toBe("<h4>H4</h4>");
-    expect(renderMarkdownToHtml("##### H5")).toBe("<h5>H5</h5>");
-    expect(renderMarkdownToHtml("###### H6")).toBe("<h6>H6</h6>");
-  });
-
-  it("renders bold", () => {
-    expect(renderMarkdownToHtml("**bold**")).toBe("<p><strong>bold</strong></p>");
-  });
-
-  it("renders inline code", () => {
-    expect(renderMarkdownToHtml("`code`")).toBe("<p><code>code</code></p>");
-  });
-
-  it("renders list items as ul", () => {
-    const md = "- item one\n- item two\n- item three";
-    expect(renderMarkdownToHtml(md)).toBe(
-      "<ul><li>item one</li><li>item two</li><li>item three</li></ul>"
-    );
-  });
-
-  it("groups consecutive list items into one ul", () => {
-    const md = "- a\n- b\n\n- c";
-    const html = renderMarkdownToHtml(md);
-    // First group becomes one <ul>, paragraph break, then second group
-    expect(html).toContain("<ul><li>a</li><li>b</li></ul>");
-    expect(html).toContain("<ul><li>c</li></ul>");
-  });
-
-  it("renders paragraphs from plain text", () => {
-    expect(renderMarkdownToHtml("Hello world")).toBe("<p>Hello world</p>");
-  });
-
-  it("handles multiple paragraphs separated by empty lines", () => {
-    const md = "First paragraph\n\nSecond paragraph";
-    const html = renderMarkdownToHtml(md);
-    expect(html).toBe("<p>First paragraph</p><p>Second paragraph</p>");
-  });
-
-  it("empty string returns empty", () => {
-    expect(renderMarkdownToHtml("")).toBe("");
-  });
-
-  it("escapes raw HTML before rendering markdown", () => {
-    const html = renderMarkdownToHtml(
-      `<script>alert("x")</script> **bold**`
-    );
-    expect(html).toBe(
-      "<p>&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; <strong>bold</strong></p>"
-    );
-  });
-
-  it("escapes raw HTML inside headings and list items", () => {
-    const html = renderMarkdownToHtml("# <b>Title</b>\n- <img src=x>");
-    expect(html).toBe(
-      "<h1>&lt;b&gt;Title&lt;/b&gt;</h1><ul><li>&lt;img src=x&gt;</li></ul>"
-    );
   });
 });

@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import type { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { apiError } from "@/lib/api-error";
 import type { ErrorResponseBody } from "@/lib/api-error";
 
 export const MAX_JSON_BODY_BYTES = 4 * 1024 * 1024;
@@ -80,14 +81,14 @@ export async function readBoundedJson(
 /**
  * Converts a JsonBodyError into a JSON API error response.
  *
+ * Routes through `apiError` so the typed error-response contract stays the
+ * single source of truth for the response body shape.
+ *
  * @param error - The bounded JSON reader error.
  * @returns A NextResponse with the encoded error body.
  */
 export function jsonBodyErrorResponse(
   error: JsonBodyError
 ): NextResponse<ErrorResponseBody> {
-  return NextResponse.json(
-    { error: error.message, code: error.code },
-    { status: error.status }
-  );
+  return apiError(error.status, error.code, error.message);
 }

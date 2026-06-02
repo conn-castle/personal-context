@@ -131,12 +131,6 @@ export type RecordGroup = {
   records: RecordSummary[];
 };
 
-/** A virtual element representing a date boundary between record groups. */
-export type VirtualDateRecord = {
-  type: "date-marker";
-  date: string;
-};
-
 /** GET /api/info response. */
 export type AppInfoResponse = {
   mode: "local" | "cloud";

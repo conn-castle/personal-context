@@ -27,11 +27,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
-- Issue 2026-06-02 d2k9w7: Dead exports in web/lib/record-utils.ts kept alive only by their own tests
-    Priority: Low. Area: web/lib/record-utils.ts, web/tests/unit/lib/record-utils.test.ts
-    Description: `renderMarkdownToHtml`, `getUniqueProjects`, and `injectVirtualDateRecords` have no production callers (verified across app/components/hooks/lib; notes now render via react-markdown per Decision y5z6a7a). Their only references are in `record-utils.test.ts`, so the tests pass coverage without exercising any shipped behavior. `formatDate`, `formatRelativeDate`, `formatFileSize`, `groupRecordsByDate`, and `groupRecordsByDateDesc` remain in use.
-    Next step: Remove the three dead exports and their corresponding describe blocks in `record-utils.test.ts`; re-run `pnpm typecheck`/`pnpm test:coverage` to confirm the gate holds. Deferred from the error-contract PR to keep that PR single-purpose.
-
 - Issue 2026-05-23 b4q8n2: Legacy chat import raw-ahead states can still skip item repair
     Priority: Medium. Area: cli/internal/cli/chat.go
     Description: Current chat import batches session/items before raw promotion, so new imports no longer create raw-ahead-of-items windows. Existing developer stores may still contain a legacy raw-ahead state from older import ordering; an exact-match re-import can skip because it compares source bytes to managed raw bytes without validating normalized item completeness.

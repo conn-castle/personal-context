@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import {
   JsonBodyError,
+  jsonBodyErrorResponse,
   readBoundedJson,
 } from "@/lib/bounded-json";
+import type { ErrorResponseBody } from "@/lib/api-error";
 
 describe("readBoundedJson", () => {
   it("parses valid JSON within the byte limit", async () => {
@@ -71,5 +73,24 @@ describe("readBoundedJson", () => {
       status: 400,
       code: "BAD_REQUEST",
     } satisfies Partial<JsonBodyError>);
+  });
+});
+
+describe("jsonBodyErrorResponse", () => {
+  it("encodes the error's status, code, and message into the response body", async () => {
+    const error = new JsonBodyError(
+      413,
+      "REQUEST_BODY_TOO_LARGE",
+      "JSON body exceeds 4 bytes"
+    );
+
+    const response = jsonBodyErrorResponse(error);
+
+    expect(response.status).toBe(413);
+    const body = (await response.json()) as ErrorResponseBody;
+    expect(body).toEqual({
+      error: "JSON body exceeds 4 bytes",
+      code: "REQUEST_BODY_TOO_LARGE",
+    });
   });
 });
