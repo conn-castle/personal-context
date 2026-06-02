@@ -194,7 +194,7 @@ pc show <id> --format json   # JSON output for scripting
 Records are ordered by ` + "`(date, day_order, id)`" + `. The ` + "`--first`" + `, ` + "`--last`" + `, ` + "`--before`" + `, ` + "`--after`" + ` flags change the fractional index without touching other records.
 
 ### Soft delete
-` + "`pc delete`" + ` sets ` + "`deleted_at`" + ` — the record is hidden but recoverable. ` + "`pc restore`" + ` clears it. ` + "`pc gc`" + ` permanently removes records deleted more than 30 days ago.
+` + "`pc delete`" + ` sets ` + "`deleted_at`" + ` — the record is hidden but recoverable. ` + "`pc restore`" + ` clears it. ` + "`pc gc`" + ` permanently removes records deleted more than 30 days ago (configurable via ` + "`gc_retention_days`" + `).
 
 ### Searching
 Search matches against ` + "`html_content`" + `, ` + "`notes`" + `, and ` + "`project_id`" + `. Results are sorted by date (newest first).`,
@@ -251,7 +251,7 @@ pc search "TODO" --format json</pre>
     </div>
     <div class="cmd">
       <h3>pc trash / gc</h3>
-      <p>List deleted records or permanently remove old trash (&gt;30 days).</p>
+      <p>List deleted records or permanently remove old trash (default &gt;30 days, configurable).</p>
       <pre>pc trash
 pc gc</pre>
     </div>

@@ -82,6 +82,27 @@ func ValidateS3Region(region string) error {
 	return nil
 }
 
+// MaxGCRetentionDays bounds the retention window. The upper limit keeps the
+// derived nanosecond duration (days * 24h) well within int64 range so it can
+// never overflow into a negative threshold and trigger unintended deletion.
+const MaxGCRetentionDays = 36500 // 100 years
+
+// ValidateGCRetentionDays checks that a configured gc retention window is usable.
+// Args: days is the configured retention in days, or nil when unset.
+// Returns: nil when unset or a positive integer within MaxGCRetentionDays; an error otherwise.
+func ValidateGCRetentionDays(days *int) error {
+	if days == nil {
+		return nil
+	}
+	if *days < 1 {
+		return fmt.Errorf("gc retention days must be a positive integer, got %d", *days)
+	}
+	if *days > MaxGCRetentionDays {
+		return fmt.Errorf("gc retention days must be at most %d, got %d", MaxGCRetentionDays, *days)
+	}
+	return nil
+}
+
 // ValidateCloudConfig validates all cloud configuration fields when cloud mode is active.
 // For local-only mode (no cloud fields set), returns nil.
 // Args: cfg is the configuration to validate.

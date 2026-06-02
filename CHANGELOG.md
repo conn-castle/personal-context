@@ -14,6 +14,8 @@ Release entries must use this format so the release workflow can extract notes:
 
 ### Changed
 
+- Made `pc gc` trash retention configurable: set `gc_retention_days` (a positive integer number of days) in `~/personal-context/.pc/config.json` to override the 30-day default. The window applies to both record and chat trash. An unset value keeps the 30-day default; invalid values (zero, negative, or above 36500) are rejected when the config is read or written.
+
 ### Fixed
 
 ## v0.1.3 - 2026-05-29

@@ -93,7 +93,10 @@ func runSetupRemoveCloud(stdout io.Writer, homeDir string, store pcconfig.Store)
 		return nil
 	}
 
-	localOnly := pcconfig.Config{ActiveProject: cfg.ActiveProject}
+	localOnly := pcconfig.Config{
+		ActiveProject:   cfg.ActiveProject,
+		GCRetentionDays: cfg.GCRetentionDays,
+	}
 	if err := store.Write(localOnly); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
@@ -257,7 +260,7 @@ func runSetupCloud(
 		return fmt.Errorf("write AWS credentials profile: %w", err)
 	}
 
-	// 8. Write cloud config (preserve ActiveProject from existing config).
+	// 8. Write cloud config (preserve ActiveProject and GCRetentionDays from existing config).
 	cfg := pcconfig.Config{
 		NeonURL:          neonURL,
 		S3Bucket:         s3Bucket,
@@ -267,6 +270,7 @@ func runSetupCloud(
 		S3Endpoint:       s3Endpoint,
 		S3ForcePathStyle: s3ForcePathStyle,
 		APIKey:           trimmedAPIKey,
+		GCRetentionDays:  existing.GCRetentionDays,
 	}
 	if err := store.Write(cfg); err != nil {
 		// Rollback AWS credentials to previous state on config write failure.

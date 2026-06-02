@@ -165,7 +165,7 @@ above with `--api-key`.
 - `pc chat list|search|show|delete|restore` — browse, search, render, soft-delete, and restore imported chat sessions; list/search JSON returns `{items,total,next_cursor}`. For `pc chat search --format json`, `total` is the current page size, not the overall match count; paginate via `next_cursor`. `show` uses `$PAGER` when stdout is a TTY and shows a parent's subagents (and a subagent's parent). `pc chat list`/`pc chat search` accept `--parent-source-session-id <sid>` to scope to one parent's subagents.
 - `pc docs [topic]` / `pc docs search <query>` — print embedded concept reference matching the installed binary (`chat-import`, `item-types`, `schema`, `search-syntax`, `project-device-registry`); pipe it to `less`, `grep`, or an assistant
 - `pc trash` — list soft-deleted records and chats
-- `pc gc` — hard-delete trash older than 30 days (cascades child rows, removes files including chat raw sources; cloud-aware: deletes from cloud first to prevent sync re-creation)
+- `pc gc` — hard-delete trash older than the configured retention window (default 30 days; set `gc_retention_days` in `~/personal-context/.pc/config.json` to change it; applies to both records and chats; cascades child rows, removes files including chat raw sources; cloud-aware: deletes from cloud first to prevent sync re-creation)
 - `pc project list|register|archive|restore` — manage the project registry; `pc project register <id> [path] --device <id>` registers a source path for chat project assignment
 - `pc device list|register|archive|restore` — manage the source-device registry
 - `pc doctor` — check system health (DB, orphans, missing files; cloud connectivity if configured)

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestReadWriteRoundTrip(t *testing.T) {
@@ -402,5 +403,77 @@ func TestWriteFailurePreservesExistingConfig(t *testing.T) {
 	}
 	if string(current) != string(original) {
 		t.Fatalf("expected config file to remain unchanged on failed write")
+	}
+}
+
+func TestGCRetentionDaysRoundTrip(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	days := 7
+	if err := store.Write(Config{GCRetentionDays: &days}); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	loaded, err := store.Read()
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if loaded.GCRetentionDays == nil {
+		t.Fatal("expected gc_retention_days to persist, got nil")
+	}
+	if *loaded.GCRetentionDays != days {
+		t.Fatalf("expected gc_retention_days %d, got %d", days, *loaded.GCRetentionDays)
+	}
+}
+
+func TestGCRetentionDefaultsWhenUnset(t *testing.T) {
+	cfg := Config{}
+	want := time.Duration(DefaultGCRetentionDays) * 24 * time.Hour
+	if got := cfg.GCRetention(); got != want {
+		t.Fatalf("expected default retention %v, got %v", want, got)
+	}
+}
+
+func TestGCRetentionUsesConfiguredValue(t *testing.T) {
+	days := 90
+	cfg := Config{GCRetentionDays: &days}
+	want := 90 * 24 * time.Hour
+	if got := cfg.GCRetention(); got != want {
+		t.Fatalf("expected retention %v, got %v", want, got)
+	}
+}
+
+func TestReadRejectsInvalidGCRetention(t *testing.T) {
+	home := t.TempDir()
+	store, err := NewStore(home)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	configPath := store.Path()
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"gc_retention_days": 0}`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	if _, err := store.Read(); err == nil {
+		t.Fatal("expected Read to reject a zero gc_retention_days")
+	}
+}
+
+func TestWriteRejectsInvalidGCRetention(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+
+	days := -5
+	if err := store.Write(Config{GCRetentionDays: &days}); err == nil {
+		t.Fatal("expected Write to reject a negative gc_retention_days")
 	}
 }

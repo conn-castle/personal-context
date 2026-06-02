@@ -97,6 +97,36 @@ func TestValidateS3Region(t *testing.T) {
 	}
 }
 
+func TestValidateGCRetentionDays(t *testing.T) {
+	one := 1
+	thirty := 30
+	zero := 0
+	negative := -3
+	maxAllowed := MaxGCRetentionDays
+	tooLarge := MaxGCRetentionDays + 1
+	tests := []struct {
+		name    string
+		days    *int
+		wantErr bool
+	}{
+		{"unset", nil, false},
+		{"one day", &one, false},
+		{"thirty days", &thirty, false},
+		{"max allowed", &maxAllowed, false},
+		{"zero", &zero, true},
+		{"negative", &negative, true},
+		{"above max", &tooLarge, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateGCRetentionDays(tt.days)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateGCRetentionDays(%v) error = %v, wantErr %v", tt.days, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateCloudConfig(t *testing.T) {
 	t.Run("valid cloud config", func(t *testing.T) {
 		err := ValidateCloudConfig(Config{
