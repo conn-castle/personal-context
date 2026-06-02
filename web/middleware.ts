@@ -2,6 +2,7 @@ import { getToken } from "next-auth/jwt";
 import { NextRequest, NextResponse } from "next/server";
 import { getLocalModeState } from "@/lib/local-mode";
 import { extractBearerToken } from "@/lib/bearer-token";
+import { invalidConfig, unauthorized } from "@/lib/api-error";
 
 const PUBLIC_API_ROUTES = new Set(["/api/register", "/api/info"]);
 
@@ -23,10 +24,7 @@ export default async function middleware(req: NextRequest) {
   if (localMode.hasConfigError) {
     const { pathname } = req.nextUrl;
     if (pathname.startsWith("/api/")) {
-      return NextResponse.json(
-        { error: "Invalid LOCAL_BACKEND_URL configuration", code: "INVALID_CONFIG" },
-        { status: 500 },
-      );
+      return invalidConfig();
     }
 
     return new NextResponse("Invalid LOCAL_BACKEND_URL configuration", {
@@ -58,10 +56,7 @@ export default async function middleware(req: NextRequest) {
 
   // API routes return 401 JSON for unauthenticated requests.
   if (isAPI && !isLoggedIn) {
-    return NextResponse.json(
-      { error: "Unauthorized", code: "UNAUTHORIZED" },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   // Page routes redirect to /login.

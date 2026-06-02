@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { auth } from "@/lib/auth";
 import { getPool } from "@/lib/db-pool";
 import { extractBearerToken } from "@/lib/bearer-token";
+import { unauthorized } from "@/lib/api-error";
 
 interface AuthenticatedUser {
   id: string;
@@ -40,10 +41,7 @@ export async function requireUser(
 export async function requireSessionUser(): Promise<AuthenticatedUser | NextResponse> {
   const session = await auth();
   if (!session?.user?.id || typeof session.user.email !== "string") {
-    return NextResponse.json(
-      { error: "Unauthorized", code: "UNAUTHORIZED" },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   return { id: session.user.id, email: session.user.email };
@@ -71,10 +69,7 @@ async function validateApiKey(
   );
 
   if (rows.length === 0) {
-    return NextResponse.json(
-      { error: "Invalid or revoked API key", code: "UNAUTHORIZED" },
-      { status: 401 },
-    );
+    return unauthorized("Invalid or revoked API key");
   }
 
   // Update last_used_at (fire-and-forget; don't block the response).

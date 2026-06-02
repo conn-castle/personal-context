@@ -1,4 +1,4 @@
-import type { RecordSummary, RecordGroup, VirtualDateRecord } from "@/lib/types";
+import type { RecordSummary, RecordGroup } from "@/lib/types";
 
 // ---------- UI helper functions (moved from v0.dev mock-data.ts) ----------
 
@@ -53,24 +53,6 @@ export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/**
- * Extracts unique project IDs from an array of records.
- *
- * @param records - Array of records with optional project_id.
- * @returns Sorted array of unique, non-null project ID strings.
- */
-export function getUniqueProjects(
-  records: { project_id: string | null }[]
-): string[] {
-  const projects = new Set<string>();
-  for (const record of records) {
-    if (record.project_id) {
-      projects.add(record.project_id);
-    }
-  }
-  return Array.from(projects).sort();
 }
 
 /**
@@ -130,27 +112,6 @@ export function groupRecordsByDate(records: RecordSummary[]): RecordGroup[] {
 }
 
 /**
- * Inserts virtual date-marker elements before each record group.
- *
- * Every group receives a date marker immediately before it.
- *
- * @param groups - Record groups (typically from groupRecordsByDate).
- * @returns Alternating VirtualDateRecord and RecordGroup elements.
- */
-export function injectVirtualDateRecords(
-  groups: RecordGroup[]
-): (RecordGroup | VirtualDateRecord)[] {
-  const result: (RecordGroup | VirtualDateRecord)[] = [];
-
-  for (const group of groups) {
-    result.push({ type: "date-marker", date: group.date });
-    result.push(group);
-  }
-
-  return result;
-}
-
-/**
  * Builds the regex used to discover and rewrite `figures/{filename}` src
  * attributes.
  *
@@ -204,98 +165,4 @@ export function rewriteFigureSources(
       return `src=${quote}${resolvedUrl}${quote}`;
     }
   );
-}
-
-/**
- * Converts a simple subset of Markdown to HTML.
- *
- * Supported syntax:
- * - `# heading` through `###### heading` (h1-h6)
- * - `**bold**` inline
- * - `` `code` `` inline
- * - `- list item` (consecutive items grouped into `<ul>`)
- * - Empty lines create paragraph breaks
- * - Plain text wrapped in `<p>`
- *
- * @param markdown - The markdown source string.
- * @returns An HTML string.
- */
-export function renderMarkdownToHtml(markdown: string): string {
-  if (markdown === "") return "";
-
-  const lines = markdown.split("\n");
-  const blocks: string[] = [];
-  let listBuffer: string[] = [];
-
-  function flushList(): void {
-    if (listBuffer.length > 0) {
-      blocks.push(
-        "<ul>" + listBuffer.map((item) => `<li>${item}</li>`).join("") + "</ul>"
-      );
-      listBuffer = [];
-    }
-  }
-
-  for (const line of lines) {
-    // Empty line — flush list and act as paragraph separator
-    if (line.trim() === "") {
-      flushList();
-      continue;
-    }
-
-    // Heading: # through ######
-    const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
-    if (headingMatch) {
-      flushList();
-      const level = headingMatch[1].length;
-      const text = applyInline(headingMatch[2]);
-      blocks.push(`<h${level}>${text}</h${level}>`);
-      continue;
-    }
-
-    // List item: - text
-    const listMatch = line.match(/^-\s+(.+)$/);
-    if (listMatch) {
-      listBuffer.push(applyInline(listMatch[1]));
-      continue;
-    }
-
-    // Plain text → paragraph
-    flushList();
-    blocks.push(`<p>${applyInline(line)}</p>`);
-  }
-
-  flushList();
-
-  return blocks.join("");
-}
-
-/**
- * Applies inline markdown formatting (bold, code) to a text string.
- *
- * @param text - The raw text to process.
- * @returns The text with inline HTML substitutions.
- */
-function applyInline(text: string): string {
-  let result = escapeHtml(text);
-  // Bold: **text**
-  result = result.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  // Inline code: `text`
-  result = result.replace(/`(.+?)`/g, "<code>$1</code>");
-  return result;
-}
-
-/**
- * Escapes raw HTML characters before markdown tags are applied.
- *
- * @param text - Untrusted markdown text.
- * @returns HTML-escaped text.
- */
-function escapeHtml(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
 }

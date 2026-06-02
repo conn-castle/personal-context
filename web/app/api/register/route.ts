@@ -4,6 +4,14 @@ import { hashPassword } from "@/lib/password";
 import { canonicalizeEmailIdentity } from "@/lib/email-identity";
 import { getLocalModeState } from "@/lib/local-mode";
 import {
+  badRequest,
+  conflict,
+  internalError,
+  invalidConfig,
+  localModeAuthDisabled,
+  registrationDisabled,
+} from "@/lib/api-error";
+import {
   JsonBodyError,
   jsonBodyErrorResponse,
   readBoundedJson,
@@ -40,26 +48,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const localMode = getLocalModeState();
   if (localMode.hasConfigError) {
-    return NextResponse.json(
-      { error: "Invalid LOCAL_BACKEND_URL configuration", code: "INVALID_CONFIG" },
-      { status: 500 },
-    );
+    return invalidConfig();
   }
 
   if (localMode.enabled) {
-    return NextResponse.json(
-      { error: "Registration is unavailable in local mode.", code: "LOCAL_MODE_AUTH_DISABLED" },
-      { status: 403 },
-    );
+    return localModeAuthDisabled("Registration is unavailable in local mode.");
   }
 
   // Check if registration is enabled.
   const enabled = process.env.REGISTRATION_ENABLED === "true";
   if (!enabled) {
-    return NextResponse.json(
-      { error: "Registration is disabled.", code: "REGISTRATION_DISABLED" },
-      { status: 403 },
-    );
+    return registrationDisabled();
   }
 
   let body: unknown;
@@ -69,43 +68,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (error instanceof JsonBodyError) {
       return jsonBodyErrorResponse(error);
     }
-    return NextResponse.json(
-      { error: "Invalid JSON body.", code: "BAD_REQUEST" },
-      { status: 400 },
-    );
+    return badRequest("Invalid JSON body.");
   }
   if (!isRecord(body)) {
-    return NextResponse.json(
-      { error: "JSON body must be an object.", code: "BAD_REQUEST" },
-      { status: 400 },
-    );
+    return badRequest("JSON body must be an object.");
   }
 
   const { email, name, password } = body;
   const canonicalEmail = typeof email === "string" ? canonicalizeEmailIdentity(email) : "";
 
   if (!canonicalEmail.includes("@")) {
-    return NextResponse.json(
-      { error: "A valid email is required.", code: "BAD_REQUEST" },
-      { status: 400 },
-    );
+    return badRequest("A valid email is required.");
   }
 
   if (!password || typeof password !== "string" || password.length < 8) {
-    return NextResponse.json(
-      {
-        error: "Password must be at least 8 characters.",
-        code: "BAD_REQUEST",
-      },
-      { status: 400 },
-    );
+    return badRequest("Password must be at least 8 characters.");
   }
 
   if (name !== undefined && name !== null && typeof name !== "string") {
-    return NextResponse.json(
-      { error: "Name must be a string or null.", code: "BAD_REQUEST" },
-      { status: 400 },
-    );
+    return badRequest("Name must be a string or null.");
   }
 
   const pool = getPool();
@@ -121,16 +102,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json(rows[0], { status: 201 });
   } catch (error) {
     if (isUniqueEmailViolation(error)) {
-      return NextResponse.json(
-        { error: "An account with this email already exists.", code: "CONFLICT" },
-        { status: 409 },
-      );
+      return conflict("An account with this email already exists.");
     }
 
     console.error("POST /api/register error:", error);
-    return NextResponse.json(
-      { error: "Registration failed.", code: "INTERNAL_ERROR" },
-      { status: 500 },
-    );
+    return internalError("Registration failed.");
   }
 }
