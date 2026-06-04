@@ -27,6 +27,17 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-04 w8k3r1: pc chat import has no coverage self-check against on-disk ground truth
+    Priority: Medium. Area: cli/internal/cli/chat.go, cli/internal/cli/doctor.go
+    Description: The importer reports files scanned / sessions created but never compares the store against a disk scan of all discovered roots, so a silent discovery gap reads as success. This class of miss left an installed store at ~14% coverage undetected because verification compared output against the same roots the importer scans (a circular check).
+    Next step: Add a coverage self-check to the import summary or `pc doctor` that counts unique sessions on disk under all discovered roots (codex rollout uuid, claude session-id + subagent, gemini basename) and reports any shortfall vs the store.
+    Notes: Discovery is registry-driven and tested; this is the systemic guard so the silent-miss class cannot recur.
+
+- Issue 2026-06-04 q2v9m6: Gemini chat session identity is path-derived, not the in-file sessionId
+    Priority: Low. Area: cli/internal/chatimport/chatimport.go
+    Description: geminiSourceSessionID derives source_session_id from the file path (grandparent/parent/basename) with a stale comment claiming Gemini carries no usable session id; current Gemini session JSON does carry a stable top-level `sessionId`. Path-based identity works but is brittle (a moved/renamed tmp dir changes identity) and differs from codex/claude which key on the native id.
+    Next step: Switch Gemini identity to the in-file `sessionId` only during a fresh store rebuild — it rewrites every Gemini source_session_id, so doing it incrementally would churn/duplicate existing rows. Defer until such a rebuild.
+
 - Issue 2026-06-04 t7n2v5: No backend-level test forces a real mid-transaction rollback for UpsertChatSessionWithItems
     Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}, repositorytest
     Description: No test exercises a genuine mid-transaction failure (after the session UPSERT + items DELETE, before commit) for UpsertChatSessionWithItems to prove Postgres/SQLite rollback leaves session updated_at and items unchanged. The contract atomicity test's Ordinal:-1 path fails validChatItemInput pre-validation before Begin, so no real DB transaction is opened; the sync-layer self-heal test only exercises the memory repo's snapshot-restore.

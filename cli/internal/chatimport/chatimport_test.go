@@ -1211,3 +1211,123 @@ func TestJSONTranscriptSecondPassSurfacesChangedArrayDecodeErrors(t *testing.T) 
 		})
 	}
 }
+
+// agentPanelPath/agentPanelHash are a real Gemini projectHash pair captured from
+// disk. Gemini stores `projectHash == sha256(absolute repo root)`; pinning the
+// externally produced hash proves matchProjectHash hashes the same bytes Gemini
+// does. (Recomputing the hash inside the test would pass even if both sides
+// hashed the wrong thing, so the pinned value is the real check.)
+const (
+	agentPanelPath = "/Users/nicholasjconn/Local/git-repos/conn-castle/agent-panel"
+	agentPanelHash = "8307379c969280cb435ce59cc0ff8daaee53a835d3c5cd64615ee38e5b5a6e0c"
+)
+
+// writeGeminiSessionFile creates <dir>/chats/session-x.json with an optional
+// top-level projectHash, mirroring Gemini's on-disk layout (the session lives
+// under chats/ so a sibling .project_root resolves from the grandparent).
+func writeGeminiSessionFile(t *testing.T, dir string, projectHash string) string {
+	t.Helper()
+	chats := filepath.Join(dir, "chats")
+	if err := os.MkdirAll(chats, 0o755); err != nil {
+		t.Fatalf("mkdir chats: %v", err)
+	}
+	payload := `{"messages":[{"role":"user","content":"needle"}]}`
+	if projectHash != "" {
+		payload = `{"projectHash":"` + projectHash + `","messages":[{"role":"user","content":"needle"}]}`
+	}
+	path := filepath.Join(chats, "session-x.json")
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write gemini session: %v", err)
+	}
+	return path
+}
+
+func TestResolveGeminiProjectCWDFromProjectHash(t *testing.T) {
+	sessionPath := writeGeminiSessionFile(t, t.TempDir(), agentPanelHash)
+	paths := []repository.ProjectPath{
+		{ProjectID: "ap", Path: agentPanelPath, DeviceID: "device-a"},
+		{ProjectID: "other", Path: "/some/other/repo", DeviceID: "device-a"},
+	}
+	got := ResolveGeminiProjectCWD(sessionPath, paths, "device-a")
+	if got == nil || *got != agentPanelPath {
+		t.Fatalf("ResolveGeminiProjectCWD via projectHash = %v; want %q", got, agentPanelPath)
+	}
+	// The hash is scoped to the importing device; a match registered on another
+	// device must not leak across devices.
+	if got := ResolveGeminiProjectCWD(sessionPath, paths, "device-b"); got != nil {
+		t.Fatalf("ResolveGeminiProjectCWD on wrong device = %v; want nil", got)
+	}
+}
+
+func TestResolveGeminiProjectCWDPrefersProjectRoot(t *testing.T) {
+	dir := t.TempDir()
+	// The projectHash would match agentPanelPath, but a literal .project_root
+	// must win so sub-directory launches still prefix-match.
+	sessionPath := writeGeminiSessionFile(t, dir, agentPanelHash)
+	literal := filepath.Join(dir, "literal-repo-root")
+	if err := os.WriteFile(filepath.Join(dir, ".project_root"), []byte(literal+"\n"), 0o644); err != nil {
+		t.Fatalf("write .project_root: %v", err)
+	}
+	paths := []repository.ProjectPath{{ProjectID: "ap", Path: agentPanelPath, DeviceID: "device-a"}}
+	got := ResolveGeminiProjectCWD(sessionPath, paths, "device-a")
+	if got == nil || *got != literal {
+		t.Fatalf("ResolveGeminiProjectCWD = %v; want .project_root literal %q (precedence over projectHash)", got, literal)
+	}
+}
+
+func TestResolveGeminiProjectCWDUnresolvableReturnsNil(t *testing.T) {
+	paths := []repository.ProjectPath{{ProjectID: "ap", Path: agentPanelPath, DeviceID: "device-a"}}
+	// projectHash present but unregistered: a one-way hash is never reversed to a
+	// guessed path, so the session stays unattributed.
+	unregistered := writeGeminiSessionFile(t, t.TempDir(), "0000000000000000000000000000000000000000000000000000000000000000")
+	if got := ResolveGeminiProjectCWD(unregistered, paths, "device-a"); got != nil {
+		t.Fatalf("unregistered projectHash = %v; want nil", got)
+	}
+	// Neither .project_root nor projectHash present: nothing to resolve.
+	none := writeGeminiSessionFile(t, t.TempDir(), "")
+	if got := ResolveGeminiProjectCWD(none, paths, "device-a"); got != nil {
+		t.Fatalf("no project signal = %v; want nil", got)
+	}
+}
+
+func TestResolveGeminiProjectCWDIgnoresMalformedAndEmptySignals(t *testing.T) {
+	paths := []repository.ProjectPath{{ProjectID: "ap", Path: agentPanelPath, DeviceID: "device-a"}}
+
+	// An empty .project_root must not resolve to an empty cwd; with no
+	// projectHash either, the session stays unattributed.
+	emptyRootDir := t.TempDir()
+	sessionPath := writeGeminiSessionFile(t, emptyRootDir, "")
+	if err := os.WriteFile(filepath.Join(emptyRootDir, ".project_root"), []byte("  \n"), 0o644); err != nil {
+		t.Fatalf("write empty .project_root: %v", err)
+	}
+	if got := ResolveGeminiProjectCWD(sessionPath, paths, "device-a"); got != nil {
+		t.Fatalf("empty .project_root = %v; want nil", got)
+	}
+
+	// Malformed session JSON yields no projectHash.
+	badDir := filepath.Join(t.TempDir(), "chats")
+	if err := os.MkdirAll(badDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	badPath := filepath.Join(badDir, "session-x.json")
+	if err := os.WriteFile(badPath, []byte("{not json"), 0o644); err != nil {
+		t.Fatalf("write malformed json: %v", err)
+	}
+	if got := ResolveGeminiProjectCWD(badPath, paths, "device-a"); got != nil {
+		t.Fatalf("malformed json = %v; want nil", got)
+	}
+
+	// An explicitly empty projectHash is treated as absent.
+	emptyHash := filepath.Join(badDir, "empty-hash.json")
+	if err := os.WriteFile(emptyHash, []byte(`{"projectHash":"","messages":[{"role":"user","content":"x"}]}`), 0o644); err != nil {
+		t.Fatalf("write empty-hash json: %v", err)
+	}
+	if got := ResolveGeminiProjectCWD(emptyHash, paths, "device-a"); got != nil {
+		t.Fatalf("empty projectHash = %v; want nil", got)
+	}
+
+	// A source file that no longer exists resolves to nil rather than erroring.
+	if got := ResolveGeminiProjectCWD(filepath.Join(t.TempDir(), "chats", "gone.json"), paths, "device-a"); got != nil {
+		t.Fatalf("missing source = %v; want nil", got)
+	}
+}
