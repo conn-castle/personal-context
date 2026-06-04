@@ -372,6 +372,159 @@ func TestFigureAndDataFileNoOpUpdatesDoNotBumpSyncVersion(t *testing.T) {
 	}
 }
 
+func TestRecordAssetKeyValidationBranches(t *testing.T) {
+	repo, _ := newConcreteRepo(t)
+	ctx := context.Background()
+	record := mustCreateRecord(t, repo, repository.CreateRecordInput{
+		ID:          "20260305-a55e7001",
+		Date:        "2026-03-05",
+		DayOrder:    "a",
+		HTMLContent: strPtr("<h1>asset</h1>"),
+	})
+
+	if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+		RecordID: record.ID,
+		Filename: "bad.png",
+		S3Key:    "figures/other-record/bad.png",
+	}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for bad figure create key, got %v", err)
+	}
+	if _, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+		RecordID: record.ID,
+		Filename: "bad.csv",
+		S3Key:    "data/" + record.ID + "/nested/bad.csv",
+		Size:     1,
+		Hash:     strings.Repeat("a", 64),
+	}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for bad data-file create key, got %v", err)
+	}
+
+	figure, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+		RecordID: record.ID,
+		Filename: "plot.png",
+		S3Key:    "figures/" + record.ID + "/plot.png",
+	})
+	if err != nil {
+		t.Fatalf("CreateRecordFigure() error = %v", err)
+	}
+	if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{
+		ID:    figure.ID,
+		S3Key: "figures/" + record.ID + "/wrong.png",
+	}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for bad figure update key, got %v", err)
+	}
+
+	dataFile, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+		RecordID: record.ID,
+		Filename: "metrics.csv",
+		S3Key:    "data/" + record.ID + "/metrics.csv",
+		Size:     1,
+		Hash:     strings.Repeat("b", 64),
+	})
+	if err != nil {
+		t.Fatalf("CreateRecordDataFile() error = %v", err)
+	}
+	if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{
+		ID:    dataFile.ID,
+		S3Key: "data/other-record/metrics.csv",
+	}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for bad data-file update key, got %v", err)
+	}
+}
+
+func TestTemplateProjectAndDeviceListBehavior(t *testing.T) {
+	repo, _ := newConcreteRepo(t)
+	ctx := context.Background()
+
+	if _, err := repo.CreateTemplate(ctx, repository.CreateTemplateInput{Name: "zeta", HTMLContent: "<p>z</p>"}); err != nil {
+		t.Fatalf("CreateTemplate(zeta) error = %v", err)
+	}
+	if _, err := repo.CreateTemplate(ctx, repository.CreateTemplateInput{Name: "alpha", HTMLContent: "<p>a</p>"}); err != nil {
+		t.Fatalf("CreateTemplate(alpha) error = %v", err)
+	}
+	templates, err := repo.ListTemplates(ctx)
+	if err != nil {
+		t.Fatalf("ListTemplates() error = %v", err)
+	}
+	if len(templates) != 2 || templates[0].Name != "alpha" || templates[1].Name != "zeta" {
+		t.Fatalf("templates not sorted by name: %+v", templates)
+	}
+
+	if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "active-project"}); err != nil {
+		t.Fatalf("CreateProject(active) error = %v", err)
+	}
+	if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "archived-project"}); err != nil {
+		t.Fatalf("CreateProject(archived) error = %v", err)
+	}
+	if _, err := repo.ArchiveProject(ctx, "archived-project"); err != nil {
+		t.Fatalf("ArchiveProject() error = %v", err)
+	}
+	activeProjects, err := repo.ListProjects(ctx, false)
+	if err != nil {
+		t.Fatalf("ListProjects(false) error = %v", err)
+	}
+	if len(activeProjects) != 1 || activeProjects[0].ID != "active-project" {
+		t.Fatalf("active projects = %+v, want active-project only", activeProjects)
+	}
+	allProjects, err := repo.ListProjects(ctx, true)
+	if err != nil {
+		t.Fatalf("ListProjects(true) error = %v", err)
+	}
+	if len(allProjects) != 2 {
+		t.Fatalf("all projects count = %d, want 2", len(allProjects))
+	}
+
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "active-device"}); err != nil {
+		t.Fatalf("CreateDevice(active) error = %v", err)
+	}
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "archived-device"}); err != nil {
+		t.Fatalf("CreateDevice(archived) error = %v", err)
+	}
+	if _, err := repo.ArchiveDevice(ctx, "archived-device"); err != nil {
+		t.Fatalf("ArchiveDevice() error = %v", err)
+	}
+	activeDevices, err := repo.ListDevices(ctx, false)
+	if err != nil {
+		t.Fatalf("ListDevices(false) error = %v", err)
+	}
+	if len(activeDevices) != 1 || activeDevices[0].ID != "active-device" {
+		t.Fatalf("active devices = %+v, want active-device only", activeDevices)
+	}
+	allDevices, err := repo.ListDevices(ctx, true)
+	if err != nil {
+		t.Fatalf("ListDevices(true) error = %v", err)
+	}
+	if len(allDevices) != 2 {
+		t.Fatalf("all devices count = %d, want 2", len(allDevices))
+	}
+}
+
+func TestSearchHelpers(t *testing.T) {
+	query := sqliteFTSQuery(`alpha "quoted" beta`)
+	if query != `"alpha" """quoted""" "beta"` {
+		t.Fatalf("sqliteFTSQuery() = %q", query)
+	}
+
+	recordID := domainResultID(repository.DomainSearchResult{
+		Record: &repository.Record{ID: "20260305-aabbccdd"},
+	})
+	if recordID != "20260305-aabbccdd" {
+		t.Fatalf("record domainResultID = %q", recordID)
+	}
+	chatID := domainResultID(repository.DomainSearchResult{
+		Chat: &repository.ChatSearchResult{
+			Session: repository.ChatSession{ID: "20260305-deadbeef"},
+			Item:    repository.ChatItem{Ordinal: 7},
+		},
+	})
+	if chatID != "20260305-deadbeef/000007" {
+		t.Fatalf("chat domainResultID = %q", chatID)
+	}
+	if emptyID := domainResultID(repository.DomainSearchResult{}); emptyID != "" {
+		t.Fatalf("empty domainResultID = %q, want empty", emptyID)
+	}
+}
+
 func TestTemplateValidationConflictAndNotFoundBranches(t *testing.T) {
 	repo, _ := newConcreteRepo(t)
 	ctx := context.Background()
@@ -2190,6 +2343,10 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 			_, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{ID: 1, Filename: "plot2.png"})
 			return err
 		}},
+		{name: "UpdateRecordFigureNoPrefetch", run: func() error {
+			_, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{ID: 1})
+			return err
+		}},
 		{name: "ListRecordFiguresByRecordID", run: func() error { _, err := repo.ListRecordFiguresByRecordID(ctx, "20260320-abcd1234"); return err }},
 		{name: "DeleteRecordFigure", run: func() error { return repo.DeleteRecordFigure(ctx, 1) }},
 		{name: "CreateRecordDataFile", run: func() error {
@@ -2208,6 +2365,10 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 		}},
 		{name: "UpdateRecordDataFile", run: func() error {
 			_, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{ID: 1, Filename: "data2.csv"})
+			return err
+		}},
+		{name: "UpdateRecordDataFileNoPrefetch", run: func() error {
+			_, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{ID: 1})
 			return err
 		}},
 		{name: "ListRecordDataFilesByRecordID", run: func() error { _, err := repo.ListRecordDataFilesByRecordID(ctx, "20260320-abcd1234"); return err }},
