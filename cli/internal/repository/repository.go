@@ -61,6 +61,9 @@ type Repository interface {
 	UpsertDeviceForImport(ctx context.Context, device Device) (bool, error)
 
 	UpsertChatSession(ctx context.Context, input UpsertChatSessionInput) (ChatSession, bool, error)
+	// UpsertChatSessionWithItems writes a chat session and its complete
+	// replacement item set in one backend transaction.
+	UpsertChatSessionWithItems(ctx context.Context, input UpsertChatSessionInput, items []CreateChatItemInput) (ChatSession, bool, error)
 	GetChatSessionByID(ctx context.Context, id string) (ChatSession, error)
 	GetChatSessionBySource(ctx context.Context, source string, sourceSessionID string) (ChatSession, error)
 	ListChatSessions(ctx context.Context, filter ListChatSessionsFilter) ([]ChatSession, error)

@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-04 t7n2v5: No backend-level test forces a real mid-transaction rollback for UpsertChatSessionWithItems
+    Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}, repositorytest
+    Description: No test exercises a genuine mid-transaction failure (after the session UPSERT + items DELETE, before commit) for UpsertChatSessionWithItems to prove Postgres/SQLite rollback leaves session updated_at and items unchanged. The contract atomicity test's Ordinal:-1 path fails validChatItemInput pre-validation before Begin, so no real DB transaction is opened; the sync-layer self-heal test only exercises the memory repo's snapshot-restore.
+    Next step: Add a backend-specific test (e.g. inject a failing exec or constraint violation between the items DELETE and commit) asserting the session row and items are unchanged after rollback. This is backend-specific (Postgres needs Docker/integration tag) and does not belong in the shared contract suite.
+
 - Issue 2026-06-04 w3h7p1: Finish CI/release workflow supply-chain hardening beyond SHA pinning
     Priority: Low. Area: .github/workflows
     Description: PR #34 pinned actions to SHAs and added `persist-credentials: false` to the read-only `ci.yml` checkouts. Two reviewer-suggested hardenings remain: `cache: false` on `setup-go` (a CI-speed vs cache-poisoning tradeoff) in `ci.yml` and `release.yml` build-release, and `persist-credentials: false` on `release.yml` checkouts. The release-pipeline change is risky because the homebrew-tap checkout (release.yml:116) feeds `peter-evans/create-pull-request`, which pushes; `release.yml` is tag-triggered and not exercised by PR CI, so the credential change can't be verified here.
@@ -39,13 +44,8 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 - Issue 2026-05-22 h9k2m4: Replace per-import hash of managed raw with schema-backed fingerprint
     Priority: Low. Area: cli/internal/cli/chat.go, schema
-    Description: Exact unchanged chat imports still pay source + managed file hashing cost, plus an O(N) `ListChatSessions(IncludeDeleted: true)` load per source per import to populate the lookup index. Append-only JSONL/NDJSON now uses a suffix import path, so this is a remaining optimization rather than the active-session bottleneck. See: s4w9x2.
+    Description: Exact unchanged chat imports still pay source + managed file hashing cost, plus an O(N) `ListChatSessions(IncludeDeleted: true)` load per source per import to populate the lookup index. Append-only JSONL/NDJSON now uses a suffix import path, so this is a remaining optimization rather than the active-session bottleneck.
     Next step: If large-history profiling shows exact-match hashing or the per-source list load remains expensive, design a schema-backed source fingerprint with explicit migration handling and consider a narrower index-load filter.
-
-- Issue 2026-05-17 s4w9x2: SearchAll fetches full match set into Go memory before pagination
-    Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/chat.go
-    Description: `SearchAll` runs per-domain (records, chats) queries with no LIMIT/OFFSET, merges them in Go, sorts by BM25 rank across domains, then slices client-side. For queries that match thousands of rows this is O(N) memory and adds latency. The recent CLI fix limits the CLI-side over-fetch via `Limit+1`, but the repository still pulls all matches into memory before applying Limit/Offset.
-    Next step: Push the union+rank+limit into SQL via UNION ALL with a shared rank expression, or cap each domain's fetch at `Limit+1` rows and merge. Update both backends and contract tests.
 
 - Issue 2026-05-17 a3i6f8: Snapshot replacement is rollback-safe but not crash-safe atomic
     Priority: Medium. Area: cli/internal/gitsnapshot/snapshot.go
@@ -56,11 +56,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/repository.go, schema
     Description: `CreateRecord` and `UpsertChatSession` each do a read-then-insert preflight to check that the ID isn't already used by the other table. Two concurrent writers can pass both probes and commit conflicting IDs. The races are unlikely in practice (chat IDs include random hex), but the invariant is real if the design relies on a shared ID namespace.
     Next step: Introduce a dedicated `id_registry` table with a unique constraint and reserve the ID transactionally on creation, or run both inserts inside the same transaction with a shared advisory lock. Update both backends; document the contract in DECISIONS.md.
-
-- Issue 2026-05-17 c8h9k1: Chat sync upsert + items replacement is not atomic
-    Priority: High. Area: cli/internal/sync/service.go
-    Description: `syncChangedChatsDirected` calls `UpsertChatSession` (which advances target `updated_at` to the source value) followed by `ReplaceChatItems`. If `ReplaceChatItems` fails, the chat row is left advanced while items remain stale, and the next sync sees equal timestamps (WinnerNone) and skips the chat — leaving the items table inconsistent indefinitely. Unlike records, chats use unconditional `ReplaceChatItems` so they are not self-healing across syncs.
-    Next step: Wrap the chat upsert + items replacement in a single repository-level transaction, or downgrade target `updated_at` on items failure so the next sync re-picks the chat. Add a failing-test reproducer (force `ReplaceChatItems` error, assert next sync corrects items).
 
 - Issue 2026-05-17 p2r3s4: Project-paths registry sync is insert-only and grows monotonically
     Priority: Medium. Area: cli/internal/sync/service.go cli/internal/repository

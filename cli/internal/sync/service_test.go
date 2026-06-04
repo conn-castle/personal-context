@@ -221,8 +221,62 @@ func TestSyncChangedChatsErrorBranches(t *testing.T) {
 	source.chatItems["20260514-beadfeed"] = []repository.ChatItem{{SessionID: "20260514-beadfeed", Ordinal: 0, Role: "user", ItemType: "message", SearchText: "x", CreatedAt: now}}
 	target = newMemoryRepo(nil)
 	target.replaceChatItemsErr = errors.New("replace failed")
-	if err := syncChangedChats(context.Background(), time.Time{}, "test", source, target, nil, nil); err == nil || !strings.Contains(err.Error(), "test chat items") {
-		t.Fatalf("expected replace chat items error, got %v", err)
+	if err := syncChangedChats(context.Background(), time.Time{}, "test", source, target, nil, nil); err == nil || !strings.Contains(err.Error(), "test chat session/items") {
+		t.Fatalf("expected chat session/items error, got %v", err)
+	}
+}
+
+func TestSyncChangedChatsRetriesAfterAtomicItemWriteFailure(t *testing.T) {
+	now := time.Date(2026, 5, 14, 14, 0, 0, 0, time.UTC)
+	id := "20260514-beadfeed"
+	source := newMemoryRepo(nil)
+	target := newMemoryRepo(nil)
+	source.chatSessions[id] = repository.ChatSession{
+		ID:              id,
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		StartedAt:       now,
+		LastActivityAt:  now.Add(time.Minute),
+		CreatedAt:       now,
+		UpdatedAt:       now.Add(time.Minute),
+	}
+	target.chatSessions[id] = repository.ChatSession{
+		ID:              id,
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	oldText := "old target item"
+	newText := "new source item"
+	target.chatItems[id] = []repository.ChatItem{{SessionID: id, Ordinal: 0, Role: "user", ItemType: "message", SearchText: oldText, CreatedAt: now}}
+	source.chatItems[id] = []repository.ChatItem{{SessionID: id, Ordinal: 0, Role: "assistant", ItemType: "message", SearchText: newText, CreatedAt: now.Add(time.Minute)}}
+
+	target.replaceChatItemsErr = errors.New("replace failed")
+	err := syncChangedChatsDirected(context.Background(), time.Time{}, "test", source, target, WinnerLocal, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "test chat session/items") {
+		t.Fatalf("expected atomic write error, got %v", err)
+	}
+	if got := target.chatSessions[id].UpdatedAt; !got.Equal(now) {
+		t.Fatalf("target updated_at advanced after failed item write: got %v want %v", got, now)
+	}
+	if items := target.chatItems[id]; len(items) != 1 || items[0].SearchText != oldText {
+		t.Fatalf("target items changed after failed item write: %+v", items)
+	}
+
+	target.replaceChatItemsErr = nil
+	if err := syncChangedChatsDirected(context.Background(), time.Time{}, "test", source, target, WinnerLocal, nil, nil); err != nil {
+		t.Fatalf("syncChangedChatsDirected(retry) error = %v", err)
+	}
+	if got := target.chatSessions[id].UpdatedAt; !got.Equal(now.Add(time.Minute)) {
+		t.Fatalf("target updated_at after retry = %v, want %v", got, now.Add(time.Minute))
+	}
+	if items := target.chatItems[id]; len(items) != 1 || items[0].SearchText != newText {
+		t.Fatalf("target items after retry = %+v, want %q", items, newText)
 	}
 }
 
@@ -4445,6 +4499,34 @@ func (m *memoryRepo) UpsertChatSession(_ context.Context, input repository.Upser
 	session := chatSessionFromInput(input)
 	m.chatSessions[session.ID] = session
 	return session, created, nil
+}
+func (m *memoryRepo) UpsertChatSessionWithItems(ctx context.Context, input repository.UpsertChatSessionInput, inputs []repository.CreateChatItemInput) (repository.ChatSession, bool, error) {
+	previousSessions := cloneChatSessions(m.chatSessions)
+	previousItems := cloneChatItems(m.chatItems)
+	session, created, err := m.UpsertChatSession(ctx, input)
+	if err != nil {
+		return repository.ChatSession{}, false, err
+	}
+	if err := m.ReplaceChatItems(ctx, session.ID, inputs); err != nil {
+		m.chatSessions = previousSessions
+		m.chatItems = previousItems
+		return repository.ChatSession{}, false, err
+	}
+	return session, created, nil
+}
+func cloneChatSessions(sessions map[string]repository.ChatSession) map[string]repository.ChatSession {
+	cloned := make(map[string]repository.ChatSession, len(sessions))
+	for id, session := range sessions {
+		cloned[id] = session
+	}
+	return cloned
+}
+func cloneChatItems(items map[string][]repository.ChatItem) map[string][]repository.ChatItem {
+	cloned := make(map[string][]repository.ChatItem, len(items))
+	for sessionID, sessionItems := range items {
+		cloned[sessionID] = append([]repository.ChatItem(nil), sessionItems...)
+	}
+	return cloned
 }
 func (m *memoryRepo) GetChatSessionByID(_ context.Context, id string) (repository.ChatSession, error) {
 	session, ok := m.chatSessions[id]

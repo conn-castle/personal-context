@@ -376,12 +376,129 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if len(items) != 2 || items[1].SearchText != appendedText {
 			t.Fatalf("unexpected appended chat items: %+v", items)
 		}
+		atomicText := "contract atomic replacement needle"
+		atomicUpdatedAt := now.Add(2 * time.Minute)
+		atomicSession, atomicCreated, err := repo.UpsertChatSessionWithItems(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              session.ID,
+				Source:          "codex",
+				SourceSessionID: "source-1",
+				SourceDeviceID:  "chat-device",
+				StartedAt:       now,
+				LastActivityAt:  now.Add(2 * time.Minute),
+				UpdatedAt:       &atomicUpdatedAt,
+			},
+			ClearDeleted: true,
+		}, []repository.CreateChatItemInput{{
+			Ordinal:    0,
+			Role:       "assistant",
+			ItemType:   "message",
+			Text:       &atomicText,
+			SearchText: atomicText,
+			CreatedAt:  &now,
+		}})
+		if err != nil {
+			t.Fatalf("UpsertChatSessionWithItems() error = %v", err)
+		}
+		if atomicCreated {
+			t.Fatal("expected atomic replacement to update existing session")
+		}
+		items, err = repo.ListChatItems(ctx, atomicSession.ID)
+		if err != nil {
+			t.Fatalf("ListChatItems(atomic) error = %v", err)
+		}
+		if len(items) != 1 || items[0].SearchText != atomicText {
+			t.Fatalf("unexpected atomic replacement chat items: %+v", items)
+		}
+		rollbackUpdatedAt := atomicSession.UpdatedAt
+		failedUpdatedAt := now.Add(3 * time.Minute)
+		_, _, err = repo.UpsertChatSessionWithItems(ctx, repository.UpsertChatSessionInput{
+			CreateChatSessionInput: repository.CreateChatSessionInput{
+				ID:              session.ID,
+				Source:          "codex",
+				SourceSessionID: "source-1",
+				SourceDeviceID:  "chat-device",
+				StartedAt:       now,
+				LastActivityAt:  now.Add(3 * time.Minute),
+				UpdatedAt:       &failedUpdatedAt,
+			},
+			ClearDeleted: true,
+		}, []repository.CreateChatItemInput{{
+			Ordinal:  -1,
+			Role:     "assistant",
+			ItemType: "message",
+		}})
+		if !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected invalid atomic replacement error, got %v", err)
+		}
+		rolledBack, err := repo.GetChatSessionByID(ctx, atomicSession.ID)
+		if err != nil {
+			t.Fatalf("GetChatSessionByID(after rollback) error = %v", err)
+		}
+		if !rolledBack.UpdatedAt.Equal(rollbackUpdatedAt) {
+			t.Fatalf("chat session updated_at changed after failed atomic replacement: got %v want %v", rolledBack.UpdatedAt, rollbackUpdatedAt)
+		}
+		items, err = repo.ListChatItems(ctx, atomicSession.ID)
+		if err != nil {
+			t.Fatalf("ListChatItems(after rollback) error = %v", err)
+		}
+		if len(items) != 1 || items[0].SearchText != atomicText {
+			t.Fatalf("chat items changed after failed atomic replacement: %+v", items)
+		}
 		results, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle"})
 		if err != nil {
 			t.Fatalf("SearchChatItems() error = %v", err)
 		}
 		if len(results) != 1 || results[0].Session.ID != session.ID || results[0].Item.Ordinal != 0 {
 			t.Fatalf("unexpected chat search results: %+v", results)
+		}
+		recordNeedleA := "contract record alpha needle"
+		recordNeedleB := "contract record beta needle"
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
+			ID:             "20260514-acac0001",
+			Date:           "2026-05-14",
+			DayOrder:       "m",
+			Notes:          &recordNeedleA,
+			ProjectID:      "chat/project",
+			SourceDeviceID: "chat-device",
+		})
+		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
+			ID:             "20260514-acac0002",
+			Date:           "2026-05-14",
+			DayOrder:       "n",
+			Notes:          &recordNeedleB,
+			ProjectID:      "chat/project",
+			SourceDeviceID: "chat-device",
+		})
+		fullSearch, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", IncludeToolOutputs: true})
+		if err != nil {
+			t.Fatalf("SearchAll(full) error = %v", err)
+		}
+		if len(fullSearch) < 3 {
+			t.Fatalf("expected at least 3 unified search hits, got %+v", fullSearch)
+		}
+		recordHits := 0
+		for _, hit := range fullSearch {
+			if hit.Record == nil {
+				continue
+			}
+			recordHits++
+			// Both record fixtures above were created with Date "2026-05-14"; assert
+			// the search path returns the stored date string (guards Date scanning,
+			// e.g. Postgres scanning a time.Time and formatting it back).
+			if hit.Record.Date != "2026-05-14" {
+				t.Fatalf("record search hit %q returned Date %q, want %q", hit.Record.ID, hit.Record.Date, "2026-05-14")
+			}
+		}
+		if recordHits == 0 {
+			t.Fatalf("expected at least one record hit in unified search, got %+v", fullSearch)
+		}
+		secondHitPage, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", IncludeToolOutputs: true, Limit: 1, Offset: 1})
+		if err != nil {
+			t.Fatalf("SearchAll(page) error = %v", err)
+		}
+		if len(secondHitPage) != 1 || secondHitPage[0].Domain != fullSearch[1].Domain || domainResultID(secondHitPage[0]) != domainResultID(fullSearch[1]) {
+			t.Fatalf("paged unified search returned %+v, want second hit %+v from full search %+v", secondHitPage, fullSearch[1], fullSearch)
 		}
 		if _, err := repo.CreateRecord(ctx, repository.CreateRecordInput{
 			ID:             session.ID,
@@ -1740,6 +1857,16 @@ func assertExactOrder(t *testing.T, got []string, want []string) {
 			t.Fatalf("unexpected ordering at %d: got=%v want=%v", idx, got, want)
 		}
 	}
+}
+
+func domainResultID(result repository.DomainSearchResult) string {
+	if result.Record != nil {
+		return result.Record.ID
+	}
+	if result.Chat != nil {
+		return result.Chat.Session.ID + ":" + fmt.Sprint(result.Chat.Item.Ordinal)
+	}
+	return ""
 }
 
 func strPtr(value string) *string {

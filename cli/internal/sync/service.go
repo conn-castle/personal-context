@@ -245,9 +245,27 @@ func syncChangedChatsDirected(ctx context.Context, since time.Time, name string,
 				return err
 			}
 		}
+		items, err := source.ListChatItems(ctx, session.ID)
+		if err != nil {
+			return fmt.Errorf("list %s chat items %s: %w", name, session.ID, err)
+		}
+		inputs := make([]repository.CreateChatItemInput, 0, len(items))
+		for _, item := range items {
+			createdAt := item.CreatedAt
+			inputs = append(inputs, repository.CreateChatItemInput{
+				SessionID:  session.ID,
+				Ordinal:    item.Ordinal,
+				Role:       item.Role,
+				ItemType:   item.ItemType,
+				Text:       item.Text,
+				SearchText: item.SearchText,
+				RawJSON:    item.RawJSON,
+				CreatedAt:  &createdAt,
+			})
+		}
 		createdAt := session.CreatedAt
 		updatedAt := session.UpdatedAt
-		stored, _, err := target.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+		_, _, err = target.UpsertChatSessionWithItems(ctx, repository.UpsertChatSessionInput{
 			CreateChatSessionInput: repository.CreateChatSessionInput{
 				ID:                    session.ID,
 				Source:                session.Source,
@@ -266,30 +284,9 @@ func syncChangedChatsDirected(ctx context.Context, since time.Time, name string,
 				DeletedAt:             session.DeletedAt,
 			},
 			ClearDeleted: session.DeletedAt == nil,
-		})
+		}, inputs)
 		if err != nil {
-			return fmt.Errorf("%s chat session %s: %w", name, session.ID, err)
-		}
-		items, err := source.ListChatItems(ctx, session.ID)
-		if err != nil {
-			return fmt.Errorf("list %s chat items %s: %w", name, session.ID, err)
-		}
-		inputs := make([]repository.CreateChatItemInput, 0, len(items))
-		for _, item := range items {
-			createdAt := item.CreatedAt
-			inputs = append(inputs, repository.CreateChatItemInput{
-				SessionID:  stored.ID,
-				Ordinal:    item.Ordinal,
-				Role:       item.Role,
-				ItemType:   item.ItemType,
-				Text:       item.Text,
-				SearchText: item.SearchText,
-				RawJSON:    item.RawJSON,
-				CreatedAt:  &createdAt,
-			})
-		}
-		if err := target.ReplaceChatItems(ctx, stored.ID, inputs); err != nil {
-			return fmt.Errorf("%s chat items %s: %w", name, stored.ID, err)
+			return fmt.Errorf("%s chat session/items %s: %w", name, session.ID, err)
 		}
 	}
 	if warnWriter == nil {
