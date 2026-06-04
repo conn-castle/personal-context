@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -105,7 +112,7 @@ export function SpreadsheetViewer() {
     void fetchProjects();
   }, [refreshRecords, fetchProjects]);
 
-  const { markMutation, version, lastSyncAt } =
+  const { markMutation, version, lastSyncAt, syncError } =
     useSyncManager({
       onSyncData: handleSyncData,
     });
@@ -165,6 +172,14 @@ export function SpreadsheetViewer() {
     );
   }, [records, selectedProjects, projects.length]);
 
+  const filteredRecordsRef = useRef<RecordSummary[]>(filteredRecords);
+  const selectedRecordIdRef = useRef<string | undefined>(selectedRecord?.id);
+
+  useLayoutEffect(() => {
+    filteredRecordsRef.current = filteredRecords;
+    selectedRecordIdRef.current = selectedRecord?.id;
+  }, [filteredRecords, selectedRecord?.id]);
+
   const selectAndRememberRecord = useCallback(
     (id: string) => {
       setLastSelectedRecordId(id);
@@ -173,23 +188,19 @@ export function SpreadsheetViewer() {
     [selectRecord, setLastSelectedRecordId]
   );
 
-  const selectRecordAtIndex = useCallback(
-    (index: number) => {
-      const target = filteredRecords[index];
+  const selectRelativeRecord = useCallback(
+    (offset: -1 | 1) => {
+      const currentRecords = filteredRecordsRef.current;
+      const currentIndex = getSelectedRecordIndex(
+        currentRecords,
+        selectedRecordIdRef.current
+      );
+      const target = currentRecords[currentIndex + offset];
       if (target) {
         void selectAndRememberRecord(target.id);
       }
     },
-    [filteredRecords, selectAndRememberRecord]
-  );
-
-  const selectRelativeRecord = useCallback(
-    (offset: -1 | 1) => {
-      const nextIndex =
-        getSelectedRecordIndex(filteredRecords, selectedRecord?.id) + offset;
-      selectRecordAtIndex(nextIndex);
-    },
-    [filteredRecords, selectRecordAtIndex, selectedRecord?.id]
+    [selectAndRememberRecord]
   );
 
   // Auto-select: prefer last-selected record, fall back to most recent
@@ -339,6 +350,7 @@ export function SpreadsheetViewer() {
         onClose={() => setSettingsOpen(false)}
         syncVersion={version}
         lastSyncAt={lastSyncAt}
+        syncError={syncError}
         onDataChanged={handleSyncData}
       />
       <div className="h-screen flex flex-col bg-background">
@@ -646,10 +658,20 @@ export function SpreadsheetViewer() {
                 </ResizablePanel>
               </>
             ) : (
-              <CollapsedDetailsStrip
-                record={selectedRecord}
-                onOpenTab={openDetailsToTab}
-              />
+              <ResizablePanel
+                id="collapsed-details-panel"
+                defaultSize="48px"
+                minSize="48px"
+                maxSize="48px"
+                groupResizeBehavior="preserve-pixel-size"
+                disabled
+                className="min-w-12 max-w-12"
+              >
+                <CollapsedDetailsStrip
+                  record={selectedRecord}
+                  onOpenTab={openDetailsToTab}
+                />
+              </ResizablePanel>
             )}
           </ResizablePanelGroup>
         </div>

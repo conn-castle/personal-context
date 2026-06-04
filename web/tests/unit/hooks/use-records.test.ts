@@ -399,6 +399,7 @@ describe("useRecords", () => {
     it("updates selected record and list entry", async () => {
       const updatedDetail: RecordDetail = {
         ...mockRecordDetail,
+        html_content: "<p>Updated content</p>",
         notes: "Updated notes",
         project_id: "org/beta",
       };
@@ -440,6 +441,9 @@ describe("useRecords", () => {
       });
 
       expect(result.current.selectedRecord?.notes).toBe("Updated notes");
+      expect(result.current.records[0].html_content).toBe(
+        "<p>Updated content</p>"
+      );
       expect(result.current.records[0].project_id).toBe("org/beta");
     });
 
