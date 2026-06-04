@@ -316,11 +316,9 @@ func TestWriteFailsWhenConfigPathIsDirectory(t *testing.T) {
 }
 
 func TestWritePropagatesChmodFailure(t *testing.T) {
-	original := chmodFileFn
-	t.Cleanup(func() { chmodFileFn = original })
-	chmodFileFn = func(f *os.File, mode os.FileMode) error { return errors.New("chmod boom") }
-
-	store, err := NewStore(t.TempDir())
+	store, err := newStoreWithHooks(t.TempDir(), fileWriteHooks{
+		chmodFile: func(*os.File, os.FileMode) error { return errors.New("chmod boom") },
+	})
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
@@ -330,11 +328,9 @@ func TestWritePropagatesChmodFailure(t *testing.T) {
 }
 
 func TestWritePropagatesSyncFailure(t *testing.T) {
-	original := syncFileFn
-	t.Cleanup(func() { syncFileFn = original })
-	syncFileFn = func(f *os.File) error { return errors.New("sync boom") }
-
-	store, err := NewStore(t.TempDir())
+	store, err := newStoreWithHooks(t.TempDir(), fileWriteHooks{
+		syncFile: func(*os.File) error { return errors.New("sync boom") },
+	})
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
@@ -344,11 +340,9 @@ func TestWritePropagatesSyncFailure(t *testing.T) {
 }
 
 func TestWritePropagatesCloseFailure(t *testing.T) {
-	original := closeFileFn
-	t.Cleanup(func() { closeFileFn = original })
-	closeFileFn = func(f *os.File) error { return errors.New("close boom") }
-
-	store, err := NewStore(t.TempDir())
+	store, err := newStoreWithHooks(t.TempDir(), fileWriteHooks{
+		closeFile: func(*os.File) error { return errors.New("close boom") },
+	})
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}

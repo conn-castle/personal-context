@@ -23,22 +23,54 @@ func init() {
 	})
 }
 
-var (
-	sqlOpenFn = sql.Open
+type sqliteHooks struct {
+	sqlOpen              func(string, string) (*sql.DB, error)
+	ensureMigrationTable func(context.Context, *sql.DB) error
+	isMigrationApplied   func(context.Context, *sql.DB, string) (bool, error)
+	readFile             func(string) ([]byte, error)
+	beginTx              func(*sql.DB, context.Context) (*sql.Tx, error)
+	queryJournalMode     func(context.Context, *sql.DB) (string, error)
+}
 
-	ensureMigrationTableFn = ensureMigrationTable
-	isMigrationAppliedFn   = isMigrationApplied
-	readFileFn             = os.ReadFile
-	beginTxFn              = func(db *sql.DB, ctx context.Context) (*sql.Tx, error) {
-		return db.BeginTx(ctx, nil)
+func defaultSQLiteHooks() sqliteHooks {
+	return sqliteHooks{
+		sqlOpen:              sql.Open,
+		ensureMigrationTable: ensureMigrationTable,
+		isMigrationApplied:   isMigrationApplied,
+		readFile:             os.ReadFile,
+		beginTx: func(db *sql.DB, ctx context.Context) (*sql.Tx, error) {
+			return db.BeginTx(ctx, nil)
+		},
+		queryJournalMode: func(ctx context.Context, db *sql.DB) (string, error) {
+			var mode string
+			err := db.QueryRowContext(ctx, `PRAGMA journal_mode = WAL;`).Scan(&mode)
+			return mode, err
+		},
 	}
+}
 
-	queryJournalModeFn = func(ctx context.Context, db *sql.DB) (string, error) {
-		var mode string
-		err := db.QueryRowContext(ctx, `PRAGMA journal_mode = WAL;`).Scan(&mode)
-		return mode, err
+func (h sqliteHooks) withDefaults() sqliteHooks {
+	defaults := defaultSQLiteHooks()
+	if h.sqlOpen == nil {
+		h.sqlOpen = defaults.sqlOpen
 	}
-)
+	if h.ensureMigrationTable == nil {
+		h.ensureMigrationTable = defaults.ensureMigrationTable
+	}
+	if h.isMigrationApplied == nil {
+		h.isMigrationApplied = defaults.isMigrationApplied
+	}
+	if h.readFile == nil {
+		h.readFile = defaults.readFile
+	}
+	if h.beginTx == nil {
+		h.beginTx = defaults.beginTx
+	}
+	if h.queryJournalMode == nil {
+		h.queryJournalMode = defaults.queryJournalMode
+	}
+	return h
+}
 
 // Connection wraps an SQLite database handle configured for Personal Context.
 type Connection struct {
@@ -49,6 +81,11 @@ type Connection struct {
 // Args: path is the SQLite database file path.
 // Returns: a connection wrapper with WAL and foreign key enforcement enabled.
 func Open(path string) (*Connection, error) {
+	return openWithHooks(path, defaultSQLiteHooks())
+}
+
+func openWithHooks(path string, hooks sqliteHooks) (*Connection, error) {
+	hooks = hooks.withDefaults()
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("sqlite path is required")
 	}
@@ -57,12 +94,12 @@ func Open(path string) (*Connection, error) {
 		return nil, fmt.Errorf("create sqlite parent directory: %w", err)
 	}
 
-	db, err := sqlOpenFn("sqlite", path)
+	db, err := hooks.sqlOpen("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
 	}
 
-	if err := configure(context.Background(), db); err != nil {
+	if err := configureWithHooks(context.Background(), db, hooks); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -101,6 +138,11 @@ func (c *Connection) ApplyMigrations(ctx context.Context, migrationsDir string) 
 // Args: ctx controls cancellation; db is the target sqlite handle; migrationsDir contains .sql files.
 // Returns: nil when all pending migrations are applied and recorded.
 func ApplyMigrations(ctx context.Context, db *sql.DB, migrationsDir string) error {
+	return applyMigrationsWithHooks(ctx, db, migrationsDir, defaultSQLiteHooks())
+}
+
+func applyMigrationsWithHooks(ctx context.Context, db *sql.DB, migrationsDir string, hooks sqliteHooks) error {
+	hooks = hooks.withDefaults()
 	if db == nil {
 		return fmt.Errorf("db is required")
 	}
@@ -114,8 +156,8 @@ func ApplyMigrations(ctx context.Context, db *sql.DB, migrationsDir string) erro
 	}
 
 	return applyPendingMigrations(ctx, db, sqlMigrationFilenames(entries), func(migration string) ([]byte, error) {
-		return readFileFn(filepath.Join(migrationsDir, migration))
-	})
+		return hooks.readFile(filepath.Join(migrationsDir, migration))
+	}, hooks)
 }
 
 // ApplyMigrationsFS applies migration SQL files from an fs.FS in lexical order.
@@ -132,6 +174,11 @@ func (c *Connection) ApplyMigrationsFS(ctx context.Context, fsys fs.FS) error {
 // Args: ctx controls cancellation; db is the target sqlite handle; fsys contains .sql files.
 // Returns: nil when all pending migrations are applied and recorded.
 func ApplyMigrationsFromFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
+	return applyMigrationsFromFSWithHooks(ctx, db, fsys, defaultSQLiteHooks())
+}
+
+func applyMigrationsFromFSWithHooks(ctx context.Context, db *sql.DB, fsys fs.FS, hooks sqliteHooks) error {
+	hooks = hooks.withDefaults()
 	if db == nil {
 		return fmt.Errorf("db is required")
 	}
@@ -146,7 +193,7 @@ func ApplyMigrationsFromFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 
 	return applyPendingMigrations(ctx, db, sqlMigrationFilenames(entries), func(migration string) ([]byte, error) {
 		return fs.ReadFile(fsys, migration)
-	})
+	}, hooks)
 }
 
 // sqlMigrationFilenames keeps only root-level SQL migration files and returns
@@ -170,13 +217,15 @@ func applyPendingMigrations(
 	db *sql.DB,
 	migrations []string,
 	readMigration func(string) ([]byte, error),
+	hooks sqliteHooks,
 ) error {
-	if err := ensureMigrationTableFn(ctx, db); err != nil {
+	hooks = hooks.withDefaults()
+	if err := hooks.ensureMigrationTable(ctx, db); err != nil {
 		return err
 	}
 
 	for _, migration := range migrations {
-		applied, err := isMigrationAppliedFn(ctx, db, migration)
+		applied, err := hooks.isMigrationApplied(ctx, db, migration)
 		if err != nil {
 			return err
 		}
@@ -189,7 +238,7 @@ func applyPendingMigrations(
 			return fmt.Errorf("read migration %s: %w", migration, err)
 		}
 
-		if err := applyMigration(ctx, db, migration, content); err != nil {
+		if err := applyMigration(ctx, db, migration, content, hooks); err != nil {
 			return err
 		}
 	}
@@ -197,8 +246,8 @@ func applyPendingMigrations(
 	return nil
 }
 
-func applyMigration(ctx context.Context, db *sql.DB, migration string, content []byte) error {
-	tx, err := beginTxFn(db, ctx)
+func applyMigration(ctx context.Context, db *sql.DB, migration string, content []byte, hooks sqliteHooks) error {
+	tx, err := hooks.withDefaults().beginTx(db, ctx)
 	if err != nil {
 		return fmt.Errorf("begin migration transaction: %w", err)
 	}
@@ -224,11 +273,16 @@ func applyMigration(ctx context.Context, db *sql.DB, migration string, content [
 }
 
 func configure(ctx context.Context, db *sql.DB) error {
+	return configureWithHooks(ctx, db, defaultSQLiteHooks())
+}
+
+func configureWithHooks(ctx context.Context, db *sql.DB, hooks sqliteHooks) error {
+	hooks = hooks.withDefaults()
 	if err := db.PingContext(ctx); err != nil {
 		return fmt.Errorf("ping sqlite database: %w", err)
 	}
 
-	mode, err := queryJournalModeFn(ctx, db)
+	mode, err := hooks.queryJournalMode(ctx, db)
 	if err != nil {
 		return fmt.Errorf("enable wal mode: %w", err)
 	}

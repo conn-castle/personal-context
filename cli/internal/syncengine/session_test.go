@@ -577,6 +577,30 @@ func TestAcquireFileLockKeepsUnparseableLock(t *testing.T) {
 	}
 }
 
+func TestInspectFileLockClassifiesUnparseableLock(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "test.lock")
+
+	inspection, err := InspectFileLock(lockPath)
+	if err != nil {
+		t.Fatalf("InspectFileLock(absent) error = %v", err)
+	}
+	if inspection.Exists || inspection.HasMetadata {
+		t.Fatalf("absent lock inspection = %+v, want no file and no metadata", inspection)
+	}
+
+	if err := os.WriteFile(lockPath, []byte("locked\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	inspection, err = InspectFileLock(lockPath)
+	if err != nil {
+		t.Fatalf("InspectFileLock(unparseable) error = %v", err)
+	}
+	if !inspection.Exists || inspection.HasMetadata {
+		t.Fatalf("unparseable lock inspection = %+v, want file without metadata", inspection)
+	}
+}
+
 func TestAcquireFileLockSerializesStaleRecovery(t *testing.T) {
 	origHostname := osHostname
 	origKill := syscallKill

@@ -125,7 +125,7 @@ A rolling log of important, non-obvious decisions that materially affect future 
 - Decision 2026-03-06 z6a7b8: Package-level function variable for test-only dependency injection
     Decision: Use `var resolveHomeDirFn = defaultResolveHomeDir` pattern in cli package to allow test-only injection of errors for otherwise-untestable paths (e.g., os.UserHomeDir failure).
     Reason: Covers 7 error paths (one per command) that cannot be reached via environment manipulation. Alternative (interface-based DI) would require threading a dependency through every command function for a single test concern.
-    Tradeoffs: Unsafe with t.Parallel (tests must restore original via t.Cleanup). Acceptable since cli package tests are not parallel. See ISSUES.md b2c3d4.
+    Tradeoffs: Unsafe with t.Parallel (tests must restore original via t.Cleanup). Acceptable since cli package tests are not parallel.
 
 - Decision 2026-03-05 y5z6a7: Playwright browser e2e runs in local mode with page.route mocks
     Decision: Playwright browser verification starts Next.js with `LOCAL_BACKEND_URL=http://127.0.0.1:9876` and uses `page.route()` interception instead of MSW or a real backend.

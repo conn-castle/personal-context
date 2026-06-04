@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/conn-castle/personal-context/cli/internal/filesystem"
-	pcs3 "github.com/conn-castle/personal-context/cli/internal/s3client"
-
 	"github.com/conn-castle/personal-context/cli/internal/repository"
+	pcs3 "github.com/conn-castle/personal-context/cli/internal/s3client"
+	"github.com/conn-castle/personal-context/cli/internal/syncengine"
+
 	"github.com/spf13/cobra"
 )
 
@@ -64,6 +66,11 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer, opts doctorOp
 	}
 
 	hasWarnings := false
+	warned, err := reportDoctorLegacySyncLock(stdout, filepath.Join(basePath(homeDir), ".pc", "sync.lock"))
+	if err != nil {
+		return err
+	}
+	hasWarnings = hasWarnings || warned
 
 	// Check orphaned directories
 	figDirs, dataDirs, err := stack.FS.ListRecordIDsOnDisk()
@@ -78,7 +85,7 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer, opts doctorOp
 		}
 		return fmt.Errorf("doctor: orphaned figures check failed: %w", err)
 	}
-	warned, err := reportDoctorOrphans(stdout, "Orphaned figures", "figure directories", orphanFigs)
+	warned, err = reportDoctorOrphans(stdout, "Orphaned figures", "figure directories", orphanFigs)
 	if err != nil {
 		return err
 	}
@@ -228,6 +235,26 @@ func reportDoctorSuccess(w io.Writer, context string, label string) error {
 // reportDoctorFailure emits a FAIL line that includes the check error.
 func reportDoctorFailure(w io.Writer, context string, label string, checkErr error) error {
 	return writeDoctorf(w, context, "%sFAIL -- %v\n", doctorStatusPrefix(label), checkErr)
+}
+
+func reportDoctorLegacySyncLock(w io.Writer, lockPath string) (bool, error) {
+	inspection, err := syncengine.InspectFileLock(lockPath)
+	if err != nil {
+		return false, err
+	}
+	if !inspection.Exists || inspection.HasMetadata {
+		return false, nil
+	}
+	if err := writeDoctorf(
+		w,
+		"write sync lock warning",
+		"%sWARN -- legacy or unparseable lock at %s blocks sync recovery; confirm no pc sync or pc chat import is running, then remove the file manually\n",
+		doctorStatusPrefix("Sync lock"),
+		inspection.Path,
+	); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // reportDoctorOrphans emits either an OK line or a WARN line for orphaned

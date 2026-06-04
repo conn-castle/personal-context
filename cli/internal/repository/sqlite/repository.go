@@ -360,8 +360,8 @@ func (r *Repository) DeleteRecord(ctx context.Context, id string) error {
 
 // CreateRecordFigure inserts a figure row.
 func (r *Repository) CreateRecordFigure(ctx context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
-	if strings.TrimSpace(input.RecordID) == "" || strings.TrimSpace(input.Filename) == "" || strings.TrimSpace(input.S3Key) == "" {
-		return repository.RecordFigure{}, repository.ErrInvalidArgument
+	if err := repository.ValidateRecordAssetKey("figures", input.RecordID, input.Filename, input.S3Key); err != nil {
+		return repository.RecordFigure{}, err
 	}
 
 	result, err := r.db.ExecContext(
@@ -402,6 +402,23 @@ func (r *Repository) GetRecordFigureByID(ctx context.Context, id int64) (reposit
 func (r *Repository) UpdateRecordFigure(ctx context.Context, input repository.UpdateRecordFigureInput) (repository.RecordFigure, error) {
 	if input.ID <= 0 {
 		return repository.RecordFigure{}, repository.ErrInvalidArgument
+	}
+	if input.Filename != "" || input.S3Key != "" {
+		existing, err := r.GetRecordFigureByID(ctx, input.ID)
+		if err != nil {
+			return repository.RecordFigure{}, err
+		}
+		filename := existing.Filename
+		if input.Filename != "" {
+			filename = input.Filename
+		}
+		s3Key := existing.S3Key
+		if input.S3Key != "" {
+			s3Key = input.S3Key
+		}
+		if err := repository.ValidateRecordAssetKey("figures", existing.RecordID, filename, s3Key); err != nil {
+			return repository.RecordFigure{}, err
+		}
 	}
 
 	setClauses := []string{
@@ -478,8 +495,11 @@ func (r *Repository) DeleteRecordFigure(ctx context.Context, id int64) error {
 
 // CreateRecordDataFile inserts a data-file row.
 func (r *Repository) CreateRecordDataFile(ctx context.Context, input repository.CreateRecordDataFileInput) (repository.RecordDataFile, error) {
-	if strings.TrimSpace(input.RecordID) == "" || strings.TrimSpace(input.Filename) == "" || strings.TrimSpace(input.S3Key) == "" || strings.TrimSpace(input.Hash) == "" {
+	if strings.TrimSpace(input.Hash) == "" {
 		return repository.RecordDataFile{}, repository.ErrInvalidArgument
+	}
+	if err := repository.ValidateRecordAssetKey("data", input.RecordID, input.Filename, input.S3Key); err != nil {
+		return repository.RecordDataFile{}, err
 	}
 	if input.Size < 0 {
 		return repository.RecordDataFile{}, repository.ErrInvalidArgument
@@ -528,6 +548,23 @@ func (r *Repository) UpdateRecordDataFile(ctx context.Context, input repository.
 	}
 	if input.Size != nil && *input.Size < 0 {
 		return repository.RecordDataFile{}, repository.ErrInvalidArgument
+	}
+	if input.Filename != "" || input.S3Key != "" {
+		existing, err := r.GetRecordDataFileByID(ctx, input.ID)
+		if err != nil {
+			return repository.RecordDataFile{}, err
+		}
+		filename := existing.Filename
+		if input.Filename != "" {
+			filename = input.Filename
+		}
+		s3Key := existing.S3Key
+		if input.S3Key != "" {
+			s3Key = input.S3Key
+		}
+		if err := repository.ValidateRecordAssetKey("data", existing.RecordID, filename, s3Key); err != nil {
+			return repository.RecordDataFile{}, err
+		}
 	}
 
 	setClauses := []string{

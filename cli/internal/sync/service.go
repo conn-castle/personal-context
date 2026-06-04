@@ -233,14 +233,21 @@ func syncChangedChatsDirected(ctx context.Context, since time.Time, name string,
 				return fmt.Errorf("resolve %s chat session %s: %w", name, session.ID, err)
 			}
 			if winner != winningSide {
+				shouldTransferRaw := rawTransfer != nil && session.RawSourceKey != nil && session.DeletedAt == nil
+				if winner == WinnerNone && shouldTransferRaw {
+					if err := rawTransfer(ctx, name, session, &report); err != nil {
+						return err
+					}
+				}
 				continue
 			}
 		}
-		// Transfer raw source bytes BEFORE the metadata upsert so a partially
-		// committed metadata row does not advertise a key whose object/local
-		// file is missing. Missing bytes are degraded durability, not a
-		// hard failure: leave raw_source_key intact and aggregate a warning.
-		if rawTransfer != nil && session.RawSourceKey != nil && session.DeletedAt == nil {
+		pulling := winningSide == WinnerCloud
+		shouldTransferRaw := rawTransfer != nil && session.RawSourceKey != nil && session.DeletedAt == nil
+		// Push raw source bytes before metadata so the cloud row never
+		// advertises a key whose object is absent. Pull does the inverse below:
+		// write metadata first so a failed local upsert cannot orphan a file.
+		if shouldTransferRaw && !pulling {
 			if err := rawTransfer(ctx, name, session, &report); err != nil {
 				return err
 			}
@@ -290,6 +297,11 @@ func syncChangedChatsDirected(ctx context.Context, since time.Time, name string,
 		}
 		if err := target.ReplaceChatItems(ctx, stored.ID, inputs); err != nil {
 			return fmt.Errorf("%s chat items %s: %w", name, stored.ID, err)
+		}
+		if shouldTransferRaw && pulling {
+			if err := rawTransfer(ctx, name, session, &report); err != nil {
+				return err
+			}
 		}
 	}
 	if warnWriter == nil {

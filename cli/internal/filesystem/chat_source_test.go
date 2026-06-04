@@ -342,12 +342,16 @@ func TestCopyChatSourceToStageRejectsDirectorySource(t *testing.T) {
 }
 
 // TestPromoteChatSourceStageRenameFailureRollsBackBackup injects a
-// stage→active Rename failure via the renameFileFn hook and asserts the
+// stage→active Rename failure via the client rename hook and asserts the
 // previously-backed-up active directory is restored.
 func TestPromoteChatSourceStageRenameFailureRollsBackBackup(t *testing.T) {
 	base := t.TempDir()
-	client, _ := NewClient(base)
 	chatID := "20260315-abcdef12"
+	client, _ := newClientWithHooks(base, fileOperationHooks{
+		renameFile: func(string, string) error {
+			return errors.New("simulated stage rename failure")
+		},
+	})
 	rawDir := filepath.Join(base, "chats", "raw")
 	activeDir := filepath.Join(rawDir, chatID)
 	if err := os.MkdirAll(activeDir, 0o700); err != nil {
@@ -364,14 +368,6 @@ func TestPromoteChatSourceStageRenameFailureRollsBackBackup(t *testing.T) {
 	stagedPath := filepath.Join(stageDir, "source.json")
 	if err := os.WriteFile(stagedPath, []byte("NEW"), 0o600); err != nil {
 		t.Fatalf("write staged: %v", err)
-	}
-
-	origRename := renameFileFn
-	t.Cleanup(func() { renameFileFn = origRename })
-	renameFileFn = func(src, dst string) error {
-		// Only fail the stage→active rename so the prior backup
-		// rename can still succeed via the unhooked os.Rename.
-		return errors.New("simulated stage rename failure")
 	}
 
 	_, err := client.PromoteChatSourceStage(ChatSourceStage{
@@ -631,10 +627,9 @@ func TestCopyChatSourceToStageFileOperationFailures(t *testing.T) {
 	})
 
 	t.Run("sync staged file", func(t *testing.T) {
-		original := syncFileFn
-		t.Cleanup(func() { syncFileFn = original })
-		syncFileFn = func(*os.File) error { return errors.New("sync boom") }
-		client, _ := NewClient(t.TempDir())
+		client, _ := newClientWithHooks(t.TempDir(), fileOperationHooks{
+			syncFile: func(*os.File) error { return errors.New("sync boom") },
+		})
 		source := filepath.Join(t.TempDir(), "session.json")
 		if err := os.WriteFile(source, []byte("{}"), 0o600); err != nil {
 			t.Fatalf("write source: %v", err)
@@ -645,10 +640,9 @@ func TestCopyChatSourceToStageFileOperationFailures(t *testing.T) {
 	})
 
 	t.Run("close staged file", func(t *testing.T) {
-		original := closeFileFn
-		t.Cleanup(func() { closeFileFn = original })
-		closeFileFn = func(*os.File) error { return errors.New("close boom") }
-		client, _ := NewClient(t.TempDir())
+		client, _ := newClientWithHooks(t.TempDir(), fileOperationHooks{
+			closeFile: func(*os.File) error { return errors.New("close boom") },
+		})
 		source := filepath.Join(t.TempDir(), "session.json")
 		if err := os.WriteFile(source, []byte("{}"), 0o600); err != nil {
 			t.Fatalf("write source: %v", err)

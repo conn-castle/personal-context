@@ -8,13 +8,33 @@ import (
 	"strings"
 )
 
-var (
-	syncFileFn  = func(f *os.File) error { return f.Sync() }
-	closeFileFn = func(f *os.File) error { return f.Close() }
-	// renameFileFn wraps os.Rename so tests can inject failures into the
-	// stage→active promotion path without resorting to mode-trick hacks.
-	renameFileFn = os.Rename
-)
+type fileOperationHooks struct {
+	syncFile   func(*os.File) error
+	closeFile  func(*os.File) error
+	renameFile func(string, string) error
+}
+
+func defaultFileOperationHooks() fileOperationHooks {
+	return fileOperationHooks{
+		syncFile:   func(f *os.File) error { return f.Sync() },
+		closeFile:  func(f *os.File) error { return f.Close() },
+		renameFile: os.Rename,
+	}
+}
+
+func (h fileOperationHooks) withDefaults() fileOperationHooks {
+	defaults := defaultFileOperationHooks()
+	if h.syncFile == nil {
+		h.syncFile = defaults.syncFile
+	}
+	if h.closeFile == nil {
+		h.closeFile = defaults.closeFile
+	}
+	if h.renameFile == nil {
+		h.renameFile = defaults.renameFile
+	}
+	return h
+}
 
 // StoredFile describes a copied asset on disk.
 type StoredFile struct {
@@ -27,16 +47,21 @@ type StoredFile struct {
 // Client manages local figure/data file storage rooted at basePath.
 type Client struct {
 	basePath string
+	hooks    fileOperationHooks
 }
 
 // NewClient creates a filesystem client.
 // Args: basePath is the root local data directory (e.g., ~/personal-context).
 // Returns: a configured client or error when basePath is empty.
 func NewClient(basePath string) (*Client, error) {
+	return newClientWithHooks(basePath, defaultFileOperationHooks())
+}
+
+func newClientWithHooks(basePath string, hooks fileOperationHooks) (*Client, error) {
 	if strings.TrimSpace(basePath) == "" {
 		return nil, fmt.Errorf("base path is required")
 	}
-	return &Client{basePath: basePath}, nil
+	return &Client{basePath: basePath, hooks: hooks.withDefaults()}, nil
 }
 
 // ResolveFigurePath returns the absolute path for a figure file.
@@ -205,11 +230,12 @@ func (c *Client) copyInto(prefix string, recordID string, sourcePath string) (St
 		_ = tempFile.Close()
 		return StoredFile{}, fmt.Errorf("copy source file %s to %s: %w", sourcePath, targetPath, err)
 	}
-	if err := syncFileFn(tempFile); err != nil {
+	hooks := c.hooks.withDefaults()
+	if err := hooks.syncFile(tempFile); err != nil {
 		_ = tempFile.Close()
 		return StoredFile{}, fmt.Errorf("sync destination file %s: %w", targetPath, err)
 	}
-	if err := closeFileFn(tempFile); err != nil {
+	if err := hooks.closeFile(tempFile); err != nil {
 		return StoredFile{}, fmt.Errorf("close destination file %s: %w", targetPath, err)
 	}
 	if err := os.Rename(tempPath, targetPath); err != nil {
@@ -243,8 +269,14 @@ func validatePathSegment(field string, value string) error {
 	if strings.TrimSpace(value) == "" {
 		return fmt.Errorf("%s is required", field)
 	}
+	if value != strings.TrimSpace(value) {
+		return fmt.Errorf("%s must not contain surrounding whitespace", field)
+	}
 	if value == "." || value == ".." {
 		return fmt.Errorf("%s must not be %q", field, value)
+	}
+	if strings.Contains(value, "\\") {
+		return fmt.Errorf("%s must not include path separators: %q", field, value)
 	}
 	if value != filepath.Base(value) {
 		return fmt.Errorf("%s must not include path separators: %q", field, value)

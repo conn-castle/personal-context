@@ -672,6 +672,35 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if patchedDataFile.Description == nil || *patchedDataFile.Description != "after" {
 			t.Fatalf("expected Description preserved as %q when nil, got %v", "after", patchedDataFile.Description)
 		}
+
+		if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID: record.ID,
+			Filename: "bad.png",
+			S3Key:    "figures/other-record/bad.png",
+		}); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for non-canonical figure key, got %v", err)
+		}
+		if _, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+			RecordID: record.ID,
+			Filename: "bad.csv",
+			S3Key:    "data/" + record.ID + "/nested/bad.csv",
+			Size:     1,
+			Hash:     "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		}); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for non-canonical data-file key, got %v", err)
+		}
+		if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{
+			ID:    figure.ID,
+			S3Key: "figures/" + record.ID + "/wrong.png",
+		}); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for non-canonical figure update key, got %v", err)
+		}
+		if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{
+			ID:    dataFile.ID,
+			S3Key: "data/other-record/after.csv",
+		}); !errors.Is(err, repository.ErrInvalidArgument) {
+			t.Fatalf("expected ErrInvalidArgument for non-canonical data-file update key, got %v", err)
+		}
 	})
 
 	t.Run("list filters and invalid arguments", func(t *testing.T) {
@@ -1266,7 +1295,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if _, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
 			RecordID: alpha.ID,
 			Filename: "alpha.json",
-			S3Key:    "data/alpha.json",
+			S3Key:    "data/" + alpha.ID + "/alpha.json",
 			Size:     2,
 			Hash:     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		}); err != nil {
@@ -1398,7 +1427,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
 				RecordID: withChildren.ID,
 				Filename: name,
-				S3Key:    "figures/" + name,
+				S3Key:    "figures/" + withChildren.ID + "/" + name,
 			}); err != nil {
 				t.Fatalf("CreateRecordFigure(%s) error = %v", name, err)
 			}
@@ -1406,7 +1435,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if _, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
 			RecordID: withChildren.ID,
 			Filename: "metrics.json",
-			S3Key:    "data/metrics.json",
+			S3Key:    "data/" + withChildren.ID + "/metrics.json",
 			Size:     2,
 			Hash:     "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		}); err != nil {
@@ -1460,7 +1489,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
 			RecordID: populated.ID,
 			Filename: "scale.png",
-			S3Key:    "figures/scale.png",
+			S3Key:    "figures/" + populated.ID + "/scale.png",
 		}); err != nil {
 			t.Fatalf("CreateRecordFigure() error = %v", err)
 		}

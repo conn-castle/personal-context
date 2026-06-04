@@ -547,18 +547,13 @@ func TestConfigureRejectsUnsupportedJournalMode(t *testing.T) {
 }
 
 func TestOpenPropagatesSQLOpenFailure(t *testing.T) {
-	original := sqlOpenFn
-	t.Cleanup(func() {
-		sqlOpenFn = original
+	_, err := openWithHooks(filepath.Join(t.TempDir(), "pc.db"), sqliteHooks{
+		sqlOpen: func(string, string) (*sql.DB, error) {
+			return nil, errors.New("open boom")
+		},
 	})
-
-	sqlOpenFn = func(driverName string, dataSourceName string) (*sql.DB, error) {
-		return nil, errors.New("open boom")
-	}
-
-	_, err := Open(filepath.Join(t.TempDir(), "pc.db"))
 	if err == nil {
-		t.Fatal("expected Open() to fail when sqlOpenFn fails")
+		t.Fatal("expected Open() to fail when sql open fails")
 	}
 	if !strings.Contains(err.Error(), "open sqlite database") {
 		t.Fatalf("expected open sqlite context, got %v", err)
@@ -566,15 +561,6 @@ func TestOpenPropagatesSQLOpenFailure(t *testing.T) {
 }
 
 func TestApplyMigrationsPropagatesEnsureMigrationTableFailure(t *testing.T) {
-	original := ensureMigrationTableFn
-	t.Cleanup(func() {
-		ensureMigrationTableFn = original
-	})
-
-	ensureMigrationTableFn = func(ctx context.Context, db *sql.DB) error {
-		return errors.New("ensure boom")
-	}
-
 	dbPath := filepath.Join(t.TempDir(), "pc.db")
 	connection, err := Open(dbPath)
 	if err != nil {
@@ -582,9 +568,13 @@ func TestApplyMigrationsPropagatesEnsureMigrationTableFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = connection.Close() })
 
-	err = ApplyMigrations(context.Background(), connection.DB(), t.TempDir())
+	err = applyMigrationsWithHooks(context.Background(), connection.DB(), t.TempDir(), sqliteHooks{
+		ensureMigrationTable: func(context.Context, *sql.DB) error {
+			return errors.New("ensure boom")
+		},
+	})
 	if err == nil {
-		t.Fatal("expected ApplyMigrations() to fail when ensureMigrationTableFn fails")
+		t.Fatal("expected ApplyMigrations() to fail when ensure migration table fails")
 	}
 	if !strings.Contains(err.Error(), "ensure boom") {
 		t.Fatalf("expected ensure error to propagate, got %v", err)
@@ -592,15 +582,6 @@ func TestApplyMigrationsPropagatesEnsureMigrationTableFailure(t *testing.T) {
 }
 
 func TestApplyMigrationsPropagatesIsMigrationAppliedFailure(t *testing.T) {
-	original := isMigrationAppliedFn
-	t.Cleanup(func() {
-		isMigrationAppliedFn = original
-	})
-
-	isMigrationAppliedFn = func(ctx context.Context, db *sql.DB, version string) (bool, error) {
-		return false, fmt.Errorf("lookup boom")
-	}
-
 	dbPath := filepath.Join(t.TempDir(), "pc.db")
 	connection, err := Open(dbPath)
 	if err != nil {
@@ -613,9 +594,13 @@ func TestApplyMigrationsPropagatesIsMigrationAppliedFailure(t *testing.T) {
 		t.Fatalf("WriteFile(migration) error = %v", err)
 	}
 
-	err = ApplyMigrations(context.Background(), connection.DB(), migrationsDir)
+	err = applyMigrationsWithHooks(context.Background(), connection.DB(), migrationsDir, sqliteHooks{
+		isMigrationApplied: func(context.Context, *sql.DB, string) (bool, error) {
+			return false, fmt.Errorf("lookup boom")
+		},
+	})
 	if err == nil {
-		t.Fatal("expected ApplyMigrations() to fail when isMigrationAppliedFn fails")
+		t.Fatal("expected ApplyMigrations() to fail when migration lookup fails")
 	}
 	if !strings.Contains(err.Error(), "lookup boom") {
 		t.Fatalf("expected lookup error to propagate, got %v", err)
@@ -623,15 +608,6 @@ func TestApplyMigrationsPropagatesIsMigrationAppliedFailure(t *testing.T) {
 }
 
 func TestApplyMigrationsPropagatesReadFileFailure(t *testing.T) {
-	original := readFileFn
-	t.Cleanup(func() {
-		readFileFn = original
-	})
-
-	readFileFn = func(path string) ([]byte, error) {
-		return nil, errors.New("read boom")
-	}
-
 	dbPath := filepath.Join(t.TempDir(), "pc.db")
 	connection, err := Open(dbPath)
 	if err != nil {
@@ -644,9 +620,13 @@ func TestApplyMigrationsPropagatesReadFileFailure(t *testing.T) {
 		t.Fatalf("WriteFile(migration) error = %v", err)
 	}
 
-	err = ApplyMigrations(context.Background(), connection.DB(), migrationsDir)
+	err = applyMigrationsWithHooks(context.Background(), connection.DB(), migrationsDir, sqliteHooks{
+		readFile: func(string) ([]byte, error) {
+			return nil, errors.New("read boom")
+		},
+	})
 	if err == nil {
-		t.Fatal("expected ApplyMigrations() to fail when readFileFn fails")
+		t.Fatal("expected ApplyMigrations() to fail when read file fails")
 	}
 	if !strings.Contains(err.Error(), "read migration") || !strings.Contains(err.Error(), "read boom") {
 		t.Fatalf("expected read migration context and read boom, got %v", err)
@@ -654,15 +634,6 @@ func TestApplyMigrationsPropagatesReadFileFailure(t *testing.T) {
 }
 
 func TestApplyMigrationsPropagatesBeginTxFailure(t *testing.T) {
-	original := beginTxFn
-	t.Cleanup(func() {
-		beginTxFn = original
-	})
-
-	beginTxFn = func(db *sql.DB, ctx context.Context) (*sql.Tx, error) {
-		return nil, errors.New("begin boom")
-	}
-
 	dbPath := filepath.Join(t.TempDir(), "pc.db")
 	connection, err := Open(dbPath)
 	if err != nil {
@@ -675,9 +646,13 @@ func TestApplyMigrationsPropagatesBeginTxFailure(t *testing.T) {
 		t.Fatalf("WriteFile(migration) error = %v", err)
 	}
 
-	err = ApplyMigrations(context.Background(), connection.DB(), migrationsDir)
+	err = applyMigrationsWithHooks(context.Background(), connection.DB(), migrationsDir, sqliteHooks{
+		beginTx: func(*sql.DB, context.Context) (*sql.Tx, error) {
+			return nil, errors.New("begin boom")
+		},
+	})
 	if err == nil {
-		t.Fatal("expected ApplyMigrations() to fail when beginTxFn fails")
+		t.Fatal("expected ApplyMigrations() to fail when begin transaction fails")
 	}
 	if !strings.Contains(err.Error(), "begin migration transaction") || !strings.Contains(err.Error(), "begin boom") {
 		t.Fatalf("expected begin migration transaction context and begin boom, got %v", err)
@@ -712,15 +687,6 @@ func TestForeignKeysEnabledOnAllPoolConnections(t *testing.T) {
 }
 
 func TestConfigurePropagatesJournalModeQueryFailure(t *testing.T) {
-	originalQuery := queryJournalModeFn
-	t.Cleanup(func() {
-		queryJournalModeFn = originalQuery
-	})
-
-	queryJournalModeFn = func(ctx context.Context, db *sql.DB) (string, error) {
-		return "", errors.New("journal query boom")
-	}
-
 	dbPath := filepath.Join(t.TempDir(), "pc.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -728,7 +694,11 @@ func TestConfigurePropagatesJournalModeQueryFailure(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	if err := configure(context.Background(), db); err == nil {
+	if err := configureWithHooks(context.Background(), db, sqliteHooks{
+		queryJournalMode: func(context.Context, *sql.DB) (string, error) {
+			return "", errors.New("journal query boom")
+		},
+	}); err == nil {
 		t.Fatal("expected configure() to fail when journal mode query fails")
 	} else if !strings.Contains(err.Error(), "enable wal mode") {
 		t.Fatalf("expected wal mode context, got %v", err)
@@ -911,13 +881,6 @@ func TestApplyMigrationsFromFSFailsOnInvalidSQL(t *testing.T) {
 }
 
 func TestApplyMigrationsFromFSPropagatesBeginTxFailure(t *testing.T) {
-	original := beginTxFn
-	t.Cleanup(func() { beginTxFn = original })
-
-	beginTxFn = func(db *sql.DB, ctx context.Context) (*sql.Tx, error) {
-		return nil, errors.New("begin fs boom")
-	}
-
 	dbPath := filepath.Join(t.TempDir(), "pc.db")
 	conn, err := Open(dbPath)
 	if err != nil {
@@ -929,9 +892,13 @@ func TestApplyMigrationsFromFSPropagatesBeginTxFailure(t *testing.T) {
 		"001_demo.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE demo(id INTEGER PRIMARY KEY);`)},
 	}
 
-	err = ApplyMigrationsFromFS(context.Background(), conn.DB(), fsys)
+	err = applyMigrationsFromFSWithHooks(context.Background(), conn.DB(), fsys, sqliteHooks{
+		beginTx: func(*sql.DB, context.Context) (*sql.Tx, error) {
+			return nil, errors.New("begin fs boom")
+		},
+	})
 	if err == nil {
-		t.Fatal("expected error when beginTxFn fails")
+		t.Fatal("expected error when begin transaction fails")
 	}
 	if !strings.Contains(err.Error(), "begin migration transaction") {
 		t.Fatalf("expected begin migration error, got %v", err)
@@ -968,13 +935,6 @@ END;
 }
 
 func TestApplyMigrationsFromFSPropagatesEnsureTableFailure(t *testing.T) {
-	original := ensureMigrationTableFn
-	t.Cleanup(func() { ensureMigrationTableFn = original })
-
-	ensureMigrationTableFn = func(ctx context.Context, db *sql.DB) error {
-		return errors.New("ensure fs boom")
-	}
-
 	dbPath := filepath.Join(t.TempDir(), "pc.db")
 	conn, err := Open(dbPath)
 	if err != nil {
@@ -983,20 +943,17 @@ func TestApplyMigrationsFromFSPropagatesEnsureTableFailure(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close() })
 
 	fsys := fstest.MapFS{}
-	err = ApplyMigrationsFromFS(context.Background(), conn.DB(), fsys)
+	err = applyMigrationsFromFSWithHooks(context.Background(), conn.DB(), fsys, sqliteHooks{
+		ensureMigrationTable: func(context.Context, *sql.DB) error {
+			return errors.New("ensure fs boom")
+		},
+	})
 	if err == nil {
-		t.Fatal("expected error when ensureMigrationTableFn fails")
+		t.Fatal("expected error when ensure migration table fails")
 	}
 }
 
 func TestApplyMigrationsFromFSPropagatesLookupFailure(t *testing.T) {
-	original := isMigrationAppliedFn
-	t.Cleanup(func() { isMigrationAppliedFn = original })
-
-	isMigrationAppliedFn = func(ctx context.Context, db *sql.DB, version string) (bool, error) {
-		return false, errors.New("lookup fs boom")
-	}
-
 	dbPath := filepath.Join(t.TempDir(), "pc.db")
 	conn, err := Open(dbPath)
 	if err != nil {
@@ -1008,9 +965,13 @@ func TestApplyMigrationsFromFSPropagatesLookupFailure(t *testing.T) {
 		"001_demo.sql": &fstest.MapFile{Data: []byte(`CREATE TABLE demo(id INTEGER PRIMARY KEY);`)},
 	}
 
-	err = ApplyMigrationsFromFS(context.Background(), conn.DB(), fsys)
+	err = applyMigrationsFromFSWithHooks(context.Background(), conn.DB(), fsys, sqliteHooks{
+		isMigrationApplied: func(context.Context, *sql.DB, string) (bool, error) {
+			return false, errors.New("lookup fs boom")
+		},
+	})
 	if err == nil {
-		t.Fatal("expected error when isMigrationAppliedFn fails")
+		t.Fatal("expected error when migration lookup fails")
 	}
 }
 

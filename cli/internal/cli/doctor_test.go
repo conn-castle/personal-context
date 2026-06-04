@@ -122,6 +122,30 @@ func TestDoctorCloudWarning(t *testing.T) {
 	}
 }
 
+func TestDoctorWarnsAboutLegacySyncLock(t *testing.T) {
+	homeDir := setupEnv(t)
+	lockPath := filepath.Join(basePath(homeDir), ".pc", "sync.lock")
+	if err := os.WriteFile(lockPath, []byte("locked\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(lockPath) error = %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
+	if err == nil || !strings.Contains(err.Error(), "warnings found") {
+		t.Fatalf("runDoctor() error = %v, want warnings found", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "Sync lock:") ||
+		!strings.Contains(output, lockPath) ||
+		!strings.Contains(output, "confirm no pc sync or pc chat import is running") ||
+		!strings.Contains(output, "remove the file manually") {
+		t.Fatalf("expected legacy sync lock guidance in output, got %q", output)
+	}
+	if _, statErr := os.Stat(lockPath); statErr != nil {
+		t.Fatalf("doctor should not remove legacy sync lock: %v", statErr)
+	}
+}
+
 // failAfterWriter fails after n successful writes.
 type failAfterWriter struct {
 	remaining int
