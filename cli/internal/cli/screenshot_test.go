@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,35 +10,44 @@ import (
 	"testing"
 )
 
-func writeFakeChromeScript(t *testing.T, content string) string {
+func withFakeChromeRunner(t *testing.T, runner func(context.Context, string, []string) ([]byte, error)) {
 	t.Helper()
 
-	scriptPath := filepath.Join(t.TempDir(), "fake-chrome.sh")
-	if err := os.WriteFile(scriptPath, []byte(content), 0o755); err != nil {
-		t.Fatalf("write fake chrome script: %v", err)
-	}
-	return scriptPath
+	old := runChromeScreenshotFn
+	t.Cleanup(func() { runChromeScreenshotFn = old })
+	runChromeScreenshotFn = runner
 }
 
-func writeFakeChromePNGScript(t *testing.T) string {
+func withFakeChromePNGRunner(t *testing.T) {
 	t.Helper()
-	return writeFakeChromeScript(t, `#!/bin/sh
-set -eu
-out=""
-for arg in "$@"; do
-  case "$arg" in
-    --screenshot=*)
-      out="${arg#--screenshot=}"
-      ;;
-  esac
-done
-if [ -z "$out" ]; then
-  echo "missing screenshot arg" >&2
-  exit 2
-fi
-printf '\211PNG\r\n\032\n' > "$out"
-dd if=/dev/zero bs=1024 count=1 >> "$out" 2>/dev/null
-`)
+
+	withFakeChromeRunner(t, func(_ context.Context, _ string, args []string) ([]byte, error) {
+		outputPath, err := fakeChromeOutputPath(args)
+		if err != nil {
+			return []byte("missing screenshot arg"), err
+		}
+
+		data := append([]byte{0x89, 0x50, 0x4e, 0x47, '\r', '\n', 0x1a, '\n'}, make([]byte, 1024)...)
+		return nil, os.WriteFile(outputPath, data, 0o644)
+	})
+}
+
+func fakeChromeOutputPath(args []string) (string, error) {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--screenshot=") {
+			return strings.TrimPrefix(arg, "--screenshot="), nil
+		}
+	}
+	return "", errors.New("missing screenshot arg")
+}
+
+func fakeChromeHTMLPath(args []string) (string, error) {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "file://") {
+			return strings.TrimPrefix(arg, "file://"), nil
+		}
+	}
+	return "", errors.New("missing HTML file arg")
 }
 
 func TestBuildRecordHTML_FullDocument(t *testing.T) {
@@ -90,6 +100,111 @@ func TestBuildRecordHTML_HTMLTagVariants(t *testing.T) {
 				t.Errorf("wrapped=%v, want %v", wrapped, tt.wrap)
 			}
 		})
+	}
+}
+
+func TestPrepareScreenshotWorkspaceStagesRelativeAssets(t *testing.T) {
+	dataRoot := t.TempDir()
+	recordID := "20260310-abcdef12"
+
+	figureDir := filepath.Join(dataRoot, "figures", recordID)
+	if err := os.MkdirAll(figureDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(figureDir, "chart.png"), []byte("chart"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dataDir := filepath.Join(dataRoot, "data", recordID)
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "metrics.csv"), []byte("x,y\n1,2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	htmlPath, cleanup, err := prepareScreenshotWorkspace(recordID, `<img src="figures/chart.png">`, dataRoot)
+	if err != nil {
+		t.Fatalf("prepare screenshot workspace: %v", err)
+	}
+
+	tempDir := filepath.Dir(htmlPath)
+	t.Cleanup(cleanup)
+
+	html, err := os.ReadFile(htmlPath)
+	if err != nil {
+		t.Fatalf("read staged HTML: %v", err)
+	}
+	if !strings.Contains(string(html), `figures/chart.png`) {
+		t.Fatalf("staged HTML lost relative figure reference: %s", string(html))
+	}
+
+	stagedFigure, err := os.ReadFile(filepath.Join(tempDir, "figures", "chart.png"))
+	if err != nil {
+		t.Fatalf("read staged figure: %v", err)
+	}
+	if string(stagedFigure) != "chart" {
+		t.Fatalf("staged figure content = %q, want chart", string(stagedFigure))
+	}
+
+	stagedData, err := os.ReadFile(filepath.Join(tempDir, "data", "metrics.csv"))
+	if err != nil {
+		t.Fatalf("read staged data file: %v", err)
+	}
+	if string(stagedData) != "x,y\n1,2\n" {
+		t.Fatalf("staged data content = %q", string(stagedData))
+	}
+
+	cleanup()
+	if _, err := os.Stat(tempDir); !os.IsNotExist(err) {
+		t.Fatalf("cleanup left temp dir behind, stat err = %v", err)
+	}
+}
+
+func TestPrepareScreenshotWorkspaceIgnoresAssetPathFiles(t *testing.T) {
+	dataRoot := t.TempDir()
+	recordID := "20260310-abcdef12"
+
+	figureRoot := filepath.Join(dataRoot, "figures")
+	if err := os.MkdirAll(figureRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(figureRoot, recordID), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	htmlPath, cleanup, err := prepareScreenshotWorkspace(recordID, `<p>No assets</p>`, dataRoot)
+	if err != nil {
+		t.Fatalf("prepare screenshot workspace: %v", err)
+	}
+	defer cleanup()
+
+	if _, err := os.Stat(filepath.Join(filepath.Dir(htmlPath), "figures")); !os.IsNotExist(err) {
+		t.Fatalf("asset file should not be staged as a directory, stat err = %v", err)
+	}
+}
+
+func TestCopyDirCopiesNestedFiles(t *testing.T) {
+	sourceDir := filepath.Join(t.TempDir(), "source")
+	nestedDir := filepath.Join(sourceDir, "nested")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "chart.png"), []byte("chart bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := filepath.Join(t.TempDir(), "target")
+	if err := copyDir(sourceDir, targetDir); err != nil {
+		t.Fatalf("copy dir: %v", err)
+	}
+
+	copied, err := os.ReadFile(filepath.Join(targetDir, "nested", "chart.png"))
+	if err != nil {
+		t.Fatalf("read copied nested file: %v", err)
+	}
+	if !bytes.Equal(copied, []byte("chart bytes")) {
+		t.Fatalf("copied bytes = %q, want chart bytes", string(copied))
 	}
 }
 
@@ -198,10 +313,12 @@ func TestScreenshotWithChrome_InvalidBinary(t *testing.T) {
 }
 
 func TestScreenshotHappyPath(t *testing.T) {
+	withFakeChromePNGRunner(t)
+
 	old := findChromeBinaryFn
 	t.Cleanup(func() { findChromeBinaryFn = old })
 	findChromeBinaryFn = func() (string, error) {
-		return writeFakeChromePNGScript(t), nil
+		return "fake-chrome", nil
 	}
 
 	homeDir := setupEnv(t)
@@ -258,37 +375,32 @@ func TestScreenshotHappyPath(t *testing.T) {
 }
 
 func TestScreenshotPreservesRelativeFigurePaths(t *testing.T) {
-	fakeChromePath := writeFakeChromeScript(t, `#!/bin/sh
-set -eu
-out=""
-html=""
-for arg in "$@"; do
-  case "$arg" in
-    --screenshot=*)
-      out="${arg#--screenshot=}"
-      ;;
-    file://*)
-      html="${arg#file://}"
-      ;;
-  esac
-done
-if [ -z "$out" ] || [ -z "$html" ]; then
-  echo "missing screenshot args" >&2
-  exit 2
-fi
-if grep -q 'figures/chart.png' "$html"; then
-  if [ ! -f "$(dirname "$html")/figures/chart.png" ]; then
-    echo "missing relative figure asset" >&2
-    exit 3
-  fi
-fi
-printf 'fake png' > "$out"
-`)
+	withFakeChromeRunner(t, func(_ context.Context, _ string, args []string) ([]byte, error) {
+		outputPath, err := fakeChromeOutputPath(args)
+		if err != nil {
+			return []byte("missing screenshot args"), err
+		}
+		htmlPath, err := fakeChromeHTMLPath(args)
+		if err != nil {
+			return []byte("missing screenshot args"), err
+		}
+		html, err := os.ReadFile(htmlPath)
+		if err != nil {
+			return nil, err
+		}
+		if strings.Contains(string(html), "figures/chart.png") {
+			assetPath := filepath.Join(filepath.Dir(htmlPath), "figures", "chart.png")
+			if _, err := os.Stat(assetPath); err != nil {
+				return []byte("missing relative figure asset"), err
+			}
+		}
+		return nil, os.WriteFile(outputPath, []byte("fake png"), 0o644)
+	})
 
 	old := findChromeBinaryFn
 	t.Cleanup(func() { findChromeBinaryFn = old })
 	findChromeBinaryFn = func() (string, error) {
-		return fakeChromePath, nil
+		return "fake-chrome", nil
 	}
 
 	setupEnv(t)
@@ -328,10 +440,12 @@ printf 'fake png' > "$out"
 }
 
 func TestScreenshotDefaultOutput(t *testing.T) {
+	withFakeChromePNGRunner(t)
+
 	old := findChromeBinaryFn
 	t.Cleanup(func() { findChromeBinaryFn = old })
 	findChromeBinaryFn = func() (string, error) {
-		return writeFakeChromePNGScript(t), nil
+		return "fake-chrome", nil
 	}
 
 	setupEnv(t)

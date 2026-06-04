@@ -161,8 +161,8 @@ cli-lint: ## Run golangci-lint
 
 .PHONY: cli-coverage
 cli-coverage: ## Enforce Go coverage ≥95% (aggregate + per-package)
-	@cd $(CLI_DIR) && ./scripts/check_coverage.sh 95
-	@cd $(CLI_DIR) && ./scripts/check_coverage_per_package.sh 95
+	@cd $(CLI_DIR) && ./scripts/check_coverage.sh 95 coverage.out
+	@cd $(CLI_DIR) && ./scripts/check_coverage_per_package.sh 95 coverage.out
 
 .PHONY: cli-e2e
 cli-e2e: cli-build ## Run CLI e2e tests (builds binary first)

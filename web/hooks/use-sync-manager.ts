@@ -31,8 +31,6 @@ export interface UseSyncManagerReturn {
   isSyncing: boolean;
   /** ISO timestamp of the last successful data sync, or null if never synced. */
   lastSyncAt: string | null;
-  /** The most recent sync error message, or null after the latest successful sync. */
-  syncError: string | null;
 }
 
 const COOLDOWN_MS = 30_000;
@@ -114,7 +112,6 @@ export function useSyncManager(
   const [version, setVersion] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Mutable refs to avoid re-render dependency loops
   const lastCheckRef = useRef(0);
@@ -171,7 +168,6 @@ export function useSyncManager(
               }
               versionRef.current = versionData.version;
               setVersion(versionData.version);
-              setSyncError(null);
               return;
             }
           }
@@ -199,10 +195,8 @@ export function useSyncManager(
           versionRef.current = versionData.version;
           setVersion(versionData.version);
         }
-        setSyncError(null);
       } catch (err) {
         console.warn("Sync failed:", err);
-        setSyncError(err instanceof Error && err.message ? err.message : "Sync failed");
       } finally {
         isSyncingRef.current = false;
         setIsSyncing(false);
@@ -279,5 +273,5 @@ export function useSyncManager(
     };
   }, [enabled, doSync, idlePollMs, deepIdlePollMs, deepIdleThresholdMs]);
 
-  return { syncNow, markMutation, version, isSyncing, lastSyncAt, syncError };
+  return { syncNow, markMutation, version, isSyncing, lastSyncAt };
 }

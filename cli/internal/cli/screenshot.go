@@ -242,12 +242,18 @@ func screenshotWithChrome(ctx context.Context, chromePath string, htmlPath strin
 		fmt.Sprintf("file://%s", htmlPath),
 	}
 
-	cmd := exec.CommandContext(ctx, chromePath, args...)
-	out, err := cmd.CombinedOutput()
+	out, err := runChromeScreenshotFn(ctx, chromePath, args)
 	if err != nil {
 		return fmt.Errorf("chrome screenshot failed: %w\n%s", err, string(out))
 	}
 	return nil
+}
+
+var runChromeScreenshotFn = runChromeScreenshot
+
+func runChromeScreenshot(ctx context.Context, chromePath string, args []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, chromePath, args...)
+	return cmd.CombinedOutput()
 }
 
 func runScreenshot(ctx context.Context, stdout io.Writer, _ io.Writer, id string, output string) error {

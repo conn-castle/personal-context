@@ -293,7 +293,6 @@ export function useRecords(): UseRecordsReturn {
             s.id === id
               ? {
                   ...s,
-                  html_content: data.record.html_content,
                   project_id: data.record.project_id,
                   updated_at: data.record.updated_at,
                   deleted_at: data.record.deleted_at,
