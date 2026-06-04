@@ -548,11 +548,7 @@ func handleExistingChatImport(ctx context.Context, stack *localStack, batch *cha
 		return false, false, fmt.Errorf("compare chat source with managed raw %s: %w", sourcePath, err)
 	}
 	if comparison.matches {
-		batch.summary.SessionsSkipped++
-		if deleteSource {
-			deleteImportedChatSourceIfSafe(batch.summary, stack.FS, existing.ID, *existing.RawSourceKey, sourcePath)
-		}
-		return true, false, nil
+		return handleExactMatchChatImport(ctx, stack, batch, sessionIndex, existing, sourcePath, comparison, deviceID, projectPaths, deleteSource)
 	}
 	if comparison.appendOnly {
 		// Append ops compute ordinals from pre-batch DB state. If the same
@@ -572,6 +568,56 @@ func handleExistingChatImport(ctx context.Context, stack *localStack, batch *cha
 		return true, true, nil
 	}
 	return false, false, nil
+}
+
+// handleExactMatchChatImport preserves the unchanged-import fast path only
+// after confirming that normalized raw items still match stored database rows.
+func handleExactMatchChatImport(ctx context.Context, stack *localStack, batch *chatImportBatch, sessionIndex *chatImportSessionIndex, existing repository.ChatSession, sourcePath string, comparison chatImportSourceComparison, deviceID string, projectPaths []repository.ProjectPath, deleteSource bool) (bool, bool, error) {
+	session, items, err := chatimport.ParseTranscriptFile(existing.Source, comparison.managedPath)
+	if err != nil {
+		if errors.Is(err, chatimport.ErrEmptyTranscript) {
+			batch.summary.SessionsSkipped++
+			if deleteSource {
+				deleteImportedChatSourceIfSafe(batch.summary, stack.FS, existing.ID, *existing.RawSourceKey, sourcePath)
+			}
+			return true, false, nil
+		}
+		return false, false, fmt.Errorf("parse managed chat raw source %s: %w", comparison.managedPath, err)
+	}
+	storedItems, err := stack.Repo.ListChatItems(ctx, existing.ID)
+	if err != nil {
+		return false, false, fmt.Errorf("list existing chat items before exact-match repair: %w", err)
+	}
+	if len(storedItems) == len(items) && chatImportItemsAlreadyStored(storedItems, items) {
+		batch.summary.SessionsSkipped++
+		if deleteSource {
+			deleteImportedChatSourceIfSafe(batch.summary, stack.FS, existing.ID, *existing.RawSourceKey, sourcePath)
+		}
+		return true, false, nil
+	}
+	absSourcePath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return false, false, fmt.Errorf("resolve chat source path %q: %w", sourcePath, err)
+	}
+	session.ID = existing.ID
+	session.Source = existing.Source
+	session.SourceSessionID = existing.SourceSessionID
+	session.SourceDeviceID = deviceID
+	session.ProjectID = chatimport.MatchProjectPath(projectPaths, session.CWD, deviceID)
+	if session.ProjectID == nil {
+		session.ProjectID = existing.ProjectID
+	}
+	if session.CWD == nil {
+		session.CWD = existing.CWD
+	}
+	if session.Title == nil {
+		session.Title = existing.Title
+	}
+	session.OriginalSourcePath = &absSourcePath
+	if err := queueReplaceChatImport(ctx, stack, batch, sessionIndex, session, items, sourcePath, deleteSource); err != nil {
+		return false, false, err
+	}
+	return true, true, nil
 }
 
 // compareChatImportSource compares sourcePath with the managed raw source. A

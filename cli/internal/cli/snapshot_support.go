@@ -559,6 +559,7 @@ func updateImportedRecord(ctx context.Context, stack *localStack, record gitsnap
 		GitRemoteURL:   record.GitRemoteURL,
 		GitHash:        record.GitHash,
 		UpdatedAt:      &updatedAt,
+		SetDeletedAt:   true,
 	}); err != nil {
 		return fmt.Errorf("update record %s: %w", record.ID, err)
 	}

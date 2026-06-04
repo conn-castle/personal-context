@@ -312,6 +312,13 @@ type UnifiedSearchFilter struct {
 }
 
 // UpdateRecordInput contains mutable record fields.
+//
+// SetDeletedAt controls whether the soft-delete tombstone is touched: when
+// false the existing deleted_at is preserved regardless of DeletedAt, and when
+// true deleted_at is overwritten with DeletedAt (a nil DeletedAt clears the
+// tombstone, a non-nil value sets it to that time). Callers that are not
+// explicitly soft-deleting or restoring must leave SetDeletedAt false to avoid
+// resurrecting a soft-deleted record.
 type UpdateRecordInput struct {
 	ID             string
 	Date           string
@@ -324,6 +331,7 @@ type UpdateRecordInput struct {
 	GitRemoteURL   *string
 	GitHash        *string
 	UpdatedAt      *time.Time
+	SetDeletedAt   bool
 	DeletedAt      *time.Time
 }
 

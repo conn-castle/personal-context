@@ -107,8 +107,8 @@ func (r *Repository) UpdateRecord(ctx context.Context, input repository.UpdateRe
 		`UPDATE records
          SET date = $1, day_order = $2, html_content = $3, notes = $4, project_id = $5, source_device_id = $6, source_ref = $7, git_remote_url = $8, git_hash = $9,
              updated_at = COALESCE($10, updated_at),
-             deleted_at = $11
-         WHERE id = $12 AND user_id = $13
+             deleted_at = CASE WHEN $11 THEN $12 ELSE deleted_at END
+         WHERE id = $13 AND user_id = $14
          RETURNING id, user_id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at`,
 		input.Date,
 		input.DayOrder,
@@ -120,6 +120,7 @@ func (r *Repository) UpdateRecord(ctx context.Context, input repository.UpdateRe
 		input.GitRemoteURL,
 		input.GitHash,
 		input.UpdatedAt,
+		input.SetDeletedAt,
 		input.DeletedAt,
 		input.ID,
 		r.userID,

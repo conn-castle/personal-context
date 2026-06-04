@@ -611,6 +611,154 @@ func TestChatImportRepairsMissingManagedRawSource(t *testing.T) {
 	}
 }
 
+func TestChatImportRepairsExactMatchMissingItems(t *testing.T) {
+	homeDir := setupEnv(t)
+	root := t.TempDir()
+	transcript := `{
+  "id": "missing-items-session",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [{"role": "user", "content": "legacy raw ahead item repair"}]
+}`
+	if err := os.WriteFile(filepath.Join(root, "missing-items.json"), []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 1 || firstSummary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	before := readChatImportTestSnapshot(t, "missing-items-session")
+
+	dbPath := filepath.Join(homeDir, "personal-context", ".pc", "pc.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM chat_item WHERE session_id = ?`, before.session.ID); err != nil {
+		_ = db.Close()
+		t.Fatalf("delete chat items: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	secondSummary := runChatImportSummaryForTest(t, root)
+	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 0 ||
+		secondSummary.SessionsUpdated != 1 || secondSummary.RawSourcesCopied != 1 ||
+		secondSummary.ItemsImported != 1 || secondSummary.ItemsDelta != 1 || secondSummary.ItemsAfterImport != 1 {
+		t.Fatalf("unexpected missing-items repair summary: %+v", secondSummary)
+	}
+	after := readChatImportTestSnapshot(t, "missing-items-session")
+	if !bytes.Equal(before.rawBytes, after.rawBytes) {
+		t.Fatalf("repaired raw bytes differ from original managed copy")
+	}
+	if len(after.items) != 1 || after.items[0].SearchText != "legacy raw ahead item repair" {
+		t.Fatalf("items were not restored from raw source: %+v", after.items)
+	}
+}
+
+func TestChatImportExactMatchNoItemManagedRawSkipsWithoutClearingItems(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "no-item-managed-raw.json")
+	transcript := `{
+  "id": "no-item-managed-raw-session",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [{"role": "user", "content": "existing item survives no-item raw"}]
+}`
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 1 || firstSummary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	before := readChatImportTestSnapshot(t, "no-item-managed-raw-session")
+	beforeItemIDs := chatItemIDs(before.items)
+	noItemTranscript := []byte(`{"messages":[]}`)
+	if err := os.WriteFile(transcriptPath, noItemTranscript, 0o644); err != nil {
+		t.Fatalf("write no-item original transcript: %v", err)
+	}
+	if err := os.WriteFile(before.rawPath, noItemTranscript, 0o600); err != nil {
+		t.Fatalf("write no-item managed raw source: %v", err)
+	}
+
+	secondSummary := runChatImportSummaryForTest(t, root, "--delete-source")
+	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 1 || secondSummary.SourcesDeleted != 1 ||
+		secondSummary.SessionsUpdated != 0 || secondSummary.RawSourcesCopied != 0 ||
+		secondSummary.ItemsImported != 0 || secondSummary.ItemsDelta != 0 || secondSummary.ItemsAfterImport != 1 {
+		t.Fatalf("unexpected no-item exact-match summary: %+v", secondSummary)
+	}
+	if _, err := os.Stat(transcriptPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no-item original source to be removed, stat err = %v", err)
+	}
+	after := readChatImportTestSnapshot(t, "no-item-managed-raw-session")
+	if !equalInt64Slices(beforeItemIDs, chatItemIDs(after.items)) {
+		t.Fatalf("existing item IDs changed on no-item skip: before=%+v after=%+v", beforeItemIDs, chatItemIDs(after.items))
+	}
+	if len(after.items) != 1 || after.items[0].SearchText != "existing item survives no-item raw" {
+		t.Fatalf("existing items were not preserved: %+v", after.items)
+	}
+	if !bytes.Equal(after.rawBytes, noItemTranscript) {
+		t.Fatalf("managed raw should remain the exact matched no-item file, got %q", string(after.rawBytes))
+	}
+}
+
+func TestChatImportExactMatchRepairPreservesExistingFallbackMetadata(t *testing.T) {
+	homeDir := setupEnv(t)
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "metadata-fallback.json")
+	transcript := `{
+  "id": "metadata-fallback-session",
+  "messages": [{"role": "user", "content": {"kind": "attachment"}}]
+}`
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 1 || firstSummary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	before := readChatImportTestSnapshot(t, "metadata-fallback-session")
+	if before.session.CWD != nil || before.session.Title != nil {
+		t.Fatalf("fixture should not derive cwd/title before metadata repair, got %+v", before.session)
+	}
+
+	dbPath := filepath.Join(homeDir, "personal-context", ".pc", "pc.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	const existingCWD = "/tmp/existing-chat-cwd"
+	const existingTitle = "Existing chat title"
+	if _, err := db.Exec(`UPDATE chat_session SET cwd = ?, title = ? WHERE id = ?`, existingCWD, existingTitle, before.session.ID); err != nil {
+		_ = db.Close()
+		t.Fatalf("set existing metadata: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM chat_item WHERE session_id = ?`, before.session.ID); err != nil {
+		_ = db.Close()
+		t.Fatalf("delete chat items: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	secondSummary := runChatImportSummaryForTest(t, root)
+	if secondSummary.FilesScanned != 1 || secondSummary.SessionsUpdated != 1 ||
+		secondSummary.ItemsImported != 1 || secondSummary.ItemsDelta != 1 || secondSummary.ItemsAfterImport != 1 {
+		t.Fatalf("unexpected metadata repair summary: %+v", secondSummary)
+	}
+	after := readChatImportTestSnapshot(t, "metadata-fallback-session")
+	if after.session.CWD == nil || *after.session.CWD != existingCWD {
+		t.Fatalf("cwd was not preserved from existing session: %+v", after.session.CWD)
+	}
+	if after.session.Title == nil || *after.session.Title != existingTitle {
+		t.Fatalf("title was not preserved from existing session: %+v", after.session.Title)
+	}
+	if len(after.items) != 1 || after.items[0].RawJSON == nil {
+		t.Fatalf("items were not repaired from exact-match raw source: %+v", after.items)
+	}
+}
+
 func TestChatImportDefaultScanIncludesRegisteredClaudeConfigProjectRoot(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	setupEnv(t)

@@ -642,6 +642,7 @@ func applyRecord(
 			GitRemoteURL:   record.GitRemoteURL,
 			GitHash:        record.GitHash,
 			UpdatedAt:      &record.UpdatedAt,
+			SetDeletedAt:   true,
 			DeletedAt:      record.DeletedAt,
 		})
 		return err
