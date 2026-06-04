@@ -135,6 +135,10 @@ func (m *mockRepo) UpsertChatSession(_ context.Context, _ repository.UpsertChatS
 	return repository.ChatSession{}, true, nil
 }
 
+func (m *mockRepo) UpsertChatSessionWithItems(_ context.Context, _ repository.UpsertChatSessionInput, _ []repository.CreateChatItemInput) (repository.ChatSession, bool, error) {
+	return repository.ChatSession{}, true, nil
+}
+
 func (m *mockRepo) GetChatSessionByID(_ context.Context, _ string) (repository.ChatSession, error) {
 	return repository.ChatSession{}, repository.ErrNotFound
 }

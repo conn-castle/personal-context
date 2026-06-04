@@ -158,6 +158,40 @@ func (r *Repository) UpsertChatSession(ctx context.Context, input repository.Ups
 	return session, created, err
 }
 
+// UpsertChatSessionWithItems writes a chat session and its complete replacement
+// item set in one SQLite transaction.
+func (r *Repository) UpsertChatSessionWithItems(ctx context.Context, input repository.UpsertChatSessionInput, items []repository.CreateChatItemInput) (repository.ChatSession, bool, error) {
+	if err := validateUpsertChatSessionInput(input); err != nil {
+		return repository.ChatSession{}, false, err
+	}
+	for _, item := range items {
+		if !validChatItemInput(item) {
+			return repository.ChatSession{}, false, repository.ErrInvalidArgument
+		}
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return repository.ChatSession{}, false, mapSQLiteError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stored, created, err := upsertChatSessionTx(ctx, tx, input)
+	if err != nil {
+		return repository.ChatSession{}, false, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chat_item WHERE session_id = ?;`, stored.ID); err != nil {
+		return repository.ChatSession{}, false, mapSQLiteError(err)
+	}
+	if err := insertChatItemsTx(ctx, tx, stored.ID, items); err != nil {
+		return repository.ChatSession{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return repository.ChatSession{}, false, mapSQLiteError(err)
+	}
+	return stored, created, nil
+}
+
 func validateUpsertChatSessionInput(input repository.UpsertChatSessionInput) error {
 	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.Source) == "" ||
 		strings.TrimSpace(input.SourceSessionID) == "" || strings.TrimSpace(input.SourceDeviceID) == "" ||
@@ -628,21 +662,28 @@ func (r *Repository) SearchAll(ctx context.Context, filter repository.UnifiedSea
 	results := []repository.DomainSearchResult{}
 	includeRecords := filter.Domain == nil || *filter.Domain == "records"
 	includeChats := filter.Domain == nil || *filter.Domain == "chats"
+	domainFilter := filter
+	pageLimit := filter.Limit
+	pageOffset := filter.Offset
+	if filter.Limit > 0 {
+		domainFilter.Limit = filter.Offset + filter.Limit
+	}
 	if includeRecords {
-		records, err := r.searchRecords(ctx, filter)
+		records, err := r.searchRecords(ctx, domainFilter)
 		if err != nil {
 			return nil, err
 		}
 		results = append(results, records...)
 	}
 	if includeChats {
-		chats, err := r.SearchChatItems(ctx, repository.SearchChatItemsFilter{
+		chats, err := r.searchChatItemsForUnified(ctx, repository.SearchChatItemsFilter{
 			Query:              query,
 			IncludeDeleted:     filter.IncludeDeleted,
 			IncludeToolOutputs: filter.IncludeToolOutputs,
 			ProjectID:          filter.ProjectID,
 			DateFrom:           filter.DateFrom,
 			DateTo:             filter.DateTo,
+			Limit:              domainFilter.Limit,
 		})
 		if err != nil {
 			return nil, err
@@ -661,13 +702,13 @@ func (r *Repository) SearchAll(ctx context.Context, filter repository.UnifiedSea
 		}
 		return domainResultID(results[i]) < domainResultID(results[j])
 	})
-	start := filter.Offset
+	start := pageOffset
 	if start > len(results) {
 		return []repository.DomainSearchResult{}, nil
 	}
 	end := len(results)
-	if filter.Limit > 0 && start+filter.Limit < end {
-		end = start + filter.Limit
+	if pageLimit > 0 && start+pageLimit < end {
+		end = start + pageLimit
 	}
 	return results[start:end], nil
 }
@@ -692,7 +733,11 @@ func (r *Repository) searchRecords(ctx context.Context, filter repository.Unifie
 	query := `SELECT records.id, records.date, records.day_order, records.html_content, records.notes, records.project_id, records.source_device_id, records.source_ref, records.git_remote_url, records.git_hash, records.created_at, records.updated_at, records.deleted_at,
             -bm25(records_fts)
         FROM records INNER JOIN records_fts ON records_fts.id = records.id ` + where + ` AND records_fts MATCH ?
-        ORDER BY -bm25(records_fts) DESC, records.date, records.day_order, records.id`
+        ORDER BY -bm25(records_fts) DESC, records.id`
+	if filter.Limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, filter.Limit)
+	}
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, mapSQLiteError(err)
@@ -710,6 +755,54 @@ func (r *Repository) searchRecords(ctx context.Context, filter repository.Unifie
 		return nil, mapSQLiteError(err)
 	}
 	return results, nil
+}
+
+func (r *Repository) searchChatItemsForUnified(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
+	query := strings.TrimSpace(filter.Query)
+	if query == "" || filter.Limit < 0 || filter.Offset < 0 {
+		return nil, repository.ErrInvalidArgument
+	}
+	where := strings.Builder{}
+	where.WriteString(`WHERE chat_item_fts MATCH ?`)
+	args := []any{sqliteFTSQuery(query)}
+	if !filter.IncludeDeleted {
+		where.WriteString(` AND cs.deleted_at IS NULL`)
+	}
+	if !filter.IncludeToolOutputs {
+		where.WriteString(` AND ci.item_type != 'tool_output'`)
+	}
+	if filter.ProjectID != nil {
+		where.WriteString(` AND cs.project_id = ?`)
+		args = append(args, *filter.ProjectID)
+	}
+	if filter.DateFrom != nil {
+		where.WriteString(` AND cs.last_activity_at >= ?`)
+		args = append(args, timeutil.FormatUTCMillis(*filter.DateFrom))
+	}
+	if filter.DateTo != nil {
+		where.WriteString(` AND cs.last_activity_at <= ?`)
+		args = append(args, timeutil.FormatUTCMillis(*filter.DateTo))
+	}
+	// ORDER BY tiebreaker (cs.id, ci.ordinal) MUST match the Go merge tiebreaker in
+	// domainResultID so the bounded per-domain LIMIT does not drop the boundary
+	// element during paginated SearchAll.
+	sqlQuery := `SELECT ` + prefixedChatSessionColumns("cs") + `, ` + prefixedChatItemColumns("ci") + `,
+            snippet(chat_item_fts, 0, '', '', '...', 12),
+            -bm25(chat_item_fts)
+        FROM chat_item_fts
+        INNER JOIN chat_item AS ci ON ci.id = chat_item_fts.rowid
+        INNER JOIN chat_session AS cs ON cs.id = ci.session_id ` + where.String() + `
+        ORDER BY -bm25(chat_item_fts) DESC, cs.id, ci.ordinal`
+	if filter.Limit > 0 {
+		sqlQuery += ` LIMIT ?`
+		args = append(args, filter.Limit)
+	}
+	rows, err := r.db.QueryContext(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, mapSQLiteError(err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanChatSearchRows(rows)
 }
 
 func (r *Repository) recordIDExists(ctx context.Context, id string) (bool, error) {

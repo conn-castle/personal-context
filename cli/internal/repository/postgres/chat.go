@@ -6,14 +6,21 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
 const chatSessionColumns = `id, user_id, source, source_session_id, parent_source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at`
 const chatItemColumns = `id, session_id, ordinal, role, item_type, text, search_text, raw_json, created_at`
+
+type chatSessionExecutor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
 
 // UpsertProjectPath registers a project path and reports whether a row was inserted.
 func (r *Repository) UpsertProjectPath(ctx context.Context, input repository.CreateProjectPathInput) (repository.ProjectPath, bool, error) {
@@ -112,24 +119,69 @@ func (r *Repository) getProjectPath(ctx context.Context, projectID string, path 
 
 // UpsertChatSession creates or updates a chat session by source identity.
 func (r *Repository) UpsertChatSession(ctx context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+	if err := validateUpsertChatSessionInput(input); err != nil {
+		return repository.ChatSession{}, false, err
+	}
+	return r.upsertChatSession(ctx, r.pool, input)
+}
+
+// UpsertChatSessionWithItems writes a chat session and its complete replacement
+// item set in one Postgres transaction.
+func (r *Repository) UpsertChatSessionWithItems(ctx context.Context, input repository.UpsertChatSessionInput, items []repository.CreateChatItemInput) (repository.ChatSession, bool, error) {
+	if err := validateUpsertChatSessionInput(input); err != nil {
+		return repository.ChatSession{}, false, err
+	}
+	for _, item := range items {
+		if !validChatItemInput(item) {
+			return repository.ChatSession{}, false, repository.ErrInvalidArgument
+		}
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return repository.ChatSession{}, false, mapPgError(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	stored, created, err := r.upsertChatSession(ctx, tx, input)
+	if err != nil {
+		return repository.ChatSession{}, false, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM chat_item WHERE session_id = $1`, stored.ID); err != nil {
+		return repository.ChatSession{}, false, mapPgError(err)
+	}
+	if err := insertChatItemsTx(ctx, tx, stored.ID, items); err != nil {
+		return repository.ChatSession{}, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return repository.ChatSession{}, false, mapPgError(err)
+	}
+	return stored, created, nil
+}
+
+func validateUpsertChatSessionInput(input repository.UpsertChatSessionInput) error {
 	if strings.TrimSpace(input.ID) == "" || strings.TrimSpace(input.Source) == "" ||
 		strings.TrimSpace(input.SourceSessionID) == "" || strings.TrimSpace(input.SourceDeviceID) == "" ||
 		input.StartedAt.IsZero() || input.LastActivityAt.IsZero() {
-		return repository.ChatSession{}, false, repository.ErrInvalidArgument
+		return repository.ErrInvalidArgument
 	}
-	_, existingErr := r.GetChatSessionBySource(ctx, input.Source, input.SourceSessionID)
+	return nil
+}
+
+func (r *Repository) upsertChatSession(ctx context.Context, q chatSessionExecutor, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+	_, existingErr := scanChatSession(q.QueryRow(ctx, `SELECT `+chatSessionColumns+` FROM chat_session WHERE user_id = $1 AND source = $2 AND source_session_id = $3`, r.userID, input.Source, input.SourceSessionID))
 	if existingErr != nil && !errors.Is(existingErr, repository.ErrNotFound) {
 		return repository.ChatSession{}, false, existingErr
 	}
 	created := errors.Is(existingErr, repository.ErrNotFound)
 	if created {
-		if exists, err := r.recordIDExists(ctx, input.ID); err != nil {
+		if exists, err := r.recordIDExists(ctx, q, input.ID); err != nil {
 			return repository.ChatSession{}, false, err
 		} else if exists {
 			return repository.ChatSession{}, false, fmt.Errorf("%w: id %s already exists as record", repository.ErrConflict, input.ID)
 		}
 	}
-	_, err := r.pool.Exec(ctx,
+	_, err := q.Exec(ctx,
 		`INSERT INTO chat_session (id, user_id, source, source_session_id, parent_source_session_id, source_device_id, project_id, cwd, title, started_at, last_activity_at, original_source_path, raw_source_key, created_at, updated_at, deleted_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($14, NOW()), COALESCE($15, NOW()), $16)
          ON CONFLICT (user_id, source, source_session_id) DO UPDATE SET
@@ -149,7 +201,7 @@ func (r *Repository) UpsertChatSession(ctx context.Context, input repository.Ups
 	if err != nil {
 		return repository.ChatSession{}, false, mapPgError(err)
 	}
-	session, err := r.GetChatSessionBySource(ctx, input.Source, input.SourceSessionID)
+	session, err := scanChatSession(q.QueryRow(ctx, `SELECT `+chatSessionColumns+` FROM chat_session WHERE user_id = $1 AND source = $2 AND source_session_id = $3`, r.userID, input.Source, input.SourceSessionID))
 	return session, created, err
 }
 
@@ -345,20 +397,8 @@ func (r *Repository) AppendChatItems(ctx context.Context, sessionID string, item
 	if err := tx.QueryRow(ctx, `SELECT 1 FROM chat_session WHERE user_id = $1 AND id = $2`, r.userID, sessionID).Scan(&exists); err != nil {
 		return mapPgError(err)
 	}
-	for _, item := range items {
-		if item.Ordinal < 0 || strings.TrimSpace(item.Role) == "" || strings.TrimSpace(item.ItemType) == "" {
-			return repository.ErrInvalidArgument
-		}
-		searchText := item.SearchText
-		if searchText == "" && item.Text != nil {
-			searchText = *item.Text
-		}
-		if _, err := tx.Exec(ctx,
-			`INSERT INTO chat_item (session_id, ordinal, role, item_type, text, search_text, raw_json, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, NOW()))`,
-			sessionID, item.Ordinal, item.Role, item.ItemType, item.Text, searchText, item.RawJSON, item.CreatedAt); err != nil {
-			return mapPgError(err)
-		}
+	if err := insertChatItemsTx(ctx, tx, sessionID, items); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return mapPgError(err)
@@ -384,8 +424,22 @@ func (r *Repository) ReplaceChatItems(ctx context.Context, sessionID string, ite
 	if _, err := tx.Exec(ctx, `DELETE FROM chat_item WHERE session_id = $1`, sessionID); err != nil {
 		return mapPgError(err)
 	}
+	if err := insertChatItemsTx(ctx, tx, sessionID, items); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return mapPgError(err)
+	}
+	return nil
+}
+
+func validChatItemInput(input repository.CreateChatItemInput) bool {
+	return input.Ordinal >= 0 && strings.TrimSpace(input.Role) != "" && strings.TrimSpace(input.ItemType) != ""
+}
+
+func insertChatItemsTx(ctx context.Context, tx pgx.Tx, sessionID string, items []repository.CreateChatItemInput) error {
 	for _, item := range items {
-		if item.Ordinal < 0 || strings.TrimSpace(item.Role) == "" || strings.TrimSpace(item.ItemType) == "" {
+		if !validChatItemInput(item) {
 			return repository.ErrInvalidArgument
 		}
 		searchText := item.SearchText
@@ -398,9 +452,6 @@ func (r *Repository) ReplaceChatItems(ctx context.Context, sessionID string, ite
 			sessionID, item.Ordinal, item.Role, item.ItemType, item.Text, searchText, item.RawJSON, item.CreatedAt); err != nil {
 			return mapPgError(err)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return mapPgError(err)
 	}
 	return nil
 }
@@ -521,21 +572,28 @@ func (r *Repository) SearchAll(ctx context.Context, filter repository.UnifiedSea
 	results := []repository.DomainSearchResult{}
 	includeRecords := filter.Domain == nil || *filter.Domain == "records"
 	includeChats := filter.Domain == nil || *filter.Domain == "chats"
+	domainFilter := filter
+	pageLimit := filter.Limit
+	pageOffset := filter.Offset
+	if filter.Limit > 0 {
+		domainFilter.Limit = filter.Offset + filter.Limit
+	}
 	if includeRecords {
-		records, err := r.searchRecords(ctx, filter)
+		records, err := r.searchRecords(ctx, domainFilter)
 		if err != nil {
 			return nil, err
 		}
 		results = append(results, records...)
 	}
 	if includeChats {
-		chats, err := r.SearchChatItems(ctx, repository.SearchChatItemsFilter{
+		chats, err := r.searchChatItemsForUnified(ctx, repository.SearchChatItemsFilter{
 			Query:              query,
 			IncludeDeleted:     filter.IncludeDeleted,
 			IncludeToolOutputs: filter.IncludeToolOutputs,
 			ProjectID:          filter.ProjectID,
 			DateFrom:           filter.DateFrom,
 			DateTo:             filter.DateTo,
+			Limit:              domainFilter.Limit,
 		})
 		if err != nil {
 			return nil, err
@@ -554,13 +612,13 @@ func (r *Repository) SearchAll(ctx context.Context, filter repository.UnifiedSea
 		}
 		return domainResultID(results[i]) < domainResultID(results[j])
 	})
-	start := filter.Offset
+	start := pageOffset
 	if start > len(results) {
 		return []repository.DomainSearchResult{}, nil
 	}
 	end := len(results)
-	if filter.Limit > 0 && start+filter.Limit < end {
-		end = start + filter.Limit
+	if pageLimit > 0 && start+pageLimit < end {
+		end = start + pageLimit
 	}
 	return results[start:end], nil
 }
@@ -591,11 +649,14 @@ func (r *Repository) searchRecords(ctx context.Context, filter repository.Unifie
 		args = append(args, filter.DateTo.UTC().Format("2006-01-02"))
 		next++
 	}
-	_ = next
 	sqlQuery := `SELECT id, user_id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at,
             ts_rank(search_vector, plainto_tsquery('pg_catalog.simple'::regconfig, $2)) AS rank
         FROM records ` + where.String() + `
-        ORDER BY rank DESC, date, day_order, id`
+        ORDER BY rank DESC, id`
+	if filter.Limit > 0 {
+		sqlQuery += fmt.Sprintf(` LIMIT $%d`, next)
+		args = append(args, filter.Limit)
+	}
 	rows, err := r.pool.Query(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil, mapPgError(err)
@@ -615,9 +676,59 @@ func (r *Repository) searchRecords(ctx context.Context, filter repository.Unifie
 	return results, nil
 }
 
-func (r *Repository) recordIDExists(ctx context.Context, id string) (bool, error) {
+func (r *Repository) searchChatItemsForUnified(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
+	query := strings.TrimSpace(filter.Query)
+	if query == "" || filter.Limit < 0 || filter.Offset < 0 {
+		return nil, repository.ErrInvalidArgument
+	}
+	args := []any{r.userID, query}
+	next := 3
+	where := strings.Builder{}
+	where.WriteString(`WHERE cs.user_id = $1 AND ci.search_vector @@ plainto_tsquery('pg_catalog.simple'::regconfig, $2)`)
+	if !filter.IncludeDeleted {
+		where.WriteString(` AND cs.deleted_at IS NULL`)
+	}
+	if !filter.IncludeToolOutputs {
+		where.WriteString(` AND ci.item_type != 'tool_output'`)
+	}
+	if filter.ProjectID != nil {
+		fmt.Fprintf(&where, ` AND cs.project_id = $%d`, next)
+		args = append(args, *filter.ProjectID)
+		next++
+	}
+	if filter.DateFrom != nil {
+		fmt.Fprintf(&where, ` AND cs.last_activity_at >= $%d`, next)
+		args = append(args, filter.DateFrom.UTC())
+		next++
+	}
+	if filter.DateTo != nil {
+		fmt.Fprintf(&where, ` AND cs.last_activity_at <= $%d`, next)
+		args = append(args, filter.DateTo.UTC())
+		next++
+	}
+	// ORDER BY tiebreaker (cs.id, ci.ordinal) MUST match the Go merge tiebreaker in
+	// domainResultID so the bounded per-domain LIMIT does not drop the boundary
+	// element during paginated SearchAll.
+	sqlQuery := `SELECT ` + prefixedChatSessionColumns("cs") + `, ` + prefixedChatItemColumns("ci") + `,
+            ts_headline('pg_catalog.simple'::regconfig, ci.search_text, plainto_tsquery('pg_catalog.simple'::regconfig, $2)) AS snippet,
+            ts_rank(ci.search_vector, plainto_tsquery('pg_catalog.simple'::regconfig, $2)) AS rank
+        FROM chat_item AS ci INNER JOIN chat_session AS cs ON cs.id = ci.session_id ` + where.String() + `
+        ORDER BY rank DESC, cs.id, ci.ordinal`
+	if filter.Limit > 0 {
+		sqlQuery += fmt.Sprintf(` LIMIT $%d`, next)
+		args = append(args, filter.Limit)
+	}
+	rows, err := r.pool.Query(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, mapPgError(err)
+	}
+	defer rows.Close()
+	return scanChatSearchRows(rows)
+}
+
+func (r *Repository) recordIDExists(ctx context.Context, q chatSessionExecutor, id string) (bool, error) {
 	var exists int
-	if err := r.pool.QueryRow(ctx, `SELECT 1 FROM records WHERE user_id = $1 AND id = $2 LIMIT 1`, r.userID, id).Scan(&exists); err != nil {
+	if err := q.QueryRow(ctx, `SELECT 1 FROM records WHERE user_id = $1 AND id = $2 LIMIT 1`, r.userID, id).Scan(&exists); err != nil {
 		if errors.Is(mapPgError(err), repository.ErrNotFound) {
 			return false, nil
 		}
@@ -709,10 +820,12 @@ func scanChatSearchRow(rs rowScanner) (repository.ChatSession, repository.ChatIt
 
 func scanRecordSearchRow(rs rowScanner) (repository.Record, float64, error) {
 	var record repository.Record
+	var date time.Time
 	var rank float64
-	if err := rs.Scan(&record.ID, &record.UserID, &record.Date, &record.DayOrder, &record.HTMLContent, &record.Notes, &record.ProjectID, &record.SourceDeviceID, &record.SourceRef, &record.GitRemoteURL, &record.GitHash, &record.CreatedAt, &record.UpdatedAt, &record.DeletedAt, &rank); err != nil {
+	if err := rs.Scan(&record.ID, &record.UserID, &date, &record.DayOrder, &record.HTMLContent, &record.Notes, &record.ProjectID, &record.SourceDeviceID, &record.SourceRef, &record.GitRemoteURL, &record.GitHash, &record.CreatedAt, &record.UpdatedAt, &record.DeletedAt, &rank); err != nil {
 		return repository.Record{}, 0, mapPgError(err)
 	}
+	record.Date = date.UTC().Format("2006-01-02")
 	record.CreatedAt = record.CreatedAt.UTC()
 	record.UpdatedAt = record.UpdatedAt.UTC()
 	if record.DeletedAt != nil {

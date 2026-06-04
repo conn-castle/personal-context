@@ -272,6 +272,16 @@ func (m *mockRepo) UpsertChatSession(ctx context.Context, input repository.Upser
 	}
 	return repository.ChatSession{}, true, nil
 }
+func (m *mockRepo) UpsertChatSessionWithItems(ctx context.Context, input repository.UpsertChatSessionInput, items []repository.CreateChatItemInput) (repository.ChatSession, bool, error) {
+	session, created, err := m.UpsertChatSession(ctx, input)
+	if err != nil {
+		return repository.ChatSession{}, false, err
+	}
+	if err := m.ReplaceChatItems(ctx, session.ID, items); err != nil {
+		return repository.ChatSession{}, false, err
+	}
+	return session, created, nil
+}
 func (m *mockRepo) GetChatSessionByID(ctx context.Context, id string) (repository.ChatSession, error) {
 	if m.getChatByIDFn != nil {
 		return m.getChatByIDFn(ctx, id)
