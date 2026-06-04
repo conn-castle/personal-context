@@ -1,6 +1,7 @@
 package chatimport
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -880,5 +881,333 @@ func TestGeminiDuplicatePathsGetDistinctIdentities(t *testing.T) {
 		if !strings.HasSuffix(id, "chats/session-X") {
 			t.Fatalf("source id %q should be path-derived (chats/session-X suffix)", id)
 		}
+	}
+}
+
+// TestJSONTranscriptRootMustBeObject verifies the streaming scanner rejects
+// .json files whose root is not a JSON object, so a top-level array/scalar is
+// surfaced as a parse error rather than imported as an empty transcript.
+func TestJSONTranscriptRootMustBeObject(t *testing.T) {
+	root := t.TempDir()
+	cases := map[string]string{
+		"array root":  `[{"role":"user","content":"hi"}]`,
+		"string root": `"just a string"`,
+		"number root": `42`,
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(root, strings.ReplaceAll(name, " ", "-")+".json")
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			_, _, err := ParseTranscriptFile("codex", path)
+			if err == nil {
+				t.Fatalf("expected error for non-object root, got nil")
+			}
+			if !strings.Contains(err.Error(), "expected JSON object transcript") {
+				t.Fatalf("error = %v, want 'expected JSON object transcript'", err)
+			}
+		})
+	}
+}
+
+// TestJSONTranscriptSessionFieldNonStringValuesUnset verifies that a recognized
+// session-field key carrying a non-string value (composite or scalar) leaves the
+// corresponding session field unset, and that a later non-string redefinition of
+// a previously-set key deletes it (last-wins).
+func TestJSONTranscriptSessionFieldNonStringValuesUnset(t *testing.T) {
+	root := t.TempDir()
+
+	t.Run("composite and scalar values skipped", func(t *testing.T) {
+		path := filepath.Join(root, "composite.json")
+		// title is an object, cwd is an array, session_id is a number: none
+		// should populate the session. A real array still drives items.
+		transcript := `{
+  "title": {"nested": "object"},
+  "cwd": ["/tmp/a", "/tmp/b"],
+  "session_id": 99,
+  "messages": [{"role":"user","content":"only item"}]
+}`
+		if err := os.WriteFile(path, []byte(transcript), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		session, items, err := ParseTranscriptFile("codex", path)
+		if err != nil {
+			t.Fatalf("ParseTranscriptFile() error = %v", err)
+		}
+		// The composite title field is skipped, so the session title is not
+		// the JSON value; it falls back to the first item's text.
+		if session.Title == nil || *session.Title != "only item" {
+			t.Fatalf("title should fall back to item text (composite field skipped), got %v", session.Title)
+		}
+		if session.CWD != nil {
+			t.Fatalf("cwd should be unset, got %v", *session.CWD)
+		}
+		// session_id was a non-string, so no canonical id was captured; the
+		// scanner falls back to the filename basename.
+		if session.SourceSessionID != "composite" {
+			t.Fatalf("source session id = %q, want filename fallback", session.SourceSessionID)
+		}
+		if len(items) != 1 || items[0].SearchText != "only item" {
+			t.Fatalf("unexpected items: %+v", items)
+		}
+	})
+
+	t.Run("non-string redefinition deletes earlier string", func(t *testing.T) {
+		path := filepath.Join(root, "redefine.json")
+		// title first appears as a real string, then is re-declared as a
+		// composite. Last-wins semantics must drop it entirely.
+		transcript := `{
+  "title": "First Title",
+  "title": {"now": "an object"},
+  "messages": [{"role":"user","content":"item content"}]
+}`
+		if err := os.WriteFile(path, []byte(transcript), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		session, _, err := ParseTranscriptFile("codex", path)
+		if err != nil {
+			t.Fatalf("ParseTranscriptFile() error = %v", err)
+		}
+		// Last-wins: the composite redefinition deletes the earlier string, so
+		// the title must NOT be "First Title"; it falls back to item text.
+		if session.Title == nil || *session.Title == "First Title" {
+			t.Fatalf("title should be deleted by non-string redefinition (fall back to item text), got %v", session.Title)
+		}
+		if *session.Title != "item content" {
+			t.Fatalf("title fallback = %q, want item text", *session.Title)
+		}
+	})
+}
+
+// TestJSONTranscriptWhitespaceSessionFieldUnset verifies a recognized
+// session-field key whose string value is only whitespace is treated as unset
+// (trimmed-empty), so the session falls back rather than carrying blank metadata.
+func TestJSONTranscriptWhitespaceSessionFieldUnset(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "blank-cwd.json")
+	transcript := `{
+  "cwd": "   ",
+  "session_id": "real-id",
+  "messages": [{"role":"user","content":"item"}]
+}`
+	if err := os.WriteFile(path, []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	session, _, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.CWD != nil {
+		t.Fatalf("whitespace-only cwd should be unset, got %q", *session.CWD)
+	}
+	if session.SourceSessionID != "real-id" {
+		t.Fatalf("session id = %q, want real-id", session.SourceSessionID)
+	}
+}
+
+// TestJSONTranscriptArraySelectionIgnoresNonArrays verifies the array-key
+// selection logic: a recognized array key whose value is not an array is not
+// selected, deferring to a lower-priority key that does hold a real array.
+func TestJSONTranscriptArraySelectionIgnoresNonArrays(t *testing.T) {
+	root := t.TempDir()
+
+	t.Run("non-array high-priority key defers to real array", func(t *testing.T) {
+		path := filepath.Join(root, "non-array.json")
+		// messages (highest priority) is a scalar; items holds the real array.
+		transcript := `{
+  "messages": 5,
+  "items": [{"role":"assistant","content":"chosen item"}]
+}`
+		if err := os.WriteFile(path, []byte(transcript), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		_, items, err := ParseTranscriptFile("codex", path)
+		if err != nil {
+			t.Fatalf("ParseTranscriptFile() error = %v", err)
+		}
+		if len(items) != 1 || items[0].SearchText != "chosen item" {
+			t.Fatalf("expected items array to win, got %+v", items)
+		}
+	})
+
+	t.Run("duplicate array key selects last occurrence", func(t *testing.T) {
+		path := filepath.Join(root, "dup-both-arrays.json")
+		// messages appears twice, both real arrays. Last-wins selection picks
+		// the second occurrence, so the second pass must skip the first array
+		// and decode the second.
+		transcript := `{
+  "messages": [{"role":"user","content":"stale messages"}],
+  "messages": [{"role":"assistant","content":"fresh messages"}]
+}`
+		if err := os.WriteFile(path, []byte(transcript), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		_, items, err := ParseTranscriptFile("codex", path)
+		if err != nil {
+			t.Fatalf("ParseTranscriptFile() error = %v", err)
+		}
+		if len(items) != 1 || items[0].SearchText != "fresh messages" {
+			t.Fatalf("expected second messages occurrence, got %+v", items)
+		}
+	})
+
+	t.Run("last-wins non-array deselects duplicate array key", func(t *testing.T) {
+		path := filepath.Join(root, "dup-array.json")
+		// messages appears first as a real array, then as a scalar. Last-wins
+		// marks messages as not-an-array, so items is selected instead.
+		transcript := `{
+  "messages": [{"role":"user","content":"stale messages"}],
+  "messages": 7,
+  "items": [{"role":"assistant","content":"items wins"}]
+}`
+		if err := os.WriteFile(path, []byte(transcript), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		_, items, err := ParseTranscriptFile("codex", path)
+		if err != nil {
+			t.Fatalf("ParseTranscriptFile() error = %v", err)
+		}
+		if len(items) != 1 || items[0].SearchText != "items wins" {
+			t.Fatalf("expected items array after messages deselected, got %+v", items)
+		}
+	})
+}
+
+// TestJSONTranscriptSkipsNestedIgnoredComposites verifies that unrecognized keys
+// holding deeply nested arrays/objects are skipped cleanly without affecting the
+// selected transcript array.
+func TestJSONTranscriptSkipsNestedIgnoredComposites(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "nested-ignored.json")
+	transcript := `{
+  "ignored": [1, [2, 3], {"a": 4, "b": [5, {"c": 6}]}],
+  "messages": [{"role":"user","content":"survives nested skip"}]
+}`
+	if err := os.WriteFile(path, []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, items, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if len(items) != 1 || items[0].SearchText != "survives nested skip" {
+		t.Fatalf("nested ignored composite should be skipped, got %+v", items)
+	}
+}
+
+// TestJSONTranscriptMalformedReturnsError verifies the streaming scanner
+// surfaces a parse error (rather than panicking or silently importing an empty
+// session) for a range of malformed/truncated transcript shapes. Each case
+// exercises a distinct point in the scanner where decoding can fail: the object
+// start, a session-field value, an ignored composite value, an array-key value,
+// and the closing delimiter.
+func TestJSONTranscriptMalformedReturnsError(t *testing.T) {
+	root := t.TempDir()
+	cases := map[string]string{
+		"garbage root":              `@@@`,
+		"truncated object":          `{"a":1`,
+		"truncated session value":   `{"title": {`,
+		"truncated ignored array":   `{"ignored": [1,2`,
+		"truncated after key":       `{"cwd":`,
+		"truncated array key value": `{"messages": [`,
+		"truncated nested object":   `{"ignored": {"a"`,
+		"missing array value":       `{"messages"`,
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(root, strings.ReplaceAll(name, " ", "-")+".json")
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			_, _, err := ParseTranscriptFile("codex", path)
+			if err == nil {
+				t.Fatalf("expected parse error for malformed transcript, got nil")
+			}
+		})
+	}
+}
+
+// TestJSONTranscriptSecondPassRejectsChangedSelectedArray exercises the second
+// pass independently: the first scan may select an array key, then the file can
+// change before the selected occurrence is decoded.
+func TestJSONTranscriptSecondPassRejectsChangedSelectedArray(t *testing.T) {
+	root := t.TempDir()
+	cases := map[string]string{
+		"scalar": `{"messages": 42}`,
+		"object": `{
+  "messages": {"nested": [1, 2, 3]}
+}`,
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(root, name+".json")
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			_, err := parseJSONTranscriptArray(path, "messages", 1)
+			if err == nil {
+				t.Fatalf("expected selected-array error, got nil")
+			}
+			if !strings.Contains(err.Error(), `selected transcript key "messages" is no longer an array`) {
+				t.Fatalf("error = %v, want selected-array error", err)
+			}
+		})
+	}
+}
+
+// TestJSONTranscriptSecondPassReportsChangedFileErrors ensures file removal or
+// corruption between the first scan and second decode pass surfaces as an error
+// instead of importing stale/empty data silently.
+func TestJSONTranscriptSecondPassReportsChangedFileErrors(t *testing.T) {
+	root := t.TempDir()
+	missing := filepath.Join(root, "missing.json")
+	if _, err := parseJSONTranscriptArray(missing, "messages", 1); err == nil {
+		t.Fatal("expected missing second-pass file error")
+	}
+
+	cases := map[string]string{
+		"root is array":                   `[]`,
+		"malformed skipped field":         `{"ignored": [1`,
+		"malformed previous occurrence":   `{"messages": {"bad": [`,
+		"selected occurrence not present": `{"items": []}`,
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(root, strings.ReplaceAll(name, " ", "-")+".json")
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			_, err := parseJSONTranscriptArray(path, "messages", 2)
+			if err == nil {
+				t.Fatalf("expected second-pass mutation error, got nil")
+			}
+		})
+	}
+}
+
+// TestJSONTranscriptSecondPassSurfacesChangedArrayDecodeErrors covers malformed
+// selected-array content observed after the first pass has already selected
+// that key/occurrence.
+func TestJSONTranscriptSecondPassSurfacesChangedArrayDecodeErrors(t *testing.T) {
+	cases := map[string]string{
+		"missing array": ``,
+		"truncated item": `[
+  {"role": "user", "content": "ok"},
+  {"role": "assistant", "content":
+`,
+		"bad close": `[
+  {"role": "user", "content": "ok"}
+  42
+]`,
+		"wrong close delimiter": `[1, 2}`,
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := decodeJSONTranscriptItems(json.NewDecoder(strings.NewReader(content)), name+".json", "messages")
+			if err == nil {
+				t.Fatalf("expected decode error, got nil")
+			}
+		})
 	}
 }
