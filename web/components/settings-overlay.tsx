@@ -34,6 +34,7 @@ interface SettingsOverlayProps {
   onClose: () => void;
   syncVersion: number;
   lastSyncAt: string | null;
+  syncError: string | null;
   onDataChanged: () => void;
 }
 
@@ -48,6 +49,7 @@ export function SettingsOverlay({
   onClose,
   syncVersion,
   lastSyncAt,
+  syncError,
   onDataChanged,
 }: SettingsOverlayProps) {
   const [info, setInfo] = useState<AppInfoResponse | null>(null);
@@ -173,6 +175,15 @@ export function SettingsOverlay({
                   {lastSyncAt ? formatSyncTime(lastSyncAt) : "Never"}
                 </span>
               </div>
+
+              {syncError && (
+                <div className="flex items-start justify-between gap-4">
+                  <span className="text-sm">Sync error</span>
+                  <span className="max-w-[65%] break-words text-right text-sm text-destructive">
+                    {syncError}
+                  </span>
+                </div>
+              )}
 
               {/* Sync version */}
               <div className="flex items-center justify-between">

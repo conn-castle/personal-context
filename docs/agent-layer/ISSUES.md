@@ -108,25 +108,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: `runSeed` uses HTML content as the identity key for existing tutorial records (`existingByHTML`). If a user edits the HTML of a seeded record, `runSeed` will not recognise it as existing and will create a duplicate on the next run. Stable IDs would require schema changes (a `seed_key` column or similar) and migration support.
     Next step: When the schema is next extended, consider adding a `seed_key` or `origin` column to records so seed idempotency is content-independent. Until then, the backfill repair logic handles partial deletion correctly.
 
-- Issue 2026-03-10 m3n4o5a: updateRecord does not propagate html_content back to RecordSummary list
-    Priority: Low. Area: web/hooks/use-records.ts
-    Description: When a record is updated via PATCH, `updateRecord` copies `project_id`, `updated_at`, and `deleted_at` from the response into the local RecordSummary list but not `html_content`. If PATCH is later extended to accept `html_content`, thumbnails will show stale content until a full refresh.
-    Next step: When PATCH is extended to accept `html_content`, add `html_content` to the fields copied in the `setRecords` updater.
-
 - Issue 2026-03-10 k1l2m3a: handleSyncData discards incremental sync payload
     Priority: Medium. Area: web/components/spreadsheet-viewer.tsx
     Description: `handleSyncData` callback ignores the `SyncChangesResponse` data from `useSyncManager` and does a full page-1 refetch via `refreshRecords()`. This wastes the incremental `GET /api/sync/changes` API call and resets pagination on every sync.
     Next step: Either use the incremental items to merge into the local record list, or remove the `GET /api/sync/changes` fetch from `useSyncManager` and use version-triggered full refetch only.
-
-- Issue 2026-03-10 l3m4n5a: Stale closure risk in keyboard navigation handler
-    Priority: Low. Area: web/components/spreadsheet-viewer.tsx
-    Description: The `useEffect` for keyboard navigation re-registers the event listener on every `selectedRecord` and `filteredRecords` change. Between re-registrations, a keydown could reference stale data. Additionally, `goToPrevious`/`goToNext` duplicated logic recalculates `findIndex` on each call.
-    Next step: Refactor to use `useRef` for `filteredRecords` and `selectedRecord`, with a single stable event handler.
-
-- Issue 2026-03-10 n7o8p9a: CollapsedDetailsStrip may violate ResizablePanel contract
-    Priority: Medium. Area: web/components/spreadsheet-viewer.tsx
-    Description: When `panelVisibility.details` is false, `CollapsedDetailsStrip` may be rendered as a direct child of `ResizablePanelGroup` without a `ResizablePanel` wrapper. `react-resizable-panels` requires all direct children to be `Panel` or `PanelResizeHandle`.
-    Next step: Verify whether the component is truly a direct child of PanelGroup. If so, wrap in a fixed-size `ResizablePanel` or render outside the group.
 
 - Issue 2026-03-10 o9p0q1a: refreshRecords does not clear stale selectedRecord
     Priority: Low. Area: web/hooks/use-records.ts
@@ -158,11 +143,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: The idle polling `schedule` function recursively calls itself via `setTimeout`. If the `useEffect` re-runs while an old `tick()` is executing `doSync`, both old and new polling chains can be active concurrently. The `isSyncingRef` guard (added in Round 1) prevents double `doSync` execution but the redundant timers remain.
     Next step: Add a `cancelled` boolean in the effect that is set `true` in the cleanup function, checked before calling `schedule()` in the recursive callback.
 
-- Issue 2026-03-10 e9f0g1a: useSyncManager does not expose sync errors to consumers
-    Priority: Low. Area: web/hooks/use-sync-manager.ts
-    Description: The `catch` block in `doSync` now logs via `console.warn`, but no error state is exposed to consumers. The UI cannot indicate that sync is failing.
-    Next step: Expose a `syncError` state or `lastSyncError` ref so consumers can display a stale-data indicator.
-
 - Issue 2026-03-10 g3h4i5a: AssetCard download/delete handlers are no-ops
     Priority: Medium. Area: web/components/record-details.tsx
     Description: The `onDownload` and `onDelete` callbacks passed to `AssetCard` for both figures and data files are empty arrow functions. The delete confirmation dialog appears but the confirmed action is a no-op.
@@ -172,11 +152,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Priority: Medium. Area: web/tests/e2e
     Description: Visual regression baselines were generated on macOS. CI runs on Linux where font rendering differs, so visual tests will fail. Docker-based generation hit pnpm + radix-ui hoisting issues (`.npmrc` `public-hoist-pattern` not taking effect inside the Playwright Docker image).
     Next step: When CI is set up, generate Linux baselines via Docker with the Playwright image. May need to copy `.npmrc` into the Docker context or use `shamefully-hoist=true`.
-
-- Issue 2026-03-09 x3y4z5: SpreadsheetViewer missing integration tests for hook orchestration
-    Priority: Medium. Area: web/tests
-    Description: When page.tsx was simplified to just `<SpreadsheetViewer />`, the integration tests for initial data loading, mutation tracking (markMutation after updateRecord), and sync coordination were removed from app-page.test.tsx. These behaviors now live inside SpreadsheetViewer and are untested at the component level.
-    Next step: Create `tests/unit/components/spreadsheet-viewer.test.tsx` that mocks child components and react-resizable-panels, then tests hook orchestration (fetchRecords/fetchProjects on mount, markMutation after successful mutation, no markMutation on failure).
 
 - Issue 2026-03-09 u1v2w3: Drag-and-drop reorder not implemented in web UI
     Priority: Medium. Area: web/components
