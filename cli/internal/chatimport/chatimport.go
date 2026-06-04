@@ -490,7 +490,7 @@ func parseJSONTranscript(source string, path string) (repository.CreateChatSessi
 
 	scan, err := scanJSONTranscript(json.NewDecoder(file))
 	if err != nil {
-		return repository.CreateChatSessionInput{}, nil, err
+		return repository.CreateChatSessionInput{}, nil, fmt.Errorf("scan %s: %w", path, err)
 	}
 	session := newTranscriptSession(source, path)
 	scan.sessionFields.applyTo(&session)
@@ -500,7 +500,7 @@ func parseJSONTranscript(source string, path string) (repository.CreateChatSessi
 		// transcript array keys, so arbitrary agent config/state JSON
 		// under a scanned root doesn't get silently imported as an empty
 		// chat session.
-		return repository.CreateChatSessionInput{}, nil, fmt.Errorf("no transcript array (expected one of messages/items/transcript)")
+		return repository.CreateChatSessionInput{}, nil, fmt.Errorf("scan %s: no transcript array (expected one of messages/items/transcript)", path)
 	}
 
 	items, err := parseJSONTranscriptArray(path, arrayKey, occurrence)
@@ -648,7 +648,7 @@ func parseJSONTranscriptArray(path string, key string, targetOccurrence int) ([]
 		}
 		return decodeJSONTranscriptItems(decoder, path, key)
 	}
-	return nil, fmt.Errorf("selected transcript array %q not found", key)
+	return nil, fmt.Errorf("parse %s: selected transcript array %q not found", path, key)
 }
 
 func decodeJSONTranscriptItems(decoder *json.Decoder, path string, key string) ([]repository.CreateChatItemInput, error) {
@@ -658,12 +658,7 @@ func decodeJSONTranscriptItems(decoder *json.Decoder, path string, key string) (
 	}
 	start, ok := token.(json.Delim)
 	if !ok || start != '[' {
-		if ok {
-			if err := skipJSONComposite(decoder, start); err != nil {
-				return nil, err
-			}
-		}
-		return nil, fmt.Errorf("selected transcript key %q is no longer an array", key)
+		return nil, fmt.Errorf("parse %s: selected transcript key %q is no longer an array", path, key)
 	}
 
 	var items []repository.CreateChatItemInput

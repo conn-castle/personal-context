@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-04 w3h7p1: Finish CI/release workflow supply-chain hardening beyond SHA pinning
+    Priority: Low. Area: .github/workflows
+    Description: PR #34 pinned actions to SHAs and added `persist-credentials: false` to the read-only `ci.yml` checkouts. Two reviewer-suggested hardenings remain: `cache: false` on `setup-go` (a CI-speed vs cache-poisoning tradeoff) in `ci.yml` and `release.yml` build-release, and `persist-credentials: false` on `release.yml` checkouts. The release-pipeline change is risky because the homebrew-tap checkout (release.yml:116) feeds `peter-evans/create-pull-request`, which pushes; `release.yml` is tag-triggered and not exercised by PR CI, so the credential change can't be verified here.
+    Next step: Decide the cache tradeoff explicitly; if applying `persist-credentials: false` to release.yml, verify `create-github-app-token` + `create-pull-request` still authenticate (token is passed explicitly) on a real tag run before relying on it.
+
 - Issue 2026-05-22 j4n7p3: Make screenshot fake-Chrome test scripts cross-platform
     Priority: Low. Area: cli/internal/cli/screenshot_test.go
     Description: `writeFakeChromeScript` and `writeFakeChromePNGScript` emit POSIX shell scripts (`#!/bin/sh`, `dd if=/dev/zero`) and are invoked by `TestScreenshotHappyPath`, `TestScreenshotDefaultOutput`, and the pre-existing `TestScreenshotPreservesRelativeFigurePaths`. CI runs Linux only (`.github/workflows/ci.yml` is ubuntu-latest), so this passes today, but a Windows test run would fail because `screenshotWithChrome` exec's the script directly.

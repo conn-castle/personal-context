@@ -132,7 +132,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if explicitDeleted.DeletedAt == nil || !explicitDeleted.DeletedAt.Equal(explicitDeletedAt) {
 			t.Fatalf("expected explicit DeletedAt %v, got %v", explicitDeletedAt, explicitDeleted.DeletedAt)
 		}
-		_, err = repo.UpdateRecord(ctx, repository.UpdateRecordInput{
+		recleared, err := repo.UpdateRecord(ctx, repository.UpdateRecordInput{
 			ID:             explicitDeleted.ID,
 			Date:           explicitDeleted.Date,
 			DayOrder:       explicitDeleted.DayOrder,
@@ -148,6 +148,9 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		})
 		if err != nil {
 			t.Fatalf("UpdateRecord(re-clear deleted_at) error = %v", err)
+		}
+		if recleared.DeletedAt != nil {
+			t.Fatalf("expected re-clear to set DeletedAt=nil, got %v", recleared.DeletedAt)
 		}
 
 		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
