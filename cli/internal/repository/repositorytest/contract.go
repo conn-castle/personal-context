@@ -318,6 +318,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 
 		cwd := "/tmp/chat-project/nested/deeper"
+		title := "Contract chat"
 		session, created, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
 			CreateChatSessionInput: repository.CreateChatSessionInput{
 				ID:              "20260514-abcdef12",
@@ -325,6 +326,7 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 				SourceSessionID: "source-1",
 				SourceDeviceID:  "chat-device",
 				CWD:             &cwd,
+				Title:           &title,
 				StartedAt:       now,
 				LastActivityAt:  now,
 				CreatedAt:       &now,
@@ -403,6 +405,15 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if atomicCreated {
 			t.Fatal("expected atomic replacement to update existing session")
 		}
+		if atomicSession.CWD == nil || *atomicSession.CWD != cwd {
+			t.Fatalf("expected CWD preserved on atomic upsert, got %+v", atomicSession.CWD)
+		}
+		if atomicSession.ProjectID == nil || *atomicSession.ProjectID != "chat/project-child" {
+			t.Fatalf("expected ProjectID preserved on atomic upsert, got %+v", atomicSession.ProjectID)
+		}
+		if atomicSession.Title == nil || *atomicSession.Title != title {
+			t.Fatalf("expected Title preserved on atomic upsert, got %+v", atomicSession.Title)
+		}
 		items, err = repo.ListChatItems(ctx, atomicSession.ID)
 		if err != nil {
 			t.Fatalf("ListChatItems(atomic) error = %v", err)
@@ -437,6 +448,15 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 		if !rolledBack.UpdatedAt.Equal(rollbackUpdatedAt) {
 			t.Fatalf("chat session updated_at changed after failed atomic replacement: got %v want %v", rolledBack.UpdatedAt, rollbackUpdatedAt)
+		}
+		if rolledBack.CWD == nil || *rolledBack.CWD != cwd {
+			t.Fatalf("expected CWD preserved after failed atomic replacement, got %+v", rolledBack.CWD)
+		}
+		if rolledBack.ProjectID == nil || *rolledBack.ProjectID != "chat/project-child" {
+			t.Fatalf("expected ProjectID preserved after failed atomic replacement, got %+v", rolledBack.ProjectID)
+		}
+		if rolledBack.Title == nil || *rolledBack.Title != title {
+			t.Fatalf("expected Title preserved after failed atomic replacement, got %+v", rolledBack.Title)
 		}
 		items, err = repo.ListChatItems(ctx, atomicSession.ID)
 		if err != nil {
