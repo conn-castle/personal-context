@@ -812,6 +812,63 @@ describe("useSyncManager", () => {
       });
       expect(onSyncData).toHaveBeenCalledTimes(1);
     });
+
+    it("fetches external changes after a stale self-mutation marker expires", async () => {
+      const changesData: SyncChangesResponse = {
+        items: [],
+        server_now: "2026-03-09T12:00:00Z",
+      };
+
+      let currentVersion = 1;
+      const fetchMock = vi.fn().mockImplementation((url: string) => {
+        if (url.includes("/api/sync/version")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                version: currentVersion,
+                updated_at: "2026-03-09T10:00:00Z",
+              }),
+          });
+        }
+        if (url.includes("/api/sync/changes")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(changesData),
+          });
+        }
+        return Promise.reject(new Error("Unexpected"));
+      });
+      globalThis.fetch = fetchMock;
+
+      const onSyncData = vi.fn();
+      const { result } = renderHook(() => useSyncManager({ onSyncData }));
+
+      await act(async () => {
+        await result.current.syncNow();
+      });
+      expect(onSyncData).toHaveBeenCalledWith({
+        items: [],
+        server_now: "2026-03-09T10:00:00Z",
+      });
+      onSyncData.mockClear();
+
+      act(() => {
+        result.current.markMutation();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_001);
+      });
+
+      currentVersion = 2;
+      await act(async () => {
+        await result.current.syncNow();
+      });
+
+      expect(onSyncData).toHaveBeenCalledWith(changesData);
+      expect(result.current.version).toBe(2);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -946,6 +1003,35 @@ describe("useSyncManager", () => {
       expect(removedEvents).toContain("visibilitychange");
 
       removeEventListenerSpy.mockRestore();
+    });
+
+    it("does not reschedule idle polling after cleanup if a timeout callback is already queued", () => {
+      const queuedCallbacks: Array<() => void> = [];
+      const setTimeoutSpy = vi
+        .spyOn(globalThis, "setTimeout")
+        .mockImplementation((handler, _timeout, ...args) => {
+          if (typeof handler === "function") {
+            queuedCallbacks.push(() => {
+              handler(...args);
+            });
+          }
+          return 1 as unknown as ReturnType<typeof setTimeout>;
+        });
+      const fetchMock = mockFetchResponses({
+        version: 1,
+        updated_at: "2026-03-09T10:00:00Z",
+      });
+      globalThis.fetch = fetchMock;
+
+      const { unmount } = renderHook(() => useSyncManager());
+
+      expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+      unmount();
+
+      queuedCallbacks[0]();
+
+      expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+      expect(fetchMock).not.toHaveBeenCalled();
     });
   });
 

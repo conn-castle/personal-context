@@ -128,35 +128,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: When `panelVisibility.details` is false, `CollapsedDetailsStrip` may be rendered as a direct child of `ResizablePanelGroup` without a `ResizablePanel` wrapper. `react-resizable-panels` requires all direct children to be `Panel` or `PanelResizeHandle`.
     Next step: Verify whether the component is truly a direct child of PanelGroup. If so, wrap in a fixed-size `ResizablePanel` or render outside the group.
 
-- Issue 2026-03-10 o9p0q1a: refreshRecords does not clear stale selectedRecord
-    Priority: Low. Area: web/hooks/use-records.ts
-    Description: When `refreshRecords` replaces the record list (e.g., after sync), `selectedRecord` retains stale data. If the selected record was deleted by another client, it remains visible in the detail panel while absent from navigation.
-    Next step: After `refreshRecords`, check if `selectedRecord.id` is still in the new items list. If not, clear or re-fetch it.
-
-- Issue 2026-03-10 q3r4s5a: No request cancellation between concurrent fetch/refresh operations
-    Priority: Low. Area: web/hooks/use-records.ts
-    Description: Both `fetchRecords` and `refreshRecords` write to the same `records` state and `cursorRef`. Concurrent in-flight requests can overwrite each other's results, leaving cursor and records in inconsistent states.
-    Next step: Add an `AbortController` or monotonic request ID to discard stale responses.
-
 - Issue 2026-03-10 a1b2c3a: refreshRecords does not set isLoading during background sync
     Priority: Low. Area: web/hooks/use-records.ts
     Description: `refreshRecords` (called by sync manager on version change) never sets `isLoading`. Consumers see `false` throughout the fetch, so no loading indicator is shown during background refreshes.
     Next step: Decide if this is intentional (silent refresh) or if a separate `isRefreshing` state should be exposed.
-
-- Issue 2026-03-10 b3c4d5a: selfMutationRef timing window in useSyncManager
-    Priority: Low. Area: web/hooks/use-sync-manager.ts
-    Description: `markMutation()` sets `selfMutationRef` to `true`, but it is only consumed when a version change is detected. If the S3 `_version` bump hasn't propagated when the next sync fires, the flag stays `true` and suppresses the next legitimate external version change.
-    Next step: Add a TTL or auto-clear `selfMutationRef` after ~10 seconds if no version change was observed.
-
-- Issue 2026-03-10 c5d6e7a: deleteRecord error recovery clears the error via fetchRecords re-fetch
-    Priority: Low. Area: web/hooks/use-records.ts
-    Description: When `deleteRecord` fails, it sets an error and calls `fetchRecords` to roll back optimistic state. But `fetchRecords` starts with `setError(null)`, clearing the delete error. If the re-fetch succeeds, the user never sees the delete failure message.
-    Next step: Use a separate error channel or toast for mutation failures, or skip `setError(null)` when `fetchRecords` is called as a rollback.
-
-- Issue 2026-03-10 d7e8f9a: Layer 4 idle polling recursive setTimeout without cancel guard
-    Priority: Low. Area: web/hooks/use-sync-manager.ts
-    Description: The idle polling `schedule` function recursively calls itself via `setTimeout`. If the `useEffect` re-runs while an old `tick()` is executing `doSync`, both old and new polling chains can be active concurrently. The `isSyncingRef` guard (added in Round 1) prevents double `doSync` execution but the redundant timers remain.
-    Next step: Add a `cancelled` boolean in the effect that is set `true` in the cleanup function, checked before calling `schedule()` in the recursive callback.
 
 - Issue 2026-03-10 e9f0g1a: useSyncManager does not expose sync errors to consumers
     Priority: Low. Area: web/hooks/use-sync-manager.ts

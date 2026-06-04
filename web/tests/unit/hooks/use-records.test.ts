@@ -208,6 +208,188 @@ describe("useRecords", () => {
 
       expect(result.current.error).toBe("Failed to fetch records");
     });
+
+    it("does not let a stale first-page response overwrite a newer one", async () => {
+      const slowRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260309-11111111",
+        project_id: "org/slow",
+      };
+      const fastRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260309-22222222",
+        project_id: "org/fast",
+      };
+      let resolveSlow:
+        | ((value: {
+            ok: boolean;
+            json: () => Promise<{
+              items: RecordSummary[];
+              total: number;
+              next_cursor: string | null;
+            }>;
+          }) => void)
+        | null = null;
+      let resolveFast:
+        | ((value: {
+            ok: boolean;
+            json: () => Promise<{
+              items: RecordSummary[];
+              total: number;
+              next_cursor: string | null;
+            }>;
+          }) => void)
+        | null = null;
+      const fetchMock = vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveSlow = resolve as typeof resolveSlow;
+            })
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveFast = resolve as typeof resolveFast;
+            })
+        );
+      globalThis.fetch = fetchMock;
+
+      const { result } = renderHook(() => useRecords());
+
+      let slowRequest: Promise<void>;
+      await act(async () => {
+        slowRequest = result.current.fetchRecords({ project: "org/slow" });
+        await Promise.resolve();
+      });
+
+      let fastRequest: Promise<void>;
+      await act(async () => {
+        fastRequest = result.current.fetchRecords({ project: "org/fast" });
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        resolveFast?.({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [fastRecord],
+              total: 1,
+              next_cursor: null,
+            }),
+        });
+        await fastRequest!;
+      });
+
+      expect(result.current.records).toEqual([fastRecord]);
+      expect(result.current.hasMore).toBe(false);
+
+      await act(async () => {
+        resolveSlow?.({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [slowRecord],
+              total: 2,
+              next_cursor: "stale-cursor",
+            }),
+        });
+        await slowRequest!;
+      });
+
+      expect(result.current.records).toEqual([fastRecord]);
+      expect(result.current.hasMore).toBe(false);
+      expect(result.current.isLoading).toBe(false);
+      expect(result.current.error).toBeNull();
+    });
+
+    it("clears loading when a silent refresh supersedes an older first-page request", async () => {
+      const refreshedRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260310-22222222",
+      };
+      let resolveInitial:
+        | ((value: {
+            ok: boolean;
+            json: () => Promise<{
+              items: RecordSummary[];
+              total: number;
+              next_cursor: string | null;
+            }>;
+          }) => void)
+        | null = null;
+      let resolveRefresh:
+        | ((value: {
+            ok: boolean;
+            json: () => Promise<{
+              items: RecordSummary[];
+              total: number;
+              next_cursor: string | null;
+            }>;
+          }) => void)
+        | null = null;
+      const fetchMock = vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveInitial = resolve as typeof resolveInitial;
+            })
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveRefresh = resolve as typeof resolveRefresh;
+            })
+        );
+      globalThis.fetch = fetchMock;
+
+      const { result } = renderHook(() => useRecords());
+
+      let initialRequest: Promise<void>;
+      await act(async () => {
+        initialRequest = result.current.fetchRecords();
+        await Promise.resolve();
+      });
+      expect(result.current.isLoading).toBe(true);
+
+      let refreshRequest: Promise<void>;
+      await act(async () => {
+        refreshRequest = result.current.refreshRecords();
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        resolveRefresh?.({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [refreshedRecord],
+              total: 1,
+              next_cursor: null,
+            }),
+        });
+        await refreshRequest!;
+      });
+
+      await act(async () => {
+        resolveInitial?.({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [mockRecord],
+              total: 1,
+              next_cursor: "stale-cursor",
+            }),
+        });
+        await initialRequest!;
+      });
+
+      expect(result.current.records).toEqual([refreshedRecord]);
+      expect(result.current.isLoading).toBe(false);
+    });
   });
 
   describe("fetchMore", () => {
@@ -348,6 +530,106 @@ describe("useRecords", () => {
 
       expect(result.current.records).toHaveLength(2);
       expect(result.current.isFetchingMore).toBe(false);
+    });
+
+    it("does not append a stale next page after a newer first-page request starts", async () => {
+      const nextPageRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260308-11111111",
+      };
+      const refreshedRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260310-22222222",
+      };
+
+      globalThis.fetch = mockFetch({
+        "/api/records": { items: [mockRecord], total: 2, next_cursor: "cursor1" },
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      await act(async () => {
+        await result.current.fetchRecords();
+      });
+
+      let resolveNextPage:
+        | ((value: {
+            ok: boolean;
+            json: () => Promise<{
+              items: RecordSummary[];
+              total: number;
+              next_cursor: string | null;
+            }>;
+          }) => void)
+        | null = null;
+      let resolveReplacement:
+        | ((value: {
+            ok: boolean;
+            json: () => Promise<{
+              items: RecordSummary[];
+              total: number;
+              next_cursor: string | null;
+            }>;
+          }) => void)
+        | null = null;
+      const fetchMock = vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveNextPage = resolve as typeof resolveNextPage;
+            })
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveReplacement = resolve as typeof resolveReplacement;
+            })
+        );
+      globalThis.fetch = fetchMock;
+
+      let nextPageRequest: Promise<void>;
+      await act(async () => {
+        nextPageRequest = result.current.fetchMore();
+        await Promise.resolve();
+      });
+
+      let replacementRequest: Promise<void>;
+      await act(async () => {
+        replacementRequest = result.current.fetchRecords();
+        await Promise.resolve();
+      });
+
+      await act(async () => {
+        resolveReplacement?.({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [refreshedRecord],
+              total: 1,
+              next_cursor: null,
+            }),
+        });
+        await replacementRequest!;
+      });
+
+      await act(async () => {
+        resolveNextPage?.({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [nextPageRecord],
+              total: 2,
+              next_cursor: "stale-cursor",
+            }),
+        });
+        await nextPageRequest!;
+      });
+
+      expect(result.current.records).toEqual([refreshedRecord]);
+      expect(result.current.hasMore).toBe(false);
+      expect(result.current.isFetchingMore).toBe(false);
+      expect(result.current.isLoading).toBe(false);
     });
   });
 
@@ -627,8 +909,8 @@ describe("useRecords", () => {
       });
 
       // After rollback re-fetch, records should be restored
-      // Note: fetchRecords clears error, so error is null after successful re-fetch
       expect(result.current.records).toHaveLength(1);
+      expect(result.current.error).toContain("Failed to delete record");
     });
   });
 
@@ -748,6 +1030,7 @@ describe("useRecords", () => {
 
       // After rollback re-fetch, records should be restored
       expect(result.current.records).toHaveLength(1);
+      expect(result.current.error).toContain("Failed to restore record");
     });
   });
 
@@ -927,6 +1210,44 @@ describe("useRecords", () => {
       expect(fetchMock).toHaveBeenCalledWith(
         expect.stringContaining("project=org")
       );
+    });
+
+    it("clears selectedRecord when the refreshed page no longer contains it", async () => {
+      const otherRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260308-11111111",
+      };
+
+      globalThis.fetch = mockFetch({
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      await act(async () => {
+        await result.current.fetchRecords();
+      });
+
+      globalThis.fetch = mockFetch({
+        "/api/records/20260309-aabbccdd": { record: mockRecordDetail },
+      });
+
+      await act(async () => {
+        await result.current.selectRecord("20260309-aabbccdd");
+      });
+
+      expect(result.current.selectedRecord?.id).toBe("20260309-aabbccdd");
+
+      globalThis.fetch = mockFetch({
+        "/api/records": { items: [otherRecord], total: 1, next_cursor: null },
+      });
+
+      await act(async () => {
+        await result.current.refreshRecords();
+      });
+
+      expect(result.current.records).toEqual([otherRecord]);
+      expect(result.current.selectedRecord).toBeNull();
     });
 
     it("sets error on failure", async () => {

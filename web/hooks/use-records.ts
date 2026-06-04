@@ -80,6 +80,10 @@ interface RecordDetailResponse {
   record: RecordDetail;
 }
 
+interface FetchRecordsOptions {
+  preserveExistingError?: boolean;
+}
+
 const JSON_REQUEST_HEADERS = { "Content-Type": "application/json" };
 
 /**
@@ -191,6 +195,21 @@ export function useRecords(): UseRecordsReturn {
   const cursorRef = useRef<string | null>(null);
   const filterParamsRef = useRef<RecordFilterParams | undefined>(undefined);
   const isFetchingMoreRef = useRef(false);
+  const replacementRequestSeqRef = useRef(0);
+  const loadingRequestSeqRef = useRef(0);
+
+  const beginLoading = useCallback(() => {
+    const loadingSeq = loadingRequestSeqRef.current + 1;
+    loadingRequestSeqRef.current = loadingSeq;
+    setIsLoading(true);
+    return loadingSeq;
+  }, []);
+
+  const finishLoading = useCallback((loadingSeq: number) => {
+    if (loadingRequestSeqRef.current === loadingSeq) {
+      setIsLoading(false);
+    }
+  }, []);
 
   const updatePaginationState = useCallback((nextCursor: string | null) => {
     cursorRef.current = nextCursor;
@@ -200,6 +219,9 @@ export function useRecords(): UseRecordsReturn {
   const replaceRecordsPage = useCallback(
     (data: PaginatedResponse<RecordSummary>) => {
       setRecords(data.items);
+      setSelectedRecord((prev) =>
+        prev && data.items.some((record) => record.id === prev.id) ? prev : null
+      );
       updatePaginationState(data.next_cursor);
     },
     [updatePaginationState]
@@ -210,34 +232,51 @@ export function useRecords(): UseRecordsReturn {
     setSelectedRecord((prev) => (prev?.id === id ? null : prev));
   }, []);
 
-  const fetchRecords = useCallback(async (params?: RecordFilterParams) => {
-    filterParamsRef.current = params;
-    cursorRef.current = null;
-    setIsLoading(true);
-    setError(null);
+  const fetchRecords = useCallback(
+    async (
+      params?: RecordFilterParams,
+      options: FetchRecordsOptions = {}
+    ) => {
+      const requestSeq = replacementRequestSeqRef.current + 1;
+      replacementRequestSeqRef.current = requestSeq;
+      const loadingSeq = beginLoading();
+      filterParamsRef.current = params;
+      cursorRef.current = null;
+      if (!options.preserveExistingError) {
+        setError(null);
+      }
 
-    try {
-      const data = await fetchJsonOrThrow<PaginatedResponse<RecordSummary>>(
-        `/api/records${buildQuery(params)}`,
-        "Failed to fetch records"
-      );
-      replaceRecordsPage(data);
-    } catch (err) {
-      setError(getErrorMessage(err, "Failed to fetch records"));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [replaceRecordsPage]);
+      try {
+        const data = await fetchJsonOrThrow<PaginatedResponse<RecordSummary>>(
+          `/api/records${buildQuery(params)}`,
+          "Failed to fetch records"
+        );
+        if (replacementRequestSeqRef.current !== requestSeq) {
+          return;
+        }
+        replaceRecordsPage(data);
+      } catch (err) {
+        if (replacementRequestSeqRef.current !== requestSeq) {
+          return;
+        }
+        setError(getErrorMessage(err, "Failed to fetch records"));
+      } finally {
+        finishLoading(loadingSeq);
+      }
+    },
+    [beginLoading, finishLoading, replaceRecordsPage]
+  );
 
   const fetchMore = useCallback(async () => {
     const currentCursor = cursorRef.current;
     if (!currentCursor || isFetchingMoreRef.current) {
       return;
     }
+    const requestSeq = replacementRequestSeqRef.current;
+    const loadingSeq = beginLoading();
 
     isFetchingMoreRef.current = true;
     setIsFetchingMore(true);
-    setIsLoading(true);
     setError(null);
 
     try {
@@ -245,19 +284,25 @@ export function useRecords(): UseRecordsReturn {
         `/api/records${buildQuery(filterParamsRef.current, currentCursor)}`,
         "Failed to fetch more records"
       );
+      if (replacementRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       setRecords((prev) => mergeUniqueRecords(prev, data.items));
       updatePaginationState(data.next_cursor);
     } catch (err) {
+      if (replacementRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       setError(getErrorMessage(err, "Failed to fetch more records"));
     } finally {
       isFetchingMoreRef.current = false;
       setIsFetchingMore(false);
-      setIsLoading(false);
+      finishLoading(loadingSeq);
     }
-  }, [updatePaginationState]);
+  }, [beginLoading, finishLoading, updatePaginationState]);
 
   const selectRecord = useCallback(async (id: string) => {
-    setIsLoading(true);
+    const loadingSeq = beginLoading();
     setError(null);
 
     try {
@@ -269,9 +314,9 @@ export function useRecords(): UseRecordsReturn {
     } catch (err) {
       setError(getErrorMessage(err, "Failed to fetch record detail"));
     } finally {
-      setIsLoading(false);
+      finishLoading(loadingSeq);
     }
-  }, []);
+  }, [beginLoading, finishLoading]);
 
   const updateRecord = useCallback(
     async (id: string, body: Record<string, unknown>) => {
@@ -324,7 +369,9 @@ export function useRecords(): UseRecordsReturn {
         return true;
       } catch (err) {
         setError(getErrorMessage(err, failureMessage));
-        await fetchRecords(filterParamsRef.current);
+        await fetchRecords(filterParamsRef.current, {
+          preserveExistingError: true,
+        });
         return false;
       }
     },
@@ -396,6 +443,8 @@ export function useRecords(): UseRecordsReturn {
   }, []);
 
   const refreshRecords = useCallback(async () => {
+    const requestSeq = replacementRequestSeqRef.current + 1;
+    replacementRequestSeqRef.current = requestSeq;
     updatePaginationState(null);
     setError(null);
 
@@ -404,8 +453,14 @@ export function useRecords(): UseRecordsReturn {
         `/api/records${buildQuery(filterParamsRef.current)}`,
         "Failed to refresh records"
       );
+      if (replacementRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       replaceRecordsPage(data);
     } catch (err) {
+      if (replacementRequestSeqRef.current !== requestSeq) {
+        return;
+      }
       setError(getErrorMessage(err, "Failed to refresh records"));
     }
   }, [replaceRecordsPage, updatePaginationState]);
