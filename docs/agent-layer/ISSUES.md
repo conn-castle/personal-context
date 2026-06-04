@@ -27,6 +27,23 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-04 c5k9d2: Gemini duplicate-content collapse can discard the only cwd-resolving copy
+    Priority: Low. Area: cli/internal/cli/chat.go
+    Description: When two distinct Gemini tmp dirs hold byte-identical session JSON, the brand-new dedup (seenContentHashes, chat.go ~424) keeps the first in scan order as representative without weighing cwd resolvability. If that representative resolves no cwd (no .project_root, projectHash unregistered at import) while the skipped duplicate has a .project_root, the stored row keeps cwd=NULL and a later `pc project register` cannot backfill it. Not reachable from real Gemini layout (one tmp dir per project root, so byte-identical JSON does not co-occur; a representative carrying projectHash self-heals on re-import after register).
+    Next step: When collapsing a byte-identical duplicate, prefer/merge a copy that resolves a non-nil Gemini cwd over the scan-order-first representative (requires updating the already-queued/stored representative's cwd).
+    Notes: Raised by Codex on PR #37 (P2). Deferred as out-of-scope for the attribution PR.
+
+- Issue 2026-06-04 w8k3r1: pc chat import has no coverage self-check against on-disk ground truth
+    Priority: Medium. Area: cli/internal/cli/chat.go, cli/internal/cli/doctor.go
+    Description: The importer reports files scanned / sessions created but never compares the store against a disk scan of all discovered roots, so a silent discovery gap reads as success. This class of miss left an installed store at ~14% coverage undetected because verification compared output against the same roots the importer scans (a circular check).
+    Next step: Add a coverage self-check to the import summary or `pc doctor` that counts unique sessions on disk under all discovered roots (codex rollout uuid, claude session-id + subagent, gemini basename) and reports any shortfall vs the store.
+    Notes: Discovery is registry-driven and tested; this is the systemic guard so the silent-miss class cannot recur.
+
+- Issue 2026-06-04 q2v9m6: Gemini chat session identity is path-derived, not the in-file sessionId
+    Priority: Low. Area: cli/internal/chatimport/chatimport.go
+    Description: geminiSourceSessionID derives source_session_id from the file path (grandparent/parent/basename) with a stale comment claiming Gemini carries no usable session id; current Gemini session JSON does carry a stable top-level `sessionId`. Path-based identity works but is brittle (a moved/renamed tmp dir changes identity) and differs from codex/claude which key on the native id.
+    Next step: Switch Gemini identity to the in-file `sessionId` only during a fresh store rebuild — it rewrites every Gemini source_session_id, so doing it incrementally would churn/duplicate existing rows. Defer until such a rebuild.
+
 - Issue 2026-06-04 t7n2v5: No backend-level test forces a real mid-transaction rollback for UpsertChatSessionWithItems
     Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}, repositorytest
     Description: No test exercises a genuine mid-transaction failure (after the session UPSERT + items DELETE, before commit) for UpsertChatSessionWithItems to prove Postgres/SQLite rollback leaves session updated_at and items unchanged. The contract atomicity test's Ordinal:-1 path fails validChatItemInput pre-validation before Begin, so no real DB transaction is opened; the sync-layer self-heal test only exercises the memory repo's snapshot-restore.

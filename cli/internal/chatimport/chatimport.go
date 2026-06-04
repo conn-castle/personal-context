@@ -2,6 +2,8 @@ package chatimport
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -195,6 +197,89 @@ func MatchProjectPath(paths []repository.ProjectPath, cwd *string, deviceID stri
 		return nil
 	}
 	return &best.ProjectID
+}
+
+// ResolveGeminiProjectCWD derives the repo-root working directory for a Gemini
+// transcript so it can be attributed to a registered project. Gemini sessions
+// carry no `cwd` field; instead the repo root is recoverable from the source on
+// disk in one of two ways:
+//   - older "named" tmp dirs ship a sibling `.project_root` file holding the
+//     literal absolute repo root. This is preferred because a literal path also
+//     supports longest-prefix matching for sub-directory launches.
+//   - newer "hash" tmp dirs encode `projectHash == sha256(absolute repo root)`
+//     in the session JSON. A hash is one-way, so it resolves only against the
+//     registry: the registered project path whose sha256 equals it (exact root).
+//
+// Returns nil when neither signal yields a usable path (for example an ephemeral
+// checkout that is not a registered project, or a hash with no registered
+// match); the caller then leaves cwd NULL and the session stays unattributed.
+func ResolveGeminiProjectCWD(sourcePath string, paths []repository.ProjectPath, deviceID string) *string {
+	if root := readGeminiProjectRoot(sourcePath); root != nil {
+		return root
+	}
+	if hash := readGeminiProjectHash(sourcePath); hash != nil {
+		return matchProjectHash(paths, *hash, deviceID)
+	}
+	return nil
+}
+
+// readGeminiProjectRoot reads the literal repo root from the `.project_root`
+// file Gemini writes for "named" tmp dirs. The file is a sibling of the `chats/`
+// directory that holds the session (e.g. `<dir>/.project_root` next to
+// `<dir>/chats/session-*.json`), so it lives in the source file's grandparent.
+func readGeminiProjectRoot(sourcePath string) *string {
+	dir := filepath.Dir(filepath.Dir(sourcePath))
+	data, err := os.ReadFile(filepath.Join(dir, ".project_root"))
+	if err != nil {
+		return nil
+	}
+	root := strings.TrimSpace(string(data))
+	if root == "" {
+		return nil
+	}
+	return &root
+}
+
+// readGeminiProjectHash reads the top-level `projectHash` string from a Gemini
+// session JSON. Decoding into a struct skips every other top-level field
+// (including the potentially large `messages` array) without materialising it.
+// Returns nil when the field is absent/empty or the file cannot be parsed.
+func readGeminiProjectHash(sourcePath string) *string {
+	file, err := os.Open(sourcePath)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = file.Close() }()
+	var meta struct {
+		ProjectHash string `json:"projectHash"`
+	}
+	if err := json.NewDecoder(file).Decode(&meta); err != nil {
+		return nil
+	}
+	hash := strings.TrimSpace(meta.ProjectHash)
+	if hash == "" {
+		return nil
+	}
+	return &hash
+}
+
+// matchProjectHash returns the registered project path on the given device whose
+// sha256 equals projectHash. Gemini hashes the resolved workspace root exactly,
+// so this is an exact-root match (no prefix); misses return nil and stay
+// unattributed rather than guessing a sub-path.
+func matchProjectHash(paths []repository.ProjectPath, projectHash string, deviceID string) *string {
+	want := strings.ToLower(projectHash)
+	for i := range paths {
+		if paths[i].DeviceID != deviceID {
+			continue
+		}
+		sum := sha256.Sum256([]byte(paths[i].Path))
+		if hex.EncodeToString(sum[:]) == want {
+			matched := paths[i].Path
+			return &matched
+		}
+	}
+	return nil
 }
 
 func parseJSONLTranscript(source string, path string) (repository.CreateChatSessionInput, []repository.CreateChatItemInput, error) {

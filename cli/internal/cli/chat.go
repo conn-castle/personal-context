@@ -368,6 +368,7 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 						return hadMutations, fmt.Errorf("parse %s: %w", file, err)
 					}
 					session.SourceDeviceID = deviceID
+					resolveGeminiCWD(&session, file, projectPaths, deviceID)
 					session.ProjectID = chatimport.MatchProjectPath(projectPaths, session.CWD, deviceID)
 					sourceSessionKey := chatImportSourceSessionKey{source: session.Source, sourceSessionID: session.SourceSessionID}
 					if batch.hasSourceSession(session.Source, session.SourceSessionID) {
@@ -584,20 +585,13 @@ func handleExactMatchChatImport(ctx context.Context, stack *localStack, batch *c
 		}
 		return false, false, fmt.Errorf("parse managed chat raw source %s: %w", comparison.managedPath, err)
 	}
-	storedItems, err := stack.Repo.ListChatItems(ctx, existing.ID)
-	if err != nil {
-		return false, false, fmt.Errorf("list existing chat items before exact-match repair: %w", err)
-	}
-	if len(storedItems) == len(items) && chatImportItemsAlreadyStored(storedItems, items) {
-		batch.summary.SessionsSkipped++
-		if deleteSource {
-			deleteImportedChatSourceIfSafe(batch.summary, stack.FS, existing.ID, *existing.RawSourceKey, sourcePath)
-		}
-		return true, false, nil
-	}
-	absSourcePath, err := filepath.Abs(sourcePath)
-	if err != nil {
-		return false, false, fmt.Errorf("resolve chat source path %q: %w", sourcePath, err)
+	// Gemini transcripts carry no cwd, so an already-imported Gemini session is
+	// NULL-attributed until the repo root is recovered from the source on disk
+	// (the `.project_root` file or `projectHash`). Resolve it here so a re-import
+	// repairs attribution even though the transcript bytes are unchanged; gate on
+	// the unattributed case so already-attributed sessions skip the extra reads.
+	if existing.ProjectID == nil {
+		resolveGeminiCWD(&session, sourcePath, projectPaths, deviceID)
 	}
 	session.ID = existing.ID
 	session.Source = existing.Source
@@ -612,6 +606,25 @@ func handleExactMatchChatImport(ctx context.Context, stack *localStack, batch *c
 	}
 	if session.Title == nil {
 		session.Title = existing.Title
+	}
+	storedItems, err := stack.Repo.ListChatItems(ctx, existing.ID)
+	if err != nil {
+		return false, false, fmt.Errorf("list existing chat items before exact-match repair: %w", err)
+	}
+	// Skip only when neither the items NOR the attribution changed. An
+	// attribution-only change (e.g. a Gemini session whose project just became
+	// resolvable) still needs a write even though the transcript is byte-identical.
+	if len(storedItems) == len(items) && chatImportItemsAlreadyStored(storedItems, items) &&
+		nullableTextEqual(session.ProjectID, existing.ProjectID) && nullableTextEqual(session.CWD, existing.CWD) {
+		batch.summary.SessionsSkipped++
+		if deleteSource {
+			deleteImportedChatSourceIfSafe(batch.summary, stack.FS, existing.ID, *existing.RawSourceKey, sourcePath)
+		}
+		return true, false, nil
+	}
+	absSourcePath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return false, false, fmt.Errorf("resolve chat source path %q: %w", sourcePath, err)
 	}
 	session.OriginalSourcePath = &absSourcePath
 	if err := queueReplaceChatImport(ctx, stack, batch, sessionIndex, session, items, sourcePath, deleteSource); err != nil {
@@ -864,6 +877,18 @@ func nullableTextEqual(left *string, right *string) bool {
 		return left == right
 	}
 	return *left == *right
+}
+
+// resolveGeminiCWD fills a Gemini session's working directory from the source on
+// disk so it can be attributed like codex/claude. Gemini transcripts carry no
+// `cwd`; chatimport.ResolveGeminiProjectCWD recovers the repo root from the
+// sibling `.project_root` file or the `projectHash == sha256(repo root)` field.
+// It is a no-op for other sources or when the cwd is already known.
+func resolveGeminiCWD(session *repository.CreateChatSessionInput, sourcePath string, projectPaths []repository.ProjectPath, deviceID string) {
+	if session.Source != "gemini" || session.CWD != nil {
+		return
+	}
+	session.CWD = chatimport.ResolveGeminiProjectCWD(sourcePath, projectPaths, deviceID)
 }
 
 func queueReplaceChatImport(ctx context.Context, stack *localStack, batch *chatImportBatch, sessionIndex *chatImportSessionIndex, session repository.CreateChatSessionInput, items []repository.CreateChatItemInput, sourcePath string, deleteSource bool) error {
