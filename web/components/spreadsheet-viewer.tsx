@@ -660,9 +660,9 @@ export function SpreadsheetViewer() {
             ) : (
               <ResizablePanel
                 id="collapsed-details-panel"
-                defaultSize={48}
-                minSize={48}
-                maxSize={48}
+                defaultSize="48px"
+                minSize="48px"
+                maxSize="48px"
                 groupResizeBehavior="preserve-pixel-size"
                 disabled
                 className="min-w-12 max-w-12"

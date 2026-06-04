@@ -403,9 +403,9 @@ describe("SpreadsheetViewer", () => {
       .closest("[data-panel-id='collapsed-details-panel']");
 
     expect(wrapper).not.toBeNull();
-    expect(wrapper?.getAttribute("data-default-size")).toBe("48");
-    expect(wrapper?.getAttribute("data-min-size")).toBe("48");
-    expect(wrapper?.getAttribute("data-max-size")).toBe("48");
+    expect(wrapper?.getAttribute("data-default-size")).toBe("48px");
+    expect(wrapper?.getAttribute("data-min-size")).toBe("48px");
+    expect(wrapper?.getAttribute("data-max-size")).toBe("48px");
     expect(wrapper?.getAttribute("data-group-resize-behavior")).toBe(
       "preserve-pixel-size"
     );
