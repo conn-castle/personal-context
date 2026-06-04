@@ -4053,7 +4053,9 @@ func (m *memoryRepo) UpdateRecord(_ context.Context, input repository.UpdateReco
 	record.GitRemoteURL = cloneStringPtr(input.GitRemoteURL)
 	record.GitHash = cloneStringPtr(input.GitHash)
 	record.UpdatedAt = derefTime(input.UpdatedAt)
-	record.DeletedAt = cloneTimePtr(input.DeletedAt)
+	if input.SetDeletedAt {
+		record.DeletedAt = cloneTimePtr(input.DeletedAt)
+	}
 	m.records[input.ID] = record
 	return record, nil
 }

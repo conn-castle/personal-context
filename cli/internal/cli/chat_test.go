@@ -611,6 +611,51 @@ func TestChatImportRepairsMissingManagedRawSource(t *testing.T) {
 	}
 }
 
+func TestChatImportRepairsExactMatchMissingItems(t *testing.T) {
+	homeDir := setupEnv(t)
+	root := t.TempDir()
+	transcript := `{
+  "id": "missing-items-session",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [{"role": "user", "content": "legacy raw ahead item repair"}]
+}`
+	if err := os.WriteFile(filepath.Join(root, "missing-items.json"), []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	firstSummary := runChatImportSummaryForTest(t, root)
+	if firstSummary.SessionsCreated != 1 || firstSummary.ItemsImported != 1 || firstSummary.RawSourcesCopied != 1 {
+		t.Fatalf("unexpected first import summary: %+v", firstSummary)
+	}
+	before := readChatImportTestSnapshot(t, "missing-items-session")
+
+	dbPath := filepath.Join(homeDir, "personal-context", ".pc", "pc.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	if _, err := db.Exec(`DELETE FROM chat_item WHERE session_id = ?`, before.session.ID); err != nil {
+		_ = db.Close()
+		t.Fatalf("delete chat items: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close db: %v", err)
+	}
+
+	secondSummary := runChatImportSummaryForTest(t, root)
+	if secondSummary.FilesScanned != 1 || secondSummary.SessionsSkipped != 0 ||
+		secondSummary.SessionsUpdated != 1 || secondSummary.RawSourcesCopied != 1 ||
+		secondSummary.ItemsImported != 1 || secondSummary.ItemsDelta != 1 || secondSummary.ItemsAfterImport != 1 {
+		t.Fatalf("unexpected missing-items repair summary: %+v", secondSummary)
+	}
+	after := readChatImportTestSnapshot(t, "missing-items-session")
+	if !bytes.Equal(before.rawBytes, after.rawBytes) {
+		t.Fatalf("repaired raw bytes differ from original managed copy")
+	}
+	if len(after.items) != 1 || after.items[0].SearchText != "legacy raw ahead item repair" {
+		t.Fatalf("items were not restored from raw source: %+v", after.items)
+	}
+}
+
 func TestChatImportDefaultScanIncludesRegisteredClaudeConfigProjectRoot(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	setupEnv(t)

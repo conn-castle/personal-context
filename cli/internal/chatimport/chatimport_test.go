@@ -111,6 +111,41 @@ func TestJSONLItemSessionScopedFieldsCanFillFallbackMetadata(t *testing.T) {
 	}
 }
 
+func TestJSONTranscriptStreamingPreservesPriority(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "priority.json")
+	transcript := `{
+  "id": "generic-id",
+  "ignored": {"nested": [{"large": "discarded"}]},
+  "items": [{"role": "user", "content": "lower priority item"}],
+  "session_id": "canonical-id",
+  "messages": [42, {"role": "assistant", "content": "preferred message", "timestamp": "2026-05-14T12:00:00Z"}],
+  "transcript": [{"role": "user", "content": "lowest priority item"}],
+  "cwd": "/tmp/stream-json",
+  "title": "Streamed JSON"
+}`
+	if err := os.WriteFile(path, []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	session, items, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.SourceSessionID != "canonical-id" {
+		t.Fatalf("source session id = %q, want canonical-id", session.SourceSessionID)
+	}
+	if session.CWD == nil || *session.CWD != "/tmp/stream-json" || session.Title == nil || *session.Title != "Streamed JSON" {
+		t.Fatalf("expected streamed cwd/title metadata, got %+v", session)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items len = %d, want 1: %+v", len(items), items)
+	}
+	if items[0].SearchText != "preferred message" || items[0].Ordinal != 1 {
+		t.Fatalf("expected messages array with original ordinal preserved, got %+v", items[0])
+	}
+}
+
 func TestParseAppendedJSONLTranscriptUsesBaseSession(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "append-session.jsonl")

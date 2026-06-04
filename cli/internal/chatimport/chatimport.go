@@ -487,21 +487,14 @@ func parseJSONTranscript(source string, path string) (repository.CreateChatSessi
 		return repository.CreateChatSessionInput{}, nil, err
 	}
 	defer func() { _ = file.Close() }()
-	var payload map[string]any
-	if err := json.NewDecoder(file).Decode(&payload); err != nil {
+
+	scan, err := scanJSONTranscript(json.NewDecoder(file))
+	if err != nil {
 		return repository.CreateChatSessionInput{}, nil, err
 	}
 	session := newTranscriptSession(source, path)
-	applySessionFields(&session, payload)
-	var rawItems []any
-	matched := false
-	for _, key := range []string{"messages", "items", "transcript"} {
-		if value, ok := payload[key].([]any); ok {
-			rawItems = value
-			matched = true
-			break
-		}
-	}
+	scan.sessionFields.applyTo(&session)
+	arrayKey, occurrence, matched := scan.selectedArray()
 	if !matched {
 		// Reject any .json file that doesn't carry one of the supported
 		// transcript array keys, so arbitrary agent config/state JSON
@@ -509,22 +502,301 @@ func parseJSONTranscript(source string, path string) (repository.CreateChatSessi
 		// chat session.
 		return repository.CreateChatSessionInput{}, nil, fmt.Errorf("no transcript array (expected one of messages/items/transcript)")
 	}
-	items := make([]repository.CreateChatItemInput, 0, len(rawItems))
-	for i, raw := range rawItems {
-		object, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		item := itemFromPayload(object, i)
-		if item.SearchText != "" || item.RawJSON != nil {
-			items = append(items, item)
-		}
+
+	items, err := parseJSONTranscriptArray(path, arrayKey, occurrence)
+	if err != nil {
+		return repository.CreateChatSessionInput{}, nil, err
 	}
 	if len(items) == 0 {
 		return repository.CreateChatSessionInput{}, nil, ErrEmptyTranscript
 	}
 	finalizeSessionTimes(&session, items)
 	return session, items, nil
+}
+
+var jsonTranscriptArrayKeys = []string{"messages", "items", "transcript"}
+
+type jsonTranscriptArrayScan struct {
+	occurrence int
+	isArray    bool
+}
+
+type jsonTranscriptScan struct {
+	sessionFields jsonTranscriptSessionFields
+	arrays        map[string]jsonTranscriptArrayScan
+}
+
+func (scan jsonTranscriptScan) selectedArray() (string, int, bool) {
+	for _, key := range jsonTranscriptArrayKeys {
+		array := scan.arrays[key]
+		if array.isArray {
+			return key, array.occurrence, true
+		}
+	}
+	return "", 0, false
+}
+
+type jsonTranscriptSessionFields map[string]string
+
+func (fields jsonTranscriptSessionFields) applyTo(session *repository.CreateChatSessionInput) {
+	// Prefer the canonical session keys before falling back to the generic
+	// "id" field, which some vendors reuse for unrelated draft/internal ids.
+	for _, key := range []string{"session_id", "conversation_id", "chat_id", "id"} {
+		if value, ok := fields[key]; ok {
+			session.SourceSessionID = value
+			break
+		}
+	}
+	if value, ok := fields["cwd"]; ok {
+		session.CWD = &value
+	}
+	if value, ok := fields["title"]; ok {
+		session.Title = &value
+	}
+	for _, key := range []string{"timestamp", "created_at", "started_at"} {
+		if value, ok := fields[key]; ok {
+			if parsed, err := ParseChatTime(value); err == nil {
+				applySessionTime(session, parsed)
+				break
+			}
+		}
+	}
+}
+
+func scanJSONTranscript(decoder *json.Decoder) (jsonTranscriptScan, error) {
+	if err := consumeJSONObjectStart(decoder); err != nil {
+		return jsonTranscriptScan{}, err
+	}
+	scan := jsonTranscriptScan{
+		sessionFields: jsonTranscriptSessionFields{},
+		arrays:        map[string]jsonTranscriptArrayScan{},
+	}
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return jsonTranscriptScan{}, err
+		}
+		key, ok := token.(string)
+		if !ok {
+			return jsonTranscriptScan{}, fmt.Errorf("invalid JSON object key")
+		}
+		if isJSONTranscriptArrayKey(key) {
+			array := scan.arrays[key]
+			array.occurrence++
+			array.isArray, err = skipJSONValueAndReportArray(decoder)
+			if err != nil {
+				return jsonTranscriptScan{}, err
+			}
+			scan.arrays[key] = array
+			continue
+		}
+		if isJSONTranscriptSessionFieldKey(key) {
+			value, ok, err := readJSONStringValue(decoder)
+			if err != nil {
+				return jsonTranscriptScan{}, err
+			}
+			if ok {
+				scan.sessionFields[key] = value
+			} else {
+				delete(scan.sessionFields, key)
+			}
+			continue
+		}
+		if err := skipJSONValue(decoder); err != nil {
+			return jsonTranscriptScan{}, err
+		}
+	}
+	if err := consumeJSONDelim(decoder, '}'); err != nil {
+		return jsonTranscriptScan{}, err
+	}
+	return scan, nil
+}
+
+func parseJSONTranscriptArray(path string, key string, targetOccurrence int) ([]repository.CreateChatItemInput, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+
+	decoder := json.NewDecoder(file)
+	if err := consumeJSONObjectStart(decoder); err != nil {
+		return nil, err
+	}
+	occurrence := 0
+	for decoder.More() {
+		token, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		field, ok := token.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid JSON object key")
+		}
+		if field != key {
+			if err := skipJSONValue(decoder); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		occurrence++
+		if occurrence != targetOccurrence {
+			if err := skipJSONValue(decoder); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		return decodeJSONTranscriptItems(decoder, path, key)
+	}
+	return nil, fmt.Errorf("selected transcript array %q not found", key)
+}
+
+func decodeJSONTranscriptItems(decoder *json.Decoder, path string, key string) ([]repository.CreateChatItemInput, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	start, ok := token.(json.Delim)
+	if !ok || start != '[' {
+		if ok {
+			if err := skipJSONComposite(decoder, start); err != nil {
+				return nil, err
+			}
+		}
+		return nil, fmt.Errorf("selected transcript key %q is no longer an array", key)
+	}
+
+	var items []repository.CreateChatItemInput
+	ordinal := 0
+	for decoder.More() {
+		var raw any
+		if err := decoder.Decode(&raw); err != nil {
+			return nil, fmt.Errorf("parse %s %s[%d]: %w", path, key, ordinal, err)
+		}
+		if object, ok := raw.(map[string]any); ok {
+			item := itemFromPayload(object, ordinal)
+			if item.SearchText != "" || item.RawJSON != nil {
+				items = append(items, item)
+			}
+		}
+		ordinal++
+	}
+	if err := consumeJSONDelim(decoder, ']'); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func consumeJSONObjectStart(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	start, ok := token.(json.Delim)
+	if !ok || start != '{' {
+		return fmt.Errorf("expected JSON object transcript")
+	}
+	return nil
+}
+
+func consumeJSONDelim(decoder *json.Decoder, want json.Delim) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	got, ok := token.(json.Delim)
+	if !ok || got != want {
+		return fmt.Errorf("expected JSON delimiter %q", want)
+	}
+	return nil
+}
+
+func isJSONTranscriptArrayKey(key string) bool {
+	for _, candidate := range jsonTranscriptArrayKeys {
+		if key == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func isJSONTranscriptSessionFieldKey(key string) bool {
+	switch key {
+	case "session_id", "conversation_id", "chat_id", "id", "cwd", "title", "timestamp", "created_at", "started_at":
+		return true
+	}
+	return false
+}
+
+func readJSONStringValue(decoder *json.Decoder) (string, bool, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return "", false, err
+	}
+	if start, ok := token.(json.Delim); ok {
+		if err := skipJSONComposite(decoder, start); err != nil {
+			return "", false, err
+		}
+		return "", false, nil
+	}
+	value, ok := token.(string)
+	if !ok {
+		return "", false, nil
+	}
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", false, nil
+	}
+	return trimmed, true, nil
+}
+
+func skipJSONValueAndReportArray(decoder *json.Decoder) (bool, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return false, err
+	}
+	start, ok := token.(json.Delim)
+	if !ok {
+		return false, nil
+	}
+	if err := skipJSONComposite(decoder, start); err != nil {
+		return false, err
+	}
+	return start == '[', nil
+}
+
+func skipJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if start, ok := token.(json.Delim); ok {
+		return skipJSONComposite(decoder, start)
+	}
+	return nil
+}
+
+func skipJSONComposite(decoder *json.Decoder, start json.Delim) error {
+	switch start {
+	case '{':
+		for decoder.More() {
+			if _, err := decoder.Token(); err != nil {
+				return err
+			}
+			if err := skipJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		return consumeJSONDelim(decoder, '}')
+	case '[':
+		for decoder.More() {
+			if err := skipJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		return consumeJSONDelim(decoder, ']')
+	}
+	return nil
 }
 
 func newTranscriptSession(source string, path string) repository.CreateChatSessionInput {

@@ -63,6 +63,92 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if updated.CreatedAt != recordA.CreatedAt {
 			t.Fatalf("expected CreatedAt preserved after update: got %v, want %v", updated.CreatedAt, recordA.CreatedAt)
 		}
+		if err := repo.SoftDeleteRecord(ctx, recordA.ID); err != nil {
+			t.Fatalf("SoftDeleteRecord(update target) error = %v", err)
+		}
+		deleted, err := repo.GetRecordByID(ctx, recordA.ID)
+		if err != nil {
+			t.Fatalf("GetRecordByID(deleted update target) error = %v", err)
+		}
+		if deleted.DeletedAt == nil {
+			t.Fatal("expected DeletedAt after soft delete")
+		}
+		preserved, err := repo.UpdateRecord(ctx, repository.UpdateRecordInput{
+			ID:             deleted.ID,
+			Date:           deleted.Date,
+			DayOrder:       "d",
+			HTMLContent:    deleted.HTMLContent,
+			Notes:          deleted.Notes,
+			ProjectID:      deleted.ProjectID,
+			SourceDeviceID: deleted.SourceDeviceID,
+			SourceRef:      deleted.SourceRef,
+			GitRemoteURL:   deleted.GitRemoteURL,
+			GitHash:        deleted.GitHash,
+		})
+		if err != nil {
+			t.Fatalf("UpdateRecord(preserve deleted_at) error = %v", err)
+		}
+		if preserved.DeletedAt == nil || !preserved.DeletedAt.Equal(deleted.DeletedAt.UTC()) {
+			t.Fatalf("expected omitted DeletedAt to preserve tombstone %v, got %v", deleted.DeletedAt, preserved.DeletedAt)
+		}
+		cleared, err := repo.UpdateRecord(ctx, repository.UpdateRecordInput{
+			ID:             preserved.ID,
+			Date:           preserved.Date,
+			DayOrder:       preserved.DayOrder,
+			HTMLContent:    preserved.HTMLContent,
+			Notes:          preserved.Notes,
+			ProjectID:      preserved.ProjectID,
+			SourceDeviceID: preserved.SourceDeviceID,
+			SourceRef:      preserved.SourceRef,
+			GitRemoteURL:   preserved.GitRemoteURL,
+			GitHash:        preserved.GitHash,
+			SetDeletedAt:   true,
+			DeletedAt:      nil,
+		})
+		if err != nil {
+			t.Fatalf("UpdateRecord(clear deleted_at) error = %v", err)
+		}
+		if cleared.DeletedAt != nil {
+			t.Fatalf("expected explicit nil DeletedAt to clear tombstone, got %v", cleared.DeletedAt)
+		}
+		explicitDeletedAt := time.Date(2026, 3, 5, 10, 30, 0, 0, time.UTC)
+		explicitDeleted, err := repo.UpdateRecord(ctx, repository.UpdateRecordInput{
+			ID:             cleared.ID,
+			Date:           cleared.Date,
+			DayOrder:       cleared.DayOrder,
+			HTMLContent:    cleared.HTMLContent,
+			Notes:          cleared.Notes,
+			ProjectID:      cleared.ProjectID,
+			SourceDeviceID: cleared.SourceDeviceID,
+			SourceRef:      cleared.SourceRef,
+			GitRemoteURL:   cleared.GitRemoteURL,
+			GitHash:        cleared.GitHash,
+			SetDeletedAt:   true,
+			DeletedAt:      &explicitDeletedAt,
+		})
+		if err != nil {
+			t.Fatalf("UpdateRecord(set deleted_at) error = %v", err)
+		}
+		if explicitDeleted.DeletedAt == nil || !explicitDeleted.DeletedAt.Equal(explicitDeletedAt) {
+			t.Fatalf("expected explicit DeletedAt %v, got %v", explicitDeletedAt, explicitDeleted.DeletedAt)
+		}
+		_, err = repo.UpdateRecord(ctx, repository.UpdateRecordInput{
+			ID:             explicitDeleted.ID,
+			Date:           explicitDeleted.Date,
+			DayOrder:       explicitDeleted.DayOrder,
+			HTMLContent:    explicitDeleted.HTMLContent,
+			Notes:          explicitDeleted.Notes,
+			ProjectID:      explicitDeleted.ProjectID,
+			SourceDeviceID: explicitDeleted.SourceDeviceID,
+			SourceRef:      explicitDeleted.SourceRef,
+			GitRemoteURL:   explicitDeleted.GitRemoteURL,
+			GitHash:        explicitDeleted.GitHash,
+			SetDeletedAt:   true,
+			DeletedAt:      nil,
+		})
+		if err != nil {
+			t.Fatalf("UpdateRecord(re-clear deleted_at) error = %v", err)
+		}
 
 		mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
 			ID:          "20250304-b7e1c9d3",

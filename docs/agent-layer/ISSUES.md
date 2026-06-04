@@ -27,11 +27,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
-- Issue 2026-05-23 b4q8n2: Legacy chat import raw-ahead states can still skip item repair
-    Priority: Medium. Area: cli/internal/cli/chat.go
-    Description: Current chat import batches session/items before raw promotion, so new imports no longer create raw-ahead-of-items windows. Existing developer stores may still contain a legacy raw-ahead state from older import ordering; an exact-match re-import can skip because it compares source bytes to managed raw bytes without validating normalized item completeness.
-    Next step: Add an item/raw consistency repair path for exact-match chat imports, or introduce a repository-level import repair marker so old incomplete item writes can be detected and repaired.
-
 - Issue 2026-05-22 j4n7p3: Make screenshot fake-Chrome test scripts cross-platform
     Priority: Low. Area: cli/internal/cli/screenshot_test.go
     Description: `writeFakeChromeScript` and `writeFakeChromePNGScript` emit POSIX shell scripts (`#!/bin/sh`, `dd if=/dev/zero`) and are invoked by `TestScreenshotHappyPath`, `TestScreenshotDefaultOutput`, and the pre-existing `TestScreenshotPreservesRelativeFigurePaths`. CI runs Linux only (`.github/workflows/ci.yml` is ubuntu-latest), so this passes today, but a Windows test run would fail because `screenshotWithChrome` exec's the script directly.
@@ -56,11 +51,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/repository.go, schema
     Description: `CreateRecord` and `UpsertChatSession` each do a read-then-insert preflight to check that the ID isn't already used by the other table. Two concurrent writers can pass both probes and commit conflicting IDs. The races are unlikely in practice (chat IDs include random hex), but the invariant is real if the design relies on a shared ID namespace.
     Next step: Introduce a dedicated `id_registry` table with a unique constraint and reserve the ID transactionally on creation, or run both inserts inside the same transaction with a shared advisory lock. Update both backends; document the contract in DECISIONS.md.
-
-- Issue 2026-05-17 j1m4z5: JSON transcript parser materialises whole payload via map[string]any
-    Priority: Low. Area: cli/internal/chatimport/chatimport.go
-    Description: `parseJSONTranscript` now uses `json.NewDecoder(file).Decode(&payload)` (no longer ReadFile), which avoids the duplicate raw-bytes copy, but `payload` is still a `map[string]any` covering the entire transcript. Memory remains O(transcript size) with high interface-overhead multiplier. For very large Gemini transcripts this can still exceed memory; the JSONL path already uses a streaming bufio.Scanner.
-    Next step: Define a typed struct for top-level session fields and stream the transcript array element-by-element with `Decoder.Token()` + `Decoder.Decode()`. Note that `finalizeSessionTimes` reads items to set session timestamps, so the streaming pass needs to either buffer item timestamps or do a two-pass read.
 
 - Issue 2026-05-17 c8h9k1: Chat sync upsert + items replacement is not atomic
     Priority: High. Area: cli/internal/sync/service.go
@@ -157,16 +147,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Priority: Medium. Area: web/components
     Description: `useRecords.reorderRecord` exists and API route works, but `RecordNavigation` has no drag handlers. Users cannot reorder records via drag-and-drop in the browser.
     Next step: Add `@dnd-kit/core` or HTML5 drag-and-drop to `RecordNavigation`, call `reorderRecord` on drop with the order route's `computeFractionalIndex`.
-
-- Issue 2026-03-08 m7n8o9: UpdateRecord silently clears deleted_at when input.DeletedAt is nil
-    Priority: Medium. Area: cli/internal/repository
-    Description: `UpdateRecord` sets `deleted_at = ?` unconditionally. A caller that constructs `UpdateRecordInput` without copying the existing `DeletedAt` silently restores a soft-deleted record. All current callers are safe (they copy `existing.DeletedAt`), but the API is a footgun for future callers.
-    Next step: Add `SetDeletedAt bool` flag to `UpdateRecordInput` or change SQL to `COALESCE(?, deleted_at)` with a separate explicit-clear mechanism for sync/restore.
-
-- Issue 2026-03-08 o1p2q3: GitHub Actions pinned to mutable version tags
-    Priority: Medium. Area: .github/workflows
-    Description: GitHub Actions use major version tags (`@v4`, `@v5`, `@v6`, `@v8`) rather than full commit SHAs. Third-party actions like `golangci/golangci-lint-action@v8` carry supply-chain risk.
-    Next step: Pin all actions to full commit SHAs with version comments.
 
 - Issue 2026-03-08 k4l5m6: Repository adapters and sync suites are oversized
     Priority: Low. Area: cli/internal/repository, cli/internal/sync

@@ -324,6 +324,7 @@ type UpdateRecordInput struct {
 	GitRemoteURL   *string
 	GitHash        *string
 	UpdatedAt      *time.Time
+	SetDeletedAt   bool
 	DeletedAt      *time.Time
 }
 
