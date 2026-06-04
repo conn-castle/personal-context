@@ -1212,14 +1212,16 @@ func TestJSONTranscriptSecondPassSurfacesChangedArrayDecodeErrors(t *testing.T) 
 	}
 }
 
-// agentPanelPath/agentPanelHash are a real Gemini projectHash pair captured from
-// disk. Gemini stores `projectHash == sha256(absolute repo root)`; pinning the
-// externally produced hash proves matchProjectHash hashes the same bytes Gemini
-// does. (Recomputing the hash inside the test would pass even if both sides
-// hashed the wrong thing, so the pinned value is the real check.)
+// agentPanelPath/agentPanelHash are a fixed, anonymized example pair. Gemini
+// stores `projectHash == sha256(absolute repo root)`, and agentPanelHash is the
+// sha256 of agentPanelPath computed by an external tool (`shasum -a 256`, no
+// trailing newline) rather than in-test. Pinning an externally produced hash
+// proves matchProjectHash hashes the same bytes Gemini does — recomputing it
+// inside the test with sha256.Sum256 would pass even if both sides hashed the
+// wrong thing, so the pinned value is the real check.
 const (
-	agentPanelPath = "/Users/nicholasjconn/Local/git-repos/conn-castle/agent-panel"
-	agentPanelHash = "8307379c969280cb435ce59cc0ff8daaee53a835d3c5cd64615ee38e5b5a6e0c"
+	agentPanelPath = "/home/dev/projects/agent-panel"
+	agentPanelHash = "4e387ba454ce0658208441473a6ce71f726791d01d518def792a6b655f32a0ea"
 )
 
 // writeGeminiSessionFile creates <dir>/chats/session-x.json with an optional

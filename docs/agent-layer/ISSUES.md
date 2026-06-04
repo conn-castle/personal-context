@@ -27,6 +27,12 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-04 c5k9d2: Gemini duplicate-content collapse can discard the only cwd-resolving copy
+    Priority: Low. Area: cli/internal/cli/chat.go
+    Description: When two distinct Gemini tmp dirs hold byte-identical session JSON, the brand-new dedup (seenContentHashes, chat.go ~424) keeps the first in scan order as representative without weighing cwd resolvability. If that representative resolves no cwd (no .project_root, projectHash unregistered at import) while the skipped duplicate has a .project_root, the stored row keeps cwd=NULL and a later `pc project register` cannot backfill it. Not reachable from real Gemini layout (one tmp dir per project root, so byte-identical JSON does not co-occur; a representative carrying projectHash self-heals on re-import after register).
+    Next step: When collapsing a byte-identical duplicate, prefer/merge a copy that resolves a non-nil Gemini cwd over the scan-order-first representative (requires updating the already-queued/stored representative's cwd).
+    Notes: Raised by Codex on PR #37 (P2). Deferred as out-of-scope for the attribution PR.
+
 - Issue 2026-06-04 w8k3r1: pc chat import has no coverage self-check against on-disk ground truth
     Priority: Medium. Area: cli/internal/cli/chat.go, cli/internal/cli/doctor.go
     Description: The importer reports files scanned / sessions created but never compares the store against a disk scan of all discovered roots, so a silent discovery gap reads as success. This class of miss left an installed store at ~14% coverage undetected because verification compared output against the same roots the importer scans (a circular check).
