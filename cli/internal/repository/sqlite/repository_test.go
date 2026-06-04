@@ -1585,6 +1585,89 @@ func TestWriteChatImportBatchReplaceAppendSearchAndSyncVersion(t *testing.T) {
 	}
 }
 
+func TestUpsertChatSessionWithItemsCreatesAndRollsBackItemConflict(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newConcreteRepo(t)
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "atomic-device"}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+
+	first := "atomic create first"
+	second := "atomic create second"
+	createdSession, created, err := repo.UpsertChatSessionWithItems(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260514-33333333",
+			Source:          "codex",
+			SourceSessionID: "atomic-create",
+			SourceDeviceID:  "atomic-device",
+			StartedAt:       now,
+			LastActivityAt:  now,
+			CreatedAt:       &now,
+			UpdatedAt:       &now,
+		},
+		ClearDeleted: true,
+	}, []repository.CreateChatItemInput{{
+		Ordinal:   0,
+		Role:      "user",
+		ItemType:  "message",
+		Text:      &first,
+		CreatedAt: &now,
+	}, {
+		Ordinal:   1,
+		Role:      "assistant",
+		ItemType:  "message",
+		Text:      &second,
+		CreatedAt: &now,
+	}})
+	if err != nil {
+		t.Fatalf("UpsertChatSessionWithItems(create) error = %v", err)
+	}
+	if !created || createdSession.ID != "20260514-33333333" {
+		t.Fatalf("expected new atomic session, created=%v session=%+v", created, createdSession)
+	}
+	items, err := repo.ListChatItems(ctx, createdSession.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems(created atomic) error = %v", err)
+	}
+	if len(items) != 2 || items[0].SearchText != first || items[1].SearchText != second {
+		t.Fatalf("unexpected atomic create items: %+v", items)
+	}
+
+	rollbackText := "atomic rollback text"
+	_, _, err = repo.UpsertChatSessionWithItems(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260514-44444444",
+			Source:          "codex",
+			SourceSessionID: "atomic-rollback",
+			SourceDeviceID:  "atomic-device",
+			StartedAt:       now,
+			LastActivityAt:  now,
+			CreatedAt:       &now,
+			UpdatedAt:       &now,
+		},
+		ClearDeleted: true,
+	}, []repository.CreateChatItemInput{{
+		Ordinal:   0,
+		Role:      "user",
+		ItemType:  "message",
+		Text:      &rollbackText,
+		CreatedAt: &now,
+	}, {
+		Ordinal:   0,
+		Role:      "assistant",
+		ItemType:  "message",
+		Text:      &rollbackText,
+		CreatedAt: &now,
+	}})
+	if !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected duplicate item conflict, got %v", err)
+	}
+	if _, err := repo.GetChatSessionByID(ctx, "20260514-44444444"); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected failed atomic create to roll back session, got %v", err)
+	}
+}
+
 func TestRunChatImportBulkModeRestoresFTSTriggers(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := newConcreteRepo(t)
