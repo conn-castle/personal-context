@@ -825,7 +825,7 @@ func scanRecordSearchRow(rs rowScanner) (repository.Record, float64, error) {
 	if err := rs.Scan(&record.ID, &record.UserID, &date, &record.DayOrder, &record.HTMLContent, &record.Notes, &record.ProjectID, &record.SourceDeviceID, &record.SourceRef, &record.GitRemoteURL, &record.GitHash, &record.CreatedAt, &record.UpdatedAt, &record.DeletedAt, &rank); err != nil {
 		return repository.Record{}, 0, mapPgError(err)
 	}
-	record.Date = date.Format("2006-01-02")
+	record.Date = date.UTC().Format("2006-01-02")
 	record.CreatedAt = record.CreatedAt.UTC()
 	record.UpdatedAt = record.UpdatedAt.UTC()
 	if record.DeletedAt != nil {
