@@ -16,8 +16,6 @@ Release entries must use this format so the release workflow can extract notes:
 
 ### Fixed
 
-- Fixed `pc chat import` attributing a Codex fork to its parent's project. A fork rollout replays the parent's metadata (carrying the parent's working directory) after the fork's own header, so the working directory and title now lock to the fork's header instead of last-wins — divergent and empty (never-continued) forks attribute to the correct project. Non-fork sessions are unaffected (a mid-session directory change still wins).
-
 ## v0.1.5 - 2026-06-05
 
 ### Fixed
@@ -25,6 +23,7 @@ Release entries must use this format so the release workflow can extract notes:
 - Fixed `pc chat import` aborting the whole run when one transcript file cannot be parsed. Bad files are now reported on stderr as skipped and counted in the JSON summary as `files_skipped`, while the rest of the import continues.
 - Fixed Claude Code discovery so imports under `projects/` only queue top-level session JSONL files and `subagents/agent-*.jsonl` transcripts, excluding sidecars such as `tool-results/` and `memory/`.
 - Fixed Codex fork imports collapsing onto their replayed parent session id. Fork rollouts now keep their own session id, store `forked_from_id` as lineage metadata, and import as distinct sessions; fork rows intentionally preserve the replayed parent history present in the source file.
+- Fixed `pc chat import` attributing a Codex fork to its parent's project. A fork rollout replays the parent's metadata (carrying the parent's working directory) after the fork's own header, so the working directory and title now lock to the fork's header instead of last-wins — divergent and empty (never-continued) forks attribute to the correct project. Non-fork sessions are unaffected (a mid-session directory change still wins).
 
 ## v0.1.4 - 2026-06-04
 
