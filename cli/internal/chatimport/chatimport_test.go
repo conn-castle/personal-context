@@ -1067,15 +1067,22 @@ func TestJSONTranscriptWhitespaceSessionFieldUnset(t *testing.T) {
 	}
 }
 
-func TestCodexForkSessionMetaKeepsOwnIdentityAndLineage(t *testing.T) {
+// TestCodexEmptyForkLocksCWDToForkHeader is the regression guard for the
+// empty-fork bug (issue p9r4x7): a fork that was created but never continued
+// replays the parent's session_meta/turn_context after the fork's own header.
+// Under last-wins the replayed parent cwd used to overwrite the fork's, mis-
+// attributing the fork to the parent's project. The fork-scoped lock must keep
+// the fork's own cwd while still recording correct identity and lineage.
+func TestCodexEmptyForkLocksCWDToForkHeader(t *testing.T) {
 	root := t.TempDir()
-	path := filepath.Join(root, "rollout-fork-fallback.jsonl")
+	path := filepath.Join(root, "rollout-fork-empty.jsonl")
 	parentID := "019d7dea-parent"
 	forkID := "019d7deb-fork"
 	lines := []string{
 		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + forkID + `","forked_from_id":"` + parentID + `","cwd":"/repo/fork"}}`,
 		`{"timestamp":"2026-06-04T12:00:01Z","type":"session_meta","payload":{"id":"` + parentID + `","forked_from_id":null,"cwd":"/repo/parent"}}`,
-		`{"timestamp":"2026-06-04T12:00:02Z","type":"response_item","payload":{"role":"user","content":"fork-only turn"}}`,
+		`{"timestamp":"2026-06-04T12:00:02Z","type":"turn_context","payload":{"cwd":"/repo/parent"}}`,
+		`{"timestamp":"2026-06-04T12:00:03Z","type":"response_item","payload":{"role":"user","content":"replayed parent turn"}}`,
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -1091,8 +1098,105 @@ func TestCodexForkSessionMetaKeepsOwnIdentityAndLineage(t *testing.T) {
 	if session.ParentSourceSessionID == nil || *session.ParentSourceSessionID != parentID {
 		t.Fatalf("ParentSourceSessionID = %v, want %q", session.ParentSourceSessionID, parentID)
 	}
-	if len(items) != 1 || items[0].SearchText != "fork-only turn" {
-		t.Fatalf("items = %+v, want the fork turn", items)
+	if session.CWD == nil || *session.CWD != "/repo/fork" {
+		t.Fatalf("CWD = %v, want fork dir /repo/fork (parent metadata must not overwrite it)", session.CWD)
+	}
+	// A never-continued fork has no fork-authored turns: its only content is the
+	// parent history replayed after the fork header.
+	if len(items) != 1 || items[0].SearchText != "replayed parent turn" {
+		t.Fatalf("items = %+v, want the replayed parent turn", items)
+	}
+}
+
+// TestCodexContinuedForkCdsAwayPinsForkCreationDir covers a continued fork that
+// changes directories after forking: the fork's own header (cwd /repo/fork),
+// the replayed parent metadata (cwd /repo/parent), then a fork turn that cd'd to
+// a third dir (/repo/fork-moved). The lock pins cwd to the fork-creation dir,
+// which is the documented tradeoff in DECISIONS.md (k8m5v2). This fixture is the
+// discriminating guard: under last-wins cwd would be the third dir, so only the
+// lock yields /repo/fork. A fixture whose final turn_context stayed at /repo/fork
+// would pass under last-wins too and could not catch a regression.
+func TestCodexContinuedForkCdsAwayPinsForkCreationDir(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-fork-continued.jsonl")
+	parentID := "019d7dea-parent"
+	forkID := "019d7deb-fork"
+	lines := []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + forkID + `","forked_from_id":"` + parentID + `","cwd":"/repo/fork"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"session_meta","payload":{"id":"` + parentID + `","forked_from_id":null,"cwd":"/repo/parent"}}`,
+		`{"timestamp":"2026-06-04T12:00:02Z","type":"turn_context","payload":{"cwd":"/repo/parent"}}`,
+		`{"timestamp":"2026-06-04T12:00:03Z","type":"response_item","payload":{"role":"user","content":"replayed parent turn"}}`,
+		`{"timestamp":"2026-06-04T12:00:04Z","type":"turn_context","payload":{"cwd":"/repo/fork-moved"}}`,
+		`{"timestamp":"2026-06-04T12:00:05Z","type":"response_item","payload":{"role":"user","content":"fork-only turn"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, _, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.SourceSessionID != forkID {
+		t.Fatalf("SourceSessionID = %q, want fork id %q", session.SourceSessionID, forkID)
+	}
+	if session.ParentSourceSessionID == nil || *session.ParentSourceSessionID != parentID {
+		t.Fatalf("ParentSourceSessionID = %v, want %q", session.ParentSourceSessionID, parentID)
+	}
+	if session.CWD == nil || *session.CWD != "/repo/fork" {
+		t.Fatalf("CWD = %v, want fork-creation dir /repo/fork (last-wins would give /repo/fork-moved)", session.CWD)
+	}
+}
+
+// TestCodexForkLocksTitleToForkHeader covers the title branch of the lock: a
+// fork's own title must not be overwritten by the replayed parent's title.
+func TestCodexForkLocksTitleToForkHeader(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-fork-title.jsonl")
+	parentID := "019d7dea-parent"
+	forkID := "019d7deb-fork"
+	lines := []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + forkID + `","forked_from_id":"` + parentID + `","cwd":"/repo/fork","title":"Fork title"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"session_meta","payload":{"id":"` + parentID + `","forked_from_id":null,"cwd":"/repo/parent","title":"Parent title"}}`,
+		`{"timestamp":"2026-06-04T12:00:02Z","type":"response_item","payload":{"role":"user","content":"fork-only turn"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, _, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.Title == nil || *session.Title != "Fork title" {
+		t.Fatalf("Title = %v, want fork title (parent title must not overwrite it)", session.Title)
+	}
+}
+
+// TestCodexNonForkCWDFollowsLatestTurn proves the lock is fork-scoped, not
+// global: a non-fork session that changes directories mid-session is still
+// attributed to its most recent cwd under last-wins.
+func TestCodexNonForkCWDFollowsLatestTurn(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-nonfork-cd.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"standalone-cd","cwd":"/repo/a"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"turn_context","payload":{"cwd":"/repo/b"}}`,
+		`{"timestamp":"2026-06-04T12:00:02Z","type":"response_item","payload":{"role":"user","content":"after cd"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, _, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.ParentSourceSessionID != nil {
+		t.Fatalf("ParentSourceSessionID = %v, want nil (not a fork)", session.ParentSourceSessionID)
+	}
+	if session.CWD == nil || *session.CWD != "/repo/b" {
+		t.Fatalf("CWD = %v, want latest dir /repo/b (lock must not apply to non-fork sessions)", session.CWD)
 	}
 }
 

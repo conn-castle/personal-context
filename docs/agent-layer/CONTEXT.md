@@ -110,7 +110,7 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - **Chat source identity & lineage**:
   - `source_session_id` derivation: internal session id for Codex/Claude; file path (project-key dir + basename) for Gemini (no internal id).
   - Claude Task-tool subagent transcripts (files under `subagents/`, or `isSidechain` rows): `source_session_id = <parent_sid>:<subagent_basename>` plus nullable `parent_source_session_id` linking to the parent (metadata, never a FK — the parent row may be absent).
-  - Codex fork rollouts: keep their own first `session_meta.id` and store `forked_from_id` in the same nullable `parent_source_session_id` lineage field.
+  - Codex fork rollouts: keep their own first `session_meta.id` and store `forked_from_id` in the same nullable `parent_source_session_id` lineage field. `cwd`/`title` are locked to the fork's own header once set (a fork's rollout replays the parent's `session_meta`/`turn_context` carrying the parent cwd, which must not reattribute the fork to the parent's project). Non-fork sessions keep last-wins so a mid-session `cd` and the old-rollout `turn_context` cwd backfill still work.
   - Duplicates: exact byte-identical files are collapsed (`duplicates_skipped`).
   - Collisions: a file colliding with a different file's existing identity and diverging is warn-and-skipped (`collisions_skipped`), never overwritten.
   - Parse errors: unparseable transcript files are warn-and-skipped (`files_skipped`) without aborting the full import.

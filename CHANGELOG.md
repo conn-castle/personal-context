@@ -16,6 +16,8 @@ Release entries must use this format so the release workflow can extract notes:
 
 ### Fixed
 
+- Fixed `pc chat import` attributing a Codex fork to its parent's project. A fork rollout replays the parent's metadata (carrying the parent's working directory) after the fork's own header, so the working directory and title now lock to the fork's header instead of last-wins — divergent and empty (never-continued) forks attribute to the correct project. Non-fork sessions are unaffected (a mid-session directory change still wins).
+
 ## v0.1.5 - 2026-06-05
 
 ### Fixed

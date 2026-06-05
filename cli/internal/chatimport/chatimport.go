@@ -467,14 +467,11 @@ func unwrapChatLine(source string, line map[string]any) (item map[string]any, se
 			}
 			return flat, inner
 		case "turn_context":
-			// turn_context lines carry the working directory per turn.
-			// When session_meta lacked cwd (older rollouts), feeding the
-			// inner payload to applySessionFields lets the first
-			// turn_context's cwd populate session.CWD; subsequent ones
-			// don't overwrite because applySessionFields preserves the
-			// first non-nil value. This is what unlocks project auto-
-			// assignment for codex sessions that previously stayed
-			// project_id=NULL.
+			// turn_context lines carry the working directory per turn. Feeding
+			// the inner payload to applySessionFields backfills session.CWD when
+			// an older session_meta had none and otherwise takes the last non-nil
+			// cwd, except for Codex forks where applySessionFields locks cwd/title
+			// to the fork header (see there).
 			return nil, inner
 		case "event_msg":
 			return nil, nil
@@ -948,10 +945,18 @@ func applySessionFields(session *repository.CreateChatSessionInput, payload map[
 		// parents and Codex fork ancestors both use the same relationship slot.
 		session.ParentSourceSessionID = stringField(payload, "forked_from_id")
 	}
-	if value := stringField(payload, "cwd"); value != nil {
+	// A Codex fork rollout records the fork's own session_meta first (carrying
+	// forked_from_id plus the fork's cwd/title), then replays the parent's
+	// session_meta and turn_context lines (carrying the parent's cwd). Once the
+	// fork header has set cwd/title, lock them so replayed parent metadata cannot
+	// reattribute the fork to the parent's project. ParentSourceSessionID is set
+	// from forked_from_id just above, so it is already non-nil on the header line
+	// while cwd/title are still nil. Non-fork sessions keep last-wins.
+	forkLocked := session.ParentSourceSessionID != nil
+	if value := stringField(payload, "cwd"); value != nil && (!forkLocked || session.CWD == nil) {
 		session.CWD = value
 	}
-	if value := stringField(payload, "title"); value != nil {
+	if value := stringField(payload, "title"); value != nil && (!forkLocked || session.Title == nil) {
 		session.Title = value
 	}
 	for _, key := range []string{"timestamp", "created_at", "started_at"} {
