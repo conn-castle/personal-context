@@ -54,13 +54,17 @@ func chatListJSON(t *testing.T, args ...string) []chatSessionJSON {
 func TestChatImportSkipsEmptyTranscriptFiles(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()
+	projectDir := filepath.Join(root, "-Users-me-repo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
 	files := map[string]string{
 		"zero.jsonl":   "",
 		"marker.jsonl": `{"type":"last-prompt","leafUuid":"x","sessionId":"y"}` + "\n",
 		"real.jsonl":   `{"type":"assistant","sessionId":"real-claude","timestamp":"2026-05-17T10:00:00Z","message":{"role":"assistant","content":"a real message"}}` + "\n",
 	}
 	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(projectDir, name), []byte(content), 0o644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
@@ -74,6 +78,88 @@ func TestChatImportSkipsEmptyTranscriptFiles(t *testing.T) {
 	sessions := chatListJSON(t)
 	if len(sessions) != 1 || sessions[0].SourceSessionID != "real-claude" {
 		t.Fatalf("expected one non-empty session, got %+v", sessions)
+	}
+}
+
+func TestChatImportSkipsMalformedFileAndContinues(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	goodPath := filepath.Join(root, "a-good.jsonl")
+	badPath := filepath.Join(root, "b-bad.json")
+	good := strings.Join([]string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"good-codex"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"response_item","payload":{"role":"user","content":"surviving transcript"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(goodPath, []byte(good), 0o644); err != nil {
+		t.Fatalf("write good transcript: %v", err)
+	}
+	if err := os.WriteFile(badPath, []byte(`{"messages":[`), 0o644); err != nil {
+		t.Fatalf("write malformed transcript: %v", err)
+	}
+
+	summary, stderr := runChatImportAgent(t, "codex", root)
+	if summary.FilesScanned != 2 || summary.FilesSkipped != 1 || summary.SessionsCreated != 1 || summary.ItemsImported != 1 {
+		t.Fatalf("summary = %+v, want scanned/skipped/created/items = 2/1/1/1", summary)
+	}
+	if !strings.Contains(stderr, "Skipped (") || !strings.Contains(stderr, badPath) {
+		t.Fatalf("expected skipped-file warning for %s, got %q", badPath, stderr)
+	}
+	sessions := chatListJSON(t)
+	if len(sessions) != 1 || sessions[0].SourceSessionID != "good-codex" {
+		t.Fatalf("expected only good transcript imported, got %+v", sessions)
+	}
+}
+
+func TestChatImportCodexForksBecomeDistinctSessions(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	parentID := "019d7dea-parent"
+	forkA := "019d7deb-fork-a"
+	forkB := "019d7dec-fork-b"
+	writeCodexRollout := func(name string, lines []string) {
+		t.Helper()
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	writeCodexRollout("a-parent.jsonl", []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + parentID + `"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"response_item","payload":{"role":"user","content":"parent turn"}}`,
+	})
+	writeFork := func(name string, forkID string, text string) {
+		t.Helper()
+		writeCodexRollout(name, []string{
+			`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + forkID + `","forked_from_id":"` + parentID + `"}}`,
+			`{"timestamp":"2026-06-04T12:00:01Z","type":"session_meta","payload":{"id":"` + parentID + `","forked_from_id":null}}`,
+			`{"timestamp":"2026-06-04T12:00:02Z","type":"response_item","payload":{"role":"assistant","content":"` + text + `"}}`,
+		})
+	}
+	writeFork("b-fork-a.jsonl", forkA, "fork a turn")
+	writeFork("c-fork-b.jsonl", forkB, "fork b turn")
+
+	summary, stderr := runChatImportAgent(t, "codex", root)
+	if summary.SessionsCreated != 3 || summary.CollisionsSkipped != 0 || summary.FilesSkipped != 0 {
+		t.Fatalf("summary = %+v, stderr=%q; want 3 created and no collisions/skips", summary, stderr)
+	}
+	sessions := chatListJSON(t)
+	bySourceID := map[string]chatSessionJSON{}
+	for _, session := range sessions {
+		bySourceID[session.SourceSessionID] = session
+	}
+	for _, sourceID := range []string{parentID, forkA, forkB} {
+		if _, ok := bySourceID[sourceID]; !ok {
+			t.Fatalf("missing source session %q in %+v", sourceID, sessions)
+		}
+	}
+	for _, forkID := range []string{forkA, forkB} {
+		session := bySourceID[forkID]
+		if session.ParentSourceSessionID == nil || *session.ParentSourceSessionID != parentID {
+			t.Fatalf("fork %q parent = %v, want %q", forkID, session.ParentSourceSessionID, parentID)
+		}
+	}
+	if bySourceID[parentID].ParentSourceSessionID != nil {
+		t.Fatalf("parent session should not have fork lineage, got %+v", bySourceID[parentID])
 	}
 }
 

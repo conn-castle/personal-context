@@ -120,6 +120,9 @@ type chatImportSummary struct {
 	// existing (source, source_session_id) owned by a different source file and
 	// diverged from it; the run refuses to overwrite the unrelated source.
 	CollisionsSkipped int `json:"collisions_skipped,omitempty"`
+	// FilesSkipped counts files that could not be parsed as a transcript. The
+	// importer reports each path but continues scanning other files.
+	FilesSkipped int `json:"files_skipped,omitempty"`
 	// ItemsImported is the number of chat item rows written this run (work
 	// performed). Replaced sessions count every re-inserted row.
 	ItemsImported int `json:"items_imported"`
@@ -325,7 +328,7 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 				return hadMutations, err
 			}
 			for _, root := range sourceRoots {
-				files, err := chatimport.TranscriptFiles(root)
+				files, err := chatimport.TranscriptFiles(source, root)
 				if err != nil {
 					return hadMutations, err
 				}
@@ -365,7 +368,9 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 							// (above) but never creates a chat session (round-6 Issue 4).
 							continue
 						}
-						return hadMutations, fmt.Errorf("parse %s: %w", file, err)
+						summary.FilesSkipped++
+						_, _ = fmt.Fprintf(stderr, "Skipped (%s): %s\n", err, file)
+						continue
 					}
 					session.SourceDeviceID = deviceID
 					resolveGeminiCWD(&session, file, projectPaths, deviceID)

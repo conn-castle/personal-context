@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -159,7 +160,7 @@ func TestChatImportCleansUpStagingOnDBFailure(t *testing.T) {
 	}
 }
 
-func TestChatImportRebuildsFTSAfterCommittedBatchThenParseError(t *testing.T) {
+func TestChatImportRebuildsFTSAfterCommittedBatchThenSkippedParseError(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()
 	for i := range chatImportBatchSize {
@@ -174,9 +175,19 @@ func TestChatImportRebuildsFTSAfterCommittedBatchThenParseError(t *testing.T) {
 	}
 	writeTestChatTranscript(t, root, "zzz-broken.json", "{not json")
 
-	err := runImportFor(t, root)
-	if err == nil || !strings.Contains(err.Error(), "parse") {
-		t.Fatalf("expected parse error after committed batch, got %v", err)
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import should skip the parse error and finish: %v", err)
+	}
+	var summary chatImportSummary
+	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+		t.Fatalf("parse import summary: %v\n%s", err, stdout.String())
+	}
+	if summary.FilesSkipped != 1 || !strings.Contains(stderr.String(), "zzz-broken.json") {
+		t.Fatalf("expected one skipped broken file, summary=%+v stderr=%q", summary, stderr.String())
 	}
 
 	stack, err := openLocalStackFromHome()
@@ -540,17 +551,26 @@ func TestChatImportFailsOnInvalidRoot(t *testing.T) {
 	}
 }
 
-// TestChatImportFailsOnParseError exercises the parse-error branch.
-func TestChatImportFailsOnParseError(t *testing.T) {
+// TestChatImportSkipsParseError exercises the parse-error isolation branch.
+func TestChatImportSkipsParseError(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "broken.json"), []byte("{not json"), 0o644); err != nil {
 		t.Fatalf("write broken: %v", err)
 	}
-	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	stdout := &bytes.Buffer{}
+	stderr := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: stderr})
 	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root})
-	if err := cmd.Execute(); err == nil {
-		t.Fatal("expected parse error to fail import")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import should skip parse error: %v", err)
+	}
+	var summary chatImportSummary
+	if err := json.Unmarshal(stdout.Bytes(), &summary); err != nil {
+		t.Fatalf("parse import summary: %v\n%s", err, stdout.String())
+	}
+	if summary.FilesScanned != 1 || summary.FilesSkipped != 1 || !strings.Contains(stderr.String(), "broken.json") {
+		t.Fatalf("expected one skipped parse error, summary=%+v stderr=%q", summary, stderr.String())
 	}
 }
 

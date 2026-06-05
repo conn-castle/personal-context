@@ -27,6 +27,12 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-04 p9r4x7: Codex fork session_meta can overwrite fork cwd with parent cwd
+    Priority: Medium. Area: cli/internal/chatimport/chatimport.go
+    Description: Codex forks contain a fork-owned `session_meta` followed by a replayed parent `session_meta`; `applySessionFields` still overwrites `cwd` unconditionally, so a fork that diverged in another repo can be attributed to the parent's cwd even though its identity and lineage import correctly.
+    Next step: Apply the same fallback/locked-field guard used for Codex source identity to cwd capture, then add a fork fixture where parent and fork cwd differ.
+    Notes: Deferred from v0.1.5 to keep BUG C scoped to identity plus `forked_from_id` lineage.
+
 - Issue 2026-06-04 c5k9d2: Gemini duplicate-content collapse can discard the only cwd-resolving copy
     Priority: Low. Area: cli/internal/cli/chat.go
     Description: When two distinct Gemini tmp dirs hold byte-identical session JSON, the brand-new dedup (seenContentHashes, chat.go ~424) keeps the first in scan order as representative without weighing cwd resolvability. If that representative resolves no cwd (no .project_root, projectHash unregistered at import) while the skipped duplicate has a .project_root, the stored row keeps cwd=NULL and a later `pc project register` cannot backfill it. Not reachable from real Gemini layout (one tmp dir per project root, so byte-identical JSON does not co-occur; a representative carrying projectHash self-heals on re-import after register).

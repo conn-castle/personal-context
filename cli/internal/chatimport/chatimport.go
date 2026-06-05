@@ -128,7 +128,7 @@ func Roots(extra []string, sourceFilter string, projectPaths []repository.Projec
 }
 
 // TranscriptFiles returns supported transcript files under root in deterministic order.
-func TranscriptFiles(root string) ([]string, error) {
+func TranscriptFiles(source string, root string) ([]string, error) {
 	if _, err := os.Stat(root); err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -139,6 +139,22 @@ func TranscriptFiles(root string) ([]string, error) {
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if source == "claude_code" {
+			rel, _ := filepath.Rel(root, path)
+			parts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+			if entry.IsDir() {
+				if rel != "." && (len(parts) > 3 || (len(parts) == 3 && parts[2] != "subagents")) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if strings.ToLower(filepath.Ext(path)) == ".jsonl" &&
+				(len(parts) == 2 ||
+					(len(parts) == 4 && parts[2] == "subagents" && strings.HasPrefix(filepath.Base(path), "agent-"))) {
+				files = append(files, path)
+			}
+			return nil
 		}
 		if entry.IsDir() {
 			return nil
@@ -356,7 +372,7 @@ func parseJSONLTranscriptReader(source string, path string, reader io.Reader, se
 		itemPayload, sessionPayload := unwrapChatLine(source, payload)
 		if itemPayload == nil || !hasItemPayload(itemPayload) {
 			if sessionPayload != nil {
-				applySessionFields(&session, sessionPayload)
+				applySessionFields(&session, sessionPayload, fallbackSourceSessionID)
 			}
 			continue
 		}
@@ -902,7 +918,7 @@ func newTranscriptSession(source string, path string) repository.CreateChatSessi
 // project-key segment, plus its container when present) gives each path a
 // distinct, human-readable identity that stays stable across re-imports. A JSON
 // transcript carrying an explicit conversation/session id still overrides this
-// via applySessionFields.
+// during the JSON metadata scan.
 func geminiSourceSessionID(path string, base string) string {
 	dir := filepath.Dir(path)
 	parent := filepath.Base(dir)
@@ -916,14 +932,21 @@ func geminiSourceSessionID(path string, base string) string {
 	return parent + "/" + base
 }
 
-func applySessionFields(session *repository.CreateChatSessionInput, payload map[string]any) {
+func applySessionFields(session *repository.CreateChatSessionInput, payload map[string]any, fallbackSourceSessionID string) {
 	// Prefer the canonical session keys before falling back to the generic
 	// "id" field, which some vendors reuse for unrelated draft/internal ids.
 	for _, key := range []string{"session_id", "conversation_id", "chat_id", "id"} {
 		if value := stringField(payload, key); value != nil && *value != "" {
-			session.SourceSessionID = *value
+			if session.SourceSessionID == fallbackSourceSessionID || session.SourceSessionID == *value {
+				session.SourceSessionID = *value
+			}
 			break
 		}
+	}
+	if session.ParentSourceSessionID == nil {
+		// parent_source_session_id stores source-local lineage: Claude subagent
+		// parents and Codex fork ancestors both use the same relationship slot.
+		session.ParentSourceSessionID = stringField(payload, "forked_from_id")
 	}
 	if value := stringField(payload, "cwd"); value != nil {
 		session.CWD = value

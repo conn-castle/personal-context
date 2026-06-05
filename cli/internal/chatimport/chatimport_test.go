@@ -212,7 +212,7 @@ func TestTranscriptFilesSkipsGeminiLogsJSON(t *testing.T) {
 		t.Fatalf("write logs sidecar: %v", err)
 	}
 
-	files, err := TranscriptFiles(root)
+	files, err := TranscriptFiles("gemini", root)
 	if err != nil {
 		t.Fatalf("TranscriptFiles(directory) error = %v", err)
 	}
@@ -220,7 +220,7 @@ func TestTranscriptFilesSkipsGeminiLogsJSON(t *testing.T) {
 		t.Fatalf("TranscriptFiles(directory) = %+v, want only %q", files, transcriptPath)
 	}
 
-	files, err = TranscriptFiles(logsPath)
+	files, err = TranscriptFiles("gemini", logsPath)
 	if err != nil {
 		t.Fatalf("TranscriptFiles(file root) error = %v", err)
 	}
@@ -249,7 +249,7 @@ func TestHelpersAndParseErrors(t *testing.T) {
 			t.Fatalf("write %s: %v", path, err)
 		}
 	}
-	files, err := TranscriptFiles(root)
+	files, err := TranscriptFiles("codex", root)
 	if err != nil {
 		t.Fatalf("TranscriptFiles() error = %v", err)
 	}
@@ -260,11 +260,11 @@ func TestHelpersAndParseErrors(t *testing.T) {
 	if err := os.WriteFile(fileRoot, []byte(`{}`), 0o644); err != nil {
 		t.Fatalf("write file root: %v", err)
 	}
-	files, err = TranscriptFiles(fileRoot)
+	files, err = TranscriptFiles("codex", fileRoot)
 	if err != nil || len(files) != 1 || files[0] != fileRoot {
 		t.Fatalf("file transcript root files=%+v err=%v", files, err)
 	}
-	files, err = TranscriptFiles(filepath.Join(root, "missing"))
+	files, err = TranscriptFiles("codex", filepath.Join(root, "missing"))
 	if err != nil || len(files) != 0 {
 		t.Fatalf("missing transcript root files=%+v err=%v", files, err)
 	}
@@ -381,7 +381,7 @@ func TestUnexportedNormalizationBranches(t *testing.T) {
 		StartedAt:      time.Date(2026, 5, 14, 11, 0, 0, 0, time.UTC),
 		LastActivityAt: time.Date(2026, 5, 14, 11, 0, 0, 0, time.UTC),
 	}
-	applySessionFields(&session, map[string]any{"timestamp": "2026-05-14T12:30:00Z"})
+	applySessionFields(&session, map[string]any{"timestamp": "2026-05-14T12:30:00Z"}, "")
 	if !session.LastActivityAt.Equal(time.Date(2026, 5, 14, 12, 30, 0, 0, time.UTC)) {
 		t.Fatalf("expected last activity to advance, got %v", session.LastActivityAt)
 	}
@@ -657,7 +657,7 @@ func TestTranscriptFilesSkipsSubAgentMetaSidecars(t *testing.T) {
 			t.Fatalf("write %s: %v", path, err)
 		}
 	}
-	files, err := TranscriptFiles(root)
+	files, err := TranscriptFiles("codex", root)
 	if err != nil {
 		t.Fatalf("TranscriptFiles error = %v", err)
 	}
@@ -676,12 +676,73 @@ func TestTranscriptFilesSkipsClaudeSessionsIndexSidecar(t *testing.T) {
 	if err := os.WriteFile(sidecarPath, []byte(`{"sessions":["claude-session"]}`), 0o644); err != nil {
 		t.Fatalf("write sidecar: %v", err)
 	}
-	files, err := TranscriptFiles(root)
+	files, err := TranscriptFiles("codex", root)
 	if err != nil {
 		t.Fatalf("TranscriptFiles error = %v", err)
 	}
 	if len(files) != 1 || files[0] != transcriptPath {
 		t.Fatalf("expected only the .jsonl transcript, got %+v", files)
+	}
+}
+
+func TestTranscriptFilesScopesClaudeProjectsToTranscriptShapes(t *testing.T) {
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "-Users-me-repo")
+	parentID := "019d7dea-1111-2222-3333-444444444444"
+	topLevel := filepath.Join(projectDir, parentID+".jsonl")
+	subagent := filepath.Join(projectDir, parentID, "subagents", "agent-abc123.jsonl")
+	sidecars := []string{
+		filepath.Join(projectDir, parentID, "tool-results", "toolu_abc.json"),
+		filepath.Join(projectDir, parentID, "memory", "notes.json"),
+		filepath.Join(projectDir, parentID, "remote-agents", "agent.jsonl"),
+		filepath.Join(projectDir, parentID, "subagents", "agent-abc123.meta.json"),
+		filepath.Join(projectDir, parentID, "subagents", "not-agent.jsonl"),
+	}
+	for _, path := range append([]string{topLevel, subagent}, sidecars...) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	files, err := TranscriptFiles("claude_code", root)
+	if err != nil {
+		t.Fatalf("TranscriptFiles error = %v", err)
+	}
+	want := []string{topLevel, subagent}
+	if len(files) != len(want) || files[0] != want[0] || files[1] != want[1] {
+		t.Fatalf("TranscriptFiles = %+v, want %+v", files, want)
+	}
+}
+
+func TestTranscriptFilesGenericSourcesKeepRecursiveDiscovery(t *testing.T) {
+	root := t.TempDir()
+	codexPath := filepath.Join(root, "sessions", "2026", "06", "04", "rollout-a.jsonl")
+	geminiPath := filepath.Join(root, "tmp", "project", "chats", "session-a.json")
+	for _, path := range []string{codexPath, geminiPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	codexFiles, err := TranscriptFiles("codex", filepath.Join(root, "sessions"))
+	if err != nil {
+		t.Fatalf("TranscriptFiles(codex) error = %v", err)
+	}
+	if len(codexFiles) != 1 || codexFiles[0] != codexPath {
+		t.Fatalf("codex files = %+v, want %q", codexFiles, codexPath)
+	}
+	geminiFiles, err := TranscriptFiles("gemini", filepath.Join(root, "tmp"))
+	if err != nil {
+		t.Fatalf("TranscriptFiles(gemini) error = %v", err)
+	}
+	if len(geminiFiles) != 1 || geminiFiles[0] != geminiPath {
+		t.Fatalf("gemini files = %+v, want %q", geminiFiles, geminiPath)
 	}
 }
 
@@ -1003,6 +1064,61 @@ func TestJSONTranscriptWhitespaceSessionFieldUnset(t *testing.T) {
 	}
 	if session.SourceSessionID != "real-id" {
 		t.Fatalf("session id = %q, want real-id", session.SourceSessionID)
+	}
+}
+
+func TestCodexForkSessionMetaKeepsOwnIdentityAndLineage(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-fork-fallback.jsonl")
+	parentID := "019d7dea-parent"
+	forkID := "019d7deb-fork"
+	lines := []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + forkID + `","forked_from_id":"` + parentID + `","cwd":"/repo/fork"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"session_meta","payload":{"id":"` + parentID + `","forked_from_id":null,"cwd":"/repo/parent"}}`,
+		`{"timestamp":"2026-06-04T12:00:02Z","type":"response_item","payload":{"role":"user","content":"fork-only turn"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, items, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.SourceSessionID != forkID {
+		t.Fatalf("SourceSessionID = %q, want fork id %q", session.SourceSessionID, forkID)
+	}
+	if session.ParentSourceSessionID == nil || *session.ParentSourceSessionID != parentID {
+		t.Fatalf("ParentSourceSessionID = %v, want %q", session.ParentSourceSessionID, parentID)
+	}
+	if len(items) != 1 || items[0].SearchText != "fork-only turn" {
+		t.Fatalf("items = %+v, want the fork turn", items)
+	}
+}
+
+func TestCodexNonForkSessionMetaIdentityUnchanged(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-standalone.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"standalone-codex","cwd":"/repo"}}`,
+		`{"timestamp":"2026-06-04T12:00:02Z","type":"response_item","payload":{"role":"assistant","content":"standalone turn"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, items, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.SourceSessionID != "standalone-codex" {
+		t.Fatalf("SourceSessionID = %q, want standalone-codex", session.SourceSessionID)
+	}
+	if session.ParentSourceSessionID != nil {
+		t.Fatalf("ParentSourceSessionID = %v, want nil", session.ParentSourceSessionID)
+	}
+	if len(items) != 1 || items[0].SearchText != "standalone turn" {
+		t.Fatalf("items = %+v, want standalone turn", items)
 	}
 }
 
