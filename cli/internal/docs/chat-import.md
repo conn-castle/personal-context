@@ -4,7 +4,12 @@
 chat session plus chat items, and copies a managed raw source that Personal
 Context owns. `--device <id>` is required and must name a registered, active
 device. Use `--agent codex|claude|gemini` to limit the scan, and `--root <dir>`
-(requires `--agent`) to override the default roots.
+(requires `--agent`) to override the default roots. For `--agent claude` the
+root is treated as a Claude `projects/` directory: only
+`<project-dir>/<session>.jsonl` and
+`<project-dir>/<session>/subagents/agent-*.jsonl` are discovered, so point
+`--root` at a `projects`-shaped parent rather than a flat directory of
+transcript files.
 
 ## Summary fields
 
@@ -24,6 +29,8 @@ Work performed:
   `(source, source_session_id)` owned by a different source file and diverged
   from it. The run never overwrites the unrelated source; a warning naming both
   paths and the colliding source id is printed to stderr.
+- `files_skipped` — files that could not be parsed as transcripts. Each skipped
+  path is printed to stderr and the import continues with other files.
 - `items_imported` — chat item rows written this run. A replaced session counts
   every re-inserted row, so this is work performed, not net growth.
 - `files_scanned` — transcript files examined (including empty ones that create
@@ -46,7 +53,9 @@ Each session is keyed by `(source, source_session_id)`. Identity is derived so
 that distinct transcripts never collide and overwrite one another:
 
 - Codex and Claude Code take `source_session_id` from the transcript's internal
-  session id.
+  session id. Codex fork rollouts keep their own first `session_meta.id` even
+  when a later replayed parent header appears, and store `forked_from_id` in
+  `parent_source_session_id`.
 - Claude Code **subagent** (Task-tool sidechain) transcripts under a
   `subagents/` directory carry the parent transcript's session id on every row.
   They get a file-unique `source_session_id` of `<parent_sid>:<subagent_file>`

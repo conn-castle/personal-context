@@ -107,7 +107,15 @@ Any state can be reconstructed from any other (subject to two-tier guarantee):
 - **No title. No tags.** Organization is by project and date only.
 - **Chat source values**: use unambiguous product identifiers in storage (`codex`, `claude_code`, `gemini`). CLI `--agent claude` maps to `claude_code`.
 - **Chat project assignment**: import is non-interactive. Sessions whose `cwd` does not match a registered `project_paths` row are stored with `project_id = NULL`; registering a path via `pc project register <id> [path] --device <id>` backfills matching NULL sessions.
-- **Chat source identity & subagents**: `source_session_id` is derived per source — the internal session id for Codex/Claude, and the file path (project-key dir + basename) for Gemini (no internal id). Claude Task-tool subagent transcripts (files under `subagents/`, or `isSidechain` rows) get `source_session_id = <parent_sid>:<subagent_basename>` plus nullable `parent_source_session_id` linking to the parent (metadata, never a FK — the parent row may be absent). Exact byte-identical duplicate files are collapsed (`duplicates_skipped`); a file colliding with a different file's existing identity and diverging is warn-and-skipped (`collisions_skipped`), never overwritten. Gemini `gemini`/`info`/`error` rows normalize to `message`/`event` item types; empty/metadata-only transcripts create no session. The import summary separates work performed (`items_imported`) from authoritative stored state (`items_delta`, `items_after_import` via repository `CountChatItems`); `raw_sources_copied` counts distinct retained sessions.
+- **Chat source identity & lineage**:
+  - `source_session_id` derivation: internal session id for Codex/Claude; file path (project-key dir + basename) for Gemini (no internal id).
+  - Claude Task-tool subagent transcripts (files under `subagents/`, or `isSidechain` rows): `source_session_id = <parent_sid>:<subagent_basename>` plus nullable `parent_source_session_id` linking to the parent (metadata, never a FK — the parent row may be absent).
+  - Codex fork rollouts: keep their own first `session_meta.id` and store `forked_from_id` in the same nullable `parent_source_session_id` lineage field.
+  - Duplicates: exact byte-identical files are collapsed (`duplicates_skipped`).
+  - Collisions: a file colliding with a different file's existing identity and diverging is warn-and-skipped (`collisions_skipped`), never overwritten.
+  - Parse errors: unparseable transcript files are warn-and-skipped (`files_skipped`) without aborting the full import.
+  - Gemini normalization: `gemini`/`info`/`error` rows normalize to `message`/`event` item types; empty/metadata-only transcripts create no session.
+  - Import summary: separates work performed (`items_imported`) from authoritative stored state (`items_delta`, `items_after_import` via repository `CountChatItems`); `raw_sources_copied` counts distinct retained sessions.
 
 ### Figure References in HTML
 - `html_content` references figures as `figures/{filename}` (relative path, no record_id — implicit from context).

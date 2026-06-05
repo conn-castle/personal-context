@@ -788,7 +788,11 @@ func TestChatImportDefaultScanIncludesRegisteredClaudeConfigProjectRoot(t *testi
 	if err := os.WriteFile(filepath.Join(geminiConfigRoot, "onboarding.json"), []byte(`{"not":"a transcript"}`), 0o644); err != nil {
 		t.Fatalf("write gemini config json: %v", err)
 	}
-	transcriptPath := filepath.Join(transcriptRoot, "default-claude-config.jsonl")
+	projectTranscriptDir := filepath.Join(transcriptRoot, "-Users-me-repo")
+	if err := os.MkdirAll(projectTranscriptDir, 0o700); err != nil {
+		t.Fatalf("create claude project transcript dir: %v", err)
+	}
+	transcriptPath := filepath.Join(projectTranscriptDir, "default-claude-config.jsonl")
 	cwd := filepath.ToSlash(filepath.Join(normalizedProjectPath, "nested"))
 	lines := []string{
 		`{"type":"user","timestamp":"2026-05-18T12:00:00.000Z","cwd":"` + cwd + `","sessionId":"default-claude-config","message":{"role":"user","content":[{"type":"text","text":"registered claude config needle"}]}}`,
@@ -918,7 +922,11 @@ func TestChatSearchRealCodexEnvelopeContract(t *testing.T) {
 func TestChatSearchRealClaudeToolResultEnvelopeHiddenByDefault(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()
-	transcriptPath := filepath.Join(root, "claude-tool-result.jsonl")
+	projectDir := filepath.Join(root, "-Users-me-repo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+	transcriptPath := filepath.Join(projectDir, "claude-tool-result.jsonl")
 	lines := []string{
 		`{"type":"user","timestamp":"2026-05-03T02:00:00.000Z","cwd":"/repo","sessionId":"claude-tool-session","message":{"role":"user","content":[{"type":"tool_result","content":"sensitive tool result token"}]}}`,
 		``,
@@ -1311,7 +1319,11 @@ func TestChatCommandValidationAndStackErrors(t *testing.T) {
 func TestChatImportJSONLTableListAndTopLevelShow(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()
-	transcriptPath := filepath.Join(root, "jsonl-session.jsonl")
+	projectDir := filepath.Join(root, "-Users-me-repo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+	transcriptPath := filepath.Join(projectDir, "jsonl-session.jsonl")
 	transcript := strings.Join([]string{
 		`{"session_id":"jsonl-session","cwd":"/tmp/jsonl-chat","title":"JSONL title","created_at":"2026-05-14T12:00:00Z"}`,
 		`{"role":"user","content":[{"type":"text","text":"jsonl needle from user"}],"timestamp":"2026-05-14T12:01:00Z"}`,
@@ -1439,12 +1451,22 @@ func TestChatShowSourceSessionIDRejectsAmbiguousMatches(t *testing.T) {
 	setupEnv(t)
 	for _, agent := range []string{"codex", "claude"} {
 		root := t.TempDir()
+		transcriptDir := root
+		transcriptExt := ".json"
 		transcript := `{
   "id": "duplicate-source",
   "started_at": "2026-05-14T12:00:00Z",
   "messages": [{"role": "user", "content": "` + agent + ` duplicate"}]
 }`
-		if err := os.WriteFile(filepath.Join(root, agent+".json"), []byte(transcript), 0o644); err != nil {
+		if agent == "claude" {
+			transcriptDir = filepath.Join(root, "-Users-me-repo")
+			transcriptExt = ".jsonl"
+			if err := os.MkdirAll(transcriptDir, 0o755); err != nil {
+				t.Fatalf("mkdir claude transcript dir: %v", err)
+			}
+			transcript = `{"type":"user","timestamp":"2026-05-14T12:00:00Z","sessionId":"duplicate-source","message":{"role":"user","content":[{"type":"text","text":"claude duplicate"}]}}` + "\n"
+		}
+		if err := os.WriteFile(filepath.Join(transcriptDir, agent+transcriptExt), []byte(transcript), 0o644); err != nil {
 			t.Fatalf("write %s transcript: %v", agent, err)
 		}
 		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -1500,8 +1522,8 @@ func TestChatImportGeneratedIDAndParseErrorBranches(t *testing.T) {
 	}
 	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", badRoot})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "parse") {
-		t.Fatalf("expected parse error for bad transcript, got %v", err)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import should skip bad transcript: %v", err)
 	}
 }
 
