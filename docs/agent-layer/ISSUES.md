@@ -27,11 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
-- Issue 2026-06-04 p9r4x7: Codex fork session_meta can overwrite fork cwd with parent cwd
+- Issue 2026-06-04 p9r4x7: Codex fork session_meta can overwrite fork cwd/title with parent metadata
     Priority: Medium. Area: cli/internal/chatimport/chatimport.go
-    Description: Codex forks contain a fork-owned `session_meta` followed by a replayed parent `session_meta`; `applySessionFields` still overwrites `cwd` unconditionally, so a fork that diverged in another repo can be attributed to the parent's cwd even though its identity and lineage import correctly.
-    Next step: Apply the same fallback/locked-field guard used for Codex source identity to cwd capture, then add a fork fixture where parent and fork cwd differ.
-    Notes: Deferred from v0.1.5 to keep BUG C scoped to identity plus `forked_from_id` lineage.
+    Description: Codex forks contain a fork-owned `session_meta` followed by a replayed parent `session_meta`; `applySessionFields` still overwrites `cwd` (and `title`) unconditionally, so a fork that diverged in another repo can be attributed to the parent's cwd — and shows the parent's title — even though its identity and lineage import correctly.
+    Next step: Apply the same fallback/locked-field guard used for Codex source identity to the `cwd` and `title` capture, then add a fork fixture where parent and fork cwd/title differ.
+    Notes: Deferred from v0.1.5 to keep BUG C scoped to identity plus `forked_from_id` lineage. Surfaced again on PR #38 by gemini-code-assist (which also flagged `title`) and chatgpt-codex-connector.
 
 - Issue 2026-06-04 c5k9d2: Gemini duplicate-content collapse can discard the only cwd-resolving copy
     Priority: Low. Area: cli/internal/cli/chat.go
