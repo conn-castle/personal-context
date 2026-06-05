@@ -1082,7 +1082,7 @@ func TestCodexEmptyForkLocksCWDToForkHeader(t *testing.T) {
 		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + forkID + `","forked_from_id":"` + parentID + `","cwd":"/repo/fork"}}`,
 		`{"timestamp":"2026-06-04T12:00:01Z","type":"session_meta","payload":{"id":"` + parentID + `","forked_from_id":null,"cwd":"/repo/parent"}}`,
 		`{"timestamp":"2026-06-04T12:00:02Z","type":"turn_context","payload":{"cwd":"/repo/parent"}}`,
-		`{"timestamp":"2026-06-04T12:00:03Z","type":"response_item","payload":{"role":"user","content":"fork-only turn"}}`,
+		`{"timestamp":"2026-06-04T12:00:03Z","type":"response_item","payload":{"role":"user","content":"replayed parent turn"}}`,
 	}
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
@@ -1101,8 +1101,10 @@ func TestCodexEmptyForkLocksCWDToForkHeader(t *testing.T) {
 	if session.CWD == nil || *session.CWD != "/repo/fork" {
 		t.Fatalf("CWD = %v, want fork dir /repo/fork (parent metadata must not overwrite it)", session.CWD)
 	}
-	if len(items) != 1 || items[0].SearchText != "fork-only turn" {
-		t.Fatalf("items = %+v, want the fork turn", items)
+	// A never-continued fork has no fork-authored turns: its only content is the
+	// parent history replayed after the fork header.
+	if len(items) != 1 || items[0].SearchText != "replayed parent turn" {
+		t.Fatalf("items = %+v, want the replayed parent turn", items)
 	}
 }
 
