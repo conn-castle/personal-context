@@ -670,6 +670,46 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 			}
 		}
 
+		// CountSearchChatItems is the authoritative match total for the JSON
+		// `total`: it must ignore Limit, so a one-row page over a two-match
+		// filter still counts two.
+		searchTotal, err := repo.CountSearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle", ParentSourceSessionID: &parentSID})
+		if err != nil {
+			t.Fatalf("CountSearchChatItems(parent filter) error = %v", err)
+		}
+		if searchTotal != 2 {
+			t.Fatalf("expected CountSearchChatItems=2, got %d", searchTotal)
+		}
+		onePage, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle", ParentSourceSessionID: &parentSID, Limit: 1})
+		if err != nil {
+			t.Fatalf("SearchChatItems(limit 1) error = %v", err)
+		}
+		if len(onePage) != 1 {
+			t.Fatalf("expected one-row page under Limit:1, got %d (%+v)", len(onePage), onePage)
+		}
+		countUnderLimit, err := repo.CountSearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle", ParentSourceSessionID: &parentSID, Limit: 1})
+		if err != nil {
+			t.Fatalf("CountSearchChatItems(limit 1) error = %v", err)
+		}
+		if countUnderLimit != 2 {
+			t.Fatalf("CountSearchChatItems must ignore Limit; got %d want 2", countUnderLimit)
+		}
+
+		// Boolean-style uppercase operators are rejected by both the page and
+		// count paths; lowercase operator words remain literal AND terms.
+		if _, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "alpha OR beta"}); !errors.Is(err, repository.ErrUnsupportedSearchOperator) {
+			t.Fatalf("expected ErrUnsupportedSearchOperator from SearchChatItems, got %v", err)
+		}
+		if _, err := repo.CountSearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "alpha OR beta"}); !errors.Is(err, repository.ErrUnsupportedSearchOperator) {
+			t.Fatalf("expected ErrUnsupportedSearchOperator from CountSearchChatItems, got %v", err)
+		}
+		if _, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "alpha OR beta"}); !errors.Is(err, repository.ErrUnsupportedSearchOperator) {
+			t.Fatalf("expected ErrUnsupportedSearchOperator from SearchAll, got %v", err)
+		}
+		if _, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "alpha or beta"}); err != nil {
+			t.Fatalf("lowercase operator word must be a literal term (no error), got %v", err)
+		}
+
 		// CountChatItems is the authoritative item count: two subagent items so far.
 		count, err := repo.CountChatItems(ctx, repository.CountChatItemsFilter{})
 		if err != nil {

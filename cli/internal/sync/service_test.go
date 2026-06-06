@@ -4680,6 +4680,9 @@ func (m *memoryRepo) ListChatItems(_ context.Context, sessionID string) ([]repos
 func (m *memoryRepo) SearchChatItems(_ context.Context, _ repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
 	return nil, nil
 }
+func (m *memoryRepo) CountSearchChatItems(_ context.Context, _ repository.SearchChatItemsFilter) (int, error) {
+	return 0, nil
+}
 func (m *memoryRepo) SearchAll(_ context.Context, _ repository.UnifiedSearchFilter) ([]repository.DomainSearchResult, error) {
 	return nil, nil
 }

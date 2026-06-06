@@ -27,6 +27,18 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-06 t4p8m1: FTS chat search --offset is scan-and-discard (linear deep-pagination cost)
+    Priority: Low. Area: cli/internal/repository (sqlite+postgres) chat search
+    Description: `pc chat search`/`pc search` paginate the FTS path with SQL OFFSET, so deep pages re-scan and discard all skipped rows. Measured ~0.19 ms/row (`review` offset 0/500/1000/2000 = 0.19/0.36/0.56/0.75 s; `hydroponics` offset 4000 = 1.59 s vs 46 ms at 0); non-FTS `pc chat list` is constant-time by contrast. The JSON envelope already returns `next_cursor`.
+    Next step: Replace offset paging with keyset/cursor pagination on (rank, id) for the chat FTS path; reuse the existing next_cursor surface.
+    Notes: Deferred from the 2026-06 search-quality slice (that slice fixed top-k LIMIT latency, not offset cost). Lower priority than the resolved limit-latency bug.
+
+- Issue 2026-06-06 q9r2k7: Codex fork sessions replay full parent history (heavy content duplication at scale)
+    Priority: Medium. Area: cli chat import / storage / data model
+    Description: Codex forks import as distinct sessions that each carry a near-complete copy of the parent's items by design (1,111 forks from 220 parents on the reference store; codex raw dominates ~12 GB of 13 GB chats/). This inflates DB/raw storage and makes any shared-history term match the parent plus every fork. Intentional behavior per the v0.1.5 CHANGELOG — changing it needs a product/data-model decision, not a silent fix.
+    Next step: Decide whether to store only a fork's divergent tail with a pointer to the parent prefix and/or de-duplicate replayed items at the item layer; capture the decision in DECISIONS.md before implementing.
+    Notes: Surfaced in the v0.1.5 search-quality handoff §4. Related search-side symptom (one conversation returned many times) overlaps backlog fork-family grouping.
+
 - Issue 2026-06-04 c5k9d2: Gemini duplicate-content collapse can discard the only cwd-resolving copy
     Priority: Low. Area: cli/internal/cli/chat.go
     Description: When two distinct Gemini tmp dirs hold byte-identical session JSON, the brand-new dedup (seenContentHashes, chat.go ~424) keeps the first in scan order as representative without weighing cwd resolvability. If that representative resolves no cwd (no .project_root, projectHash unregistered at import) while the skipped duplicate has a .project_root, the stored row keeps cwd=NULL and a later `pc project register` cannot backfill it. Not reachable from real Gemini layout (one tmp dir per project root, so byte-identical JSON does not co-occur; a representative carrying projectHash self-heals on re-import after register).

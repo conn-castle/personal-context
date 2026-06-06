@@ -28,6 +28,24 @@ Unscheduled user-visible features and tasks (distinct from issues; not refactors
 
 <!-- ENTRIES START -->
 
+- Backlog 2026-06-06 pc-stats-command: Generic `pc stats` store-overview command
+    Priority: Medium. Area: cli, stats
+    Description: Add a `pc stats` command (with `--format json`) reporting store counts and storage footprint: sessions (total/by agent/by project), items (total/by item_type), codex forks, claude subagents, unassigned sessions; plus item text size, raw chats/ size, and DB size, ideally broken down by agent/project. Also a search-stats mode that, given a query, returns total match count, distinct sessions matched, project/agent distribution, date span, and the top match's relevance score.
+    Acceptance criteria: `pc stats` prints the counts and footprint without users hand-running sqlite3/`du`; search-stats returns aggregate statistics for a query instead of rows.
+    Notes: Surfaced in the v0.1.5 search-quality handoff §3.3. Search-stats depends on the now-implemented truthful match count (CountSearchChatItems) and exposed score.
+
+- Backlog 2026-06-06 chat-search-session-grouping: Session-grouped chat search results
+    Priority: Medium. Area: cli, search
+    Description: Offer a session-grouped result mode for `pc chat search` (one row per session with a hit count and best snippet) and/or group fork families so a single conversation is not returned many times. Today results are one row per matching item, so a session with several hits reads as duplicates, compounded by codex fork replay.
+    Acceptance criteria: A user can get one result row per matching session (or per fork family), with a hit count and representative snippet, instead of repeated per-item rows.
+    Notes: Surfaced in the v0.1.5 search-quality handoff §3.2; the fork-family facet relates to ISSUES q9r2k7 (fork replay duplication).
+
+- Backlog 2026-06-06 chat-search-parity-residuals: Finish chat search parity nits
+    Priority: Low. Area: cli, search
+    Description: Align `pc chat search` with adjacent search commands for `--limit 0`/500-cap help, `ids` output format parity, and typo feedback for unregistered `--project` filters.
+    Acceptance criteria: Help/docs state the chat-search limit cap and zero semantics; `pc chat search` either supports `--format ids` or documents why it does not; an unregistered project filter warns or errors instead of silently looking like no matches.
+    Notes: Deferred from the search-quality/performance slice so that slice can focus on ranking, JSON totals, operator errors, and output context.
+
 - Backlog 2026-05-16 chat-git-export-policy: Decide normalized chat git export policy
     Priority: High. Area: cli, backup
     Description: Decide whether normalized chat metadata/items should remain in git snapshots, be excluded, become opt-in, or be limited to metadata to avoid GB-scale chat history exports.

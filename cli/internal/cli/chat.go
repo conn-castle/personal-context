@@ -1228,19 +1228,32 @@ type chatSearchOptions struct {
 	Offset                int
 }
 
+// chatSearchJSON carries the chat hit plus backward-compatible top-level
+// fields. The nested `session` object is preserved for existing consumers; the
+// top-level `id`, `source`, `project_id`, `date`, and `score` fields give the
+// same flat shape `pc search` exposes so clients reading top-level keys work
+// against both commands. `score` is the FTS relevance rank (higher is better).
 type chatSearchJSON struct {
-	Session chatSessionJSON `json:"session"`
-	Ordinal int             `json:"ordinal"`
-	Role    string          `json:"role"`
-	Type    string          `json:"type"`
-	Text    *string         `json:"text"`
-	Snippet string          `json:"snippet"`
+	ID        string          `json:"id"`
+	Source    string          `json:"source"`
+	ProjectID *string         `json:"project_id"`
+	Date      string          `json:"date"`
+	Score     float64         `json:"score"`
+	Session   chatSessionJSON `json:"session"`
+	Ordinal   int             `json:"ordinal"`
+	Role      string          `json:"role"`
+	Type      string          `json:"type"`
+	Text      *string         `json:"text"`
+	Snippet   string          `json:"snippet"`
 }
 
 func runChatSearch(ctx context.Context, stdout io.Writer, _ io.Writer, query string, opts chatSearchOptions) error {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return fmt.Errorf("query must not be empty")
+	}
+	if err := repository.ValidateSearchQuery(query); err != nil {
+		return err
 	}
 	if opts.Limit < 1 || opts.Limit > maxChatListLimit {
 		return fmt.Errorf("limit must be between 1 and %d", maxChatListLimit)
@@ -1258,7 +1271,7 @@ func runChatSearch(ctx context.Context, stdout io.Writer, _ io.Writer, query str
 	}
 	defer func() { _ = stack.Close() }()
 	// Fetch one extra row beyond the requested page so we can emit a
-	// next-cursor for the JSON envelope without issuing a second COUNT.
+	// next-cursor for the JSON envelope; JSON total is counted separately.
 	filter := repository.SearchChatItemsFilter{Query: query, IncludeToolOutputs: opts.IncludeTools, Limit: opts.Limit + 1, Offset: opts.Offset}
 	if source != "" {
 		filter.Source = &source
@@ -1283,16 +1296,34 @@ func runChatSearch(ctx context.Context, stdout io.Writer, _ io.Writer, query str
 	case "table":
 		return writeChatSearchTable(stdout, results)
 	case "json":
+		// JSON `total` must be the full match count under the same filter, not
+		// the returned page size (DECISIONS.md 2026-05-08 e8f9g0).
+		total, err := stack.Repo.CountSearchChatItems(ctx, filter)
+		if err != nil {
+			return fmt.Errorf("count chat search matches: %w", err)
+		}
 		items := make([]chatSearchJSON, 0, len(results))
 		for _, result := range results {
-			items = append(items, chatSearchJSON{Session: chatSessionToJSON(result.Session), Ordinal: result.Item.Ordinal, Role: result.Item.Role, Type: result.Item.ItemType, Text: result.Item.Text, Snippet: result.Snippet})
+			items = append(items, chatSearchJSON{
+				ID:        result.Session.ID,
+				Source:    result.Session.Source,
+				ProjectID: result.Session.ProjectID,
+				Date:      result.Session.LastActivityAt.Format("2006-01-02"),
+				Score:     result.Rank,
+				Session:   chatSessionToJSON(result.Session),
+				Ordinal:   result.Item.Ordinal,
+				Role:      result.Item.Role,
+				Type:      result.Item.ItemType,
+				Text:      result.Item.Text,
+				Snippet:   result.Snippet,
+			})
 		}
 		var nextCursor *string
 		if hasMore {
 			next := fmt.Sprintf("%d", opts.Offset+opts.Limit)
 			nextCursor = &next
 		}
-		return listpage.WriteJSON(stdout, listpage.Response[chatSearchJSON]{Items: items, Total: len(items), NextCursor: nextCursor})
+		return listpage.WriteJSON(stdout, listpage.Response[chatSearchJSON]{Items: items, Total: total, NextCursor: nextCursor})
 	default:
 		return fmt.Errorf("unknown format %q: expected table or json", opts.Format)
 	}
@@ -1494,13 +1525,18 @@ func writeChatSearchTable(w io.Writer, results []repository.ChatSearchResult) er
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "CHAT\tORD\tROLE\tSNIPPET")
+	_, _ = fmt.Fprintln(tw, "CHAT\tDATE\tPROJECT\tORD\tROLE\tSNIPPET")
 	for _, result := range results {
 		snippet := result.Snippet
 		if snippet == "" {
 			snippet = result.Item.SearchText
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", result.Session.ID, result.Item.Ordinal, result.Item.Role, truncate(strings.ReplaceAll(snippet, "\n", " "), 100))
+		project := ""
+		if result.Session.ProjectID != nil {
+			project = *result.Session.ProjectID
+		}
+		date := result.Session.LastActivityAt.Format("2006-01-02")
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", result.Session.ID, date, project, result.Item.Ordinal, result.Item.Role, truncate(strings.ReplaceAll(snippet, "\n", " "), 100))
 	}
 	return tw.Flush()
 }

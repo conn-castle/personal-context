@@ -103,6 +103,9 @@ func runSearch(ctx context.Context, stdout io.Writer, stderr io.Writer, query st
 	if query == "" {
 		return fmt.Errorf("query must not be empty")
 	}
+	if err := repository.ValidateSearchQuery(query); err != nil {
+		return err
+	}
 	if opts.Limit < 0 {
 		return fmt.Errorf("limit must be >= 0")
 	}
@@ -258,9 +261,13 @@ func searchJSON(w io.Writer, domainResults []repository.DomainSearchResult, chil
 				project = *result.Chat.Session.ProjectID
 			}
 			results = append(results, searchResultJSON{
-				Domain:         "chats",
-				ID:             result.Chat.Session.ID,
-				ChatSessionID:  result.Chat.Session.ID,
+				Domain:        "chats",
+				ID:            result.Chat.Session.ID,
+				ChatSessionID: result.Chat.Session.ID,
+				// Chat hits have no record-style day, but the session's last
+				// activity is the date the table view shows; populate it so the
+				// JSON output matches the table instead of emitting "".
+				Date:           result.Chat.Session.LastActivityAt.Format("2006-01-02"),
 				ProjectID:      project,
 				SourceDeviceID: result.Chat.Session.SourceDeviceID,
 				CreatedAt:      formatCLITime(result.Chat.Session.CreatedAt),

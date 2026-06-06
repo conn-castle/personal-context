@@ -593,15 +593,24 @@ func (r *Repository) CountChatItems(ctx context.Context, filter repository.Count
 	return count, nil
 }
 
-// SearchChatItems searches chat item text.
-func (r *Repository) SearchChatItems(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
-	query := strings.TrimSpace(filter.Query)
-	if query == "" || filter.Limit < 0 || filter.Offset < 0 {
-		return nil, repository.ErrInvalidArgument
+// validateSearchChatItemsFilter rejects malformed pagination/empty queries and
+// unsupported boolean-style operators before any SQL runs. SearchChatItems and
+// CountSearchChatItems share it so the page and count agree on what is valid.
+func validateSearchChatItemsFilter(filter repository.SearchChatItemsFilter) error {
+	if strings.TrimSpace(filter.Query) == "" || filter.Limit < 0 || filter.Offset < 0 {
+		return repository.ErrInvalidArgument
 	}
+	return repository.ValidateSearchQuery(filter.Query)
+}
+
+// chatSearchWhereSQLite builds the shared WHERE clause and bind args for the
+// chat-item FTS page and count queries. Building it once is what keeps
+// SearchChatItems and CountSearchChatItems from drifting on deleted state, tool
+// output exclusion, project, agent, parent session, and date filters.
+func chatSearchWhereSQLite(filter repository.SearchChatItemsFilter) (string, []any) {
 	where := strings.Builder{}
 	where.WriteString(`WHERE chat_item_fts MATCH ?`)
-	args := []any{sqliteFTSQuery(query)}
+	args := []any{sqliteFTSQuery(filter.Query)}
 	if !filter.IncludeDeleted {
 		where.WriteString(` AND cs.deleted_at IS NULL`)
 	}
@@ -628,13 +637,31 @@ func (r *Repository) SearchChatItems(ctx context.Context, filter repository.Sear
 		where.WriteString(` AND cs.last_activity_at <= ?`)
 		args = append(args, timeutil.FormatUTCMillis(*filter.DateTo))
 	}
+	return where.String(), args
+}
+
+// SearchChatItems searches chat item text.
+//
+// The page query orders by the FTS5 hidden `rank` column and pushes
+// LIMIT/OFFSET into SQL so FTS5 can short-circuit to the top-k rows. Ordering by
+// `chat_item_fts.rank` (instead of `-bm25(...) DESC` plus secondary recency /
+// ordinal keys) is the performance fix: any secondary SQL sort key reintroduces
+// `USE TEMP B-TREE FOR ORDER BY`, which forces SQLite to rank the entire match
+// set before applying the limit. The exposed score is `-chat_item_fts.rank`,
+// which equals the previous `-bm25(chat_item_fts)` so the reported Rank is
+// unchanged. Equal-rank rows have no guaranteed SQL tie-breaker on this path.
+func (r *Repository) SearchChatItems(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
+	if err := validateSearchChatItemsFilter(filter); err != nil {
+		return nil, err
+	}
+	where, args := chatSearchWhereSQLite(filter)
 	sqlQuery := `SELECT ` + prefixedChatSessionColumns("cs") + `, ` + prefixedChatItemColumns("ci") + `,
             snippet(chat_item_fts, 0, '', '', '...', 12),
-            -bm25(chat_item_fts)
+            -chat_item_fts.rank
         FROM chat_item_fts
         INNER JOIN chat_item AS ci ON ci.id = chat_item_fts.rowid
-        INNER JOIN chat_session AS cs ON cs.id = ci.session_id ` + where.String() + `
-        ORDER BY -bm25(chat_item_fts) DESC, cs.last_activity_at DESC, ci.ordinal`
+        INNER JOIN chat_session AS cs ON cs.id = ci.session_id ` + where + `
+        ORDER BY chat_item_fts.rank`
 	if filter.Limit > 0 {
 		sqlQuery += ` LIMIT ?`
 		args = append(args, filter.Limit)
@@ -653,11 +680,33 @@ func (r *Repository) SearchChatItems(ctx context.Context, filter repository.Sear
 	return scanChatSearchRows(rows)
 }
 
+// CountSearchChatItems returns the total number of chat items matching the
+// search filter, ignoring Limit/Offset. It shares chatSearchWhereSQLite with
+// SearchChatItems so the JSON `total` reflects exactly the page's filters.
+func (r *Repository) CountSearchChatItems(ctx context.Context, filter repository.SearchChatItemsFilter) (int, error) {
+	if err := validateSearchChatItemsFilter(filter); err != nil {
+		return 0, err
+	}
+	where, args := chatSearchWhereSQLite(filter)
+	query := `SELECT COUNT(*)
+        FROM chat_item_fts
+        INNER JOIN chat_item AS ci ON ci.id = chat_item_fts.rowid
+        INNER JOIN chat_session AS cs ON cs.id = ci.session_id ` + where
+	var count int
+	if err := r.db.QueryRowContext(ctx, query, args...).Scan(&count); err != nil {
+		return 0, mapSQLiteError(err)
+	}
+	return count, nil
+}
+
 // SearchAll searches records and chats and returns a flat domain-discriminated list.
 func (r *Repository) SearchAll(ctx context.Context, filter repository.UnifiedSearchFilter) ([]repository.DomainSearchResult, error) {
 	query := strings.TrimSpace(filter.Query)
 	if query == "" || filter.Limit < 0 || filter.Offset < 0 {
 		return nil, repository.ErrInvalidArgument
+	}
+	if err := repository.ValidateSearchQuery(query); err != nil {
+		return nil, err
 	}
 	results := []repository.DomainSearchResult{}
 	includeRecords := filter.Domain == nil || *filter.Domain == "records"

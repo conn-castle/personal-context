@@ -42,6 +42,12 @@ Release assets are built by GitHub Actions. Stable release tags only are support
 4. Release notes are extracted from the matching `CHANGELOG.md` section.
 5. The workflow opens a PR against `conn-castle/homebrew-tap` to add or update `Formula/personal-context.rb` with the release tarball URL and SHA-256.
 
+## Homebrew tap publication
+
+Do not manually merge the Homebrew tap PR. The tap repository's GitHub Actions workflow owns that step: after the tap PR checks pass, the workflow labels/handles the PR, pulls bottle artifacts, publishes the bottle release, updates the formula bottle block, merges the PR, and deletes the bump branch.
+
+Agents should wait for the tap workflows to finish, then verify the final tap state instead of merging the PR directly. Manual merging can cause the tap `brew pr-pull` workflow to fail because it tries to cherry-pick a commit that is already on `main`, leaving bottle metadata to be repaired by hand.
+
 ## Local release checks
 
 ```bash
