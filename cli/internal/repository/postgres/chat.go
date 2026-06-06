@@ -500,13 +500,23 @@ func (r *Repository) CountChatItems(ctx context.Context, filter repository.Count
 	return count, nil
 }
 
-// SearchChatItems searches chat item text.
-func (r *Repository) SearchChatItems(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
-	query := strings.TrimSpace(filter.Query)
-	if query == "" || filter.Limit < 0 || filter.Offset < 0 {
-		return nil, repository.ErrInvalidArgument
+// validateSearchChatItemsFilter rejects malformed pagination/empty queries and
+// unsupported boolean-style operators before any SQL runs. SearchChatItems and
+// CountSearchChatItems share it so the page and count agree on what is valid.
+func validateSearchChatItemsFilter(filter repository.SearchChatItemsFilter) error {
+	if strings.TrimSpace(filter.Query) == "" || filter.Limit < 0 || filter.Offset < 0 {
+		return repository.ErrInvalidArgument
 	}
-	args := []any{r.userID, query}
+	return repository.ValidateSearchQuery(filter.Query)
+}
+
+// chatSearchPredicate builds the shared WHERE clause and bind args for the
+// chat-item page and count queries. `$1` is the user id and `$2` is the query
+// text (referenced by both the predicate and the rank/headline projection).
+// Building it once keeps SearchChatItems and CountSearchChatItems from drifting
+// on filters.
+func (r *Repository) chatSearchPredicate(filter repository.SearchChatItemsFilter) (string, []any) {
+	args := []any{r.userID, strings.TrimSpace(filter.Query)}
 	next := 3
 	where := strings.Builder{}
 	where.WriteString(`WHERE cs.user_id = $1 AND ci.search_vector @@ plainto_tsquery('pg_catalog.simple'::regconfig, $2)`)
@@ -541,10 +551,20 @@ func (r *Repository) SearchChatItems(ctx context.Context, filter repository.Sear
 		args = append(args, filter.DateTo.UTC())
 		next++
 	}
+	return where.String(), args
+}
+
+// SearchChatItems searches chat item text.
+func (r *Repository) SearchChatItems(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error) {
+	if err := validateSearchChatItemsFilter(filter); err != nil {
+		return nil, err
+	}
+	where, args := r.chatSearchPredicate(filter)
+	next := len(args) + 1
 	sqlQuery := `SELECT ` + prefixedChatSessionColumns("cs") + `, ` + prefixedChatItemColumns("ci") + `,
             ts_headline('pg_catalog.simple'::regconfig, ci.search_text, plainto_tsquery('pg_catalog.simple'::regconfig, $2)) AS snippet,
             ts_rank(ci.search_vector, plainto_tsquery('pg_catalog.simple'::regconfig, $2)) AS rank
-        FROM chat_item AS ci INNER JOIN chat_session AS cs ON cs.id = ci.session_id ` + where.String() + `
+        FROM chat_item AS ci INNER JOIN chat_session AS cs ON cs.id = ci.session_id ` + where + `
         ORDER BY rank DESC, cs.last_activity_at DESC, ci.ordinal`
 	if filter.Limit > 0 {
 		sqlQuery += fmt.Sprintf(` LIMIT $%d`, next)
@@ -563,11 +583,31 @@ func (r *Repository) SearchChatItems(ctx context.Context, filter repository.Sear
 	return scanChatSearchRows(rows)
 }
 
+// CountSearchChatItems returns the total number of chat items matching the
+// search filter, ignoring Limit/Offset. It shares chatSearchPredicate with
+// SearchChatItems so the JSON `total` reflects exactly the page's filters.
+func (r *Repository) CountSearchChatItems(ctx context.Context, filter repository.SearchChatItemsFilter) (int, error) {
+	if err := validateSearchChatItemsFilter(filter); err != nil {
+		return 0, err
+	}
+	where, args := r.chatSearchPredicate(filter)
+	query := `SELECT COUNT(*)
+        FROM chat_item AS ci INNER JOIN chat_session AS cs ON cs.id = ci.session_id ` + where
+	var count int
+	if err := r.pool.QueryRow(ctx, query, args...).Scan(&count); err != nil {
+		return 0, mapPgError(err)
+	}
+	return count, nil
+}
+
 // SearchAll searches records and chats and returns a flat domain-discriminated list.
 func (r *Repository) SearchAll(ctx context.Context, filter repository.UnifiedSearchFilter) ([]repository.DomainSearchResult, error) {
 	query := strings.TrimSpace(filter.Query)
 	if query == "" || filter.Limit < 0 || filter.Offset < 0 {
 		return nil, repository.ErrInvalidArgument
+	}
+	if err := repository.ValidateSearchQuery(query); err != nil {
+		return nil, err
 	}
 	results := []repository.DomainSearchResult{}
 	includeRecords := filter.Domain == nil || *filter.Domain == "records"

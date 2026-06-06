@@ -11,4 +11,8 @@ var (
 	ErrForeignKeyViolation = errors.New("repository: foreign key violation")
 	// ErrInvalidArgument indicates caller-provided input is missing or malformed.
 	ErrInvalidArgument = errors.New("repository: invalid argument")
+	// ErrUnsupportedSearchOperator indicates the search query contains an
+	// all-uppercase boolean-style operator token (OR, AND, NOT, NEAR) that
+	// Personal Context's implicit-AND search does not support.
+	ErrUnsupportedSearchOperator = errors.New("repository: unsupported search operator")
 )

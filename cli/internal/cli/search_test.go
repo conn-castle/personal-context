@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -24,6 +25,24 @@ func TestSearchTableNoResults(t *testing.T) {
 	}
 }
 
+func TestSearchRejectsUppercaseOperatorButAllowsLowercase(t *testing.T) {
+	setupEnv(t)
+
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"search", "monarch OR zzznomatch"})
+	err := cmd.Execute()
+	if err == nil || !errors.Is(err, repository.ErrUnsupportedSearchOperator) {
+		t.Fatalf("expected ErrUnsupportedSearchOperator for uppercase OR, got %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"search", "research and development"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("lowercase operator word must be a literal search term, got %v", err)
+	}
+}
+
 func TestSearchWritersCoverRecordAndChatDomains(t *testing.T) {
 	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
 	projectID := "project/search"
@@ -40,6 +59,7 @@ func TestSearchWritersCoverRecordAndChatDomains(t *testing.T) {
 	chat := repository.ChatSearchResult{
 		Session: repository.ChatSession{
 			ID:             "20260514-beadfeed",
+			Source:         "codex",
 			ProjectID:      &projectID,
 			SourceDeviceID: "device/search",
 			LastActivityAt: now,
@@ -76,6 +96,28 @@ func TestSearchWritersCoverRecordAndChatDomains(t *testing.T) {
 	}
 	if out := jsonOut.String(); !strings.Contains(out, `"domain": "records"`) || !strings.Contains(out, `"domain": "chats"`) || !strings.Contains(out, `"figure_count": 1`) {
 		t.Fatalf("expected both domains in json output, got %q", out)
+	}
+	// Unified chat JSON must populate date (from the session's last activity)
+	// and a non-empty agent source so it matches what the table view shows.
+	var jsonItems []searchResultJSON
+	if err := json.Unmarshal(jsonOut.Bytes(), &jsonItems); err != nil {
+		t.Fatalf("decode search json: %v", err)
+	}
+	var chatItem *searchResultJSON
+	for i := range jsonItems {
+		if jsonItems[i].Domain == "chats" {
+			chatItem = &jsonItems[i]
+			break
+		}
+	}
+	if chatItem == nil {
+		t.Fatalf("expected a chat hit in json output, got %+v", jsonItems)
+	}
+	if chatItem.Date != "2026-05-14" {
+		t.Fatalf("expected chat date 2026-05-14, got %q", chatItem.Date)
+	}
+	if chatItem.Source != "codex" {
+		t.Fatalf("expected chat source codex, got %q", chatItem.Source)
 	}
 }
 

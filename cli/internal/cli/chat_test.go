@@ -1014,6 +1014,92 @@ func TestChatSearchJSONLimitEmitsNextCursor(t *testing.T) {
 	}
 }
 
+// TestChatSearchJSONTotalExceedsPageAndTopLevelFields verifies that the JSON
+// envelope's `total` is the full match count under the same filter (not the
+// returned page size) and that each item carries the backward-compatible
+// top-level id/source/project_id/date/score fields alongside nested `session`.
+func TestChatSearchJSONTotalExceedsPageAndTopLevelFields(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	// Three message items all matching "needle"; a one-item page must still
+	// report total=3.
+	transcript := `{
+  "id": "json-total",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [
+    {"role": "user", "content": "alpha needle"},
+    {"role": "assistant", "content": "beta needle"},
+    {"role": "user", "content": "gamma needle"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(root, "total.json"), []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "--format", "json", "--limit", "1", "needle"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat search --limit 1: %v", err)
+	}
+	body := stdout.String()
+	if !strings.Contains(body, `"score"`) {
+		t.Fatalf("expected score field in chat search JSON, got %q", body)
+	}
+	var page struct {
+		Items      []chatSearchJSON `json:"items"`
+		Total      int              `json:"total"`
+		NextCursor *string          `json:"next_cursor"`
+	}
+	if err := json.Unmarshal([]byte(body), &page); err != nil {
+		t.Fatalf("decode envelope: %v (body=%q)", err, body)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected one item per --limit 1, got %d", len(page.Items))
+	}
+	if page.Total != 3 {
+		t.Fatalf("expected total=3 (full match count), got %d", page.Total)
+	}
+	if page.NextCursor == nil || *page.NextCursor != "1" {
+		t.Fatalf("expected next_cursor=1, got %+v", page.NextCursor)
+	}
+	item := page.Items[0]
+	if item.ID == "" || item.ID != item.Session.ID {
+		t.Fatalf("expected top-level id to mirror session id, got id=%q session.id=%q", item.ID, item.Session.ID)
+	}
+	if item.Source != "codex" {
+		t.Fatalf("expected top-level source=codex, got %q", item.Source)
+	}
+	if item.Date != "2026-05-14" {
+		t.Fatalf("expected top-level date=2026-05-14, got %q", item.Date)
+	}
+}
+
+// TestChatSearchRejectsUppercaseOperatorButAllowsLowercase verifies the
+// fail-loud unsupported-operator contract: an all-uppercase OR errors clearly,
+// while a lowercase operator word is treated as a literal search term.
+func TestChatSearchRejectsUppercaseOperatorButAllowsLowercase(t *testing.T) {
+	setupEnv(t)
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "monarch OR zzznomatch"})
+	err := cmd.Execute()
+	if err == nil || !errors.Is(err, repository.ErrUnsupportedSearchOperator) {
+		t.Fatalf("expected ErrUnsupportedSearchOperator for uppercase OR, got %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "research and development"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("lowercase operator word must be a literal search term, got %v", err)
+	}
+}
+
 // TestRunChatImportBailsOnCancelledContext verifies the ctx.Err() guard
 // inside the per-file import loop: a context cancelled before the loop
 // hits its first file must short-circuit the import rather than continuing
@@ -1809,14 +1895,23 @@ func TestChatWritersAndGeneratedID(t *testing.T) {
 		t.Fatalf("expected populated chat list table to include project and truncated title, got %q", out)
 	}
 	searchOut.Reset()
+	searchProject := "chat/search-project"
 	if err := writeChatSearchTable(searchOut, []repository.ChatSearchResult{{
-		Session: repository.ChatSession{ID: "20260514-facefeed"},
+		Session: repository.ChatSession{ID: "20260514-facefeed", ProjectID: &searchProject, LastActivityAt: millisTime},
 		Item:    repository.ChatItem{Ordinal: 3, Role: "assistant", SearchText: "fallback\nsnippet"},
 	}}); err != nil {
 		t.Fatalf("writeChatSearchTable(populated) error = %v", err)
 	}
 	if out := searchOut.String(); !strings.Contains(out, "fallback snippet") {
 		t.Fatalf("expected fallback chat snippet with newline normalized, got %q", out)
+	}
+	// The chat search table must surface the same date/project disambiguators
+	// the unified `pc search` table shows.
+	if out := searchOut.String(); !strings.Contains(out, "DATE") || !strings.Contains(out, "PROJECT") {
+		t.Fatalf("expected DATE and PROJECT columns in chat search header, got %q", out)
+	}
+	if out := searchOut.String(); !strings.Contains(out, "2026-05-14") || !strings.Contains(out, searchProject) {
+		t.Fatalf("expected chat search row to include date and project, got %q", out)
 	}
 	transcriptOut := &bytes.Buffer{}
 	transcriptProject := "chat/transcript-project"
