@@ -549,7 +549,6 @@ func (r *Repository) chatSearchPredicate(filter repository.SearchChatItemsFilter
 	if filter.DateTo != nil {
 		fmt.Fprintf(&where, ` AND cs.last_activity_at <= $%d`, next)
 		args = append(args, filter.DateTo.UTC())
-		next++
 	}
 	return where.String(), args
 }
