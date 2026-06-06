@@ -1271,7 +1271,7 @@ func runChatSearch(ctx context.Context, stdout io.Writer, _ io.Writer, query str
 	}
 	defer func() { _ = stack.Close() }()
 	// Fetch one extra row beyond the requested page so we can emit a
-	// next-cursor for the JSON envelope without issuing a second COUNT.
+	// next-cursor for the JSON envelope; JSON total is counted separately.
 	filter := repository.SearchChatItemsFilter{Query: query, IncludeToolOutputs: opts.IncludeTools, Limit: opts.Limit + 1, Offset: opts.Offset}
 	if source != "" {
 		filter.Source = &source
