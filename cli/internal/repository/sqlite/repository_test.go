@@ -1368,6 +1368,9 @@ func TestSQLiteProjectPathChatAndUnifiedSearchBranches(t *testing.T) {
 	if _, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", Limit: -1}); !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected invalid unified search limit error, got %v", err)
 	}
+	if _, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "alpha OR beta"}); !errors.Is(err, repository.ErrUnsupportedSearchOperator) {
+		t.Fatalf("expected unsupported operator error from unified search, got %v", err)
+	}
 
 	// Unified date filters must trim record hits to the window. The test
 	// fixture has at least one record whose date falls outside a far-past
@@ -2466,6 +2469,10 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 		{name: "CountChatItems", run: func() error { _, err := repo.CountChatItems(ctx, repository.CountChatItemsFilter{}); return err }},
 		{name: "SearchChatItems", run: func() error {
 			_, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "x"})
+			return err
+		}},
+		{name: "CountSearchChatItems", run: func() error {
+			_, err := repo.CountSearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "x"})
 			return err
 		}},
 		{name: "SearchAll", run: func() error { _, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "x"}); return err }},
