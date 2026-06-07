@@ -56,20 +56,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: geminiSourceSessionID derives source_session_id from the file path (grandparent/parent/basename) with a stale comment claiming Gemini carries no usable session id; current Gemini session JSON does carry a stable top-level `sessionId`. Path-based identity works but is brittle (a moved/renamed tmp dir changes identity) and differs from codex/claude which key on the native id.
     Next step: Switch Gemini identity to the in-file `sessionId` only during a fresh store rebuild — it rewrites every Gemini source_session_id, so doing it incrementally would churn/duplicate existing rows. Defer until such a rebuild.
 
-- Issue 2026-06-04 t7n2v5: No backend-level test forces a real mid-transaction rollback for UpsertChatSessionWithItems
-    Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}, repositorytest
-    Description: No test exercises a genuine mid-transaction failure (after the session UPSERT + items DELETE, before commit) for UpsertChatSessionWithItems to prove Postgres/SQLite rollback leaves session updated_at and items unchanged. The contract atomicity test's Ordinal:-1 path fails validChatItemInput pre-validation before Begin, so no real DB transaction is opened; the sync-layer self-heal test only exercises the memory repo's snapshot-restore.
-    Next step: Add a backend-specific test (e.g. inject a failing exec or constraint violation between the items DELETE and commit) asserting the session row and items are unchanged after rollback. This is backend-specific (Postgres needs Docker/integration tag) and does not belong in the shared contract suite.
-
 - Issue 2026-06-04 w3h7p1: Finish CI/release workflow supply-chain hardening beyond SHA pinning
     Priority: Low. Area: .github/workflows
     Description: PR #34 pinned actions to SHAs and added `persist-credentials: false` to the read-only `ci.yml` checkouts. Two reviewer-suggested hardenings remain: `cache: false` on `setup-go` (a CI-speed vs cache-poisoning tradeoff) in `ci.yml` and `release.yml` build-release, and `persist-credentials: false` on `release.yml` checkouts. The release-pipeline change is risky because the homebrew-tap checkout (release.yml:116) feeds `peter-evans/create-pull-request`, which pushes; `release.yml` is tag-triggered and not exercised by PR CI, so the credential change can't be verified here.
     Next step: Decide the cache tradeoff explicitly; if applying `persist-credentials: false` to release.yml, verify `create-github-app-token` + `create-pull-request` still authenticate (token is passed explicitly) on a real tag run before relying on it.
-
-- Issue 2026-05-22 j4n7p3: Make screenshot fake-Chrome test scripts cross-platform
-    Priority: Low. Area: cli/internal/cli/screenshot_test.go
-    Description: `writeFakeChromeScript` and `writeFakeChromePNGScript` emit POSIX shell scripts (`#!/bin/sh`, `dd if=/dev/zero`) and are invoked by `TestScreenshotHappyPath`, `TestScreenshotDefaultOutput`, and the pre-existing `TestScreenshotPreservesRelativeFigurePaths`. CI runs Linux only (`.github/workflows/ci.yml` is ubuntu-latest), so this passes today, but a Windows test run would fail because `screenshotWithChrome` exec's the script directly.
-    Next step: Replace the shell scripts with a Go-level fake (e.g., write a minimal PNG via `os.WriteFile` and return a stubbed `screenshotWithChrome` impl), or add `runtime.GOOS == "windows"` skip guards to all callers including the pre-existing test.
 
 - Issue 2026-05-22 h9k2m4: Replace per-import hash of managed raw with schema-backed fingerprint
     Priority: Low. Area: cli/internal/cli/chat.go, schema
@@ -191,8 +181,3 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Priority: Low. Area: cli/internal/sqlite, cli/internal/config, cli/internal/filesystem
     Description: Tests in sqlite, config, and filesystem packages mutate package-level `var` stubs (syncFileFn, closeFileFn, etc.) and restore via `t.Cleanup`. Safe today (no `t.Parallel`), but adding parallel tests would cause data races.
     Next step: If the test suite grows or parallel tests are needed, refactor stubs into struct fields or interface-based dependency injection.
-
-- Issue 2026-03-06 c3d4e5: Coverage scripts run all tests twice in CI
-    Priority: Low. Area: cli/scripts
-    Description: `check_coverage.sh` and `check_coverage_per_package.sh` both run `go test` independently. Every test runs at least twice per CI job, doubling test execution time as the package count grows.
-    Next step: Merge the two scripts or have the per-package script reuse the aggregate profile.

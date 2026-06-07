@@ -74,7 +74,7 @@ go test ./...
 go build ./...
 go build -o pc ./cmd/pc
 ./scripts/check_coverage.sh 95
-./scripts/check_coverage_per_package.sh 95
+./scripts/check_coverage_per_package.sh 95 coverage.out
 go test -tags integration ./internal/repository/postgres/ -v -timeout 180s
 go test -tags integration ./internal/s3client/ -v -timeout 60s
 go test -tags integration ./internal/cloude2e/ -v -timeout 420s
@@ -273,7 +273,7 @@ go test ./...
 go build ./...
 go build -o pc ./cmd/pc
 ./scripts/check_coverage.sh 95
-./scripts/check_coverage_per_package.sh 95
+./scripts/check_coverage_per_package.sh 95 coverage.out
 go test -tags integration ./internal/repository/postgres/ -v -timeout 180s
 go test -tags integration ./internal/s3client/ -v -timeout 60s
 go test -tags integration ./internal/cloude2e/ -v -timeout 420s

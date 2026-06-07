@@ -2,42 +2,38 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func writeFakeChromeScript(t *testing.T, content string) string {
+func withFakeScreenshot(t *testing.T, render func(t *testing.T, chromePath string, htmlPath string, outputPath string) error) {
 	t.Helper()
 
-	scriptPath := filepath.Join(t.TempDir(), "fake-chrome.sh")
-	if err := os.WriteFile(scriptPath, []byte(content), 0o755); err != nil {
-		t.Fatalf("write fake chrome script: %v", err)
+	oldFindChrome := findChromeBinaryFn
+	oldScreenshot := screenshotWithChromeFn
+	t.Cleanup(func() {
+		findChromeBinaryFn = oldFindChrome
+		screenshotWithChromeFn = oldScreenshot
+	})
+
+	findChromeBinaryFn = func() (string, error) {
+		return "fake-chrome", nil
 	}
-	return scriptPath
+	screenshotWithChromeFn = func(_ context.Context, chromePath string, htmlPath string, outputPath string) error {
+		return render(t, chromePath, htmlPath, outputPath)
+	}
 }
 
-func writeFakeChromePNGScript(t *testing.T) string {
+func writeFakeScreenshotPNG(t *testing.T, outputPath string) error {
 	t.Helper()
-	return writeFakeChromeScript(t, `#!/bin/sh
-set -eu
-out=""
-for arg in "$@"; do
-  case "$arg" in
-    --screenshot=*)
-      out="${arg#--screenshot=}"
-      ;;
-  esac
-done
-if [ -z "$out" ]; then
-  echo "missing screenshot arg" >&2
-  exit 2
-fi
-printf '\211PNG\r\n\032\n' > "$out"
-dd if=/dev/zero bs=1024 count=1 >> "$out" 2>/dev/null
-`)
+
+	data := append([]byte{0x89, 0x50, 0x4E, 0x47, '\r', '\n', 0x1A, '\n'}, make([]byte, 1024)...)
+	return os.WriteFile(outputPath, data, 0o644)
 }
 
 func TestBuildRecordHTML_FullDocument(t *testing.T) {
@@ -198,11 +194,9 @@ func TestScreenshotWithChrome_InvalidBinary(t *testing.T) {
 }
 
 func TestScreenshotHappyPath(t *testing.T) {
-	old := findChromeBinaryFn
-	t.Cleanup(func() { findChromeBinaryFn = old })
-	findChromeBinaryFn = func() (string, error) {
-		return writeFakeChromePNGScript(t), nil
-	}
+	withFakeScreenshot(t, func(t *testing.T, _ string, _ string, outputPath string) error {
+		return writeFakeScreenshotPNG(t, outputPath)
+	})
 
 	homeDir := setupEnv(t)
 
@@ -258,38 +252,19 @@ func TestScreenshotHappyPath(t *testing.T) {
 }
 
 func TestScreenshotPreservesRelativeFigurePaths(t *testing.T) {
-	fakeChromePath := writeFakeChromeScript(t, `#!/bin/sh
-set -eu
-out=""
-html=""
-for arg in "$@"; do
-  case "$arg" in
-    --screenshot=*)
-      out="${arg#--screenshot=}"
-      ;;
-    file://*)
-      html="${arg#file://}"
-      ;;
-  esac
-done
-if [ -z "$out" ] || [ -z "$html" ]; then
-  echo "missing screenshot args" >&2
-  exit 2
-fi
-if grep -q 'figures/chart.png' "$html"; then
-  if [ ! -f "$(dirname "$html")/figures/chart.png" ]; then
-    echo "missing relative figure asset" >&2
-    exit 3
-  fi
-fi
-printf 'fake png' > "$out"
-`)
-
-	old := findChromeBinaryFn
-	t.Cleanup(func() { findChromeBinaryFn = old })
-	findChromeBinaryFn = func() (string, error) {
-		return fakeChromePath, nil
-	}
+	withFakeScreenshot(t, func(t *testing.T, _ string, htmlPath string, outputPath string) error {
+		html, err := os.ReadFile(htmlPath)
+		if err != nil {
+			return fmt.Errorf("read prepared html: %w", err)
+		}
+		if strings.Contains(string(html), "figures/chart.png") {
+			assetPath := filepath.Join(filepath.Dir(htmlPath), "figures", "chart.png")
+			if _, err := os.Stat(assetPath); err != nil {
+				return fmt.Errorf("missing prepared relative figure asset: %w", err)
+			}
+		}
+		return os.WriteFile(outputPath, []byte("fake png"), 0o644)
+	})
 
 	setupEnv(t)
 
@@ -328,11 +303,9 @@ printf 'fake png' > "$out"
 }
 
 func TestScreenshotDefaultOutput(t *testing.T) {
-	old := findChromeBinaryFn
-	t.Cleanup(func() { findChromeBinaryFn = old })
-	findChromeBinaryFn = func() (string, error) {
-		return writeFakeChromePNGScript(t), nil
-	}
+	withFakeScreenshot(t, func(t *testing.T, _ string, _ string, outputPath string) error {
+		return writeFakeScreenshotPNG(t, outputPath)
+	})
 
 	setupEnv(t)
 
@@ -371,6 +344,69 @@ func TestScreenshotDefaultOutput(t *testing.T) {
 	defaultFile := filepath.Join(tmpCwd, recordID+".png")
 	if _, err := os.Stat(defaultFile); err != nil {
 		t.Fatalf("default output file not created: %v", err)
+	}
+}
+
+func TestScreenshotRejectsRecordWithoutHTML(t *testing.T) {
+	withFakeScreenshot(t, func(t *testing.T, _ string, _ string, _ string) error {
+		return errors.New("screenshot renderer should not run for records without HTML")
+	})
+
+	setupEnv(t)
+
+	recordDir := t.TempDir()
+	writeDefaultProvenanceMetadata(t, recordDir)
+
+	var addOut bytes.Buffer
+	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
+	addCmd.SetArgs([]string{"records", "add", recordDir})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add without HTML: %v", err)
+	}
+	recordID := strings.TrimSpace(addOut.String())
+
+	var screenshotOut bytes.Buffer
+	screenshotCmd := NewRootCommand(RootCommandOptions{Stdout: &screenshotOut, Stderr: &bytes.Buffer{}})
+	screenshotCmd.SetArgs([]string{"screenshot", recordID, "--output", filepath.Join(t.TempDir(), "no-html.png")})
+	err := screenshotCmd.Execute()
+	if err == nil {
+		t.Fatal("expected screenshot to reject record without HTML")
+	}
+	if !strings.Contains(err.Error(), "has no record.html content") {
+		t.Fatalf("expected missing HTML error, got %v", err)
+	}
+}
+
+func TestScreenshotFailsWhenRendererDoesNotCreateOutput(t *testing.T) {
+	withFakeScreenshot(t, func(t *testing.T, _ string, _ string, _ string) error {
+		return nil
+	})
+
+	setupEnv(t)
+
+	recordDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(recordDir, "record.html"), []byte("<html><body>no output</body></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeDefaultProvenanceMetadata(t, recordDir)
+
+	var addOut bytes.Buffer
+	addCmd := NewRootCommand(RootCommandOptions{Stdout: &addOut, Stderr: &bytes.Buffer{}})
+	addCmd.SetArgs([]string{"records", "add", recordDir})
+	if err := addCmd.Execute(); err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	recordID := strings.TrimSpace(addOut.String())
+
+	var screenshotOut bytes.Buffer
+	screenshotCmd := NewRootCommand(RootCommandOptions{Stdout: &screenshotOut, Stderr: &bytes.Buffer{}})
+	screenshotCmd.SetArgs([]string{"screenshot", recordID, "--output", filepath.Join(t.TempDir(), "missing.png")})
+	err := screenshotCmd.Execute()
+	if err == nil {
+		t.Fatal("expected screenshot to fail when renderer creates no output")
+	}
+	if !strings.Contains(err.Error(), "screenshot file not created") {
+		t.Fatalf("expected missing output error, got %v", err)
 	}
 }
 

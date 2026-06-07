@@ -61,7 +61,7 @@ jobs:
         run: ./scripts/check_coverage.sh 95
 
       - name: Enforce per-package coverage >= 95%
-        run: ./scripts/check_coverage_per_package.sh 95
+        run: ./scripts/check_coverage_per_package.sh 95 coverage.out
 
       - name: Run CLI e2e tests
         run: go test ./internal/e2e
