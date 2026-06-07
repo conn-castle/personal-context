@@ -52,7 +52,7 @@ if [[ "$profile" != "" ]]; then
 			}
 		' "$profile" >"$profile_path"
 
-		if [[ "$(wc -l <"$profile_path" | tr -d ' ')" -le 1 ]]; then
+		if [[ "$(wc -l <"$profile_path" | tr -cd '0-9')" -le 1 ]]; then
 			continue
 		fi
 		checked=$((checked + 1))
