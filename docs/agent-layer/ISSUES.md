@@ -27,11 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
-- Issue 2026-06-07 h3v6n2: chat import coverage self-check re-walks and re-hashes every transcript
+- Issue 2026-06-07 h3v6n2: chat import completeness check re-walks and re-hashes every transcript
     Priority: Low. Area: cli/internal/cli/chat.go
-    Description: scanChatImportCoverage does a full pre-pass that re-walks, re-parses, and re-hashes every transcript the main import loop then processes again, roughly doubling parse+hash I/O on large stores (the very high-file-count w8k3r1 scenario the check targets). Correct, just not free.
+    Description: scanChatImportCompleteness does a full pre-pass that re-walks, re-parses, and re-hashes every transcript the main import loop then processes again, roughly doubling parse+hash I/O on large stores (the very high-file-count w8k3r1 scenario the check targets). Correct, just not free.
     Next step: Fold the unique-session set into the main scan (record (source, source_session_id) and content hashes during the existing per-file loop) instead of a separate pre-pass, then compare against the store once at the end.
-    Notes: Surfaced reviewing the w8k3r1 coverage-check PR. Deferred as out-of-scope for the tight two-issue fix; it touches the correctness-critical import loop and warrants its own change.
+    Notes: Surfaced reviewing the w8k3r1 import-completeness PR. Deferred as out-of-scope for the tight two-issue fix; it touches the correctness-critical import loop and warrants its own change.
 
 - Issue 2026-06-06 t4p8m1: FTS chat search --offset is scan-and-discard (linear deep-pagination cost)
     Priority: Low. Area: cli/internal/repository (sqlite+postgres) chat search
