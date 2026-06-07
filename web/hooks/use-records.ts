@@ -191,6 +191,8 @@ export function useRecords(): UseRecordsReturn {
   const cursorRef = useRef<string | null>(null);
   const filterParamsRef = useRef<RecordFilterParams | undefined>(undefined);
   const isFetchingMoreRef = useRef(false);
+  const recordsPageRequestSeqRef = useRef(0);
+  const recordsPageLoadingSeqRef = useRef(0);
 
   const updatePaginationState = useCallback((nextCursor: string | null) => {
     cursorRef.current = nextCursor;
@@ -198,8 +200,22 @@ export function useRecords(): UseRecordsReturn {
   }, []);
 
   const replaceRecordsPage = useCallback(
-    (data: PaginatedResponse<RecordSummary>) => {
+    (
+      data: PaginatedResponse<RecordSummary>,
+      reconcileSelectedRecord: boolean
+    ) => {
       setRecords(data.items);
+      // Only reconcile away the selection when this page is terminal
+      // (next_cursor === null), meaning data.items is the complete record set.
+      // On a non-terminal first page the selection may legitimately live on a
+      // later page that was previously loaded via fetchMore, so absence here
+      // does not imply deletion and must not clear the selection.
+      if (reconcileSelectedRecord && data.next_cursor === null) {
+        const visibleRecordIDs = new Set(data.items.map((record) => record.id));
+        setSelectedRecord((prev) =>
+          prev && !visibleRecordIDs.has(prev.id) ? null : prev
+        );
+      }
       updatePaginationState(data.next_cursor);
     },
     [updatePaginationState]
@@ -210,24 +226,68 @@ export function useRecords(): UseRecordsReturn {
     setSelectedRecord((prev) => (prev?.id === id ? null : prev));
   }, []);
 
+  const loadRecordsPage = useCallback(
+    async ({
+      params,
+      failureMessage,
+      clearError,
+      setLoading,
+      reconcileSelectedRecord,
+      errorToPreserve,
+    }: {
+      params?: RecordFilterParams;
+      failureMessage: string;
+      clearError: boolean;
+      setLoading: boolean;
+      reconcileSelectedRecord: boolean;
+      errorToPreserve?: string;
+    }) => {
+      const requestSeq = recordsPageRequestSeqRef.current + 1;
+      recordsPageRequestSeqRef.current = requestSeq;
+      cursorRef.current = null;
+      if (setLoading) {
+        recordsPageLoadingSeqRef.current = requestSeq;
+        setIsLoading(true);
+      }
+      if (clearError) {
+        setError(null);
+      }
+
+      try {
+        const data = await fetchJsonOrThrow<PaginatedResponse<RecordSummary>>(
+          `/api/records${buildQuery(params)}`,
+          failureMessage
+        );
+        if (requestSeq !== recordsPageRequestSeqRef.current) {
+          return;
+        }
+        replaceRecordsPage(data, reconcileSelectedRecord);
+        if (errorToPreserve) {
+          setError(errorToPreserve);
+        }
+      } catch (err) {
+        if (requestSeq === recordsPageRequestSeqRef.current) {
+          setError(getErrorMessage(err, failureMessage));
+        }
+      } finally {
+        if (setLoading && requestSeq === recordsPageLoadingSeqRef.current) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [replaceRecordsPage]
+  );
+
   const fetchRecords = useCallback(async (params?: RecordFilterParams) => {
     filterParamsRef.current = params;
-    cursorRef.current = null;
-    setIsLoading(true);
-    setError(null);
-
-    try {
-      const data = await fetchJsonOrThrow<PaginatedResponse<RecordSummary>>(
-        `/api/records${buildQuery(params)}`,
-        "Failed to fetch records"
-      );
-      replaceRecordsPage(data);
-    } catch (err) {
-      setError(getErrorMessage(err, "Failed to fetch records"));
-    } finally {
-      setIsLoading(false);
-    }
-  }, [replaceRecordsPage]);
+    await loadRecordsPage({
+      params,
+      failureMessage: "Failed to fetch records",
+      clearError: true,
+      setLoading: true,
+      reconcileSelectedRecord: false,
+    });
+  }, [loadRecordsPage]);
 
   const fetchMore = useCallback(async () => {
     const currentCursor = cursorRef.current;
@@ -324,12 +384,20 @@ export function useRecords(): UseRecordsReturn {
         await fetchJsonOrThrow<unknown>(path, failureMessage, { method });
         return true;
       } catch (err) {
-        setError(getErrorMessage(err, failureMessage));
-        await fetchRecords(filterParamsRef.current);
+        const mutationError = getErrorMessage(err, failureMessage);
+        setError(mutationError);
+        await loadRecordsPage({
+          params: filterParamsRef.current,
+          failureMessage: "Failed to refresh records",
+          clearError: false,
+          setLoading: true,
+          reconcileSelectedRecord: true,
+          errorToPreserve: mutationError,
+        });
         return false;
       }
     },
-    [fetchRecords, removeRecordLocally]
+    [loadRecordsPage, removeRecordLocally]
   );
 
   const deleteRecord = useCallback(async (id: string) => {
@@ -397,19 +465,14 @@ export function useRecords(): UseRecordsReturn {
   }, []);
 
   const refreshRecords = useCallback(async () => {
-    updatePaginationState(null);
-    setError(null);
-
-    try {
-      const data = await fetchJsonOrThrow<PaginatedResponse<RecordSummary>>(
-        `/api/records${buildQuery(filterParamsRef.current)}`,
-        "Failed to refresh records"
-      );
-      replaceRecordsPage(data);
-    } catch (err) {
-      setError(getErrorMessage(err, "Failed to refresh records"));
-    }
-  }, [replaceRecordsPage, updatePaginationState]);
+    await loadRecordsPage({
+      params: filterParamsRef.current,
+      failureMessage: "Failed to refresh records",
+      clearError: true,
+      setLoading: false,
+      reconcileSelectedRecord: true,
+    });
+  }, [loadRecordsPage]);
 
   return {
     records,

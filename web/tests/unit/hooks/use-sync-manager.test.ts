@@ -812,6 +812,71 @@ describe("useSyncManager", () => {
       });
       expect(onSyncData).toHaveBeenCalledTimes(1);
     });
+
+    it("expires an unconsumed self-mutation flag after 10 seconds", async () => {
+      const changesData: SyncChangesResponse = {
+        items: [
+          {
+            id: "20260309-aabbccdd",
+            date: "2026-03-09",
+            day_order: "a0",
+            html_content: "<p>External edit</p>",
+            project_id: "org/proj",
+            source_device_id: "device-a",
+            source_ref: null,
+            updated_at: "2026-03-09T10:30:00Z",
+            deleted_at: null,
+            figure_count: 0,
+            data_file_count: 0,
+          },
+        ],
+        server_now: "2026-03-09T10:30:01Z",
+      };
+      let currentVersion = 1;
+      const fetchMock = vi.fn().mockImplementation((url: string) => {
+        if (url.includes("/api/sync/version")) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                version: currentVersion,
+                updated_at: "2026-03-09T10:00:00Z",
+              }),
+          });
+        }
+        if (url.includes("/api/sync/changes")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve(changesData),
+          });
+        }
+        return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+      });
+      globalThis.fetch = fetchMock;
+
+      const onSyncData = vi.fn();
+      const { result } = renderHook(() => useSyncManager({ onSyncData }));
+
+      await act(async () => {
+        await result.current.syncNow();
+      });
+      onSyncData.mockClear();
+
+      act(() => {
+        result.current.markMutation();
+      });
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_001);
+      });
+
+      currentVersion = 2;
+      await act(async () => {
+        await result.current.syncNow();
+      });
+
+      expect(onSyncData).toHaveBeenCalledWith(changesData);
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -1028,6 +1093,37 @@ describe("useSyncManager", () => {
       expect(removedEvents).toContain("visibilitychange");
 
       removeEventListenerSpy.mockRestore();
+    });
+
+    it("does not reschedule idle polling when a queued timer callback runs after cleanup", async () => {
+      const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+      const fetchMock = mockFetchResponses({
+        version: 1,
+        updated_at: "2026-03-09T10:00:00Z",
+      });
+      globalThis.fetch = fetchMock;
+      Object.defineProperty(document, "visibilityState", {
+        value: "visible",
+        writable: true,
+        configurable: true,
+      });
+
+      const { unmount } = renderHook(() =>
+        useSyncManager({ cooldownMs: 0, idlePollMs: 100 })
+      );
+
+      const queuedCallback = setTimeoutSpy.mock.calls[0][0];
+      expect(typeof queuedCallback).toBe("function");
+
+      unmount();
+
+      await act(async () => {
+        (queuedCallback as () => void)();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
     });
   });
 
