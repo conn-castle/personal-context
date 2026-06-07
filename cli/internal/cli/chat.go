@@ -133,6 +133,16 @@ type chatImportSummary struct {
 	// (in non-deleted sessions) after the run.
 	ItemsAfterImport int `json:"items_after_import"`
 	FilesScanned     int `json:"files_scanned"`
+	// DiskSessionsFound is the number of parseable, unique chat sessions found
+	// under the selected import roots before any optional source deletion.
+	DiskSessionsFound int `json:"disk_sessions_found,omitempty"`
+	// StoreSessionsFound is the number of those disk sessions represented in
+	// the repository after import finishes.
+	StoreSessionsFound int `json:"store_sessions_found,omitempty"`
+	// MissingImportedSessions is DiskSessionsFound - StoreSessionsFound. A
+	// non-zero value means the run found parseable sessions that still are not
+	// stored after import completed.
+	MissingImportedSessions int `json:"missing_imported_sessions,omitempty"`
 	// RawSourcesCopied is the number of distinct chat sessions whose managed raw
 	// source was written this run (retained state, not per-file work).
 	RawSourcesCopied     int `json:"raw_sources_copied"`
@@ -157,6 +167,18 @@ type chatImportContentHashKey struct {
 	hash   string
 }
 
+type chatImportContentRepresentative struct {
+	chatID          string
+	source          string
+	sourceSessionID string
+	hasCWD          bool
+}
+
+type chatImportCompletenessKey struct {
+	source          string
+	sourceSessionID string
+}
+
 type chatImportSessionIndex struct {
 	byOriginalPath  map[chatImportSourcePathKey]repository.ChatSession
 	bySourceSession map[chatImportSourceSessionKey]repository.ChatSession
@@ -164,7 +186,7 @@ type chatImportSessionIndex struct {
 
 type pendingChatImport struct {
 	op           repository.ChatImportOp
-	stage        filesystem.ChatSourceStage
+	stage        *filesystem.ChatSourceStage
 	sourcePath   string
 	deleteSource bool
 	sessionIndex *chatImportSessionIndex
@@ -195,9 +217,28 @@ func (b *chatImportBatch) hasSourceSession(source string, sourceSessionID string
 	return false
 }
 
+func (b *chatImportBatch) mergePendingAttribution(representative chatImportContentRepresentative, duplicate repository.CreateChatSessionInput) bool {
+	for i := range b.entries {
+		session := &b.entries[i].op.Session.CreateChatSessionInput
+		if session.ID != representative.chatID || session.Source != representative.source || session.SourceSessionID != representative.sourceSessionID {
+			continue
+		}
+		if session.CWD == nil && duplicate.CWD != nil {
+			session.CWD = duplicate.CWD
+		}
+		if session.ProjectID == nil && duplicate.ProjectID != nil {
+			session.ProjectID = duplicate.ProjectID
+		}
+		return true
+	}
+	return false
+}
+
 func (b *chatImportBatch) discardPending() {
 	for _, entry := range b.entries {
-		_ = b.fs.DeleteChatSourceStage(entry.stage)
+		if entry.stage != nil {
+			_ = b.fs.DeleteChatSourceStage(*entry.stage)
+		}
 	}
 	b.entries = nil
 }
@@ -215,24 +256,30 @@ func (b *chatImportBatch) flush(ctx context.Context) error {
 	results, err := b.writer.WriteChatImportBatch(ctx, ops)
 	if err != nil {
 		for _, entry := range entries {
-			_ = b.fs.DeleteChatSourceStage(entry.stage)
+			if entry.stage != nil {
+				_ = b.fs.DeleteChatSourceStage(*entry.stage)
+			}
 		}
 		return fmt.Errorf("write chat import batch: %w", err)
 	}
 	for i, result := range results {
 		entry := entries[i]
-		if _, err := b.fs.PromoteChatSourceStage(entry.stage); err != nil {
-			_ = b.fs.DeleteChatSourceStage(entry.stage)
-			for j := i + 1; j < len(entries); j++ {
-				_ = b.fs.DeleteChatSourceStage(entries[j].stage)
+		if entry.stage != nil {
+			if _, err := b.fs.PromoteChatSourceStage(*entry.stage); err != nil {
+				_ = b.fs.DeleteChatSourceStage(*entry.stage)
+				for j := i + 1; j < len(entries); j++ {
+					if entries[j].stage != nil {
+						_ = b.fs.DeleteChatSourceStage(*entries[j].stage)
+					}
+				}
+				return fmt.Errorf("promote chat source for %s from staged file %s: %w", result.Session.ID, entry.stage.StagedPath, err)
 			}
-			return fmt.Errorf("promote chat source for %s from staged file %s: %w", result.Session.ID, entry.stage.StagedPath, err)
+			if b.summary.rawSourceSessions == nil {
+				b.summary.rawSourceSessions = make(map[string]struct{})
+			}
+			b.summary.rawSourceSessions[result.Session.ID] = struct{}{}
+			b.summary.RawSourcesCopied = len(b.summary.rawSourceSessions)
 		}
-		if b.summary.rawSourceSessions == nil {
-			b.summary.rawSourceSessions = make(map[string]struct{})
-		}
-		b.summary.rawSourceSessions[result.Session.ID] = struct{}{}
-		b.summary.RawSourcesCopied = len(b.summary.rawSourceSessions)
 		// items_imported is work performed: every row written this run, whether
 		// inserted into a new session, appended, or re-inserted on replace. Net
 		// state is reported separately via items_delta/items_after_import.
@@ -246,7 +293,11 @@ func (b *chatImportBatch) flush(ctx context.Context) error {
 			return err
 		}
 		if entry.deleteSource {
-			deleteImportedChatSourceIfSafe(b.summary, b.fs, result.Session.ID, entry.stage.RawSourceKey, entry.sourcePath)
+			if result.Session.RawSourceKey != nil {
+				deleteImportedChatSourceIfSafe(b.summary, b.fs, result.Session.ID, *result.Session.RawSourceKey, entry.sourcePath)
+			} else {
+				deleteOriginalChatSource(b.summary, entry.sourcePath)
+			}
 		}
 	}
 	return nil
@@ -296,6 +347,10 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 	if err != nil {
 		return err
 	}
+	completenessExpected, err := scanChatImportCompleteness(ctx, roots)
+	if err != nil {
+		return err
+	}
 	summary := chatImportSummary{}
 	batch := chatImportBatch{
 		writer:  batchWriter,
@@ -321,7 +376,7 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 		itemsBefore = before
 		// seenContentHashes collapses exact byte-identical duplicate files that
 		// are scanned under different paths within this run (round-6 Issue 6).
-		seenContentHashes := map[chatImportContentHashKey]struct{}{}
+		seenContentHashes := map[chatImportContentHashKey]chatImportContentRepresentative{}
 		for source, sourceRoots := range roots {
 			sessionIndex, err := loadChatImportSessionIndex(ctx, stack.Repo, source, deviceID)
 			if err != nil {
@@ -357,7 +412,12 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 							hadMutations = true
 						}
 						if handled {
-							seenContentHashes[chatImportContentHashKey{source: source, hash: existingHash}] = struct{}{}
+							seenContentHashes[chatImportContentHashKey{source: source, hash: existingHash}] = chatImportContentRepresentative{
+								chatID:          existing.ID,
+								source:          existing.Source,
+								sourceSessionID: existing.SourceSessionID,
+								hasCWD:          existing.CWD != nil,
+							}
 							continue
 						}
 					}
@@ -417,24 +477,6 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 							return hadMutations, fmt.Errorf("look up existing chat session: %w", lookupErr)
 						}
 					}
-					if priorSession == nil {
-						// Brand-new session: collapse exact byte-identical duplicate
-						// files scanned under a different path this run. The first
-						// file in scan order is the deterministic representative.
-						hash, hashErr := recordio.HashFile(file)
-						if hashErr != nil {
-							return hadMutations, fmt.Errorf("hash chat source %s: %w", file, hashErr)
-						}
-						hashKey := chatImportContentHashKey{source: source, hash: hash}
-						if _, dup := seenContentHashes[hashKey]; dup {
-							summary.DuplicatesSkipped++
-							if opts.DeleteSource {
-								deleteOriginalChatSource(&summary, file)
-							}
-							continue
-						}
-						seenContentHashes[hashKey] = struct{}{}
-					}
 					if session.ID == "" {
 						if priorSession != nil {
 							session.ID = priorSession.ID
@@ -444,6 +486,42 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 								return hadMutations, err
 							}
 							session.ID = id
+						}
+					}
+					if priorSession == nil {
+						// Brand-new session: collapse exact byte-identical duplicate
+						// files scanned under a different path this run. The first
+						// file in scan order is the deterministic representative, but
+						// a later Gemini duplicate can still contribute cwd/project
+						// attribution if the representative could not resolve it.
+						hash, hashErr := recordio.HashFile(file)
+						if hashErr != nil {
+							return hadMutations, fmt.Errorf("hash chat source %s: %w", file, hashErr)
+						}
+						hashKey := chatImportContentHashKey{source: source, hash: hash}
+						if representative, dup := seenContentHashes[hashKey]; dup {
+							queued, merged, err := mergeDuplicateChatImportAttribution(ctx, stack, &batch, &sessionIndex, representative, session, file, opts.DeleteSource)
+							if err != nil {
+								return hadMutations, err
+							}
+							if merged {
+								representative.hasCWD = true
+								seenContentHashes[hashKey] = representative
+							}
+							if queued {
+								hadMutations = true
+							}
+							summary.DuplicatesSkipped++
+							if opts.DeleteSource && !queued {
+								deleteOriginalChatSource(&summary, file)
+							}
+							continue
+						}
+						seenContentHashes[hashKey] = chatImportContentRepresentative{
+							chatID:          session.ID,
+							source:          session.Source,
+							sourceSessionID: session.SourceSessionID,
+							hasCWD:          chatImportHasCWD(session),
 						}
 					}
 					if err := queueReplaceChatImport(ctx, stack, &batch, &sessionIndex, session, items, file, opts.DeleteSource); err != nil {
@@ -476,13 +554,76 @@ func runChatImport(ctx context.Context, stdout io.Writer, stderr io.Writer, opts
 	}
 	summary.ItemsAfterImport = itemsAfter
 	summary.ItemsDelta = itemsAfter - itemsBefore
+	if err := applyChatImportCompleteness(ctx, stack.Repo, &summary, completenessExpected); err != nil {
+		return err
+	}
 	if hadMutations {
 		_ = runAutoSyncFn(ctx, stderr)
 	}
 	for _, warning := range summary.SourceDeleteWarnings {
 		_, _ = fmt.Fprintf(stderr, "warning: failed to delete source after import: %s\n", warning)
 	}
+	if summary.MissingImportedSessions > 0 {
+		return fmt.Errorf("chat import completeness check failed: %d of %d parseable disk sessions are missing from the store after import", summary.MissingImportedSessions, summary.DiskSessionsFound)
+	}
 	return writeIndentedJSON(stdout, summary)
+}
+
+func scanChatImportCompleteness(ctx context.Context, roots map[string][]string) (map[chatImportCompletenessKey]struct{}, error) {
+	expected := map[chatImportCompletenessKey]struct{}{}
+	seenContentHashes := map[chatImportContentHashKey]struct{}{}
+	for source, sourceRoots := range roots {
+		for _, root := range sourceRoots {
+			files, err := chatimport.TranscriptFiles(source, root)
+			if err != nil {
+				return nil, err
+			}
+			for _, file := range files {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+				session, _, err := chatimport.ParseTranscriptFile(source, file)
+				if err != nil {
+					continue
+				}
+				hash, err := recordio.HashFile(file)
+				if err != nil {
+					return nil, fmt.Errorf("hash chat source for import completeness %s: %w", file, err)
+				}
+				hashKey := chatImportContentHashKey{source: source, hash: hash}
+				if _, ok := seenContentHashes[hashKey]; ok {
+					continue
+				}
+				seenContentHashes[hashKey] = struct{}{}
+				expected[chatImportCompletenessKey{source: session.Source, sourceSessionID: session.SourceSessionID}] = struct{}{}
+			}
+		}
+	}
+	return expected, nil
+}
+
+func applyChatImportCompleteness(ctx context.Context, repo repository.Repository, summary *chatImportSummary, expected map[chatImportCompletenessKey]struct{}) error {
+	summary.DiskSessionsFound = len(expected)
+	if len(expected) == 0 {
+		return nil
+	}
+	stored := 0
+	for key := range expected {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		_, err := repo.GetChatSessionBySource(ctx, key.source, key.sourceSessionID)
+		if err == nil {
+			stored++
+			continue
+		}
+		if !errors.Is(err, repository.ErrNotFound) {
+			return fmt.Errorf("check chat import completeness for %s/%s: %w", key.source, key.sourceSessionID, err)
+		}
+	}
+	summary.StoreSessionsFound = stored
+	summary.MissingImportedSessions = len(expected) - stored
+	return nil
 }
 
 // loadChatImportSessionIndex builds the lookup tables used to skip unchanged
@@ -832,7 +973,7 @@ func queueAppendJSONLChatImport(ctx context.Context, stack *localStack, batch *c
 			ItemMode: repository.ChatImportItemModeAppend,
 			Items:    items,
 		},
-		stage:        stage,
+		stage:        &stage,
 		sourcePath:   sourcePath,
 		deleteSource: deleteSource,
 		sessionIndex: sessionIndex,
@@ -896,6 +1037,75 @@ func resolveGeminiCWD(session *repository.CreateChatSessionInput, sourcePath str
 	session.CWD = chatimport.ResolveGeminiProjectCWD(sourcePath, projectPaths, deviceID)
 }
 
+func chatImportHasCWD(session repository.CreateChatSessionInput) bool {
+	return session.CWD != nil
+}
+
+func mergeDuplicateChatImportAttribution(ctx context.Context, stack *localStack, batch *chatImportBatch, sessionIndex *chatImportSessionIndex, representative chatImportContentRepresentative, duplicate repository.CreateChatSessionInput, sourcePath string, deleteSource bool) (bool, bool, error) {
+	if duplicate.Source != "gemini" || representative.hasCWD || !chatImportHasCWD(duplicate) {
+		return false, false, nil
+	}
+	if batch.mergePendingAttribution(representative, duplicate) {
+		return false, true, nil
+	}
+	queued, err := queueChatImportAttributionBackfill(ctx, stack, batch, sessionIndex, representative, duplicate, sourcePath, deleteSource)
+	if err != nil {
+		return false, false, err
+	}
+	return queued, queued, nil
+}
+
+// queueChatImportAttributionBackfill updates only missing attribution on an
+// already-stored representative while preserving its raw-source provenance.
+func queueChatImportAttributionBackfill(ctx context.Context, stack *localStack, batch *chatImportBatch, sessionIndex *chatImportSessionIndex, representative chatImportContentRepresentative, duplicate repository.CreateChatSessionInput, sourcePath string, deleteSource bool) (bool, error) {
+	existing, err := stack.Repo.GetChatSessionBySource(ctx, representative.source, representative.sourceSessionID)
+	if err != nil {
+		return false, fmt.Errorf("look up duplicate chat representative %s/%s: %w", representative.source, representative.sourceSessionID, err)
+	}
+	session := repository.CreateChatSessionInput{
+		ID:                    existing.ID,
+		Source:                existing.Source,
+		SourceSessionID:       existing.SourceSessionID,
+		ParentSourceSessionID: existing.ParentSourceSessionID,
+		SourceDeviceID:        existing.SourceDeviceID,
+		ProjectID:             existing.ProjectID,
+		CWD:                   existing.CWD,
+		Title:                 existing.Title,
+		StartedAt:             existing.StartedAt,
+		LastActivityAt:        existing.LastActivityAt,
+		OriginalSourcePath:    existing.OriginalSourcePath,
+		RawSourceKey:          existing.RawSourceKey,
+		DeletedAt:             existing.DeletedAt,
+	}
+	changed := false
+	if session.CWD == nil && duplicate.CWD != nil {
+		session.CWD = duplicate.CWD
+		changed = true
+	}
+	if session.ProjectID == nil && duplicate.ProjectID != nil {
+		session.ProjectID = duplicate.ProjectID
+		changed = true
+	}
+	if !changed {
+		return false, nil
+	}
+	if err := batch.add(ctx, pendingChatImport{
+		op: repository.ChatImportOp{
+			Session: repository.UpsertChatSessionInput{
+				CreateChatSessionInput: session,
+				ClearDeleted:           false,
+			},
+			ItemMode: repository.ChatImportItemModeAppend,
+		},
+		sourcePath:   sourcePath,
+		deleteSource: deleteSource,
+		sessionIndex: sessionIndex,
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func queueReplaceChatImport(ctx context.Context, stack *localStack, batch *chatImportBatch, sessionIndex *chatImportSessionIndex, session repository.CreateChatSessionInput, items []repository.CreateChatItemInput, sourcePath string, deleteSource bool) error {
 	stage, err := stack.FS.CopyChatSourceToStage(session.ID, sourcePath)
 	if err != nil {
@@ -912,7 +1122,7 @@ func queueReplaceChatImport(ctx context.Context, stack *localStack, batch *chatI
 			ItemMode: repository.ChatImportItemModeReplace,
 			Items:    items,
 		},
-		stage:        stage,
+		stage:        &stage,
 		sourcePath:   sourcePath,
 		deleteSource: deleteSource,
 		sessionIndex: sessionIndex,

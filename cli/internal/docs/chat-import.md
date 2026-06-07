@@ -39,13 +39,20 @@ Work performed:
   written this run (retained state, not per-file copy operations).
 - `sources_deleted` / `source_delete_warnings` — only with `--delete-source`.
 
-Resulting state (authoritative, derived from the repository item count):
+Resulting state (authoritative, derived from repository reads after import):
 
 - `items_after_import` — absolute number of stored chat items (in non-deleted
-  sessions) after the run.
+  sessions) after the run, derived from the repository item count.
 - `items_delta` — signed net change in stored items (`after - before`). A replace
   that swaps one transcript for a larger one can show `items_imported` greater
   than `items_delta`.
+- `disk_sessions_found` — parseable, unique chat sessions found under the
+  selected import roots before optional source deletion. Empty and unparseable
+  transcript files are excluded, so this can be lower than `files_scanned`.
+- `store_sessions_found` — how many of those disk sessions are represented in
+  the repository after import finishes.
+- `missing_imported_sessions` — `disk_sessions_found - store_sessions_found`.
+  A non-zero value makes the command fail after import work completes.
 
 ## Source identity and data safety
 

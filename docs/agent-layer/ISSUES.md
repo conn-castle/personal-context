@@ -27,6 +27,12 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-07 h3v6n2: chat import completeness check re-walks and re-hashes every transcript
+    Priority: Low. Area: cli/internal/cli/chat.go
+    Description: scanChatImportCompleteness does a full pre-pass that re-walks, re-parses, and re-hashes every transcript the main import loop then processes again, roughly doubling parse+hash I/O on large stores (the very high-file-count w8k3r1 scenario the check targets). Correct, just not free.
+    Next step: Fold the unique-session set into the main scan (record (source, source_session_id) and content hashes during the existing per-file loop) instead of a separate pre-pass, then compare against the store once at the end.
+    Notes: Surfaced reviewing the w8k3r1 import-completeness PR. Deferred as out-of-scope for the tight two-issue fix; it touches the correctness-critical import loop and warrants its own change.
+
 - Issue 2026-06-06 t4p8m1: FTS chat search --offset is scan-and-discard (linear deep-pagination cost)
     Priority: Low. Area: cli/internal/repository (sqlite+postgres) chat search
     Description: `pc chat search`/`pc search` paginate the FTS path with SQL OFFSET, so deep pages re-scan and discard all skipped rows. Measured ~0.19 ms/row (`review` offset 0/500/1000/2000 = 0.19/0.36/0.56/0.75 s; `hydroponics` offset 4000 = 1.59 s vs 46 ms at 0); non-FTS `pc chat list` is constant-time by contrast. The JSON envelope already returns `next_cursor`.
@@ -38,18 +44,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: Codex forks import as distinct sessions that each carry a near-complete copy of the parent's items by design (1,111 forks from 220 parents on the reference store; codex raw dominates ~12 GB of 13 GB chats/). This inflates DB/raw storage and makes any shared-history term match the parent plus every fork. Intentional behavior per the v0.1.5 CHANGELOG — changing it needs a product/data-model decision, not a silent fix.
     Next step: Decide whether to store only a fork's divergent tail with a pointer to the parent prefix and/or de-duplicate replayed items at the item layer; capture the decision in DECISIONS.md before implementing.
     Notes: Surfaced in the v0.1.5 search-quality handoff §4. Related search-side symptom (one conversation returned many times) overlaps backlog fork-family grouping.
-
-- Issue 2026-06-04 c5k9d2: Gemini duplicate-content collapse can discard the only cwd-resolving copy
-    Priority: Low. Area: cli/internal/cli/chat.go
-    Description: When two distinct Gemini tmp dirs hold byte-identical session JSON, the brand-new dedup (seenContentHashes, chat.go ~424) keeps the first in scan order as representative without weighing cwd resolvability. If that representative resolves no cwd (no .project_root, projectHash unregistered at import) while the skipped duplicate has a .project_root, the stored row keeps cwd=NULL and a later `pc project register` cannot backfill it. Not reachable from real Gemini layout (one tmp dir per project root, so byte-identical JSON does not co-occur; a representative carrying projectHash self-heals on re-import after register).
-    Next step: When collapsing a byte-identical duplicate, prefer/merge a copy that resolves a non-nil Gemini cwd over the scan-order-first representative (requires updating the already-queued/stored representative's cwd).
-    Notes: Raised by Codex on PR #37 (P2). Deferred as out-of-scope for the attribution PR.
-
-- Issue 2026-06-04 w8k3r1: pc chat import has no coverage self-check against on-disk ground truth
-    Priority: Medium. Area: cli/internal/cli/chat.go, cli/internal/cli/doctor.go
-    Description: The importer reports files scanned / sessions created but never compares the store against a disk scan of all discovered roots, so a silent discovery gap reads as success. This class of miss left an installed store at ~14% coverage undetected because verification compared output against the same roots the importer scans (a circular check).
-    Next step: Add a coverage self-check to the import summary or `pc doctor` that counts unique sessions on disk under all discovered roots (codex rollout uuid, claude session-id + subagent, gemini basename) and reports any shortfall vs the store.
-    Notes: Discovery is registry-driven and tested; this is the systemic guard so the silent-miss class cannot recur.
 
 - Issue 2026-06-04 q2v9m6: Gemini chat session identity is path-derived, not the in-file sessionId
     Priority: Low. Area: cli/internal/chatimport/chatimport.go

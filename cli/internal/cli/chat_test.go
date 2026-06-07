@@ -1177,6 +1177,7 @@ func TestRunChatImportWritesMultipleSessionsInOneBatch(t *testing.T) {
 	origNewSQLiteRepo := newSQLiteRepoFn
 	t.Cleanup(func() { newSQLiteRepoFn = origNewSQLiteRepo })
 	var batchSizes []int
+	storedBySource := make(map[string]repository.ChatSession)
 	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
 		return &mockRepo{
 			getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
@@ -1191,12 +1192,19 @@ func TestRunChatImportWritesMultipleSessionsInOneBatch(t *testing.T) {
 			getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
 				return repository.Record{}, repository.ErrNotFound
 			},
+			getChatBySourceFn: func(_ context.Context, _ string, sourceSessionID string) (repository.ChatSession, error) {
+				session, ok := storedBySource[sourceSessionID]
+				if !ok {
+					return repository.ChatSession{}, repository.ErrNotFound
+				}
+				return session, nil
+			},
 			writeChatBatchFn: func(_ context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
 				batchSizes = append(batchSizes, len(ops))
 				results := make([]repository.ChatImportResult, 0, len(ops))
 				for _, op := range ops {
 					input := op.Session.CreateChatSessionInput
-					results = append(results, repository.ChatImportResult{Session: repository.ChatSession{
+					session := repository.ChatSession{
 						ID:                 input.ID,
 						Source:             input.Source,
 						SourceSessionID:    input.SourceSessionID,
@@ -1205,7 +1213,9 @@ func TestRunChatImportWritesMultipleSessionsInOneBatch(t *testing.T) {
 						RawSourceKey:       input.RawSourceKey,
 						StartedAt:          input.StartedAt,
 						LastActivityAt:     input.LastActivityAt,
-					}, Created: true})
+					}
+					storedBySource[input.SourceSessionID] = session
+					results = append(results, repository.ChatImportResult{Session: session, Created: true})
 				}
 				return results, nil
 			},
@@ -1728,6 +1738,34 @@ func TestChatImportRepositoryErrorBranches(t *testing.T) {
 			return nil, errors.New("batch failed")
 		},
 	}, "write chat import batch")
+
+	countCalls := 0
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		countChatItemsFn: func(context.Context, repository.CountChatItemsFilter) (int, error) {
+			countCalls++
+			if countCalls == 1 {
+				return 0, nil
+			}
+			return 0, errors.New("count after failed")
+		},
+	}, "count chat items after import")
+
+	sourceLookups := 0
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			sourceLookups++
+			if sourceLookups == 1 {
+				return repository.ChatSession{}, repository.ErrNotFound
+			}
+			return repository.ChatSession{}, errors.New("import completeness lookup failed")
+		},
+	}, "check chat import completeness")
 
 	t.Setenv(pcHomeEnvVar, homeDir)
 }

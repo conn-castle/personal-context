@@ -1014,8 +1014,8 @@ func TestChatImportBatchFlushReportsPromoteFailureAndCleansRemainingStages(t *te
 		fs:      fsClient,
 		summary: &summary,
 		entries: []pendingChatImport{
-			{op: repository.ChatImportOp{Session: repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{ID: stageA.ChatSessionID, Source: "codex", SourceSessionID: "a"}}}, stage: stageA, sessionIndex: &idx},
-			{op: repository.ChatImportOp{Session: repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{ID: stageB.ChatSessionID, Source: "codex", SourceSessionID: "b"}}}, stage: stageB, sessionIndex: &idx},
+			{op: repository.ChatImportOp{Session: repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{ID: stageA.ChatSessionID, Source: "codex", SourceSessionID: "a"}}}, stage: &stageA, sessionIndex: &idx},
+			{op: repository.ChatImportOp{Session: repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{ID: stageB.ChatSessionID, Source: "codex", SourceSessionID: "b"}}}, stage: &stageB, sessionIndex: &idx},
 		},
 	}
 	err = batch.flush(context.Background())
@@ -1211,9 +1211,10 @@ func TestChatImportBatchAddFlushesWhenFull(t *testing.T) {
 		if err != nil {
 			t.Fatalf("stage[%d]: %v", i, err)
 		}
+		staged := stage
 		entries = append(entries, pendingChatImport{
 			op:           repository.ChatImportOp{Session: repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{ID: sid, Source: "codex", SourceSessionID: fmt.Sprintf("filler-%d", i)}}},
-			stage:        stage,
+			stage:        &staged,
 			sessionIndex: &idx,
 		})
 	}
@@ -1240,7 +1241,7 @@ func TestChatImportBatchAddFlushesWhenFull(t *testing.T) {
 	}
 	if err := batch.add(context.Background(), pendingChatImport{
 		op:           repository.ChatImportOp{Session: repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{ID: finalSID, Source: "codex", SourceSessionID: "final"}}},
-		stage:        finalStage,
+		stage:        &finalStage,
 		sessionIndex: &idx,
 	}); err != nil {
 		t.Fatalf("add(full) error = %v", err)
@@ -1272,7 +1273,7 @@ func TestChatImportBatchDiscardPendingDeletesStagedSources(t *testing.T) {
 	}
 	batch := chatImportBatch{
 		fs:      fsClient,
-		entries: []pendingChatImport{{stage: stage}},
+		entries: []pendingChatImport{{stage: &stage}},
 	}
 	batch.discardPending()
 	if _, err := os.Stat(stage.StagedPath); !os.IsNotExist(err) {
