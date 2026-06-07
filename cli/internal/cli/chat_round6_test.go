@@ -344,6 +344,108 @@ func TestChatImportGeminiDuplicatePaths(t *testing.T) {
 	}
 }
 
+func TestChatImportGeminiDuplicateMergePreservesResolvedCWD(t *testing.T) {
+	setupEnv(t)
+	projectPath := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir project path: %v", err)
+	}
+	normalizedProjectPath, err := normalizeProjectPath(projectPath)
+	if err != nil {
+		t.Fatalf("normalize project path: %v", err)
+	}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "register", "chat/gemini-duplicate", normalizedProjectPath, "--device", "test-device"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project register: %v", err)
+	}
+
+	root := t.TempDir()
+	writeGeminiCopy(t, filepath.Join(root, "0hash-first", "chats", "session-C.json"), "shared attribution content")
+	namedDir := filepath.Join(root, "project-name-second")
+	writeGeminiCopy(t, filepath.Join(namedDir, "chats", "session-C.json"), "shared attribution content")
+	if err := os.WriteFile(filepath.Join(namedDir, ".project_root"), []byte(normalizedProjectPath+"\n"), 0o644); err != nil {
+		t.Fatalf("write .project_root: %v", err)
+	}
+
+	summary, _ := runChatImportAgent(t, "gemini", root)
+	if summary.SessionsCreated != 1 || summary.DuplicatesSkipped != 1 {
+		t.Fatalf("duplicate import summary = %+v, want one retained session and one duplicate", summary)
+	}
+	if summary.DiskSessionsFound != 1 || summary.DiskSessionsStored != 1 || summary.CoverageShortfall != 0 {
+		t.Fatalf("coverage summary = %+v, want 1 found / 1 stored / 0 shortfall", summary)
+	}
+	sessions := chatListJSON(t, "--project", "chat/gemini-duplicate")
+	if len(sessions) != 1 {
+		t.Fatalf("expected duplicate representative attributed to project, got %+v", sessions)
+	}
+	if sessions[0].CWD == nil || *sessions[0].CWD != normalizedProjectPath {
+		t.Fatalf("representative cwd = %v, want %q", sessions[0].CWD, normalizedProjectPath)
+	}
+}
+
+// TestChatImportGeminiDuplicateMergeBackfillsStoredRepresentative covers the
+// merge path where the byte-identical representative is an already-stored
+// CWD-null session (not a pending batch entry). A later duplicate scanned in a
+// second run carries a resolvable cwd and must backfill the stored row through
+// queueReplaceChatImport, the actual DB-write merge branch that
+// mergePendingAttribution cannot reach.
+func TestChatImportGeminiDuplicateMergeBackfillsStoredRepresentative(t *testing.T) {
+	setupEnv(t)
+	projectPath := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir project path: %v", err)
+	}
+	normalizedProjectPath, err := normalizeProjectPath(projectPath)
+	if err != nil {
+		t.Fatalf("normalize project path: %v", err)
+	}
+
+	// First run: import the representative copy alone with no resolvable cwd
+	// (no .project_root, project not registered), so it stores with cwd=NULL.
+	root := t.TempDir()
+	firstDir := filepath.Join(root, "0hash-first")
+	writeGeminiCopy(t, filepath.Join(firstDir, "chats", "session-E.json"), "stored merge content")
+	first, _ := runChatImportAgent(t, "gemini", root)
+	if first.SessionsCreated != 1 {
+		t.Fatalf("first import = %+v, want one created session", first)
+	}
+	stored := chatListJSON(t)
+	if len(stored) != 1 || stored[0].CWD != nil {
+		t.Fatalf("first import should store a single cwd-null session, got %+v", stored)
+	}
+
+	// Register the project and add a byte-identical duplicate under a different
+	// tmp dir that resolves the cwd via .project_root.
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "register", "chat/gemini-stored-merge", normalizedProjectPath, "--device", "test-device"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project register: %v", err)
+	}
+	namedDir := filepath.Join(root, "project-name-second")
+	writeGeminiCopy(t, filepath.Join(namedDir, "chats", "session-E.json"), "stored merge content")
+	if err := os.WriteFile(filepath.Join(namedDir, ".project_root"), []byte(normalizedProjectPath+"\n"), 0o644); err != nil {
+		t.Fatalf("write .project_root: %v", err)
+	}
+
+	second, _ := runChatImportAgent(t, "gemini", root)
+	// The stored representative is skipped (unchanged), and the duplicate merges
+	// into it via queueReplaceChatImport rather than creating a new session.
+	if second.SessionsCreated != 0 || second.DuplicatesSkipped != 1 {
+		t.Fatalf("second import = %+v, want zero created and one duplicate merged", second)
+	}
+	if second.DiskSessionsFound != 1 || second.DiskSessionsStored != 1 || second.CoverageShortfall != 0 {
+		t.Fatalf("coverage summary = %+v, want 1 found / 1 stored / 0 shortfall", second)
+	}
+	sessions := chatListJSON(t, "--project", "chat/gemini-stored-merge")
+	if len(sessions) != 1 {
+		t.Fatalf("expected stored representative backfilled with project attribution, got %+v", sessions)
+	}
+	if sessions[0].CWD == nil || *sessions[0].CWD != normalizedProjectPath {
+		t.Fatalf("stored representative cwd = %v, want %q", sessions[0].CWD, normalizedProjectPath)
+	}
+}
+
 func TestChatImportGeminiDuplicatePathsStayCollapsedAcrossRuns(t *testing.T) {
 	setupEnv(t)
 
@@ -375,6 +477,28 @@ func TestChatImportGeminiDuplicatePathsStayCollapsedAcrossRuns(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("expected %s deleted with --delete-source, stat err = %v", path, err)
 		}
+	}
+}
+
+func TestApplyChatImportCoverageReportsShortfall(t *testing.T) {
+	expected := map[chatImportCoverageKey]struct{}{
+		{source: "codex", sourceSessionID: "stored"}:  {},
+		{source: "codex", sourceSessionID: "missing"}: {},
+	}
+	repo := &mockRepo{
+		getChatBySourceFn: func(_ context.Context, _ string, sourceSessionID string) (repository.ChatSession, error) {
+			if sourceSessionID == "stored" {
+				return repository.ChatSession{ID: "20260606-aaaabbbb"}, nil
+			}
+			return repository.ChatSession{}, repository.ErrNotFound
+		},
+	}
+	summary := chatImportSummary{}
+	if err := applyChatImportCoverage(context.Background(), repo, &summary, expected); err != nil {
+		t.Fatalf("applyChatImportCoverage() error = %v", err)
+	}
+	if summary.DiskSessionsFound != 2 || summary.DiskSessionsStored != 1 || summary.CoverageShortfall != 1 {
+		t.Fatalf("coverage summary = %+v, want 2 found / 1 stored / 1 shortfall", summary)
 	}
 }
 

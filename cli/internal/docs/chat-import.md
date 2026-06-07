@@ -46,6 +46,13 @@ Resulting state (authoritative, derived from the repository item count):
 - `items_delta` — signed net change in stored items (`after - before`). A replace
   that swaps one transcript for a larger one can show `items_imported` greater
   than `items_delta`.
+- `disk_sessions_found` — parseable, unique chat sessions found under the
+  selected import roots before optional source deletion. Empty and unparseable
+  transcript files are excluded, so this can be lower than `files_scanned`.
+- `disk_sessions_stored` — how many of those disk sessions are represented in
+  the repository after import finishes.
+- `coverage_shortfall` — `disk_sessions_found - disk_sessions_stored`. A
+  non-zero value is also reported as a stderr warning.
 
 ## Source identity and data safety
 
