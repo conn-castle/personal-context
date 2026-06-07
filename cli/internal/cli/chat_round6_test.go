@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/conn-castle/personal-context/cli/internal/filesystem"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
@@ -499,6 +501,138 @@ func TestApplyChatImportCoverageReportsShortfall(t *testing.T) {
 	}
 	if summary.DiskSessionsFound != 2 || summary.DiskSessionsStored != 1 || summary.CoverageShortfall != 1 {
 		t.Fatalf("coverage summary = %+v, want 2 found / 1 stored / 1 shortfall", summary)
+	}
+}
+
+func TestScanChatImportCoverageCountsUniqueParseableDiskSessions(t *testing.T) {
+	root := t.TempDir()
+	body := `{"id":"coverage-session","started_at":"2026-06-06T12:00:00Z","messages":[{"role":"user","content":"count me once"}]}`
+	writeTestChatTranscript(t, root, "one.json", body)
+	writeTestChatTranscript(t, root, "duplicate.json", body)
+	writeTestChatTranscript(t, root, "bad.json", `{not-json`)
+
+	expected, err := scanChatImportCoverage(context.Background(), map[string][]string{"codex": {root}})
+	if err != nil {
+		t.Fatalf("scanChatImportCoverage() error = %v", err)
+	}
+	if len(expected) != 1 {
+		t.Fatalf("scan coverage expected %d unique parseable sessions, want 1: %+v", len(expected), expected)
+	}
+	if _, ok := expected[chatImportCoverageKey{source: "codex", sourceSessionID: "coverage-session"}]; !ok {
+		t.Fatalf("scan coverage did not include codex/coverage-session: %+v", expected)
+	}
+}
+
+func TestScanChatImportCoverageStopsAfterCancellation(t *testing.T) {
+	root := t.TempDir()
+	writeTestChatTranscript(t, root, "session.json", `{"id":"canceled-session","started_at":"2026-06-06T12:00:00Z","messages":[{"role":"user","content":"stop"}]}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	expected, err := scanChatImportCoverage(ctx, map[string][]string{"codex": {root}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("scanChatImportCoverage(canceled) error = %v, want context.Canceled", err)
+	}
+	if expected != nil {
+		t.Fatalf("scanChatImportCoverage(canceled) expected = %+v, want nil", expected)
+	}
+}
+
+func TestApplyChatImportCoveragePropagatesCancellationAndStoreErrors(t *testing.T) {
+	expected := map[chatImportCoverageKey]struct{}{
+		{source: "codex", sourceSessionID: "blocked"}: {},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	repo := &mockRepo{
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			t.Fatal("GetChatSessionBySource should not run after context cancellation")
+			return repository.ChatSession{}, nil
+		},
+	}
+	if err := applyChatImportCoverage(ctx, repo, &chatImportSummary{}, expected); !errors.Is(err, context.Canceled) {
+		t.Fatalf("applyChatImportCoverage(canceled) error = %v, want context.Canceled", err)
+	}
+
+	storeErr := errors.New("store unavailable")
+	repo = &mockRepo{
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			return repository.ChatSession{}, storeErr
+		},
+	}
+	err := applyChatImportCoverage(context.Background(), repo, &chatImportSummary{}, expected)
+	if !errors.Is(err, storeErr) || !strings.Contains(err.Error(), "check chat import coverage for codex/blocked") {
+		t.Fatalf("applyChatImportCoverage(store error) = %v, want wrapped coverage lookup error", err)
+	}
+}
+
+func TestMergeDuplicateChatImportAttributionReportsStageFailure(t *testing.T) {
+	fsClient, err := filesystem.NewClient(t.TempDir())
+	if err != nil {
+		t.Fatalf("filesystem client: %v", err)
+	}
+	cwd := "/workspace/project"
+	queued, merged, err := mergeDuplicateChatImportAttribution(
+		context.Background(),
+		&localStack{FS: fsClient},
+		&chatImportBatch{},
+		&chatImportSessionIndex{},
+		chatImportContentRepresentative{chatID: "20260606-aabbccdd", source: "gemini", sourceSessionID: "representative-session"},
+		repository.CreateChatSessionInput{Source: "gemini", CWD: &cwd},
+		nil,
+		filepath.Join(t.TempDir(), "missing.json"),
+		false,
+	)
+	if err == nil || !strings.Contains(err.Error(), "stage chat source") {
+		t.Fatalf("mergeDuplicateChatImportAttribution(stage failure) error = %v, want stage error", err)
+	}
+	if queued || merged {
+		t.Fatalf("mergeDuplicateChatImportAttribution(stage failure) queued=%t merged=%t, want both false", queued, merged)
+	}
+}
+
+func TestMergePendingAttributionBackfillsOnlyMatchingRepresentative(t *testing.T) {
+	cwd := "/workspace/project"
+	projectID := "chat/project"
+	otherCWD := "/workspace/other"
+	batch := chatImportBatch{entries: []pendingChatImport{
+		{op: repository.ChatImportOp{Session: repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260606-other",
+			Source:          "gemini",
+			SourceSessionID: "other-session",
+			CWD:             &otherCWD,
+		}}}},
+		{op: repository.ChatImportOp{Session: repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260606-representative",
+			Source:          "gemini",
+			SourceSessionID: "representative-session",
+		}}}},
+	}}
+
+	merged := batch.mergePendingAttribution(chatImportContentRepresentative{
+		chatID:          "20260606-representative",
+		source:          "gemini",
+		sourceSessionID: "representative-session",
+	}, repository.CreateChatSessionInput{CWD: &cwd, ProjectID: &projectID})
+	if !merged {
+		t.Fatal("mergePendingAttribution() = false, want true for queued representative")
+	}
+	representative := batch.entries[1].op.Session.CreateChatSessionInput
+	if representative.CWD == nil || *representative.CWD != cwd {
+		t.Fatalf("representative CWD = %v, want %q", representative.CWD, cwd)
+	}
+	if representative.ProjectID == nil || *representative.ProjectID != projectID {
+		t.Fatalf("representative project_id = %v, want %q", representative.ProjectID, projectID)
+	}
+	if got := batch.entries[0].op.Session.CWD; got == nil || *got != otherCWD {
+		t.Fatalf("non-representative CWD = %v, want unchanged %q", got, otherCWD)
+	}
+	if batch.mergePendingAttribution(chatImportContentRepresentative{
+		chatID:          "20260606-missing",
+		source:          "gemini",
+		sourceSessionID: "missing-session",
+	}, repository.CreateChatSessionInput{CWD: &cwd}) {
+		t.Fatal("mergePendingAttribution() = true for missing representative, want false")
 	}
 }
 

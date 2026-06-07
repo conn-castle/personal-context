@@ -1729,6 +1729,34 @@ func TestChatImportRepositoryErrorBranches(t *testing.T) {
 		},
 	}, "write chat import batch")
 
+	countCalls := 0
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		countChatItemsFn: func(context.Context, repository.CountChatItemsFilter) (int, error) {
+			countCalls++
+			if countCalls == 1 {
+				return 0, nil
+			}
+			return 0, errors.New("count after failed")
+		},
+	}, "count chat items after import")
+
+	sourceLookups := 0
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			sourceLookups++
+			if sourceLookups == 1 {
+				return repository.ChatSession{}, repository.ErrNotFound
+			}
+			return repository.ChatSession{}, errors.New("coverage lookup failed")
+		},
+	}, "check chat import coverage")
+
 	t.Setenv(pcHomeEnvVar, homeDir)
 }
 
