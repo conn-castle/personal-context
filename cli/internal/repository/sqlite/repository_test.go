@@ -1764,6 +1764,96 @@ func TestUpsertChatSessionWithItemsCreatesAndRollsBackItemConflict(t *testing.T)
 	}
 }
 
+func TestUpsertChatSessionWithItemsRollsBackExistingReplacementConflict(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newConcreteRepo(t)
+	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "replacement-rollback-device"}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+
+	originalText := "original rollback survivor"
+	createdSession, created, err := repo.UpsertChatSessionWithItems(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260604-11111111",
+			Source:          "codex",
+			SourceSessionID: "replacement-rollback",
+			SourceDeviceID:  "replacement-rollback-device",
+			StartedAt:       now,
+			LastActivityAt:  now,
+			CreatedAt:       &now,
+			UpdatedAt:       &now,
+		},
+		ClearDeleted: true,
+	}, []repository.CreateChatItemInput{{
+		Ordinal:   0,
+		Role:      "user",
+		ItemType:  "message",
+		Text:      &originalText,
+		CreatedAt: &now,
+	}})
+	if err != nil {
+		t.Fatalf("seed UpsertChatSessionWithItems() error = %v", err)
+	}
+	if !created {
+		t.Fatal("expected seed upsert to create the chat session")
+	}
+
+	failedUpdatedAt := now.Add(time.Hour)
+	replacementText := "replacement item must roll back"
+	_, _, err = repo.UpsertChatSessionWithItems(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              createdSession.ID,
+			Source:          "codex",
+			SourceSessionID: "replacement-rollback",
+			SourceDeviceID:  "replacement-rollback-device",
+			StartedAt:       now,
+			LastActivityAt:  failedUpdatedAt,
+			UpdatedAt:       &failedUpdatedAt,
+		},
+		ClearDeleted: true,
+	}, []repository.CreateChatItemInput{{
+		Ordinal:   0,
+		Role:      "assistant",
+		ItemType:  "message",
+		Text:      &replacementText,
+		CreatedAt: &failedUpdatedAt,
+	}, {
+		Ordinal:   0,
+		Role:      "tool",
+		ItemType:  "tool_output",
+		Text:      &replacementText,
+		CreatedAt: &failedUpdatedAt,
+	}})
+	if !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected replacement item conflict, got %v", err)
+	}
+
+	rolledBack, err := repo.GetChatSessionByID(ctx, createdSession.ID)
+	if err != nil {
+		t.Fatalf("GetChatSessionByID(after rollback) error = %v", err)
+	}
+	if !rolledBack.UpdatedAt.Equal(createdSession.UpdatedAt) {
+		t.Fatalf("session updated_at changed after rollback: got %v want %v", rolledBack.UpdatedAt, createdSession.UpdatedAt)
+	}
+
+	items, err := repo.ListChatItems(ctx, createdSession.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems(after rollback) error = %v", err)
+	}
+	if len(items) != 1 || items[0].SearchText != originalText {
+		t.Fatalf("replacement conflict did not roll back chat items: %+v", items)
+	}
+
+	results, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "survivor"})
+	if err != nil {
+		t.Fatalf("SearchChatItems(survivor) error = %v", err)
+	}
+	if len(results) != 1 || results[0].Session.ID != createdSession.ID || results[0].Item.SearchText != originalText {
+		t.Fatalf("FTS changed despite replacement rollback: %+v", results)
+	}
+}
+
 func TestRunChatImportBulkModeRestoresFTSTriggers(t *testing.T) {
 	ctx := context.Background()
 	repo, _ := newConcreteRepo(t)

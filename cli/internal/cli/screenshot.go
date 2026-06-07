@@ -19,6 +19,9 @@ import (
 // findChromeBinaryFn is the function used to locate Chrome. Variable for test overrides.
 var findChromeBinaryFn = findChromeBinary
 
+// screenshotWithChromeFn is the function used to invoke Chrome. Variable for test overrides.
+var screenshotWithChromeFn = screenshotWithChrome
+
 func newScreenshotCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	var outputFlag string
 
@@ -294,7 +297,7 @@ func runScreenshot(ctx context.Context, stdout io.Writer, _ io.Writer, id string
 	defer cleanup()
 
 	// Capture screenshot.
-	if err := screenshotWithChrome(ctx, chromePath, htmlPath, output); err != nil {
+	if err := screenshotWithChromeFn(ctx, chromePath, htmlPath, output); err != nil {
 		return err
 	}
 
