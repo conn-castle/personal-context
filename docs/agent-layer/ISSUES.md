@@ -33,6 +33,21 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Next step: Fold the unique-session set into the main scan (record (source, source_session_id) and content hashes during the existing per-file loop) instead of a separate pre-pass, then compare against the store once at the end.
     Notes: Surfaced reviewing the w8k3r1 import-completeness PR. Deferred as out-of-scope for the tight two-issue fix; it touches the correctness-critical import loop and warrants its own change.
 
+- Issue 2026-06-06 m2k7r9: fetchMore is outside the monotonic page-request sequence guard
+    Priority: Low. Area: web/hooks/use-records.ts
+    Description: `loadRecordsPage` (fetch/refresh paths) increments `recordsPageRequestSeqRef` and discards stale responses, but `fetchMore` reads/writes `cursorRef.current` and calls `updatePaginationState`/`mergeUniqueRecords` with no sequence check. A `fetchMore` in flight when a `fetchRecords`/`refreshRecords` resets page 1 can land its old page and clobber the cursor the newer load just set. Narrow window, pre-existing (original sequence-guard fix scoped only fetch/refresh).
+    Next step: Capture the request sequence at the start of `fetchMore` and discard its result if `recordsPageRequestSeqRef.current` advanced before it resolved (mirror `loadRecordsPage`).
+
+- Issue 2026-06-06 s5n3w8: selectRecord and refreshRecords reconcile race on selectedRecord
+    Priority: Low. Area: web/hooks/use-records.ts
+    Description: `selectRecord` writes `selectedRecord` with no shared ordering token, while the `replaceRecordsPage` reconcile (background `refreshRecords`) independently clears it. The two async writers can interleave: a reconcile may null a just-clicked record, or a slow `selectRecord` may resurrect a record the reconcile cleared. The functional `setState` updater narrows but does not close the window. Self-corrects on the next user action, so Low.
+    Next step: If addressed, gate detail-state writes on a shared monotonic sequence or abort token so the reconcile and selectRecord cannot interleave inconsistently.
+
+- Issue 2026-06-06 v6n8r4: GitHub reports default-branch Dependabot vulnerabilities
+    Priority: High. Area: dependency security
+    Description: GitHub reported 58 vulnerabilities on the default branch during PR #40 remote-branch cleanup (3 critical, 21 high, 30 moderate, 4 low). Details are in the repository Dependabot alerts.
+    Next step: Inspect the GitHub Dependabot alert list, upgrade affected dependencies where compatible, and record any accepted risk explicitly.
+
 - Issue 2026-06-06 t4p8m1: FTS chat search --offset is scan-and-discard (linear deep-pagination cost)
     Priority: Low. Area: cli/internal/repository (sqlite+postgres) chat search
     Description: `pc chat search`/`pc search` paginate the FTS path with SQL OFFSET, so deep pages re-scan and discard all skipped rows. Measured ~0.19 ms/row (`review` offset 0/500/1000/2000 = 0.19/0.36/0.56/0.75 s; `hydroponics` offset 4000 = 1.59 s vs 46 ms at 0); non-FTS `pc chat list` is constant-time by contrast. The JSON envelope already returns `next_cursor`.
@@ -116,35 +131,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: `handleSyncData` callback ignores the `SyncChangesResponse` data from `useSyncManager` and does a full page-1 refetch via `refreshRecords()`. This wastes the incremental `GET /api/sync/changes` API call and resets pagination on every sync.
     Next step: Either use the incremental items to merge into the local record list, or remove the `GET /api/sync/changes` fetch from `useSyncManager` and use version-triggered full refetch only.
 
-- Issue 2026-03-10 o9p0q1a: refreshRecords does not clear stale selectedRecord
-    Priority: Low. Area: web/hooks/use-records.ts
-    Description: When `refreshRecords` replaces the record list (e.g., after sync), `selectedRecord` retains stale data. If the selected record was deleted by another client, it remains visible in the detail panel while absent from navigation.
-    Next step: After `refreshRecords`, check if `selectedRecord.id` is still in the new items list. If not, clear or re-fetch it.
-
-- Issue 2026-03-10 q3r4s5a: No request cancellation between concurrent fetch/refresh operations
-    Priority: Low. Area: web/hooks/use-records.ts
-    Description: Both `fetchRecords` and `refreshRecords` write to the same `records` state and `cursorRef`. Concurrent in-flight requests can overwrite each other's results, leaving cursor and records in inconsistent states.
-    Next step: Add an `AbortController` or monotonic request ID to discard stale responses.
-
 - Issue 2026-03-10 a1b2c3a: refreshRecords does not set isLoading during background sync
     Priority: Low. Area: web/hooks/use-records.ts
     Description: `refreshRecords` (called by sync manager on version change) never sets `isLoading`. Consumers see `false` throughout the fetch, so no loading indicator is shown during background refreshes.
     Next step: Decide if this is intentional (silent refresh) or if a separate `isRefreshing` state should be exposed.
-
-- Issue 2026-03-10 b3c4d5a: selfMutationRef timing window in useSyncManager
-    Priority: Low. Area: web/hooks/use-sync-manager.ts
-    Description: `markMutation()` sets `selfMutationRef` to `true`, but it is only consumed when a version change is detected. If the S3 `_version` bump hasn't propagated when the next sync fires, the flag stays `true` and suppresses the next legitimate external version change.
-    Next step: Add a TTL or auto-clear `selfMutationRef` after ~10 seconds if no version change was observed.
-
-- Issue 2026-03-10 c5d6e7a: deleteRecord error recovery clears the error via fetchRecords re-fetch
-    Priority: Low. Area: web/hooks/use-records.ts
-    Description: When `deleteRecord` fails, it sets an error and calls `fetchRecords` to roll back optimistic state. But `fetchRecords` starts with `setError(null)`, clearing the delete error. If the re-fetch succeeds, the user never sees the delete failure message.
-    Next step: Use a separate error channel or toast for mutation failures, or skip `setError(null)` when `fetchRecords` is called as a rollback.
-
-- Issue 2026-03-10 d7e8f9a: Layer 4 idle polling recursive setTimeout without cancel guard
-    Priority: Low. Area: web/hooks/use-sync-manager.ts
-    Description: The idle polling `schedule` function recursively calls itself via `setTimeout`. If the `useEffect` re-runs while an old `tick()` is executing `doSync`, both old and new polling chains can be active concurrently. The `isSyncingRef` guard (added in Round 1) prevents double `doSync` execution but the redundant timers remain.
-    Next step: Add a `cancelled` boolean in the effect that is set `true` in the cleanup function, checked before calling `schedule()` in the recursive callback.
 
 - Issue 2026-03-10 g3h4i5a: AssetCard download/delete handlers are no-ops
     Priority: Medium. Area: web/components/record-details.tsx
