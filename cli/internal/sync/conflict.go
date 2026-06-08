@@ -102,8 +102,8 @@ func PlanFigureReconciliation(
 
 	desiredByFilename := make(map[string]repository.RecordFigure, len(desired))
 	for _, figure := range desired {
-		if strings.TrimSpace(figure.Filename) == "" || strings.TrimSpace(figure.S3Key) == "" {
-			return FigurePlan{}, fmt.Errorf("desired figure filename and s3_key are required")
+		if err := repository.ValidateRecordAssetKey("figures", recordID, figure.Filename, figure.S3Key); err != nil {
+			return FigurePlan{}, fmt.Errorf("desired figure asset key: %w", err)
 		}
 		if _, exists := desiredByFilename[figure.Filename]; exists {
 			return FigurePlan{}, fmt.Errorf("duplicate desired figure filename %q", figure.Filename)
@@ -163,12 +163,11 @@ func PlanDataFileReconciliation(
 
 	desiredByFilename := make(map[string]repository.RecordDataFile, len(desired))
 	for _, dataFile := range desired {
-		if strings.TrimSpace(dataFile.Filename) == "" ||
-			strings.TrimSpace(dataFile.S3Key) == "" ||
-			strings.TrimSpace(dataFile.Hash) == "" {
-			return DataFilePlan{}, fmt.Errorf(
-				"desired data file filename, s3_key, and hash are required",
-			)
+		if err := repository.ValidateRecordAssetKey("data", recordID, dataFile.Filename, dataFile.S3Key); err != nil {
+			return DataFilePlan{}, fmt.Errorf("desired data file asset key: %w", err)
+		}
+		if strings.TrimSpace(dataFile.Hash) == "" {
+			return DataFilePlan{}, fmt.Errorf("desired data file hash is required")
 		}
 		if _, exists := desiredByFilename[dataFile.Filename]; exists {
 			return DataFilePlan{}, fmt.Errorf("duplicate desired data file filename %q", dataFile.Filename)

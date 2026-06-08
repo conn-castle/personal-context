@@ -65,6 +65,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: geminiSourceSessionID derives source_session_id from the file path (grandparent/parent/basename) with a stale comment claiming Gemini carries no usable session id; current Gemini session JSON does carry a stable top-level `sessionId`. Path-based identity works but is brittle (a moved/renamed tmp dir changes identity) and differs from codex/claude which key on the native id.
     Next step: Switch Gemini identity to the in-file `sessionId` only during a fresh store rebuild — it rewrites every Gemini source_session_id, so doing it incrementally would churn/duplicate existing rows. Defer until such a rebuild.
 
+- Issue 2026-06-04 h5j6k7: Harden schema-level record asset key canonicality
+    Priority: Low. Area: schema
+    Description: Repository adapters now reject non-canonical record child asset keys, but canonical SQLite/Postgres schema artifacts still enforce only `figures/` and `data/` prefixes. Direct database writes can still persist keys outside `{kind}/{record_id}/{filename}` until schema constraints are tightened through the migration system.
+    Next step: Add dialect-appropriate schema constraints or triggers for exact child asset key canonicality when schema migrations are next extended; keep repository validation as the runtime guard meanwhile.
+
 - Issue 2026-06-04 w3h7p1: Finish CI/release workflow supply-chain hardening beyond SHA pinning
     Priority: Low. Area: .github/workflows
     Description: PR #34 pinned actions to SHAs and added `persist-credentials: false` to the read-only `ci.yml` checkouts. Two reviewer-suggested hardenings remain: `cache: false` on `setup-go` (a CI-speed vs cache-poisoning tradeoff) in `ci.yml` and `release.yml` build-release, and `persist-credentials: false` on `release.yml` checkouts. The release-pipeline change is risky because the homebrew-tap checkout (release.yml:116) feeds `peter-evans/create-pull-request`, which pushes; `release.yml` is tag-triggered and not exercised by PR CI, so the credential change can't be verified here.
@@ -90,16 +95,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: `syncRegistries` re-uploads every project path on every sync (no `since` filter and `UpsertProjectPath` uses `INSERT OR IGNORE`). Project paths therefore cannot be removed via sync — a path deleted on device A still influences chat project-id matching on device B forever — and cost is O(paths × sync-passes).
     Next step: Decide between (a) adding `deleted_at` to `project_paths` with tombstone propagation, or (b) documenting one-way insert-only semantics and exposing `pc project paths prune`. Add a `since` filter on `ListProjectPaths` for incremental sync regardless.
 
-- Issue 2026-05-17 d4n6m2: Chat raw-source pull writes to disk before metadata upsert
-    Priority: Medium. Area: cli/internal/sync/service.go
-    Description: `transferChatRawSource` runs upload/download before `UpsertChatSession` in both directions. On push that ordering prevents advertising a key whose object is missing; on pull it inverts the rationale, so a metadata upsert failure can leave the downloaded file under `chats/raw/{id}/source.ext` with no DB row referencing it. Doctor flags it; the next successful sync self-heals; in between, lifecycle operations cannot clean it up.
-    Next step: Split push and pull ordering so pull upserts metadata first, then writes the local raw file; or wrap pull metadata + raw write in a single transactional helper.
-
-- Issue 2026-05-11 v2w3x4: Legacy sync lock files still require manual recovery
-    Priority: Medium. Area: cli/internal/syncengine
-    Description: New sync locks include JSON metadata and can recover stale same-host dead PIDs, but pre-metadata literal locks (`locked\n`) and other unparseable lock files remain blocking because they cannot be safely attributed to a dead process.
-    Next step: Add user-facing `pc doctor` guidance or a narrowly-scoped recovery command that reports the lock path and requires explicit confirmation before removing unparseable lock files.
-
 - Issue 2026-05-11 q8r9s0: Snapshot import and restore-db replacement paths are not atomic
     Priority: High. Area: cli/internal/cli/snapshot_support.go
     Description: `pc import` and `pc restore-db` can still mutate earlier database/file sections before a later record or filesystem failure occurs, so a mid-operation error can leave users with a partial restore despite chat raw-source rollback and upfront chat source-identity validation.
@@ -109,11 +104,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Priority: Medium. Area: web/components/spreadsheet-viewer.tsx
     Description: Selecting multiple projects fetches an unfiltered page from the API and filters it client-side, so matching records beyond the current unfiltered page can be hidden and pagination counts/cursors do not represent the selected projects.
     Next step: Decide whether the API should support multi-project filters or whether the UI should constrain project filtering to the server-supported single-project/all modes; then add component and hook tests for the chosen behavior.
-
-- Issue 2026-05-11 h5j6k7: Repository layer accepts non-canonical child s3_key values
-    Priority: Medium. Area: cli/internal/repository, schema
-    Description: Postgres schema checks only require `figures/` or `data/` prefixes, and repository adapters pass caller-provided child `s3_key` values through. Targeted fetch now rejects bad data-file keys, but central create/update paths can still persist paths that do not match the canonical `{kind}/{record_id}/{filename}` form.
-    Next step: Centralize child asset key derivation/validation before repository writes for figures and data files, then strengthen schema checks through the migration system when migrations are available.
 
 - Issue 2026-05-10 f1a2l3p: `pc fetch --all` is sequential; large datasets pay full round-trip per file
     Priority: Low. Area: cli/internal/cli/fetch.go
@@ -161,7 +151,12 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: `runEdit` and `runAdd` track mutation state with boolean flags and deferred rollback closures instead of wrapping multi-step DB operations in a transaction. This is fragile — a crash between DB writes and file operations leaves inconsistent state. The repository interface lacks transaction support by design (Phase 2 decision).
     Next step: When transaction support is added to the repository interface (Phase 6 sync or earlier), refactor edit/add to use proper DB transactions for the multi-step write sequences.
 
-- Issue 2026-03-06 b2c3d4: Package-level test function variables unsafe with t.Parallel
-    Priority: Low. Area: cli/internal/{sqlite,config,filesystem,cli}
-    Description: Tests in sqlite, config, filesystem, and screenshot CLI paths mutate package-level `var` stubs (`syncFileFn`, `closeFileFn`, `screenshotWithChromeFn`, etc.) and restore via `t.Cleanup`. Safe today (no `t.Parallel`), but adding parallel tests would cause data races.
-    Next step: If the test suite grows or parallel tests are needed, refactor stubs into struct fields or interface-based dependency injection.
+- Issue 2026-03-06 c3d4e5: Coverage scripts run all tests twice in CI
+    Priority: Low. Area: cli/scripts
+    Description: `check_coverage.sh` and `check_coverage_per_package.sh` both run `go test` independently. Every test runs at least twice per CI job, doubling test execution time as the package count grows.
+    Next step: Merge the two scripts or have the per-package script reuse the aggregate profile.
+
+- Issue 2026-03-06 b2c3d4: CLI package-level test function variables unsafe with t.Parallel
+    Priority: Low. Area: cli/internal/cli
+    Description: CLI tests still mutate package-level stubs such as `resolveHomeDirFn`, `screenshotWithChromeFn`, and cloud setup hooks, then restore via `t.Cleanup`. Safe today because cli package tests are not parallel, but adding parallel tests would cause data races.
+    Next step: If CLI tests need parallelism, refactor the remaining CLI command stubs into command-scoped dependencies or instance hooks.

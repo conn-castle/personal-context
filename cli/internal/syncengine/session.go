@@ -69,6 +69,14 @@ type lockFileMetadata struct {
 	StartedAt time.Time `json:"started_at"`
 }
 
+// LockFileInspection reports whether a lock file exists and whether its
+// content is parseable lock metadata.
+type LockFileInspection struct {
+	Path        string
+	Exists      bool
+	HasMetadata bool
+}
+
 // NewCursorStore constructs a last-sync store rooted at the given .pc directory.
 func NewCursorStore(pcDir string) (*CursorStore, error) {
 	if strings.TrimSpace(pcDir) == "" {
@@ -261,6 +269,24 @@ func AcquireFileLock(path string) (*FileLock, error) {
 		return nil, ErrSyncLocked
 	}
 	return nil, fmt.Errorf("create sync lock %s after stale recovery: %w", path, err)
+}
+
+// InspectFileLock reads a sync lock without acquiring or modifying it.
+func InspectFileLock(path string) (LockFileInspection, error) {
+	if strings.TrimSpace(path) == "" {
+		return LockFileInspection{}, fmt.Errorf("lock path is required")
+	}
+	inspection := LockFileInspection{Path: path}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return inspection, nil
+		}
+		return LockFileInspection{}, fmt.Errorf("read sync lock %s: %w", path, err)
+	}
+	inspection.Exists = true
+	_, inspection.HasMetadata = parseLockFileMetadata(data)
+	return inspection, nil
 }
 
 func acquireLockOperationGuard(lockPath string) (*lockOperationGuard, error) {

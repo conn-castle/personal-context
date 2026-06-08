@@ -19,11 +19,33 @@ const (
 // window used by `pc gc` when gc_retention_days is not set in config.
 const DefaultGCRetentionDays = 30
 
-var (
-	chmodFileFn = func(f *os.File, mode os.FileMode) error { return f.Chmod(mode) }
-	syncFileFn  = func(f *os.File) error { return f.Sync() }
-	closeFileFn = func(f *os.File) error { return f.Close() }
-)
+type fileWriteHooks struct {
+	chmodFile func(*os.File, os.FileMode) error
+	syncFile  func(*os.File) error
+	closeFile func(*os.File) error
+}
+
+func defaultFileWriteHooks() fileWriteHooks {
+	return fileWriteHooks{
+		chmodFile: func(f *os.File, mode os.FileMode) error { return f.Chmod(mode) },
+		syncFile:  func(f *os.File) error { return f.Sync() },
+		closeFile: func(f *os.File) error { return f.Close() },
+	}
+}
+
+func (h fileWriteHooks) withDefaults() fileWriteHooks {
+	defaults := defaultFileWriteHooks()
+	if h.chmodFile == nil {
+		h.chmodFile = defaults.chmodFile
+	}
+	if h.syncFile == nil {
+		h.syncFile = defaults.syncFile
+	}
+	if h.closeFile == nil {
+		h.closeFile = defaults.closeFile
+	}
+	return h
+}
 
 // Mode identifies whether the config is local-only or cloud-enabled.
 type Mode string
@@ -52,16 +74,21 @@ type Config struct {
 // Store reads and writes config under ~/personal-context/.pc/config.json.
 type Store struct {
 	homeDir string
+	hooks   fileWriteHooks
 }
 
 // NewStore creates a config store rooted at homeDir.
 // Args: homeDir is the user home directory path.
 // Returns: a config store or an error when homeDir is empty.
 func NewStore(homeDir string) (Store, error) {
+	return newStoreWithHooks(homeDir, defaultFileWriteHooks())
+}
+
+func newStoreWithHooks(homeDir string, hooks fileWriteHooks) (Store, error) {
 	if strings.TrimSpace(homeDir) == "" {
 		return Store{}, fmt.Errorf("home directory is required")
 	}
-	return Store{homeDir: homeDir}, nil
+	return Store{homeDir: homeDir, hooks: hooks.withDefaults()}, nil
 }
 
 // Path returns the absolute config file path.
@@ -131,7 +158,7 @@ func (s Store) Write(cfg Config) error {
 	}
 	content = append(content, '\n')
 
-	if err := writeFileAtomically(path, content, configFilePermission); err != nil {
+	if err := writeFileAtomically(path, content, configFilePermission, s.hooks); err != nil {
 		return err
 	}
 
@@ -140,7 +167,8 @@ func (s Store) Write(cfg Config) error {
 
 // writeFileAtomically writes content to a temp file in the target directory
 // and renames it into place to guarantee all-or-nothing replacement.
-func writeFileAtomically(path string, content []byte, permission os.FileMode) error {
+func writeFileAtomically(path string, content []byte, permission os.FileMode, hooks fileWriteHooks) error {
+	hooks = hooks.withDefaults()
 	dir := filepath.Dir(path)
 	tempFile, err := os.CreateTemp(dir, ".config-*.tmp")
 	if err != nil {
@@ -154,7 +182,7 @@ func writeFileAtomically(path string, content []byte, permission os.FileMode) er
 		}
 	}()
 
-	if err := chmodFileFn(tempFile, permission); err != nil {
+	if err := hooks.chmodFile(tempFile, permission); err != nil {
 		_ = tempFile.Close()
 		return fmt.Errorf("set temp config permissions %s: %w", tempPath, err)
 	}
@@ -162,11 +190,11 @@ func writeFileAtomically(path string, content []byte, permission os.FileMode) er
 		_ = tempFile.Close()
 		return fmt.Errorf("write temp config %s: %w", tempPath, err)
 	}
-	if err := syncFileFn(tempFile); err != nil {
+	if err := hooks.syncFile(tempFile); err != nil {
 		_ = tempFile.Close()
 		return fmt.Errorf("sync temp config %s: %w", tempPath, err)
 	}
-	if err := closeFileFn(tempFile); err != nil {
+	if err := hooks.closeFile(tempFile); err != nil {
 		return fmt.Errorf("close temp config %s: %w", tempPath, err)
 	}
 

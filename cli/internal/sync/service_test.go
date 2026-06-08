@@ -280,6 +280,111 @@ func TestSyncChangedChatsRetriesAfterAtomicItemWriteFailure(t *testing.T) {
 	}
 }
 
+func TestSyncChangedChatsPullDoesNotDownloadRawSourceBeforeMetadataUpsert(t *testing.T) {
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	rawKey := "chats/raw/20260517-aabbccdd/source.jsonl"
+	source := newMemoryRepo(nil)
+	source.chatSessions["20260517-aabbccdd"] = repository.ChatSession{
+		ID:              "20260517-aabbccdd",
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		RawSourceKey:    &rawKey,
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	target := newMemoryRepo(nil)
+	target.upsertChatSessionErr = errors.New("metadata write failed")
+	rawTransferCalled := false
+	rawTransfer := func(context.Context, string, repository.ChatSession, *chatRawSyncReport) error {
+		rawTransferCalled = true
+		return nil
+	}
+
+	err := syncChangedChatsDirected(context.Background(), time.Time{}, "pull", source, target, WinnerCloud, rawTransfer, nil)
+	if err == nil || !strings.Contains(err.Error(), "pull chat session/items 20260517-aabbccdd") {
+		t.Fatalf("expected metadata upsert error, got %v", err)
+	}
+	if rawTransferCalled {
+		t.Fatal("raw transfer ran before pull metadata upsert failure")
+	}
+}
+
+func TestSyncChangedChatsPullRetriesRawSourceAfterPostUpsertTransferFailure(t *testing.T) {
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	rawKey := "chats/raw/20260517-aabbccdd/source.jsonl"
+	source := newMemoryRepo(nil)
+	source.chatSessions["20260517-aabbccdd"] = repository.ChatSession{
+		ID:              "20260517-aabbccdd",
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		RawSourceKey:    &rawKey,
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	target := newMemoryRepo(nil)
+
+	rawTransferCalls := 0
+	rawTransfer := func(context.Context, string, repository.ChatSession, *chatRawSyncReport) error {
+		rawTransferCalls++
+		if rawTransferCalls == 1 {
+			return errors.New("download failed after metadata upsert")
+		}
+		return nil
+	}
+
+	err := syncChangedChatsDirected(context.Background(), time.Time{}, "pull", source, target, WinnerCloud, rawTransfer, nil)
+	if err == nil || !strings.Contains(err.Error(), "download failed after metadata upsert") {
+		t.Fatalf("expected raw transfer error, got %v", err)
+	}
+	if _, ok := target.chatSessions["20260517-aabbccdd"]; !ok {
+		t.Fatal("expected metadata to be present after first failed raw transfer")
+	}
+
+	if err := syncChangedChatsDirected(context.Background(), time.Time{}, "pull", source, target, WinnerCloud, rawTransfer, nil); err != nil {
+		t.Fatalf("expected retry raw transfer to succeed, got %v", err)
+	}
+	if rawTransferCalls != 2 {
+		t.Fatalf("rawTransferCalls = %d, want 2", rawTransferCalls)
+	}
+}
+
+func TestSyncChangedChatsPushDoesNotUploadRawSourceForEqualMetadata(t *testing.T) {
+	now := time.Date(2026, 5, 17, 12, 0, 0, 0, time.UTC)
+	rawKey := "chats/raw/20260517-aabbccdd/source.jsonl"
+	source := newMemoryRepo(nil)
+	source.chatSessions["20260517-aabbccdd"] = repository.ChatSession{
+		ID:              "20260517-aabbccdd",
+		Source:          "codex",
+		SourceSessionID: "source",
+		SourceDeviceID:  "device",
+		RawSourceKey:    &rawKey,
+		StartedAt:       now,
+		LastActivityAt:  now,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	target := newMemoryRepo(nil)
+	target.chatSessions["20260517-aabbccdd"] = source.chatSessions["20260517-aabbccdd"]
+	rawTransferCalled := false
+	rawTransfer := func(context.Context, string, repository.ChatSession, *chatRawSyncReport) error {
+		rawTransferCalled = true
+		return nil
+	}
+
+	if err := syncChangedChatsDirected(context.Background(), time.Time{}, "push", source, target, WinnerLocal, rawTransfer, nil); err != nil {
+		t.Fatalf("syncChangedChatsDirected(push equal metadata) error = %v", err)
+	}
+	if rawTransferCalled {
+		t.Fatal("push transferred raw source for equal metadata")
+	}
+}
+
 func TestSyncChangedChatsReplacesItemsAndSkipsOlderSource(t *testing.T) {
 	now := time.Date(2026, 5, 14, 14, 0, 0, 0, time.UTC)
 	source := newMemoryRepo(nil)
@@ -1066,7 +1171,7 @@ func TestSyncPushFigureCreateUpdateDeleteOnCloud(t *testing.T) {
 		},
 		Figures: []repository.RecordFigure{
 			{RecordID: recordID, Filename: "new.png", S3Key: "figures/" + recordID + "/new.png"},
-			{RecordID: recordID, Filename: "updated.png", S3Key: "figures/" + recordID + "/updated-v2.png"},
+			{RecordID: recordID, Filename: "updated.png", S3Key: "figures/" + recordID + "/updated.png"},
 		},
 	}
 	// Cloud has: updated.png (existing, different s3key), old.png (to be deleted)
@@ -1095,7 +1200,7 @@ func TestSyncPushFigureCreateUpdateDeleteOnCloud(t *testing.T) {
 		t.Fatalf("uploaded new figure = %q, want %q", got, "NEW-FIG")
 	}
 	// updated.png should be uploaded with new s3 key; old s3 key should be deleted.
-	if got := objects.objects["figures/"+recordID+"/updated-v2.png"]; got != "UPDATED-FIG" {
+	if got := objects.objects["figures/"+recordID+"/updated.png"]; got != "UPDATED-FIG" {
 		t.Fatalf("uploaded updated figure = %q, want %q", got, "UPDATED-FIG")
 	}
 	if _, exists := objects.objects["figures/"+recordID+"/updated-v1.png"]; exists {
@@ -1128,7 +1233,7 @@ func TestSyncPushDataFileCreateUpdateDeleteOnCloud(t *testing.T) {
 		DataFiles: []repository.RecordDataFile{
 			{RecordID: recordID, Filename: "new.csv", S3Key: "data/" + recordID + "/new.csv",
 				Size: 5, Hash: strings.Repeat("a", 64)},
-			{RecordID: recordID, Filename: "updated.csv", S3Key: "data/" + recordID + "/updated-v2.csv",
+			{RecordID: recordID, Filename: "updated.csv", S3Key: "data/" + recordID + "/updated.csv",
 				Size: 12, Hash: strings.Repeat("b", 64)},
 		},
 	}
@@ -1421,11 +1526,11 @@ func TestSyncPullUpdatesLocalDataFilesAndFigures(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.RecordFigure{
-			{RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot-v2.png",
+			{RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot.png",
 				AltText: strPtr("new alt")},
 		},
 		DataFiles: []repository.RecordDataFile{
-			{RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics-v2.csv",
+			{RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics.csv",
 				Size: 10, Hash: strings.Repeat("b", 64), Description: strPtr("new desc")},
 		},
 	}
@@ -1433,7 +1538,7 @@ func TestSyncPullUpdatesLocalDataFilesAndFigures(t *testing.T) {
 	service, localRepo, _, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	writeLocalAsset(t, localFS, true, recordID, "plot.png", "OLD-FIG")
 	writeLocalAsset(t, localFS, false, recordID, "metrics.csv", "OLD-DATA")
-	objects.objects["figures/"+recordID+"/plot-v2.png"] = "NEW-FIG"
+	objects.objects["figures/"+recordID+"/plot.png"] = "NEW-FIG"
 
 	if err := service.Sync(context.Background()); err != nil {
 		t.Fatalf("Sync() error = %v", err)
@@ -1555,7 +1660,7 @@ func TestSyncPushErrorsOnCloudUpdateRecordFigureFailure(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.RecordFigure{{
-			RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot-v2.png",
+			RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot.png",
 		}},
 	}
 	cloudBundle := RecordBundle{
@@ -1721,7 +1826,7 @@ func TestSyncPushErrorsOnCloudUpdateRecordDataFileFailure(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.RecordDataFile{{
-			RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics-v2.csv",
+			RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
@@ -1839,14 +1944,14 @@ func TestSyncPullErrorsOnLocalUpdateRecordFigureFailure(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.RecordFigure{{
-			RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot-v2.png",
+			RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot.png",
 			AltText: strPtr("new"),
 		}},
 	}
 
 	service, _, _, localFS, objects, _ := newTestService(t, []RecordBundle{localBundle}, []RecordBundle{cloudBundle})
 	writeLocalAsset(t, localFS, true, recordID, "plot.png", "OLD")
-	objects.objects["figures/"+recordID+"/plot-v2.png"] = "NEW"
+	objects.objects["figures/"+recordID+"/plot.png"] = "NEW"
 	localRepo := service.localRepo.(*memoryRepo)
 	localRepo.updateRecordFigureErr = fmt.Errorf("local update figure denied")
 
@@ -1947,7 +2052,7 @@ func TestSyncPullErrorsOnLocalUpdateRecordDataFileFailure(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.RecordDataFile{{
-			RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics-v2.csv",
+			RecordID: recordID, Filename: "metrics.csv", S3Key: "data/" + recordID + "/metrics.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
@@ -2061,7 +2166,7 @@ func TestSyncPullDataFileUpdateWithFilenameChange(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base,
 		},
 		DataFiles: []repository.RecordDataFile{{
-			ID: 1, RecordID: recordID, Filename: "old-data.csv", S3Key: "data/" + recordID + "/data.csv",
+			ID: 1, RecordID: recordID, Filename: "old-data.csv", S3Key: "data/" + recordID + "/old-data.csv",
 			Size: 5, Hash: strings.Repeat("a", 64),
 		}},
 	}
@@ -2074,7 +2179,7 @@ func TestSyncPullDataFileUpdateWithFilenameChange(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.RecordDataFile{{
-			RecordID: recordID, Filename: "old-data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
+			RecordID: recordID, Filename: "old-data.csv", S3Key: "data/" + recordID + "/old-data.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
@@ -2533,7 +2638,7 @@ func TestSyncPullDataFileUpdateWithFilenameRename(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.RecordDataFile{
-			{RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
+			{RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 				Size: 10, Hash: strings.Repeat("b", 64)},
 		},
 	}
@@ -2903,7 +3008,7 @@ func TestSyncPushErrorsWhenMissingLocalBinaryWouldChangeDataFileS3Key(t *testing
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.RecordDataFile{{
-			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
@@ -2973,7 +3078,7 @@ func TestSyncPushErrorsOnDataFileUpdateUploadFailure(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.RecordDataFile{{
-			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
@@ -3015,7 +3120,7 @@ func TestSyncPushErrorsOnDataFileUpdateDeleteOldS3Failure(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.RecordDataFile{{
-			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
@@ -3104,7 +3209,7 @@ func TestSyncPushErrorsOnFigureUpdateDeleteOldS3Failure(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		Figures: []repository.RecordFigure{{
-			RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot-v2.png",
+			RecordID: recordID, Filename: "plot.png", S3Key: "figures/" + recordID + "/plot.png",
 		}},
 	}
 	cloudBundle := RecordBundle{
@@ -3180,7 +3285,7 @@ func TestSyncPushErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.RecordDataFile{{
-			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
@@ -3304,7 +3409,7 @@ func TestSyncPullErrorsOnDataFileUpdateResolvePathFailure(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.RecordDataFile{{
-			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
+			RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 			Size: 10, Hash: strings.Repeat("b", 64),
 		}},
 	}
@@ -3487,8 +3592,8 @@ func TestSyncPullErrorsOnFigurePlanReconciliationWithInvalidDesired(t *testing.T
 	if err == nil {
 		t.Fatal("expected error from PlanFigureReconciliation with whitespace S3Key")
 	}
-	if !strings.Contains(err.Error(), "s3_key are required") {
-		t.Fatalf("error = %q, want to contain 's3_key are required'", err.Error())
+	if !strings.Contains(err.Error(), "s3_key is required") {
+		t.Fatalf("error = %q, want to contain 's3_key is required'", err.Error())
 	}
 }
 
@@ -3518,8 +3623,8 @@ func TestSyncPushErrorsOnFigurePlanReconciliationWithInvalidDesired(t *testing.T
 	if err == nil {
 		t.Fatal("expected error from PlanFigureReconciliation with whitespace S3Key")
 	}
-	if !strings.Contains(err.Error(), "s3_key are required") {
-		t.Fatalf("error = %q, want to contain 's3_key are required'", err.Error())
+	if !strings.Contains(err.Error(), "s3_key is required") {
+		t.Fatalf("error = %q, want to contain 's3_key is required'", err.Error())
 	}
 }
 
@@ -3549,8 +3654,8 @@ func TestSyncPullErrorsOnDataFilePlanReconciliationWithInvalidDesired(t *testing
 	if err == nil {
 		t.Fatal("expected error from PlanDataFileReconciliation with whitespace hash")
 	}
-	if !strings.Contains(err.Error(), "hash are required") {
-		t.Fatalf("error = %q, want to contain 'hash are required'", err.Error())
+	if !strings.Contains(err.Error(), "hash is required") {
+		t.Fatalf("error = %q, want to contain 'hash is required'", err.Error())
 	}
 }
 
@@ -3580,8 +3685,8 @@ func TestSyncPushErrorsOnDataFilePlanReconciliationWithInvalidDesired(t *testing
 	if err == nil {
 		t.Fatal("expected error from PlanDataFileReconciliation with whitespace hash")
 	}
-	if !strings.Contains(err.Error(), "hash are required") {
-		t.Fatalf("error = %q, want to contain 'hash are required'", err.Error())
+	if !strings.Contains(err.Error(), "hash is required") {
+		t.Fatalf("error = %q, want to contain 'hash is required'", err.Error())
 	}
 }
 
@@ -3766,7 +3871,7 @@ func TestSyncPullErrorsOnDataFileUpdateRemoveFileFailure(t *testing.T) {
 			CreatedAt:   base, UpdatedAt: base.Add(5 * time.Minute),
 		},
 		DataFiles: []repository.RecordDataFile{
-			{RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data-v2.csv",
+			{RecordID: recordID, Filename: "data.csv", S3Key: "data/" + recordID + "/data.csv",
 				Size: 10, Hash: strings.Repeat("b", 64)},
 		},
 	}
@@ -3989,6 +4094,7 @@ type memoryRepo struct {
 	listChatItemsErr           error
 	maxChatItemOrdinalErr      error
 	createChatItemErr          error
+	upsertChatSessionErr       error
 	replaceChatItemsErr        error
 	getChatBySourceErr         error
 }
@@ -4473,6 +4579,9 @@ func (m *memoryRepo) UpsertDeviceForImport(_ context.Context, device repository.
 	return true, nil
 }
 func (m *memoryRepo) UpsertChatSession(_ context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error) {
+	if m.upsertChatSessionErr != nil {
+		return repository.ChatSession{}, false, m.upsertChatSessionErr
+	}
 	created := true
 	for id, existing := range m.chatSessions {
 		if existing.Source == input.Source && existing.SourceSessionID == input.SourceSessionID {

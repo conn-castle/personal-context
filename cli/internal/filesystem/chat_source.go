@@ -147,8 +147,9 @@ func (c *Client) CopyChatSourceToStage(chatSessionID string, sourcePath string) 
 		return ChatSourceStage{}, fmt.Errorf("create staged chat source %s: %w", stagedPath, err)
 	}
 	written, copyErr := io.Copy(dstFile, srcFile)
-	syncErr := syncFileFn(dstFile)
-	closeErr := closeFileFn(dstFile)
+	hooks := c.hooks.withDefaults()
+	syncErr := hooks.syncFile(dstFile)
+	closeErr := hooks.closeFile(dstFile)
 	if copyErr != nil || syncErr != nil || closeErr != nil {
 		_ = os.RemoveAll(stageDir)
 		if copyErr != nil {
@@ -247,7 +248,7 @@ func (c *Client) PromoteChatSourceStage(stage ChatSourceStage) (StoredFile, erro
 		return StoredFile{}, fmt.Errorf("stat active chat raw dir: %w", err)
 	}
 
-	if err := renameFileFn(stageDir, activeDir); err != nil {
+	if err := c.hooks.withDefaults().renameFile(stageDir, activeDir); err != nil {
 		if backupDir != "" {
 			_ = os.Rename(backupDir, activeDir)
 		}

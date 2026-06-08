@@ -230,7 +230,7 @@ func TestPlanFigureReconciliationMatchesByFilename(t *testing.T) {
 			ID:       99,
 			RecordID: "20260308-a1b2c3d4",
 			Filename: "plot.png",
-			S3Key:    "figures/20260308-a1b2c3d4/plot-v2.png",
+			S3Key:    "figures/20260308-a1b2c3d4/plot.png",
 			AltText:  strPtr("after"),
 		}},
 	)
@@ -286,7 +286,7 @@ func TestPlanDataFileReconciliationMatchesByFilename(t *testing.T) {
 			ID:          42,
 			RecordID:    "20260308-a1b2c3d4",
 			Filename:    "metrics.csv",
-			S3Key:       "data/20260308-a1b2c3d4/metrics-v2.csv",
+			S3Key:       "data/20260308-a1b2c3d4/metrics.csv",
 			Size:        12,
 			Hash:        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			Description: strPtr("after"),
@@ -632,7 +632,7 @@ func TestPlanFigureReconciliationRejectsDuplicateDesiredFilename(t *testing.T) {
 		nil,
 		[]repository.RecordFigure{
 			{Filename: "plot.png", S3Key: "figures/20260308-a1b2c3d4/plot.png"},
-			{Filename: "plot.png", S3Key: "figures/20260308-a1b2c3d4/plot-alt.png"},
+			{Filename: "plot.png", S3Key: "figures/20260308-a1b2c3d4/plot.png"},
 		},
 	)
 	if err == nil {
@@ -647,7 +647,7 @@ func TestPlanFigureReconciliationRejectsDuplicateExistingFilename(t *testing.T) 
 		"20260308-a1b2c3d4",
 		[]repository.RecordFigure{
 			{ID: 1, Filename: "plot.png", S3Key: "figures/20260308-a1b2c3d4/plot.png"},
-			{ID: 2, Filename: "plot.png", S3Key: "figures/20260308-a1b2c3d4/plot-2.png"},
+			{ID: 2, Filename: "plot.png", S3Key: "figures/20260308-a1b2c3d4/plot.png"},
 		},
 		nil,
 	)
@@ -664,7 +664,7 @@ func TestPlanDataFileReconciliationRejectsDuplicateDesiredFilename(t *testing.T)
 		nil,
 		[]repository.RecordDataFile{
 			{Filename: "metrics.csv", S3Key: "data/20260308-a1b2c3d4/metrics.csv", Hash: "deadbeef"},
-			{Filename: "metrics.csv", S3Key: "data/20260308-a1b2c3d4/metrics-alt.csv", Hash: "cafef00d"},
+			{Filename: "metrics.csv", S3Key: "data/20260308-a1b2c3d4/metrics.csv", Hash: "cafef00d"},
 		},
 	)
 	if err == nil {
@@ -679,7 +679,7 @@ func TestPlanDataFileReconciliationRejectsDuplicateExistingFilename(t *testing.T
 		"20260308-a1b2c3d4",
 		[]repository.RecordDataFile{
 			{ID: 1, Filename: "metrics.csv", S3Key: "data/20260308-a1b2c3d4/metrics.csv", Hash: "deadbeef"},
-			{ID: 2, Filename: "metrics.csv", S3Key: "data/20260308-a1b2c3d4/metrics-2.csv", Hash: "cafef00d"},
+			{ID: 2, Filename: "metrics.csv", S3Key: "data/20260308-a1b2c3d4/metrics.csv", Hash: "cafef00d"},
 		},
 		nil,
 	)

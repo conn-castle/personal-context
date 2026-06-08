@@ -122,6 +122,80 @@ func TestDoctorCloudWarning(t *testing.T) {
 	}
 }
 
+func TestDoctorWarnsAboutLegacySyncLock(t *testing.T) {
+	homeDir := setupEnv(t)
+	lockPath := filepath.Join(basePath(homeDir), ".pc", "sync.lock")
+	if err := os.WriteFile(lockPath, []byte("locked\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(lockPath) error = %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
+	if err == nil || !strings.Contains(err.Error(), "warnings found") {
+		t.Fatalf("runDoctor() error = %v, want warnings found", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "Sync lock:") ||
+		!strings.Contains(output, lockPath) ||
+		!strings.Contains(output, "confirm no pc sync or pc chat import is running") ||
+		!strings.Contains(output, "remove the file manually") {
+		t.Fatalf("expected legacy sync lock guidance in output, got %q", output)
+	}
+	if _, statErr := os.Stat(lockPath); statErr != nil {
+		t.Fatalf("doctor should not remove legacy sync lock: %v", statErr)
+	}
+}
+
+func TestDoctorIgnoresMetadataSyncLock(t *testing.T) {
+	homeDir := setupEnv(t)
+	lockPath := filepath.Join(basePath(homeDir), ".pc", "sync.lock")
+	metadata := `{"pid":1,"hostname":"host","started_at":"2026-05-11T12:00:00Z"}`
+	if err := os.WriteFile(lockPath, []byte(metadata), 0o600); err != nil {
+		t.Fatalf("WriteFile(metadata lock) error = %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
+	if err != nil {
+		t.Fatalf("runDoctor() error = %v", err)
+	}
+	if strings.Contains(stdout.String(), "Sync lock:") {
+		t.Fatalf("metadata lock should not emit legacy warning, got %q", stdout.String())
+	}
+}
+
+func TestDoctorReturnsLegacySyncLockReadError(t *testing.T) {
+	homeDir := setupEnv(t)
+	lockPath := filepath.Join(basePath(homeDir), ".pc", "sync.lock")
+	if err := os.Remove(lockPath); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("Remove(lockPath) error = %v", err)
+	}
+	if err := os.Mkdir(lockPath, 0o700); err != nil {
+		t.Fatalf("Mkdir(lockPath) error = %v", err)
+	}
+
+	err := runDoctor(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, doctorOptions{})
+	if err == nil {
+		t.Fatal("expected runDoctor to return sync lock read error")
+	}
+}
+
+func TestReportDoctorLegacySyncLockWriteError(t *testing.T) {
+	lockPath := filepath.Join(t.TempDir(), "sync.lock")
+	if err := os.WriteFile(lockPath, []byte("locked\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(lockPath) error = %v", err)
+	}
+
+	stdout := &failAfterWriter{remaining: 0}
+	warned, err := reportDoctorLegacySyncLock(stdout, lockPath)
+	if err == nil {
+		t.Fatal("expected write error")
+	}
+	if warned {
+		t.Fatal("write failure should not report a completed warning")
+	}
+}
+
 // failAfterWriter fails after n successful writes.
 type failAfterWriter struct {
 	remaining int

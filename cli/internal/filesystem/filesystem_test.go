@@ -375,13 +375,29 @@ func TestCopyFailsWhenDestinationParentCannotBeCreated(t *testing.T) {
 	}
 }
 
-func TestCopyPropagatesSyncFailure(t *testing.T) {
-	original := syncFileFn
-	t.Cleanup(func() { syncFileFn = original })
-	syncFileFn = func(f *os.File) error { return errors.New("sync boom") }
-
+func TestCopyRejectsNonCanonicalFilenameSegments(t *testing.T) {
 	root := t.TempDir()
 	client, err := NewClient(root)
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	for _, name := range []string{" leading.png", "trailing.png ", "bad\\name.png"} {
+		source := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(source, []byte("x"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", source, err)
+		}
+		if _, err := client.CopyFigure("20260305-a1b2c3d4", source); err == nil {
+			t.Fatalf("expected CopyFigure(%q) to reject non-canonical filename", name)
+		}
+	}
+}
+
+func TestCopyPropagatesSyncFailure(t *testing.T) {
+	root := t.TempDir()
+	client, err := newClientWithHooks(root, fileOperationHooks{
+		syncFile: func(*os.File) error { return errors.New("sync boom") },
+	})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
@@ -401,12 +417,10 @@ func TestCopyPropagatesSyncFailure(t *testing.T) {
 }
 
 func TestCopyPropagatesCloseFailure(t *testing.T) {
-	original := closeFileFn
-	t.Cleanup(func() { closeFileFn = original })
-	closeFileFn = func(f *os.File) error { return errors.New("close boom") }
-
 	root := t.TempDir()
-	client, err := NewClient(root)
+	client, err := newClientWithHooks(root, fileOperationHooks{
+		closeFile: func(*os.File) error { return errors.New("close boom") },
+	})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
