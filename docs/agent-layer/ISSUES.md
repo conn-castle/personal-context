@@ -172,6 +172,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Next step: When transaction support is added to the repository interface (Phase 6 sync or earlier), refactor edit/add to use proper DB transactions for the multi-step write sequences.
 
 - Issue 2026-03-06 b2c3d4: Package-level test function variables unsafe with t.Parallel
-    Priority: Low. Area: cli/internal/sqlite, cli/internal/config, cli/internal/filesystem
-    Description: Tests in sqlite, config, and filesystem packages mutate package-level `var` stubs (syncFileFn, closeFileFn, etc.) and restore via `t.Cleanup`. Safe today (no `t.Parallel`), but adding parallel tests would cause data races.
+    Priority: Low. Area: cli/internal/{sqlite,config,filesystem,cli}
+    Description: Tests in sqlite, config, filesystem, and screenshot CLI paths mutate package-level `var` stubs (`syncFileFn`, `closeFileFn`, `screenshotWithChromeFn`, etc.) and restore via `t.Cleanup`. Safe today (no `t.Parallel`), but adding parallel tests would cause data races.
     Next step: If the test suite grows or parallel tests are needed, refactor stubs into struct fields or interface-based dependency injection.

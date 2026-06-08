@@ -9,6 +9,9 @@ mode = "yolo"
 [agents.antigravity]
 enabled = true
 
+[agents.antigravity.agent_specific]
+model = "Gemini 3.5 Flash (High)"
+
 [agents.claude]
 enabled = true
 agent_specific.env.ENABLE_CLAUDEAI_MCP_SERVERS = "false"
