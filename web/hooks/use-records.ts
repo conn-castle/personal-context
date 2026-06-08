@@ -193,6 +193,10 @@ export function useRecords(): UseRecordsReturn {
   const isFetchingMoreRef = useRef(false);
   const recordsPageRequestSeqRef = useRef(0);
   const recordsPageLoadingSeqRef = useRef(0);
+  const recordsPageLastCommittedSeqRef = useRef(0);
+  const activeRecordsPageFilterKeyRef = useRef(buildQuery());
+  const committedRecordsPageFilterKeyRef = useRef(buildQuery());
+  const recordsPageInFlightCountRef = useRef(0);
 
   const updatePaginationState = useCallback((nextCursor: string | null) => {
     cursorRef.current = nextCursor;
@@ -243,8 +247,13 @@ export function useRecords(): UseRecordsReturn {
       errorToPreserve?: string;
     }) => {
       const requestSeq = recordsPageRequestSeqRef.current + 1;
+      const requestFilterKey = buildQuery(params);
       recordsPageRequestSeqRef.current = requestSeq;
-      cursorRef.current = null;
+      activeRecordsPageFilterKeyRef.current = requestFilterKey;
+      recordsPageInFlightCountRef.current += 1;
+      if (requestFilterKey !== committedRecordsPageFilterKeyRef.current) {
+        updatePaginationState(null);
+      }
       if (setLoading) {
         recordsPageLoadingSeqRef.current = requestSeq;
         setIsLoading(true);
@@ -255,27 +264,38 @@ export function useRecords(): UseRecordsReturn {
 
       try {
         const data = await fetchJsonOrThrow<PaginatedResponse<RecordSummary>>(
-          `/api/records${buildQuery(params)}`,
+          `/api/records${requestFilterKey}`,
           failureMessage
         );
-        if (requestSeq !== recordsPageRequestSeqRef.current) {
+        if (
+          requestFilterKey !== activeRecordsPageFilterKeyRef.current ||
+          requestSeq <= recordsPageLastCommittedSeqRef.current
+        ) {
           return;
         }
+        recordsPageLastCommittedSeqRef.current = requestSeq;
+        committedRecordsPageFilterKeyRef.current = requestFilterKey;
         replaceRecordsPage(data, reconcileSelectedRecord);
         if (errorToPreserve) {
           setError(errorToPreserve);
+        } else {
+          setError(null);
         }
       } catch (err) {
         if (requestSeq === recordsPageRequestSeqRef.current) {
           setError(getErrorMessage(err, failureMessage));
         }
       } finally {
+        recordsPageInFlightCountRef.current = Math.max(
+          0,
+          recordsPageInFlightCountRef.current - 1
+        );
         if (setLoading && requestSeq === recordsPageLoadingSeqRef.current) {
           setIsLoading(false);
         }
       }
     },
-    [replaceRecordsPage]
+    [replaceRecordsPage, updatePaginationState]
   );
 
   const fetchRecords = useCallback(async (params?: RecordFilterParams) => {
@@ -291,7 +311,11 @@ export function useRecords(): UseRecordsReturn {
 
   const fetchMore = useCallback(async () => {
     const currentCursor = cursorRef.current;
-    if (!currentCursor || isFetchingMoreRef.current) {
+    if (
+      !currentCursor ||
+      isFetchingMoreRef.current ||
+      recordsPageInFlightCountRef.current > 0
+    ) {
       return;
     }
 

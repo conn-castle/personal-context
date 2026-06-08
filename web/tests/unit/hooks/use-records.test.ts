@@ -1181,8 +1181,8 @@ describe("useRecords", () => {
 
       const { result } = renderHook(() => useRecords());
 
-      let alphaFetch: Promise<void>;
-      let betaFetch: Promise<void>;
+      let alphaFetch: Promise<void> = Promise.resolve();
+      let betaFetch: Promise<void> = Promise.resolve();
       await act(async () => {
         alphaFetch = result.current.fetchRecords({ project: "org/alpha" });
         betaFetch = result.current.fetchRecords({ project: "org/beta" });
@@ -1266,7 +1266,7 @@ describe("useRecords", () => {
 
       const { result } = renderHook(() => useRecords());
 
-      let visibleFetch: Promise<void>;
+      let visibleFetch: Promise<void> = Promise.resolve();
       await act(async () => {
         visibleFetch = result.current.fetchRecords();
         await Promise.resolve();
@@ -1274,7 +1274,7 @@ describe("useRecords", () => {
 
       expect(result.current.isLoading).toBe(true);
 
-      let silentRefresh: Promise<void>;
+      let silentRefresh: Promise<void> = Promise.resolve();
       await act(async () => {
         silentRefresh = result.current.refreshRecords();
         await Promise.resolve();
@@ -1319,6 +1319,158 @@ describe("useRecords", () => {
         "20260309-refreshed",
       ]);
       expect(result.current.isLoading).toBe(false);
+    });
+
+    it("allows an older same-filter success to recover after a newer refresh fails", async () => {
+      const initialRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260309-initial",
+      };
+      type RecordsHTTPResponse = {
+        ok: boolean;
+        status?: number;
+        json: () => Promise<PaginatedResponse<RecordSummary> | { error: string }>;
+      };
+      const pending: Array<{
+        url: string;
+        resolve: (response: RecordsHTTPResponse) => void;
+      }> = [];
+
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        return new Promise<RecordsHTTPResponse>((resolve) => {
+          pending.push({ url, resolve });
+        });
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      let visibleFetch: Promise<void> = Promise.resolve();
+      await act(async () => {
+        visibleFetch = result.current.fetchRecords({ project: "org/proj" });
+        await Promise.resolve();
+      });
+
+      let silentRefresh: Promise<void> = Promise.resolve();
+      await act(async () => {
+        silentRefresh = result.current.refreshRecords();
+        await Promise.resolve();
+      });
+
+      expect(pending.map((request) => request.url)).toEqual([
+        "/api/records?project=org%2Fproj",
+        "/api/records?project=org%2Fproj",
+      ]);
+
+      await act(async () => {
+        pending[1].resolve({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ error: "Unavailable" }),
+        });
+        await silentRefresh;
+      });
+
+      expect(result.current.error).toBe("Failed to refresh records: 503");
+      expect(result.current.records).toEqual([]);
+
+      await act(async () => {
+        pending[0].resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [initialRecord],
+              total: 1,
+              next_cursor: "initial-cursor",
+            }),
+        });
+        await visibleFetch;
+      });
+
+      expect(result.current.records.map((record) => record.id)).toEqual([
+        "20260309-initial",
+      ]);
+      expect(result.current.error).toBeNull();
+
+      const fetchMoreMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            items: [],
+            total: 1,
+            next_cursor: null,
+          }),
+      });
+      globalThis.fetch = fetchMoreMock;
+
+      await act(async () => {
+        await result.current.fetchMore();
+      });
+
+      expect(fetchMoreMock).toHaveBeenCalledWith(
+        expect.stringContaining("cursor=initial-cursor")
+      );
+    });
+
+    it("preserves pagination after a same-filter refresh fails", async () => {
+      const page2Record: RecordSummary = {
+        ...mockRecord,
+        id: "20260309-page2",
+      };
+
+      globalThis.fetch = mockFetch({
+        "/api/records": {
+          items: [mockRecord],
+          total: 2,
+          next_cursor: "cursor1",
+        },
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      await act(async () => {
+        await result.current.fetchRecords({ project: "org/proj" });
+      });
+
+      expect(result.current.hasMore).toBe(true);
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: () => Promise.resolve({ error: "Unavailable" }),
+      });
+
+      await act(async () => {
+        await result.current.refreshRecords();
+      });
+
+      expect(result.current.error).toBe("Failed to refresh records: 503");
+      expect(result.current.records.map((record) => record.id)).toEqual([
+        "20260309-aabbccdd",
+      ]);
+      expect(result.current.hasMore).toBe(true);
+
+      const fetchMoreMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            items: [page2Record],
+            total: 2,
+            next_cursor: null,
+          }),
+      });
+      globalThis.fetch = fetchMoreMock;
+
+      await act(async () => {
+        await result.current.fetchMore();
+      });
+
+      expect(fetchMoreMock).toHaveBeenCalledWith(
+        expect.stringContaining("cursor=cursor1")
+      );
+      expect(result.current.records.map((record) => record.id)).toEqual([
+        "20260309-aabbccdd",
+        "20260309-page2",
+      ]);
     });
   });
 });

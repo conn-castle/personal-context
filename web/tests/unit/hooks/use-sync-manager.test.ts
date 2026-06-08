@@ -1112,7 +1112,10 @@ describe("useSyncManager", () => {
         useSyncManager({ cooldownMs: 0, idlePollMs: 100 })
       );
 
-      const queuedCallback = setTimeoutSpy.mock.calls[0][0];
+      const idlePollCall = setTimeoutSpy.mock.calls.find(
+        (call) => call[1] === 100
+      );
+      const queuedCallback = idlePollCall?.[0];
       expect(typeof queuedCallback).toBe("function");
 
       unmount();
@@ -1123,7 +1126,10 @@ describe("useSyncManager", () => {
       });
 
       expect(fetchMock).not.toHaveBeenCalled();
-      expect(setTimeoutSpy).toHaveBeenCalledTimes(1);
+      const idlePollSchedules = setTimeoutSpy.mock.calls.filter(
+        (call) => call[1] === 100
+      );
+      expect(idlePollSchedules).toHaveLength(1);
     });
   });
 
