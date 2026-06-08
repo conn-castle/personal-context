@@ -61,6 +61,9 @@ type Repository interface {
 	UpsertDeviceForImport(ctx context.Context, device Device) (bool, error)
 
 	UpsertChatSession(ctx context.Context, input UpsertChatSessionInput) (ChatSession, bool, error)
+	// UpsertChatSessionWithItems writes a chat session and its complete
+	// replacement item set in one backend transaction.
+	UpsertChatSessionWithItems(ctx context.Context, input UpsertChatSessionInput, items []CreateChatItemInput) (ChatSession, bool, error)
 	GetChatSessionByID(ctx context.Context, id string) (ChatSession, error)
 	GetChatSessionBySource(ctx context.Context, source string, sourceSessionID string) (ChatSession, error)
 	ListChatSessions(ctx context.Context, filter ListChatSessionsFilter) ([]ChatSession, error)
@@ -79,6 +82,11 @@ type Repository interface {
 	// CLI-side deltas.
 	CountChatItems(ctx context.Context, filter CountChatItemsFilter) (int, error)
 	SearchChatItems(ctx context.Context, filter SearchChatItemsFilter) ([]ChatSearchResult, error)
+	// CountSearchChatItems returns the total number of chat items matching the
+	// search filter, ignoring Limit and Offset. It is the authoritative `total`
+	// for `pc chat search --format json` and shares predicate construction with
+	// SearchChatItems so the page and count can never drift.
+	CountSearchChatItems(ctx context.Context, filter SearchChatItemsFilter) (int, error)
 	SearchAll(ctx context.Context, filter UnifiedSearchFilter) ([]DomainSearchResult, error)
 
 	// CountActiveRecords returns the number of non-deleted records.

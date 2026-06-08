@@ -788,7 +788,11 @@ func TestChatImportDefaultScanIncludesRegisteredClaudeConfigProjectRoot(t *testi
 	if err := os.WriteFile(filepath.Join(geminiConfigRoot, "onboarding.json"), []byte(`{"not":"a transcript"}`), 0o644); err != nil {
 		t.Fatalf("write gemini config json: %v", err)
 	}
-	transcriptPath := filepath.Join(transcriptRoot, "default-claude-config.jsonl")
+	projectTranscriptDir := filepath.Join(transcriptRoot, "-Users-me-repo")
+	if err := os.MkdirAll(projectTranscriptDir, 0o700); err != nil {
+		t.Fatalf("create claude project transcript dir: %v", err)
+	}
+	transcriptPath := filepath.Join(projectTranscriptDir, "default-claude-config.jsonl")
 	cwd := filepath.ToSlash(filepath.Join(normalizedProjectPath, "nested"))
 	lines := []string{
 		`{"type":"user","timestamp":"2026-05-18T12:00:00.000Z","cwd":"` + cwd + `","sessionId":"default-claude-config","message":{"role":"user","content":[{"type":"text","text":"registered claude config needle"}]}}`,
@@ -918,7 +922,11 @@ func TestChatSearchRealCodexEnvelopeContract(t *testing.T) {
 func TestChatSearchRealClaudeToolResultEnvelopeHiddenByDefault(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()
-	transcriptPath := filepath.Join(root, "claude-tool-result.jsonl")
+	projectDir := filepath.Join(root, "-Users-me-repo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+	transcriptPath := filepath.Join(projectDir, "claude-tool-result.jsonl")
 	lines := []string{
 		`{"type":"user","timestamp":"2026-05-03T02:00:00.000Z","cwd":"/repo","sessionId":"claude-tool-session","message":{"role":"user","content":[{"type":"tool_result","content":"sensitive tool result token"}]}}`,
 		``,
@@ -1006,6 +1014,92 @@ func TestChatSearchJSONLimitEmitsNextCursor(t *testing.T) {
 	}
 }
 
+// TestChatSearchJSONTotalExceedsPageAndTopLevelFields verifies that the JSON
+// envelope's `total` is the full match count under the same filter (not the
+// returned page size) and that each item carries the backward-compatible
+// top-level id/source/project_id/date/score fields alongside nested `session`.
+func TestChatSearchJSONTotalExceedsPageAndTopLevelFields(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	// Three message items all matching "needle"; a one-item page must still
+	// report total=3.
+	transcript := `{
+  "id": "json-total",
+  "started_at": "2026-05-14T12:00:00Z",
+  "messages": [
+    {"role": "user", "content": "alpha needle"},
+    {"role": "assistant", "content": "beta needle"},
+    {"role": "user", "content": "gamma needle"}
+  ]
+}`
+	if err := os.WriteFile(filepath.Join(root, "total.json"), []byte(transcript), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", root})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "--format", "json", "--limit", "1", "needle"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat search --limit 1: %v", err)
+	}
+	body := stdout.String()
+	if !strings.Contains(body, `"score"`) {
+		t.Fatalf("expected score field in chat search JSON, got %q", body)
+	}
+	var page struct {
+		Items      []chatSearchJSON `json:"items"`
+		Total      int              `json:"total"`
+		NextCursor *string          `json:"next_cursor"`
+	}
+	if err := json.Unmarshal([]byte(body), &page); err != nil {
+		t.Fatalf("decode envelope: %v (body=%q)", err, body)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("expected one item per --limit 1, got %d", len(page.Items))
+	}
+	if page.Total != 3 {
+		t.Fatalf("expected total=3 (full match count), got %d", page.Total)
+	}
+	if page.NextCursor == nil || *page.NextCursor != "1" {
+		t.Fatalf("expected next_cursor=1, got %+v", page.NextCursor)
+	}
+	item := page.Items[0]
+	if item.ID == "" || item.ID != item.Session.ID {
+		t.Fatalf("expected top-level id to mirror session id, got id=%q session.id=%q", item.ID, item.Session.ID)
+	}
+	if item.Source != "codex" {
+		t.Fatalf("expected top-level source=codex, got %q", item.Source)
+	}
+	if item.Date != "2026-05-14" {
+		t.Fatalf("expected top-level date=2026-05-14, got %q", item.Date)
+	}
+}
+
+// TestChatSearchRejectsUppercaseOperatorButAllowsLowercase verifies the
+// fail-loud unsupported-operator contract: an all-uppercase OR errors clearly,
+// while a lowercase operator word is treated as a literal search term.
+func TestChatSearchRejectsUppercaseOperatorButAllowsLowercase(t *testing.T) {
+	setupEnv(t)
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "monarch OR zzznomatch"})
+	err := cmd.Execute()
+	if err == nil || !errors.Is(err, repository.ErrUnsupportedSearchOperator) {
+		t.Fatalf("expected ErrUnsupportedSearchOperator for uppercase OR, got %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "search", "research and development"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("lowercase operator word must be a literal search term, got %v", err)
+	}
+}
+
 // TestRunChatImportBailsOnCancelledContext verifies the ctx.Err() guard
 // inside the per-file import loop: a context cancelled before the loop
 // hits its first file must short-circuit the import rather than continuing
@@ -1083,6 +1177,7 @@ func TestRunChatImportWritesMultipleSessionsInOneBatch(t *testing.T) {
 	origNewSQLiteRepo := newSQLiteRepoFn
 	t.Cleanup(func() { newSQLiteRepoFn = origNewSQLiteRepo })
 	var batchSizes []int
+	storedBySource := make(map[string]repository.ChatSession)
 	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
 		return &mockRepo{
 			getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
@@ -1097,12 +1192,19 @@ func TestRunChatImportWritesMultipleSessionsInOneBatch(t *testing.T) {
 			getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
 				return repository.Record{}, repository.ErrNotFound
 			},
+			getChatBySourceFn: func(_ context.Context, _ string, sourceSessionID string) (repository.ChatSession, error) {
+				session, ok := storedBySource[sourceSessionID]
+				if !ok {
+					return repository.ChatSession{}, repository.ErrNotFound
+				}
+				return session, nil
+			},
 			writeChatBatchFn: func(_ context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
 				batchSizes = append(batchSizes, len(ops))
 				results := make([]repository.ChatImportResult, 0, len(ops))
 				for _, op := range ops {
 					input := op.Session.CreateChatSessionInput
-					results = append(results, repository.ChatImportResult{Session: repository.ChatSession{
+					session := repository.ChatSession{
 						ID:                 input.ID,
 						Source:             input.Source,
 						SourceSessionID:    input.SourceSessionID,
@@ -1111,7 +1213,9 @@ func TestRunChatImportWritesMultipleSessionsInOneBatch(t *testing.T) {
 						RawSourceKey:       input.RawSourceKey,
 						StartedAt:          input.StartedAt,
 						LastActivityAt:     input.LastActivityAt,
-					}, Created: true})
+					}
+					storedBySource[input.SourceSessionID] = session
+					results = append(results, repository.ChatImportResult{Session: session, Created: true})
 				}
 				return results, nil
 			},
@@ -1311,7 +1415,11 @@ func TestChatCommandValidationAndStackErrors(t *testing.T) {
 func TestChatImportJSONLTableListAndTopLevelShow(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()
-	transcriptPath := filepath.Join(root, "jsonl-session.jsonl")
+	projectDir := filepath.Join(root, "-Users-me-repo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
+	transcriptPath := filepath.Join(projectDir, "jsonl-session.jsonl")
 	transcript := strings.Join([]string{
 		`{"session_id":"jsonl-session","cwd":"/tmp/jsonl-chat","title":"JSONL title","created_at":"2026-05-14T12:00:00Z"}`,
 		`{"role":"user","content":[{"type":"text","text":"jsonl needle from user"}],"timestamp":"2026-05-14T12:01:00Z"}`,
@@ -1439,12 +1547,22 @@ func TestChatShowSourceSessionIDRejectsAmbiguousMatches(t *testing.T) {
 	setupEnv(t)
 	for _, agent := range []string{"codex", "claude"} {
 		root := t.TempDir()
+		transcriptDir := root
+		transcriptExt := ".json"
 		transcript := `{
   "id": "duplicate-source",
   "started_at": "2026-05-14T12:00:00Z",
   "messages": [{"role": "user", "content": "` + agent + ` duplicate"}]
 }`
-		if err := os.WriteFile(filepath.Join(root, agent+".json"), []byte(transcript), 0o644); err != nil {
+		if agent == "claude" {
+			transcriptDir = filepath.Join(root, "-Users-me-repo")
+			transcriptExt = ".jsonl"
+			if err := os.MkdirAll(transcriptDir, 0o755); err != nil {
+				t.Fatalf("mkdir claude transcript dir: %v", err)
+			}
+			transcript = `{"type":"user","timestamp":"2026-05-14T12:00:00Z","sessionId":"duplicate-source","message":{"role":"user","content":[{"type":"text","text":"claude duplicate"}]}}` + "\n"
+		}
+		if err := os.WriteFile(filepath.Join(transcriptDir, agent+transcriptExt), []byte(transcript), 0o644); err != nil {
 			t.Fatalf("write %s transcript: %v", agent, err)
 		}
 		cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
@@ -1500,8 +1618,8 @@ func TestChatImportGeneratedIDAndParseErrorBranches(t *testing.T) {
 	}
 	cmd = NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "codex", "--root", badRoot})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "parse") {
-		t.Fatalf("expected parse error for bad transcript, got %v", err)
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("chat import should skip bad transcript: %v", err)
 	}
 }
 
@@ -1620,6 +1738,34 @@ func TestChatImportRepositoryErrorBranches(t *testing.T) {
 			return nil, errors.New("batch failed")
 		},
 	}, "write chat import batch")
+
+	countCalls := 0
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		countChatItemsFn: func(context.Context, repository.CountChatItemsFilter) (int, error) {
+			countCalls++
+			if countCalls == 1 {
+				return 0, nil
+			}
+			return 0, errors.New("count after failed")
+		},
+	}, "count chat items after import")
+
+	sourceLookups := 0
+	runWithRepo(t, &mockRepo{
+		getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+			return activeDevice, nil
+		},
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			sourceLookups++
+			if sourceLookups == 1 {
+				return repository.ChatSession{}, repository.ErrNotFound
+			}
+			return repository.ChatSession{}, errors.New("import completeness lookup failed")
+		},
+	}, "check chat import completeness")
 
 	t.Setenv(pcHomeEnvVar, homeDir)
 }
@@ -1787,14 +1933,23 @@ func TestChatWritersAndGeneratedID(t *testing.T) {
 		t.Fatalf("expected populated chat list table to include project and truncated title, got %q", out)
 	}
 	searchOut.Reset()
+	searchProject := "chat/search-project"
 	if err := writeChatSearchTable(searchOut, []repository.ChatSearchResult{{
-		Session: repository.ChatSession{ID: "20260514-facefeed"},
+		Session: repository.ChatSession{ID: "20260514-facefeed", ProjectID: &searchProject, LastActivityAt: millisTime},
 		Item:    repository.ChatItem{Ordinal: 3, Role: "assistant", SearchText: "fallback\nsnippet"},
 	}}); err != nil {
 		t.Fatalf("writeChatSearchTable(populated) error = %v", err)
 	}
 	if out := searchOut.String(); !strings.Contains(out, "fallback snippet") {
 		t.Fatalf("expected fallback chat snippet with newline normalized, got %q", out)
+	}
+	// The chat search table must surface the same date/project disambiguators
+	// the unified `pc search` table shows.
+	if out := searchOut.String(); !strings.Contains(out, "DATE") || !strings.Contains(out, "PROJECT") {
+		t.Fatalf("expected DATE and PROJECT columns in chat search header, got %q", out)
+	}
+	if out := searchOut.String(); !strings.Contains(out, "2026-05-14") || !strings.Contains(out, searchProject) {
+		t.Fatalf("expected chat search row to include date and project, got %q", out)
 	}
 	transcriptOut := &bytes.Buffer{}
 	transcriptProject := "chat/transcript-project"

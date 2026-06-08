@@ -212,7 +212,7 @@ func TestTranscriptFilesSkipsGeminiLogsJSON(t *testing.T) {
 		t.Fatalf("write logs sidecar: %v", err)
 	}
 
-	files, err := TranscriptFiles(root)
+	files, err := TranscriptFiles("gemini", root)
 	if err != nil {
 		t.Fatalf("TranscriptFiles(directory) error = %v", err)
 	}
@@ -220,7 +220,7 @@ func TestTranscriptFilesSkipsGeminiLogsJSON(t *testing.T) {
 		t.Fatalf("TranscriptFiles(directory) = %+v, want only %q", files, transcriptPath)
 	}
 
-	files, err = TranscriptFiles(logsPath)
+	files, err = TranscriptFiles("gemini", logsPath)
 	if err != nil {
 		t.Fatalf("TranscriptFiles(file root) error = %v", err)
 	}
@@ -249,7 +249,7 @@ func TestHelpersAndParseErrors(t *testing.T) {
 			t.Fatalf("write %s: %v", path, err)
 		}
 	}
-	files, err := TranscriptFiles(root)
+	files, err := TranscriptFiles("codex", root)
 	if err != nil {
 		t.Fatalf("TranscriptFiles() error = %v", err)
 	}
@@ -260,11 +260,11 @@ func TestHelpersAndParseErrors(t *testing.T) {
 	if err := os.WriteFile(fileRoot, []byte(`{}`), 0o644); err != nil {
 		t.Fatalf("write file root: %v", err)
 	}
-	files, err = TranscriptFiles(fileRoot)
+	files, err = TranscriptFiles("codex", fileRoot)
 	if err != nil || len(files) != 1 || files[0] != fileRoot {
 		t.Fatalf("file transcript root files=%+v err=%v", files, err)
 	}
-	files, err = TranscriptFiles(filepath.Join(root, "missing"))
+	files, err = TranscriptFiles("codex", filepath.Join(root, "missing"))
 	if err != nil || len(files) != 0 {
 		t.Fatalf("missing transcript root files=%+v err=%v", files, err)
 	}
@@ -381,7 +381,7 @@ func TestUnexportedNormalizationBranches(t *testing.T) {
 		StartedAt:      time.Date(2026, 5, 14, 11, 0, 0, 0, time.UTC),
 		LastActivityAt: time.Date(2026, 5, 14, 11, 0, 0, 0, time.UTC),
 	}
-	applySessionFields(&session, map[string]any{"timestamp": "2026-05-14T12:30:00Z"})
+	applySessionFields(&session, map[string]any{"timestamp": "2026-05-14T12:30:00Z"}, "")
 	if !session.LastActivityAt.Equal(time.Date(2026, 5, 14, 12, 30, 0, 0, time.UTC)) {
 		t.Fatalf("expected last activity to advance, got %v", session.LastActivityAt)
 	}
@@ -657,7 +657,7 @@ func TestTranscriptFilesSkipsSubAgentMetaSidecars(t *testing.T) {
 			t.Fatalf("write %s: %v", path, err)
 		}
 	}
-	files, err := TranscriptFiles(root)
+	files, err := TranscriptFiles("codex", root)
 	if err != nil {
 		t.Fatalf("TranscriptFiles error = %v", err)
 	}
@@ -676,12 +676,73 @@ func TestTranscriptFilesSkipsClaudeSessionsIndexSidecar(t *testing.T) {
 	if err := os.WriteFile(sidecarPath, []byte(`{"sessions":["claude-session"]}`), 0o644); err != nil {
 		t.Fatalf("write sidecar: %v", err)
 	}
-	files, err := TranscriptFiles(root)
+	files, err := TranscriptFiles("codex", root)
 	if err != nil {
 		t.Fatalf("TranscriptFiles error = %v", err)
 	}
 	if len(files) != 1 || files[0] != transcriptPath {
 		t.Fatalf("expected only the .jsonl transcript, got %+v", files)
+	}
+}
+
+func TestTranscriptFilesScopesClaudeProjectsToTranscriptShapes(t *testing.T) {
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "-Users-me-repo")
+	parentID := "019d7dea-1111-2222-3333-444444444444"
+	topLevel := filepath.Join(projectDir, parentID+".jsonl")
+	subagent := filepath.Join(projectDir, parentID, "subagents", "agent-abc123.jsonl")
+	sidecars := []string{
+		filepath.Join(projectDir, parentID, "tool-results", "toolu_abc.json"),
+		filepath.Join(projectDir, parentID, "memory", "notes.json"),
+		filepath.Join(projectDir, parentID, "remote-agents", "agent.jsonl"),
+		filepath.Join(projectDir, parentID, "subagents", "agent-abc123.meta.json"),
+		filepath.Join(projectDir, parentID, "subagents", "not-agent.jsonl"),
+	}
+	for _, path := range append([]string{topLevel, subagent}, sidecars...) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	files, err := TranscriptFiles("claude_code", root)
+	if err != nil {
+		t.Fatalf("TranscriptFiles error = %v", err)
+	}
+	want := []string{topLevel, subagent}
+	if len(files) != len(want) || files[0] != want[0] || files[1] != want[1] {
+		t.Fatalf("TranscriptFiles = %+v, want %+v", files, want)
+	}
+}
+
+func TestTranscriptFilesGenericSourcesKeepRecursiveDiscovery(t *testing.T) {
+	root := t.TempDir()
+	codexPath := filepath.Join(root, "sessions", "2026", "06", "04", "rollout-a.jsonl")
+	geminiPath := filepath.Join(root, "tmp", "project", "chats", "session-a.json")
+	for _, path := range []string{codexPath, geminiPath} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", path, err)
+		}
+		if err := os.WriteFile(path, []byte(`{}`), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+
+	codexFiles, err := TranscriptFiles("codex", filepath.Join(root, "sessions"))
+	if err != nil {
+		t.Fatalf("TranscriptFiles(codex) error = %v", err)
+	}
+	if len(codexFiles) != 1 || codexFiles[0] != codexPath {
+		t.Fatalf("codex files = %+v, want %q", codexFiles, codexPath)
+	}
+	geminiFiles, err := TranscriptFiles("gemini", filepath.Join(root, "tmp"))
+	if err != nil {
+		t.Fatalf("TranscriptFiles(gemini) error = %v", err)
+	}
+	if len(geminiFiles) != 1 || geminiFiles[0] != geminiPath {
+		t.Fatalf("gemini files = %+v, want %q", geminiFiles, geminiPath)
 	}
 }
 
@@ -1006,6 +1067,165 @@ func TestJSONTranscriptWhitespaceSessionFieldUnset(t *testing.T) {
 	}
 }
 
+// TestCodexEmptyForkLocksCWDToForkHeader is the regression guard for the
+// empty-fork bug (issue p9r4x7): a fork that was created but never continued
+// replays the parent's session_meta/turn_context after the fork's own header.
+// Under last-wins the replayed parent cwd used to overwrite the fork's, mis-
+// attributing the fork to the parent's project. The fork-scoped lock must keep
+// the fork's own cwd while still recording correct identity and lineage.
+func TestCodexEmptyForkLocksCWDToForkHeader(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-fork-empty.jsonl")
+	parentID := "019d7dea-parent"
+	forkID := "019d7deb-fork"
+	lines := []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + forkID + `","forked_from_id":"` + parentID + `","cwd":"/repo/fork"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"session_meta","payload":{"id":"` + parentID + `","forked_from_id":null,"cwd":"/repo/parent"}}`,
+		`{"timestamp":"2026-06-04T12:00:02Z","type":"turn_context","payload":{"cwd":"/repo/parent"}}`,
+		`{"timestamp":"2026-06-04T12:00:03Z","type":"response_item","payload":{"role":"user","content":"replayed parent turn"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, items, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.SourceSessionID != forkID {
+		t.Fatalf("SourceSessionID = %q, want fork id %q", session.SourceSessionID, forkID)
+	}
+	if session.ParentSourceSessionID == nil || *session.ParentSourceSessionID != parentID {
+		t.Fatalf("ParentSourceSessionID = %v, want %q", session.ParentSourceSessionID, parentID)
+	}
+	if session.CWD == nil || *session.CWD != "/repo/fork" {
+		t.Fatalf("CWD = %v, want fork dir /repo/fork (parent metadata must not overwrite it)", session.CWD)
+	}
+	// A never-continued fork has no fork-authored turns: its only content is the
+	// parent history replayed after the fork header.
+	if len(items) != 1 || items[0].SearchText != "replayed parent turn" {
+		t.Fatalf("items = %+v, want the replayed parent turn", items)
+	}
+}
+
+// TestCodexContinuedForkCdsAwayPinsForkCreationDir covers a continued fork that
+// changes directories after forking: the fork's own header (cwd /repo/fork),
+// the replayed parent metadata (cwd /repo/parent), then a fork turn that cd'd to
+// a third dir (/repo/fork-moved). The lock pins cwd to the fork-creation dir,
+// which is the documented tradeoff in DECISIONS.md (k8m5v2). This fixture is the
+// discriminating guard: under last-wins cwd would be the third dir, so only the
+// lock yields /repo/fork. A fixture whose final turn_context stayed at /repo/fork
+// would pass under last-wins too and could not catch a regression.
+func TestCodexContinuedForkCdsAwayPinsForkCreationDir(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-fork-continued.jsonl")
+	parentID := "019d7dea-parent"
+	forkID := "019d7deb-fork"
+	lines := []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + forkID + `","forked_from_id":"` + parentID + `","cwd":"/repo/fork"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"session_meta","payload":{"id":"` + parentID + `","forked_from_id":null,"cwd":"/repo/parent"}}`,
+		`{"timestamp":"2026-06-04T12:00:02Z","type":"turn_context","payload":{"cwd":"/repo/parent"}}`,
+		`{"timestamp":"2026-06-04T12:00:03Z","type":"response_item","payload":{"role":"user","content":"replayed parent turn"}}`,
+		`{"timestamp":"2026-06-04T12:00:04Z","type":"turn_context","payload":{"cwd":"/repo/fork-moved"}}`,
+		`{"timestamp":"2026-06-04T12:00:05Z","type":"response_item","payload":{"role":"user","content":"fork-only turn"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, _, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.SourceSessionID != forkID {
+		t.Fatalf("SourceSessionID = %q, want fork id %q", session.SourceSessionID, forkID)
+	}
+	if session.ParentSourceSessionID == nil || *session.ParentSourceSessionID != parentID {
+		t.Fatalf("ParentSourceSessionID = %v, want %q", session.ParentSourceSessionID, parentID)
+	}
+	if session.CWD == nil || *session.CWD != "/repo/fork" {
+		t.Fatalf("CWD = %v, want fork-creation dir /repo/fork (last-wins would give /repo/fork-moved)", session.CWD)
+	}
+}
+
+// TestCodexForkLocksTitleToForkHeader covers the title branch of the lock: a
+// fork's own title must not be overwritten by the replayed parent's title.
+func TestCodexForkLocksTitleToForkHeader(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-fork-title.jsonl")
+	parentID := "019d7dea-parent"
+	forkID := "019d7deb-fork"
+	lines := []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + forkID + `","forked_from_id":"` + parentID + `","cwd":"/repo/fork","title":"Fork title"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"session_meta","payload":{"id":"` + parentID + `","forked_from_id":null,"cwd":"/repo/parent","title":"Parent title"}}`,
+		`{"timestamp":"2026-06-04T12:00:02Z","type":"response_item","payload":{"role":"user","content":"fork-only turn"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, _, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.Title == nil || *session.Title != "Fork title" {
+		t.Fatalf("Title = %v, want fork title (parent title must not overwrite it)", session.Title)
+	}
+}
+
+// TestCodexNonForkCWDFollowsLatestTurn proves the lock is fork-scoped, not
+// global: a non-fork session that changes directories mid-session is still
+// attributed to its most recent cwd under last-wins.
+func TestCodexNonForkCWDFollowsLatestTurn(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-nonfork-cd.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"standalone-cd","cwd":"/repo/a"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"turn_context","payload":{"cwd":"/repo/b"}}`,
+		`{"timestamp":"2026-06-04T12:00:02Z","type":"response_item","payload":{"role":"user","content":"after cd"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, _, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.ParentSourceSessionID != nil {
+		t.Fatalf("ParentSourceSessionID = %v, want nil (not a fork)", session.ParentSourceSessionID)
+	}
+	if session.CWD == nil || *session.CWD != "/repo/b" {
+		t.Fatalf("CWD = %v, want latest dir /repo/b (lock must not apply to non-fork sessions)", session.CWD)
+	}
+}
+
+func TestCodexNonForkSessionMetaIdentityUnchanged(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "rollout-standalone.jsonl")
+	lines := []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"standalone-codex","cwd":"/repo"}}`,
+		`{"timestamp":"2026-06-04T12:00:02Z","type":"response_item","payload":{"role":"assistant","content":"standalone turn"}}`,
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	session, items, err := ParseTranscriptFile("codex", path)
+	if err != nil {
+		t.Fatalf("ParseTranscriptFile() error = %v", err)
+	}
+	if session.SourceSessionID != "standalone-codex" {
+		t.Fatalf("SourceSessionID = %q, want standalone-codex", session.SourceSessionID)
+	}
+	if session.ParentSourceSessionID != nil {
+		t.Fatalf("ParentSourceSessionID = %v, want nil", session.ParentSourceSessionID)
+	}
+	if len(items) != 1 || items[0].SearchText != "standalone turn" {
+		t.Fatalf("items = %+v, want standalone turn", items)
+	}
+}
+
 // TestJSONTranscriptArraySelectionIgnoresNonArrays verifies the array-key
 // selection logic: a recognized array key whose value is not an array is not
 // selected, deferring to a lower-priority key that does hold a real array.
@@ -1209,5 +1429,127 @@ func TestJSONTranscriptSecondPassSurfacesChangedArrayDecodeErrors(t *testing.T) 
 				t.Fatalf("expected decode error, got nil")
 			}
 		})
+	}
+}
+
+// agentPanelPath/agentPanelHash are a fixed, anonymized example pair. Gemini
+// stores `projectHash == sha256(absolute repo root)`, and agentPanelHash is the
+// sha256 of agentPanelPath computed by an external tool (`shasum -a 256`, no
+// trailing newline) rather than in-test. Pinning an externally produced hash
+// proves matchProjectHash hashes the same bytes Gemini does — recomputing it
+// inside the test with sha256.Sum256 would pass even if both sides hashed the
+// wrong thing, so the pinned value is the real check.
+const (
+	agentPanelPath = "/home/dev/projects/agent-panel"
+	agentPanelHash = "4e387ba454ce0658208441473a6ce71f726791d01d518def792a6b655f32a0ea"
+)
+
+// writeGeminiSessionFile creates <dir>/chats/session-x.json with an optional
+// top-level projectHash, mirroring Gemini's on-disk layout (the session lives
+// under chats/ so a sibling .project_root resolves from the grandparent).
+func writeGeminiSessionFile(t *testing.T, dir string, projectHash string) string {
+	t.Helper()
+	chats := filepath.Join(dir, "chats")
+	if err := os.MkdirAll(chats, 0o755); err != nil {
+		t.Fatalf("mkdir chats: %v", err)
+	}
+	payload := `{"messages":[{"role":"user","content":"needle"}]}`
+	if projectHash != "" {
+		payload = `{"projectHash":"` + projectHash + `","messages":[{"role":"user","content":"needle"}]}`
+	}
+	path := filepath.Join(chats, "session-x.json")
+	if err := os.WriteFile(path, []byte(payload), 0o644); err != nil {
+		t.Fatalf("write gemini session: %v", err)
+	}
+	return path
+}
+
+func TestResolveGeminiProjectCWDFromProjectHash(t *testing.T) {
+	sessionPath := writeGeminiSessionFile(t, t.TempDir(), agentPanelHash)
+	paths := []repository.ProjectPath{
+		{ProjectID: "ap", Path: agentPanelPath, DeviceID: "device-a"},
+		{ProjectID: "other", Path: "/some/other/repo", DeviceID: "device-a"},
+	}
+	got := ResolveGeminiProjectCWD(sessionPath, paths, "device-a")
+	if got == nil || *got != agentPanelPath {
+		t.Fatalf("ResolveGeminiProjectCWD via projectHash = %v; want %q", got, agentPanelPath)
+	}
+	// The hash is scoped to the importing device; a match registered on another
+	// device must not leak across devices.
+	if got := ResolveGeminiProjectCWD(sessionPath, paths, "device-b"); got != nil {
+		t.Fatalf("ResolveGeminiProjectCWD on wrong device = %v; want nil", got)
+	}
+}
+
+func TestResolveGeminiProjectCWDPrefersProjectRoot(t *testing.T) {
+	dir := t.TempDir()
+	// The projectHash would match agentPanelPath, but a literal .project_root
+	// must win so sub-directory launches still prefix-match.
+	sessionPath := writeGeminiSessionFile(t, dir, agentPanelHash)
+	literal := filepath.Join(dir, "literal-repo-root")
+	if err := os.WriteFile(filepath.Join(dir, ".project_root"), []byte(literal+"\n"), 0o644); err != nil {
+		t.Fatalf("write .project_root: %v", err)
+	}
+	paths := []repository.ProjectPath{{ProjectID: "ap", Path: agentPanelPath, DeviceID: "device-a"}}
+	got := ResolveGeminiProjectCWD(sessionPath, paths, "device-a")
+	if got == nil || *got != literal {
+		t.Fatalf("ResolveGeminiProjectCWD = %v; want .project_root literal %q (precedence over projectHash)", got, literal)
+	}
+}
+
+func TestResolveGeminiProjectCWDUnresolvableReturnsNil(t *testing.T) {
+	paths := []repository.ProjectPath{{ProjectID: "ap", Path: agentPanelPath, DeviceID: "device-a"}}
+	// projectHash present but unregistered: a one-way hash is never reversed to a
+	// guessed path, so the session stays unattributed.
+	unregistered := writeGeminiSessionFile(t, t.TempDir(), "0000000000000000000000000000000000000000000000000000000000000000")
+	if got := ResolveGeminiProjectCWD(unregistered, paths, "device-a"); got != nil {
+		t.Fatalf("unregistered projectHash = %v; want nil", got)
+	}
+	// Neither .project_root nor projectHash present: nothing to resolve.
+	none := writeGeminiSessionFile(t, t.TempDir(), "")
+	if got := ResolveGeminiProjectCWD(none, paths, "device-a"); got != nil {
+		t.Fatalf("no project signal = %v; want nil", got)
+	}
+}
+
+func TestResolveGeminiProjectCWDIgnoresMalformedAndEmptySignals(t *testing.T) {
+	paths := []repository.ProjectPath{{ProjectID: "ap", Path: agentPanelPath, DeviceID: "device-a"}}
+
+	// An empty .project_root must not resolve to an empty cwd; with no
+	// projectHash either, the session stays unattributed.
+	emptyRootDir := t.TempDir()
+	sessionPath := writeGeminiSessionFile(t, emptyRootDir, "")
+	if err := os.WriteFile(filepath.Join(emptyRootDir, ".project_root"), []byte("  \n"), 0o644); err != nil {
+		t.Fatalf("write empty .project_root: %v", err)
+	}
+	if got := ResolveGeminiProjectCWD(sessionPath, paths, "device-a"); got != nil {
+		t.Fatalf("empty .project_root = %v; want nil", got)
+	}
+
+	// Malformed session JSON yields no projectHash.
+	badDir := filepath.Join(t.TempDir(), "chats")
+	if err := os.MkdirAll(badDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	badPath := filepath.Join(badDir, "session-x.json")
+	if err := os.WriteFile(badPath, []byte("{not json"), 0o644); err != nil {
+		t.Fatalf("write malformed json: %v", err)
+	}
+	if got := ResolveGeminiProjectCWD(badPath, paths, "device-a"); got != nil {
+		t.Fatalf("malformed json = %v; want nil", got)
+	}
+
+	// An explicitly empty projectHash is treated as absent.
+	emptyHash := filepath.Join(badDir, "empty-hash.json")
+	if err := os.WriteFile(emptyHash, []byte(`{"projectHash":"","messages":[{"role":"user","content":"x"}]}`), 0o644); err != nil {
+		t.Fatalf("write empty-hash json: %v", err)
+	}
+	if got := ResolveGeminiProjectCWD(emptyHash, paths, "device-a"); got != nil {
+		t.Fatalf("empty projectHash = %v; want nil", got)
+	}
+
+	// A source file that no longer exists resolves to nil rather than erroring.
+	if got := ResolveGeminiProjectCWD(filepath.Join(t.TempDir(), "chats", "gone.json"), paths, "device-a"); got != nil {
+		t.Fatalf("missing source = %v; want nil", got)
 	}
 }

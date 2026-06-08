@@ -14,9 +14,36 @@ Release entries must use this format so the release workflow can extract notes:
 
 ### Changed
 
-- Made `pc gc` trash retention configurable: set `gc_retention_days` (a positive integer number of days) in `~/personal-context/.pc/config.json` to override the 30-day default. The window applies to both record and chat trash. An unset value keeps the 30-day default; invalid values (zero, negative, or above 36500) are rejected when the config is read or written.
+### Fixed
+
+## v0.1.5 - 2026-06-05
 
 ### Fixed
+
+- Fixed `pc chat import` aborting the whole run when one transcript file cannot be parsed. Bad files are now reported on stderr as skipped and counted in the JSON summary as `files_skipped`, while the rest of the import continues.
+- Fixed Claude Code discovery so imports under `projects/` only queue top-level session JSONL files and `subagents/agent-*.jsonl` transcripts, excluding sidecars such as `tool-results/` and `memory/`.
+- Fixed Codex fork imports collapsing onto their replayed parent session id. Fork rollouts now keep their own session id, store `forked_from_id` as lineage metadata, and import as distinct sessions; fork rows intentionally preserve the replayed parent history present in the source file.
+- Fixed `pc chat import` attributing a Codex fork to its parent's project. A fork rollout replays the parent's metadata (carrying the parent's working directory) after the fork's own header, so the working directory and title now lock to the fork's header instead of last-wins — divergent and empty (never-continued) forks attribute to the correct project. Non-fork sessions are unaffected (a mid-session directory change still wins).
+
+## v0.1.4 - 2026-06-04
+
+### Added
+
+- Made `pc gc` trash retention configurable: set `gc_retention_days` (a positive integer number of days) in `~/personal-context/.pc/config.json` to override the 30-day default. The window applies to both record and chat trash. An unset value keeps the 30-day default; invalid values (zero, negative, or above 36500) are rejected when the config is read or written, and the setting is preserved across cloud setup and removal.
+
+### Changed
+
+- Reduced `pc chat import` memory use on large transcripts: the JSON transcript parser now streams array elements one at a time instead of decoding the whole payload into memory, preserving the existing ordinal, last-wins, and empty/no-array semantics.
+- Bounded cross-domain search pagination: each domain query now fetches only the rows needed for the requested page instead of loading the full match set into memory, with ORDER BY tiebreakers aligned across SQLite and Postgres so merged result ordering is unchanged.
+
+### Fixed
+
+- Fixed Gemini chat sessions importing as unassigned: Gemini transcripts carry no working directory, so they never matched a registered project. Import now resolves each session's repo root from an on-disk `.project_root` path (preferred) or by matching the session's project hash to a registered project path, and persists it as the session cwd so project attribution works. A later `pc project register` re-attributes `.project_root` sessions; hash-only sessions need a re-import.
+- Fixed chat sync leaving the items table inconsistent: a chat session's row update and its item replacement are now applied in a single transaction (SQLite and Postgres), so a mid-update failure rolls back cleanly and the next sync re-syncs the chat instead of skipping it on equal timestamps.
+- Fixed `pc records edit` (and other partial updates) silently restoring trashed records: updates that do not touch deletion now preserve `deleted_at` instead of clearing it, so editing a soft-deleted record no longer un-deletes it.
+- Fixed legacy chats that had raw transcripts but missing or diverged item rows: re-importing a byte-identical managed transcript now re-parses and replaces the stored items when they are missing or have drifted, healing previously inconsistent imports.
+- Fixed search result dates under Postgres: record dates are now scanned and formatted in UTC so they match the canonical date string instead of reflecting the server's local zone.
+- Fixed five web record-viewer defects: sync failures now surface in Settings instead of only logging to the console; editing a record updates its list thumbnail without a full refresh; keyboard record navigation no longer acts on stale filter/selection state; and the collapsed details panel now satisfies the resizable-panel layout contract.
 
 ## v0.1.3 - 2026-05-29
 

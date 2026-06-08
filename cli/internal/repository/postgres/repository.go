@@ -399,6 +399,7 @@ func (r *Repository) UpdateRecordFigure(ctx context.Context, input repository.Up
 	if input.ID <= 0 {
 		return repository.RecordFigure{}, repository.ErrInvalidArgument
 	}
+	s3KeyPatch := input.S3Key
 	if input.Filename != "" || input.S3Key != "" {
 		existing, err := r.GetRecordFigureByID(ctx, input.ID)
 		if err != nil {
@@ -411,6 +412,12 @@ func (r *Repository) UpdateRecordFigure(ctx context.Context, input repository.Up
 		s3Key := existing.S3Key
 		if input.S3Key != "" {
 			s3Key = input.S3Key
+		} else if input.Filename != "" {
+			s3Key, err = repository.CanonicalRecordAssetKey("figures", existing.RecordID, filename)
+			if err != nil {
+				return repository.RecordFigure{}, err
+			}
+			s3KeyPatch = s3Key
 		}
 		if err := repository.ValidateRecordAssetKey("figures", existing.RecordID, filename, s3Key); err != nil {
 			return repository.RecordFigure{}, err
@@ -421,7 +428,7 @@ func (r *Repository) UpdateRecordFigure(ctx context.Context, input repository.Up
 		"filename = COALESCE(NULLIF($1, ''), filename)",
 		"s3_key = COALESCE(NULLIF($2, ''), s3_key)",
 	}
-	args := []any{input.Filename, input.S3Key}
+	args := []any{input.Filename, s3KeyPatch}
 	nextParam := 3
 
 	if input.AltText != nil {
@@ -578,6 +585,7 @@ func (r *Repository) UpdateRecordDataFile(ctx context.Context, input repository.
 	if input.Size != nil && *input.Size < 0 {
 		return repository.RecordDataFile{}, repository.ErrInvalidArgument
 	}
+	s3KeyPatch := input.S3Key
 	if input.Filename != "" || input.S3Key != "" {
 		existing, err := r.GetRecordDataFileByID(ctx, input.ID)
 		if err != nil {
@@ -590,6 +598,12 @@ func (r *Repository) UpdateRecordDataFile(ctx context.Context, input repository.
 		s3Key := existing.S3Key
 		if input.S3Key != "" {
 			s3Key = input.S3Key
+		} else if input.Filename != "" {
+			s3Key, err = repository.CanonicalRecordAssetKey("data", existing.RecordID, filename)
+			if err != nil {
+				return repository.RecordDataFile{}, err
+			}
+			s3KeyPatch = s3Key
 		}
 		if err := repository.ValidateRecordAssetKey("data", existing.RecordID, filename, s3Key); err != nil {
 			return repository.RecordDataFile{}, err
@@ -602,7 +616,7 @@ func (r *Repository) UpdateRecordDataFile(ctx context.Context, input repository.
 		"size = COALESCE($3, size)",
 		"hash = COALESCE(NULLIF($4, ''), hash)",
 	}
-	args := []any{input.Filename, input.S3Key, input.Size, input.Hash}
+	args := []any{input.Filename, s3KeyPatch, input.Size, input.Hash}
 	nextParam := 5
 
 	if input.Description != nil {

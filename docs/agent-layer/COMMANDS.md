@@ -61,10 +61,10 @@ Notes: Enforces the hard 95% threshold and fails loudly below target. Excludes `
 
 - Run per-package Go coverage gate
 ```bash
-./scripts/check_coverage_per_package.sh 95
+./scripts/check_coverage_per_package.sh 95 coverage.out
 ```
 Run from: `cli/`
-Notes: Fails when any tested package drops below 95%. Same exclusions as the aggregate coverage script. Integration-only packages (`postgres`, `s3client`, `cloude2e`) are tested with Docker via `-tags integration`.
+Notes: Run after `./scripts/check_coverage.sh 95` to reuse `coverage.out` instead of re-running tests. Omit the profile argument for a standalone per-package run. Same exclusions as the aggregate coverage script. Integration-only packages (`postgres`, `s3client`, `cloude2e`) are tested with Docker via `-tags integration`.
 
 - Run full Phase 3 manual verification flow (opens record preview in browser)
 ```bash

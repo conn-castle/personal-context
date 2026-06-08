@@ -2,6 +2,8 @@ package chatimport
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -126,7 +128,7 @@ func Roots(extra []string, sourceFilter string, projectPaths []repository.Projec
 }
 
 // TranscriptFiles returns supported transcript files under root in deterministic order.
-func TranscriptFiles(root string) ([]string, error) {
+func TranscriptFiles(source string, root string) ([]string, error) {
 	if _, err := os.Stat(root); err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -137,6 +139,22 @@ func TranscriptFiles(root string) ([]string, error) {
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
+		}
+		if source == "claude_code" {
+			rel, _ := filepath.Rel(root, path)
+			parts := strings.Split(filepath.Clean(rel), string(filepath.Separator))
+			if entry.IsDir() {
+				if rel != "." && (len(parts) > 3 || (len(parts) == 3 && parts[2] != "subagents")) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if strings.ToLower(filepath.Ext(path)) == ".jsonl" &&
+				(len(parts) == 2 ||
+					(len(parts) == 4 && parts[2] == "subagents" && strings.HasPrefix(filepath.Base(path), "agent-"))) {
+				files = append(files, path)
+			}
+			return nil
 		}
 		if entry.IsDir() {
 			return nil
@@ -195,6 +213,89 @@ func MatchProjectPath(paths []repository.ProjectPath, cwd *string, deviceID stri
 		return nil
 	}
 	return &best.ProjectID
+}
+
+// ResolveGeminiProjectCWD derives the repo-root working directory for a Gemini
+// transcript so it can be attributed to a registered project. Gemini sessions
+// carry no `cwd` field; instead the repo root is recoverable from the source on
+// disk in one of two ways:
+//   - older "named" tmp dirs ship a sibling `.project_root` file holding the
+//     literal absolute repo root. This is preferred because a literal path also
+//     supports longest-prefix matching for sub-directory launches.
+//   - newer "hash" tmp dirs encode `projectHash == sha256(absolute repo root)`
+//     in the session JSON. A hash is one-way, so it resolves only against the
+//     registry: the registered project path whose sha256 equals it (exact root).
+//
+// Returns nil when neither signal yields a usable path (for example an ephemeral
+// checkout that is not a registered project, or a hash with no registered
+// match); the caller then leaves cwd NULL and the session stays unattributed.
+func ResolveGeminiProjectCWD(sourcePath string, paths []repository.ProjectPath, deviceID string) *string {
+	if root := readGeminiProjectRoot(sourcePath); root != nil {
+		return root
+	}
+	if hash := readGeminiProjectHash(sourcePath); hash != nil {
+		return matchProjectHash(paths, *hash, deviceID)
+	}
+	return nil
+}
+
+// readGeminiProjectRoot reads the literal repo root from the `.project_root`
+// file Gemini writes for "named" tmp dirs. The file is a sibling of the `chats/`
+// directory that holds the session (e.g. `<dir>/.project_root` next to
+// `<dir>/chats/session-*.json`), so it lives in the source file's grandparent.
+func readGeminiProjectRoot(sourcePath string) *string {
+	dir := filepath.Dir(filepath.Dir(sourcePath))
+	data, err := os.ReadFile(filepath.Join(dir, ".project_root"))
+	if err != nil {
+		return nil
+	}
+	root := strings.TrimSpace(string(data))
+	if root == "" {
+		return nil
+	}
+	return &root
+}
+
+// readGeminiProjectHash reads the top-level `projectHash` string from a Gemini
+// session JSON. Decoding into a struct skips every other top-level field
+// (including the potentially large `messages` array) without materialising it.
+// Returns nil when the field is absent/empty or the file cannot be parsed.
+func readGeminiProjectHash(sourcePath string) *string {
+	file, err := os.Open(sourcePath)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = file.Close() }()
+	var meta struct {
+		ProjectHash string `json:"projectHash"`
+	}
+	if err := json.NewDecoder(file).Decode(&meta); err != nil {
+		return nil
+	}
+	hash := strings.TrimSpace(meta.ProjectHash)
+	if hash == "" {
+		return nil
+	}
+	return &hash
+}
+
+// matchProjectHash returns the registered project path on the given device whose
+// sha256 equals projectHash. Gemini hashes the resolved workspace root exactly,
+// so this is an exact-root match (no prefix); misses return nil and stay
+// unattributed rather than guessing a sub-path.
+func matchProjectHash(paths []repository.ProjectPath, projectHash string, deviceID string) *string {
+	want := strings.ToLower(projectHash)
+	for i := range paths {
+		if paths[i].DeviceID != deviceID {
+			continue
+		}
+		sum := sha256.Sum256([]byte(paths[i].Path))
+		if hex.EncodeToString(sum[:]) == want {
+			matched := paths[i].Path
+			return &matched
+		}
+	}
+	return nil
 }
 
 func parseJSONLTranscript(source string, path string) (repository.CreateChatSessionInput, []repository.CreateChatItemInput, error) {
@@ -271,7 +372,7 @@ func parseJSONLTranscriptReader(source string, path string, reader io.Reader, se
 		itemPayload, sessionPayload := unwrapChatLine(source, payload)
 		if itemPayload == nil || !hasItemPayload(itemPayload) {
 			if sessionPayload != nil {
-				applySessionFields(&session, sessionPayload)
+				applySessionFields(&session, sessionPayload, fallbackSourceSessionID)
 			}
 			continue
 		}
@@ -366,14 +467,11 @@ func unwrapChatLine(source string, line map[string]any) (item map[string]any, se
 			}
 			return flat, inner
 		case "turn_context":
-			// turn_context lines carry the working directory per turn.
-			// When session_meta lacked cwd (older rollouts), feeding the
-			// inner payload to applySessionFields lets the first
-			// turn_context's cwd populate session.CWD; subsequent ones
-			// don't overwrite because applySessionFields preserves the
-			// first non-nil value. This is what unlocks project auto-
-			// assignment for codex sessions that previously stayed
-			// project_id=NULL.
+			// turn_context lines carry the working directory per turn. Feeding
+			// the inner payload to applySessionFields backfills session.CWD when
+			// an older session_meta had none and otherwise takes the last non-nil
+			// cwd, except for Codex forks where applySessionFields locks cwd/title
+			// to the fork header (see there).
 			return nil, inner
 		case "event_msg":
 			return nil, nil
@@ -817,7 +915,7 @@ func newTranscriptSession(source string, path string) repository.CreateChatSessi
 // project-key segment, plus its container when present) gives each path a
 // distinct, human-readable identity that stays stable across re-imports. A JSON
 // transcript carrying an explicit conversation/session id still overrides this
-// via applySessionFields.
+// during the JSON metadata scan.
 func geminiSourceSessionID(path string, base string) string {
 	dir := filepath.Dir(path)
 	parent := filepath.Base(dir)
@@ -831,19 +929,34 @@ func geminiSourceSessionID(path string, base string) string {
 	return parent + "/" + base
 }
 
-func applySessionFields(session *repository.CreateChatSessionInput, payload map[string]any) {
+func applySessionFields(session *repository.CreateChatSessionInput, payload map[string]any, fallbackSourceSessionID string) {
 	// Prefer the canonical session keys before falling back to the generic
 	// "id" field, which some vendors reuse for unrelated draft/internal ids.
 	for _, key := range []string{"session_id", "conversation_id", "chat_id", "id"} {
 		if value := stringField(payload, key); value != nil && *value != "" {
-			session.SourceSessionID = *value
+			if session.SourceSessionID == fallbackSourceSessionID || session.SourceSessionID == *value {
+				session.SourceSessionID = *value
+			}
 			break
 		}
 	}
-	if value := stringField(payload, "cwd"); value != nil {
+	if session.ParentSourceSessionID == nil {
+		// parent_source_session_id stores source-local lineage: Claude subagent
+		// parents and Codex fork ancestors both use the same relationship slot.
+		session.ParentSourceSessionID = stringField(payload, "forked_from_id")
+	}
+	// A Codex fork rollout records the fork's own session_meta first (carrying
+	// forked_from_id plus the fork's cwd/title), then replays the parent's
+	// session_meta and turn_context lines (carrying the parent's cwd). Once the
+	// fork header has set cwd/title, lock them so replayed parent metadata cannot
+	// reattribute the fork to the parent's project. ParentSourceSessionID is set
+	// from forked_from_id just above, so it is already non-nil on the header line
+	// while cwd/title are still nil. Non-fork sessions keep last-wins.
+	forkLocked := session.ParentSourceSessionID != nil
+	if value := stringField(payload, "cwd"); value != nil && (!forkLocked || session.CWD == nil) {
 		session.CWD = value
 	}
-	if value := stringField(payload, "title"); value != nil {
+	if value := stringField(payload, "title"); value != nil && (!forkLocked || session.Title == nil) {
 		session.Title = value
 	}
 	for _, key := range []string{"timestamp", "created_at", "started_at"} {

@@ -200,6 +200,19 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 	if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{ID: figure.ID}); err != nil {
 		t.Fatalf("UpdateRecordFigure() with minimal input should succeed, got %v", err)
 	}
+	if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{
+		ID:       figure.ID,
+		Filename: "bad/name.png",
+	}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for invalid filename-only figure update, got %v", err)
+	}
+	unchangedFigure, err := repo.GetRecordFigureByID(ctx, figure.ID)
+	if err != nil {
+		t.Fatalf("GetRecordFigureByID() after invalid filename-only update error = %v", err)
+	}
+	if unchangedFigure.Filename != "x.png" || unchangedFigure.S3Key != "figures/20260305-11112222/x.png" {
+		t.Fatalf("invalid filename-only figure update mutated row: %+v", unchangedFigure)
+	}
 	if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{ID: 999999, Filename: "new.png"}); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing figure update, got %v", err)
 	}
@@ -236,6 +249,19 @@ func TestAssetValidationAndNotFoundBranches(t *testing.T) {
 	}
 	if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{ID: dataFile.ID}); err != nil {
 		t.Fatalf("UpdateRecordDataFile() with minimal input should succeed, got %v", err)
+	}
+	if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{
+		ID:       dataFile.ID,
+		Filename: "bad/name.csv",
+	}); !errors.Is(err, repository.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for invalid filename-only data-file update, got %v", err)
+	}
+	unchangedDataFile, err := repo.GetRecordDataFileByID(ctx, dataFile.ID)
+	if err != nil {
+		t.Fatalf("GetRecordDataFileByID() after invalid filename-only update error = %v", err)
+	}
+	if unchangedDataFile.Filename != "x.csv" || unchangedDataFile.S3Key != "data/20260305-11112222/x.csv" {
+		t.Fatalf("invalid filename-only data-file update mutated row: %+v", unchangedDataFile)
 	}
 	if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{ID: 999999, Filename: "new.csv"}); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for missing data-file update, got %v", err)
@@ -1521,6 +1547,9 @@ func TestSQLiteProjectPathChatAndUnifiedSearchBranches(t *testing.T) {
 	if _, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "needle", Limit: -1}); !errors.Is(err, repository.ErrInvalidArgument) {
 		t.Fatalf("expected invalid unified search limit error, got %v", err)
 	}
+	if _, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "alpha OR beta"}); !errors.Is(err, repository.ErrUnsupportedSearchOperator) {
+		t.Fatalf("expected unsupported operator error from unified search, got %v", err)
+	}
 
 	// Unified date filters must trim record hits to the window. The test
 	// fixture has at least one record whose date falls outside a far-past
@@ -1625,6 +1654,99 @@ func TestSQLiteProjectPathChatAndUnifiedSearchBranches(t *testing.T) {
 	}
 	if _, err := repo.GetChatSessionByID(ctx, session.ID); !errors.Is(err, repository.ErrNotFound) {
 		t.Fatalf("expected deleted chat to be missing, got %v", err)
+	}
+}
+
+// TestSQLiteChatSearchRankFastPath verifies the FTS5 rank fast path: results
+// come back ordered by descending score, the page LIMIT/OFFSET partitions the
+// match set without dropping or duplicating rows, and the count ignores the
+// page bounds. The fast path drops the old recency/ordinal SQL tie-breaker, so
+// this asserts score ordering and pagination integrity instead of a fixed
+// equal-rank order.
+func TestSQLiteChatSearchRankFastPath(t *testing.T) {
+	repo, _ := newConcreteRepo(t)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC)
+	deviceID := "rank-device"
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: deviceID, CreatedAt: &now, UpdatedAt: &now}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+	session, _, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID: "20260520-abcd0001", Source: "codex", SourceSessionID: "rank-sid",
+			SourceDeviceID: deviceID, StartedAt: now, LastActivityAt: now, CreatedAt: &now, UpdatedAt: &now,
+		},
+		ClearDeleted: true,
+	})
+	if err != nil {
+		t.Fatalf("UpsertChatSession() error = %v", err)
+	}
+	// Five matching items with decreasing term frequency and increasing length
+	// so bm25 assigns each a distinct, decreasing relevance score.
+	for ordinal := 0; ordinal < 5; ordinal++ {
+		hits := 5 - ordinal
+		text := strings.Repeat("needle ", hits) + strings.Repeat("filler ", ordinal*10)
+		if _, err := repo.CreateChatItem(ctx, repository.CreateChatItemInput{
+			SessionID: session.ID, Ordinal: ordinal, Role: "assistant", ItemType: "message",
+			Text: &text, SearchText: text, CreatedAt: &now,
+		}); err != nil {
+			t.Fatalf("CreateChatItem(%d) error = %v", ordinal, err)
+		}
+	}
+
+	full, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle"})
+	if err != nil {
+		t.Fatalf("SearchChatItems(full) error = %v", err)
+	}
+	if len(full) != 5 {
+		t.Fatalf("expected 5 needle hits, got %d", len(full))
+	}
+	for i := 1; i < len(full); i++ {
+		if full[i].Rank > full[i-1].Rank {
+			t.Fatalf("results must be ordered by descending score; index %d score %v > %d score %v", i, full[i].Rank, i-1, full[i-1].Rank)
+		}
+	}
+
+	total, err := repo.CountSearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle"})
+	if err != nil {
+		t.Fatalf("CountSearchChatItems() error = %v", err)
+	}
+	if total != 5 {
+		t.Fatalf("CountSearchChatItems = %d, want 5", total)
+	}
+	totalUnderLimit, err := repo.CountSearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle", Limit: 2})
+	if err != nil {
+		t.Fatalf("CountSearchChatItems(limit) error = %v", err)
+	}
+	if totalUnderLimit != 5 {
+		t.Fatalf("CountSearchChatItems must ignore Limit; got %d want 5", totalUnderLimit)
+	}
+
+	// Pagination integrity: three pages must reproduce the unpaged order exactly
+	// and together cover all five items with no duplicates.
+	seen := map[int]int{}
+	pageOrdinals := []int{}
+	for _, page := range []struct{ limit, offset int }{{2, 0}, {2, 2}, {1, 4}} {
+		results, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "needle", Limit: page.limit, Offset: page.offset})
+		if err != nil {
+			t.Fatalf("SearchChatItems(limit %d offset %d) error = %v", page.limit, page.offset, err)
+		}
+		for i, r := range results {
+			fullIdx := page.offset + i
+			if r.Item.Ordinal != full[fullIdx].Item.Ordinal {
+				t.Fatalf("paged row at offset %d index %d ordinal %d != unpaged ordinal %d", page.offset, i, r.Item.Ordinal, full[fullIdx].Item.Ordinal)
+			}
+			seen[r.Item.Ordinal]++
+			pageOrdinals = append(pageOrdinals, r.Item.Ordinal)
+		}
+	}
+	if len(pageOrdinals) != 5 {
+		t.Fatalf("expected 5 rows across pages, got %d (%v)", len(pageOrdinals), pageOrdinals)
+	}
+	for ordinal := 0; ordinal < 5; ordinal++ {
+		if seen[ordinal] != 1 {
+			t.Fatalf("ordinal %d appeared %d times across pages, want exactly 1 (%v)", ordinal, seen[ordinal], pageOrdinals)
+		}
 	}
 }
 
@@ -1735,6 +1857,179 @@ func TestWriteChatImportBatchReplaceAppendSearchAndSyncVersion(t *testing.T) {
 	}
 	if afterAppend.Version <= afterReplace.Version {
 		t.Fatalf("sync_version did not increase after batch append: before=%d after=%d", afterReplace.Version, afterAppend.Version)
+	}
+}
+
+func TestUpsertChatSessionWithItemsCreatesAndRollsBackItemConflict(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newConcreteRepo(t)
+	now := time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC)
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "atomic-device"}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+
+	first := "atomic create first"
+	second := "atomic create second"
+	createdSession, created, err := repo.UpsertChatSessionWithItems(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260514-33333333",
+			Source:          "codex",
+			SourceSessionID: "atomic-create",
+			SourceDeviceID:  "atomic-device",
+			StartedAt:       now,
+			LastActivityAt:  now,
+			CreatedAt:       &now,
+			UpdatedAt:       &now,
+		},
+		ClearDeleted: true,
+	}, []repository.CreateChatItemInput{{
+		Ordinal:   0,
+		Role:      "user",
+		ItemType:  "message",
+		Text:      &first,
+		CreatedAt: &now,
+	}, {
+		Ordinal:   1,
+		Role:      "assistant",
+		ItemType:  "message",
+		Text:      &second,
+		CreatedAt: &now,
+	}})
+	if err != nil {
+		t.Fatalf("UpsertChatSessionWithItems(create) error = %v", err)
+	}
+	if !created || createdSession.ID != "20260514-33333333" {
+		t.Fatalf("expected new atomic session, created=%v session=%+v", created, createdSession)
+	}
+	items, err := repo.ListChatItems(ctx, createdSession.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems(created atomic) error = %v", err)
+	}
+	if len(items) != 2 || items[0].SearchText != first || items[1].SearchText != second {
+		t.Fatalf("unexpected atomic create items: %+v", items)
+	}
+
+	rollbackText := "atomic rollback text"
+	_, _, err = repo.UpsertChatSessionWithItems(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260514-44444444",
+			Source:          "codex",
+			SourceSessionID: "atomic-rollback",
+			SourceDeviceID:  "atomic-device",
+			StartedAt:       now,
+			LastActivityAt:  now,
+			CreatedAt:       &now,
+			UpdatedAt:       &now,
+		},
+		ClearDeleted: true,
+	}, []repository.CreateChatItemInput{{
+		Ordinal:   0,
+		Role:      "user",
+		ItemType:  "message",
+		Text:      &rollbackText,
+		CreatedAt: &now,
+	}, {
+		Ordinal:   0,
+		Role:      "assistant",
+		ItemType:  "message",
+		Text:      &rollbackText,
+		CreatedAt: &now,
+	}})
+	if !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected duplicate item conflict, got %v", err)
+	}
+	if _, err := repo.GetChatSessionByID(ctx, "20260514-44444444"); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected failed atomic create to roll back session, got %v", err)
+	}
+}
+
+func TestUpsertChatSessionWithItemsRollsBackExistingReplacementConflict(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := newConcreteRepo(t)
+	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "replacement-rollback-device"}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+
+	originalText := "original rollback survivor"
+	createdSession, created, err := repo.UpsertChatSessionWithItems(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260604-11111111",
+			Source:          "codex",
+			SourceSessionID: "replacement-rollback",
+			SourceDeviceID:  "replacement-rollback-device",
+			StartedAt:       now,
+			LastActivityAt:  now,
+			CreatedAt:       &now,
+			UpdatedAt:       &now,
+		},
+		ClearDeleted: true,
+	}, []repository.CreateChatItemInput{{
+		Ordinal:   0,
+		Role:      "user",
+		ItemType:  "message",
+		Text:      &originalText,
+		CreatedAt: &now,
+	}})
+	if err != nil {
+		t.Fatalf("seed UpsertChatSessionWithItems() error = %v", err)
+	}
+	if !created {
+		t.Fatal("expected seed upsert to create the chat session")
+	}
+
+	failedUpdatedAt := now.Add(time.Hour)
+	replacementText := "replacement item must roll back"
+	_, _, err = repo.UpsertChatSessionWithItems(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              createdSession.ID,
+			Source:          "codex",
+			SourceSessionID: "replacement-rollback",
+			SourceDeviceID:  "replacement-rollback-device",
+			StartedAt:       now,
+			LastActivityAt:  failedUpdatedAt,
+			UpdatedAt:       &failedUpdatedAt,
+		},
+		ClearDeleted: true,
+	}, []repository.CreateChatItemInput{{
+		Ordinal:   0,
+		Role:      "assistant",
+		ItemType:  "message",
+		Text:      &replacementText,
+		CreatedAt: &failedUpdatedAt,
+	}, {
+		Ordinal:   0,
+		Role:      "tool",
+		ItemType:  "tool_output",
+		Text:      &replacementText,
+		CreatedAt: &failedUpdatedAt,
+	}})
+	if !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected replacement item conflict, got %v", err)
+	}
+
+	rolledBack, err := repo.GetChatSessionByID(ctx, createdSession.ID)
+	if err != nil {
+		t.Fatalf("GetChatSessionByID(after rollback) error = %v", err)
+	}
+	if !rolledBack.UpdatedAt.Equal(createdSession.UpdatedAt) {
+		t.Fatalf("session updated_at changed after rollback: got %v want %v", rolledBack.UpdatedAt, createdSession.UpdatedAt)
+	}
+
+	items, err := repo.ListChatItems(ctx, createdSession.ID)
+	if err != nil {
+		t.Fatalf("ListChatItems(after rollback) error = %v", err)
+	}
+	if len(items) != 1 || items[0].SearchText != originalText {
+		t.Fatalf("replacement conflict did not roll back chat items: %+v", items)
+	}
+
+	results, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "survivor"})
+	if err != nil {
+		t.Fatalf("SearchChatItems(survivor) error = %v", err)
+	}
+	if len(results) != 1 || results[0].Session.ID != createdSession.ID || results[0].Item.SearchText != originalText {
+		t.Fatalf("FTS changed despite replacement rollback: %+v", results)
 	}
 }
 
@@ -2451,6 +2746,10 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 		{name: "CountChatItems", run: func() error { _, err := repo.CountChatItems(ctx, repository.CountChatItemsFilter{}); return err }},
 		{name: "SearchChatItems", run: func() error {
 			_, err := repo.SearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "x"})
+			return err
+		}},
+		{name: "CountSearchChatItems", run: func() error {
+			_, err := repo.CountSearchChatItems(ctx, repository.SearchChatItemsFilter{Query: "x"})
 			return err
 		}},
 		{name: "SearchAll", run: func() error { _, err := repo.SearchAll(ctx, repository.UnifiedSearchFilter{Query: "x"}); return err }},

@@ -3,7 +3,10 @@ package cli
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,13 +57,17 @@ func chatListJSON(t *testing.T, args ...string) []chatSessionJSON {
 func TestChatImportSkipsEmptyTranscriptFiles(t *testing.T) {
 	setupEnv(t)
 	root := t.TempDir()
+	projectDir := filepath.Join(root, "-Users-me-repo")
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatalf("mkdir project dir: %v", err)
+	}
 	files := map[string]string{
 		"zero.jsonl":   "",
 		"marker.jsonl": `{"type":"last-prompt","leafUuid":"x","sessionId":"y"}` + "\n",
 		"real.jsonl":   `{"type":"assistant","sessionId":"real-claude","timestamp":"2026-05-17T10:00:00Z","message":{"role":"assistant","content":"a real message"}}` + "\n",
 	}
 	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(projectDir, name), []byte(content), 0o644); err != nil {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
@@ -74,6 +81,88 @@ func TestChatImportSkipsEmptyTranscriptFiles(t *testing.T) {
 	sessions := chatListJSON(t)
 	if len(sessions) != 1 || sessions[0].SourceSessionID != "real-claude" {
 		t.Fatalf("expected one non-empty session, got %+v", sessions)
+	}
+}
+
+func TestChatImportSkipsMalformedFileAndContinues(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	goodPath := filepath.Join(root, "a-good.jsonl")
+	badPath := filepath.Join(root, "b-bad.json")
+	good := strings.Join([]string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"good-codex"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"response_item","payload":{"role":"user","content":"surviving transcript"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(goodPath, []byte(good), 0o644); err != nil {
+		t.Fatalf("write good transcript: %v", err)
+	}
+	if err := os.WriteFile(badPath, []byte(`{"messages":[`), 0o644); err != nil {
+		t.Fatalf("write malformed transcript: %v", err)
+	}
+
+	summary, stderr := runChatImportAgent(t, "codex", root)
+	if summary.FilesScanned != 2 || summary.FilesSkipped != 1 || summary.SessionsCreated != 1 || summary.ItemsImported != 1 {
+		t.Fatalf("summary = %+v, want scanned/skipped/created/items = 2/1/1/1", summary)
+	}
+	if !strings.Contains(stderr, "Skipped (") || !strings.Contains(stderr, badPath) {
+		t.Fatalf("expected skipped-file warning for %s, got %q", badPath, stderr)
+	}
+	sessions := chatListJSON(t)
+	if len(sessions) != 1 || sessions[0].SourceSessionID != "good-codex" {
+		t.Fatalf("expected only good transcript imported, got %+v", sessions)
+	}
+}
+
+func TestChatImportCodexForksBecomeDistinctSessions(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	parentID := "019d7dea-parent"
+	forkA := "019d7deb-fork-a"
+	forkB := "019d7dec-fork-b"
+	writeCodexRollout := func(name string, lines []string) {
+		t.Helper()
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	writeCodexRollout("a-parent.jsonl", []string{
+		`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + parentID + `"}}`,
+		`{"timestamp":"2026-06-04T12:00:01Z","type":"response_item","payload":{"role":"user","content":"parent turn"}}`,
+	})
+	writeFork := func(name string, forkID string, text string) {
+		t.Helper()
+		writeCodexRollout(name, []string{
+			`{"timestamp":"2026-06-04T12:00:00Z","type":"session_meta","payload":{"id":"` + forkID + `","forked_from_id":"` + parentID + `"}}`,
+			`{"timestamp":"2026-06-04T12:00:01Z","type":"session_meta","payload":{"id":"` + parentID + `","forked_from_id":null}}`,
+			`{"timestamp":"2026-06-04T12:00:02Z","type":"response_item","payload":{"role":"assistant","content":"` + text + `"}}`,
+		})
+	}
+	writeFork("b-fork-a.jsonl", forkA, "fork a turn")
+	writeFork("c-fork-b.jsonl", forkB, "fork b turn")
+
+	summary, stderr := runChatImportAgent(t, "codex", root)
+	if summary.SessionsCreated != 3 || summary.CollisionsSkipped != 0 || summary.FilesSkipped != 0 {
+		t.Fatalf("summary = %+v, stderr=%q; want 3 created and no collisions/skips", summary, stderr)
+	}
+	sessions := chatListJSON(t)
+	bySourceID := map[string]chatSessionJSON{}
+	for _, session := range sessions {
+		bySourceID[session.SourceSessionID] = session
+	}
+	for _, sourceID := range []string{parentID, forkA, forkB} {
+		if _, ok := bySourceID[sourceID]; !ok {
+			t.Fatalf("missing source session %q in %+v", sourceID, sessions)
+		}
+	}
+	for _, forkID := range []string{forkA, forkB} {
+		session := bySourceID[forkID]
+		if session.ParentSourceSessionID == nil || *session.ParentSourceSessionID != parentID {
+			t.Fatalf("fork %q parent = %v, want %q", forkID, session.ParentSourceSessionID, parentID)
+		}
+	}
+	if bySourceID[parentID].ParentSourceSessionID != nil {
+		t.Fatalf("parent session should not have fork lineage, got %+v", bySourceID[parentID])
 	}
 }
 
@@ -258,6 +347,133 @@ func TestChatImportGeminiDuplicatePaths(t *testing.T) {
 	}
 }
 
+func TestChatImportGeminiDuplicateMergePreservesResolvedCWD(t *testing.T) {
+	setupEnv(t)
+	projectPath := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir project path: %v", err)
+	}
+	normalizedProjectPath, err := normalizeProjectPath(projectPath)
+	if err != nil {
+		t.Fatalf("normalize project path: %v", err)
+	}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "register", "chat/gemini-duplicate", normalizedProjectPath, "--device", "test-device"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project register: %v", err)
+	}
+
+	root := t.TempDir()
+	writeGeminiCopy(t, filepath.Join(root, "0hash-first", "chats", "session-C.json"), "shared attribution content")
+	namedDir := filepath.Join(root, "project-name-second")
+	writeGeminiCopy(t, filepath.Join(namedDir, "chats", "session-C.json"), "shared attribution content")
+	if err := os.WriteFile(filepath.Join(namedDir, ".project_root"), []byte(normalizedProjectPath+"\n"), 0o644); err != nil {
+		t.Fatalf("write .project_root: %v", err)
+	}
+
+	summary, _ := runChatImportAgent(t, "gemini", root)
+	if summary.SessionsCreated != 1 || summary.DuplicatesSkipped != 1 {
+		t.Fatalf("duplicate import summary = %+v, want one retained session and one duplicate", summary)
+	}
+	if summary.DiskSessionsFound != 1 || summary.StoreSessionsFound != 1 || summary.MissingImportedSessions != 0 {
+		t.Fatalf("import completeness summary = %+v, want 1 disk session / 1 store session / 0 missing", summary)
+	}
+	sessions := chatListJSON(t, "--project", "chat/gemini-duplicate")
+	if len(sessions) != 1 {
+		t.Fatalf("expected duplicate representative attributed to project, got %+v", sessions)
+	}
+	if sessions[0].CWD == nil || *sessions[0].CWD != normalizedProjectPath {
+		t.Fatalf("representative cwd = %v, want %q", sessions[0].CWD, normalizedProjectPath)
+	}
+}
+
+// TestChatImportGeminiDuplicateMergeBackfillsStoredRepresentative covers the
+// merge path where the byte-identical representative is an already-stored
+// CWD-null session (not a pending batch entry). A later duplicate scanned in a
+// second run carries a resolvable cwd and must backfill only attribution on the
+// stored row, without replacing representative provenance.
+func TestChatImportGeminiDuplicateMergeBackfillsStoredRepresentative(t *testing.T) {
+	setupEnv(t)
+	projectPath := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(projectPath, 0o755); err != nil {
+		t.Fatalf("mkdir project path: %v", err)
+	}
+	normalizedProjectPath, err := normalizeProjectPath(projectPath)
+	if err != nil {
+		t.Fatalf("normalize project path: %v", err)
+	}
+
+	// First run: import the representative copy alone with no resolvable cwd
+	// (no .project_root, project not registered), so it stores with cwd=NULL.
+	root := t.TempDir()
+	firstDir := filepath.Join(root, "0hash-first")
+	firstPath := filepath.Join(firstDir, "chats", "session-E.json")
+	writeGeminiCopy(t, firstPath, "stored merge content")
+	first, _ := runChatImportAgent(t, "gemini", root)
+	if first.SessionsCreated != 1 {
+		t.Fatalf("first import = %+v, want one created session", first)
+	}
+	stored := chatListJSON(t)
+	if len(stored) != 1 || stored[0].CWD != nil {
+		t.Fatalf("first import should store a single cwd-null session, got %+v", stored)
+	}
+	if stored[0].OriginalSourcePath == nil || stored[0].RawSourceKey == nil {
+		t.Fatalf("first import should store representative provenance, got %+v", stored[0])
+	}
+
+	// Register the project and add a byte-identical duplicate under a different
+	// tmp dir that resolves the cwd via .project_root.
+	cmd := NewRootCommand(RootCommandOptions{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"project", "register", "chat/gemini-stored-merge", normalizedProjectPath, "--device", "test-device"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("project register: %v", err)
+	}
+	namedDir := filepath.Join(root, "project-name-second")
+	duplicatePath := filepath.Join(namedDir, "chats", "session-E.json")
+	writeGeminiCopy(t, duplicatePath, "stored merge content")
+	if err := os.WriteFile(filepath.Join(namedDir, ".project_root"), []byte(normalizedProjectPath+"\n"), 0o644); err != nil {
+		t.Fatalf("write .project_root: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"chat", "import", "--device", "test-device", "--agent", "gemini", "--root", root, "--delete-source"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("second chat import: %v", err)
+	}
+	var second chatImportSummary
+	if err := json.Unmarshal(stdout.Bytes(), &second); err != nil {
+		t.Fatalf("parse second import summary: %v\n%s", err, stdout.String())
+	}
+	// The stored representative is skipped (unchanged), and the duplicate
+	// updates only missing attribution rather than replacing raw provenance.
+	if second.SessionsCreated != 0 || second.SessionsUpdated != 1 || second.ItemsImported != 0 ||
+		second.RawSourcesCopied != 0 || second.DuplicatesSkipped != 1 || second.SourcesDeleted != 2 {
+		t.Fatalf("second import = %+v, want one attribution-only duplicate merge", second)
+	}
+	if second.DiskSessionsFound != 1 || second.StoreSessionsFound != 1 || second.MissingImportedSessions != 0 {
+		t.Fatalf("import completeness summary = %+v, want 1 disk session / 1 store session / 0 missing", second)
+	}
+	sessions := chatListJSON(t, "--project", "chat/gemini-stored-merge")
+	if len(sessions) != 1 {
+		t.Fatalf("expected stored representative backfilled with project attribution, got %+v", sessions)
+	}
+	if sessions[0].CWD == nil || *sessions[0].CWD != normalizedProjectPath {
+		t.Fatalf("stored representative cwd = %v, want %q", sessions[0].CWD, normalizedProjectPath)
+	}
+	if sessions[0].OriginalSourcePath == nil || *sessions[0].OriginalSourcePath != *stored[0].OriginalSourcePath {
+		t.Fatalf("stored representative original_source_path = %v, want preserved %v", sessions[0].OriginalSourcePath, stored[0].OriginalSourcePath)
+	}
+	if sessions[0].RawSourceKey == nil || *sessions[0].RawSourceKey != *stored[0].RawSourceKey {
+		t.Fatalf("stored representative raw_source_key = %v, want preserved %v", sessions[0].RawSourceKey, stored[0].RawSourceKey)
+	}
+	for _, path := range []string{firstPath, duplicatePath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("expected source %s deleted after attribution-only --delete-source import, stat err = %v", path, err)
+		}
+	}
+}
+
 func TestChatImportGeminiDuplicatePathsStayCollapsedAcrossRuns(t *testing.T) {
 	setupEnv(t)
 
@@ -289,6 +505,237 @@ func TestChatImportGeminiDuplicatePathsStayCollapsedAcrossRuns(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("expected %s deleted with --delete-source, stat err = %v", path, err)
 		}
+	}
+}
+
+func TestApplyChatImportCompletenessReportsMissingImportedSessions(t *testing.T) {
+	expected := map[chatImportCompletenessKey]struct{}{
+		{source: "codex", sourceSessionID: "stored"}:  {},
+		{source: "codex", sourceSessionID: "missing"}: {},
+	}
+	repo := &mockRepo{
+		getChatBySourceFn: func(_ context.Context, _ string, sourceSessionID string) (repository.ChatSession, error) {
+			if sourceSessionID == "stored" {
+				return repository.ChatSession{ID: "20260606-aaaabbbb"}, nil
+			}
+			return repository.ChatSession{}, repository.ErrNotFound
+		},
+	}
+	summary := chatImportSummary{}
+	if err := applyChatImportCompleteness(context.Background(), repo, &summary, expected); err != nil {
+		t.Fatalf("applyChatImportCompleteness() error = %v", err)
+	}
+	if summary.DiskSessionsFound != 2 || summary.StoreSessionsFound != 1 || summary.MissingImportedSessions != 1 {
+		t.Fatalf("import completeness summary = %+v, want 2 disk sessions / 1 store session / 1 missing", summary)
+	}
+}
+
+func TestRunChatImportCompletenessFailureReturnsAfterImportWork(t *testing.T) {
+	setupEnv(t)
+	root := t.TempDir()
+	writeTestChatTranscript(t, root, "stored.json", `{"id":"stored","started_at":"2026-06-06T12:00:00Z","messages":[{"role":"user","content":"stored"}]}`)
+	writeTestChatTranscript(t, root, "missing.json", `{"id":"missing","started_at":"2026-06-06T12:00:00Z","messages":[{"role":"user","content":"missing"}]}`)
+
+	origNewSQLiteRepo := newSQLiteRepoFn
+	t.Cleanup(func() { newSQLiteRepoFn = origNewSQLiteRepo })
+	origAutoSync := runAutoSyncFn
+	t.Cleanup(func() { runAutoSyncFn = origAutoSync })
+
+	batchWritten := false
+	autoSyncCalls := 0
+	runAutoSyncFn = func(context.Context, io.Writer) error {
+		autoSyncCalls++
+		return nil
+	}
+	newSQLiteRepoFn = func(*sql.DB) (repository.Repository, error) {
+		return &mockRepo{
+			getDeviceByIDFn: func(context.Context, string) (repository.Device, error) {
+				return repository.Device{ID: "test-device"}, nil
+			},
+			listProjectPathsFn: func(context.Context, *string) ([]repository.ProjectPath, error) {
+				return nil, nil
+			},
+			listChatSessionsFn: func(context.Context, repository.ListChatSessionsFilter) ([]repository.ChatSession, error) {
+				return nil, nil
+			},
+			getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+				return repository.Record{}, repository.ErrNotFound
+			},
+			getChatByIDFn: func(context.Context, string) (repository.ChatSession, error) {
+				return repository.ChatSession{}, repository.ErrNotFound
+			},
+			getChatBySourceFn: func(_ context.Context, source string, sourceSessionID string) (repository.ChatSession, error) {
+				if batchWritten && source == "codex" && sourceSessionID == "stored" {
+					return repository.ChatSession{ID: "20260606-aaaabbbb", Source: source, SourceSessionID: sourceSessionID}, nil
+				}
+				return repository.ChatSession{}, repository.ErrNotFound
+			},
+			writeChatBatchFn: func(_ context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error) {
+				batchWritten = true
+				results := make([]repository.ChatImportResult, 0, len(ops))
+				for _, op := range ops {
+					input := op.Session.CreateChatSessionInput
+					results = append(results, repository.ChatImportResult{Session: repository.ChatSession{
+						ID:                 input.ID,
+						Source:             input.Source,
+						SourceSessionID:    input.SourceSessionID,
+						SourceDeviceID:     input.SourceDeviceID,
+						OriginalSourcePath: input.OriginalSourcePath,
+						RawSourceKey:       input.RawSourceKey,
+						StartedAt:          input.StartedAt,
+						LastActivityAt:     input.LastActivityAt,
+					}, Created: true})
+				}
+				return results, nil
+			},
+		}, nil
+	}
+
+	err := runChatImport(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, chatImportOptions{
+		DeviceID: "test-device",
+		Agent:    "codex",
+		Roots:    []string{root},
+	})
+	if err == nil || !strings.Contains(err.Error(), "chat import completeness check failed: 1 of 2 parseable disk sessions are missing from the store after import") {
+		t.Fatalf("runChatImport() error = %v, want import-completeness hard error", err)
+	}
+	if !batchWritten {
+		t.Fatal("expected import batch to complete before import-completeness hard error")
+	}
+	if autoSyncCalls != 1 {
+		t.Fatalf("auto-sync calls = %d, want 1 before import-completeness hard error", autoSyncCalls)
+	}
+}
+
+func TestScanChatImportCompletenessCountsUniqueParseableDiskSessions(t *testing.T) {
+	root := t.TempDir()
+	body := `{"id":"complete-session","started_at":"2026-06-06T12:00:00Z","messages":[{"role":"user","content":"count me once"}]}`
+	writeTestChatTranscript(t, root, "one.json", body)
+	writeTestChatTranscript(t, root, "duplicate.json", body)
+	writeTestChatTranscript(t, root, "bad.json", `{not-json`)
+
+	expected, err := scanChatImportCompleteness(context.Background(), map[string][]string{"codex": {root}})
+	if err != nil {
+		t.Fatalf("scanChatImportCompleteness() error = %v", err)
+	}
+	if len(expected) != 1 {
+		t.Fatalf("import completeness scan found %d unique parseable sessions, want 1: %+v", len(expected), expected)
+	}
+	if _, ok := expected[chatImportCompletenessKey{source: "codex", sourceSessionID: "complete-session"}]; !ok {
+		t.Fatalf("import completeness scan did not include codex/complete-session: %+v", expected)
+	}
+}
+
+func TestScanChatImportCompletenessStopsAfterCancellation(t *testing.T) {
+	root := t.TempDir()
+	writeTestChatTranscript(t, root, "session.json", `{"id":"canceled-session","started_at":"2026-06-06T12:00:00Z","messages":[{"role":"user","content":"stop"}]}`)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	expected, err := scanChatImportCompleteness(ctx, map[string][]string{"codex": {root}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("scanChatImportCompleteness(canceled) error = %v, want context.Canceled", err)
+	}
+	if expected != nil {
+		t.Fatalf("scanChatImportCompleteness(canceled) expected = %+v, want nil", expected)
+	}
+}
+
+func TestApplyChatImportCompletenessPropagatesCancellationAndStoreErrors(t *testing.T) {
+	expected := map[chatImportCompletenessKey]struct{}{
+		{source: "codex", sourceSessionID: "blocked"}: {},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	repo := &mockRepo{
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			t.Fatal("GetChatSessionBySource should not run after context cancellation")
+			return repository.ChatSession{}, nil
+		},
+	}
+	if err := applyChatImportCompleteness(ctx, repo, &chatImportSummary{}, expected); !errors.Is(err, context.Canceled) {
+		t.Fatalf("applyChatImportCompleteness(canceled) error = %v, want context.Canceled", err)
+	}
+
+	storeErr := errors.New("store unavailable")
+	repo = &mockRepo{
+		getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+			return repository.ChatSession{}, storeErr
+		},
+	}
+	err := applyChatImportCompleteness(context.Background(), repo, &chatImportSummary{}, expected)
+	if !errors.Is(err, storeErr) || !strings.Contains(err.Error(), "check chat import completeness for codex/blocked") {
+		t.Fatalf("applyChatImportCompleteness(store error) = %v, want wrapped import-completeness lookup error", err)
+	}
+}
+
+func TestMergeDuplicateChatImportAttributionReportsRepresentativeLookupFailure(t *testing.T) {
+	cwd := "/workspace/project"
+	lookupErr := errors.New("lookup failed")
+	queued, merged, err := mergeDuplicateChatImportAttribution(
+		context.Background(),
+		&localStack{Repo: &mockRepo{
+			getChatBySourceFn: func(context.Context, string, string) (repository.ChatSession, error) {
+				return repository.ChatSession{}, lookupErr
+			},
+		}},
+		&chatImportBatch{},
+		&chatImportSessionIndex{},
+		chatImportContentRepresentative{chatID: "20260606-aabbccdd", source: "gemini", sourceSessionID: "representative-session"},
+		repository.CreateChatSessionInput{Source: "gemini", CWD: &cwd},
+		filepath.Join(t.TempDir(), "missing.json"),
+		false,
+	)
+	if !errors.Is(err, lookupErr) || !strings.Contains(err.Error(), "look up duplicate chat representative") {
+		t.Fatalf("mergeDuplicateChatImportAttribution(lookup failure) error = %v, want wrapped lookup error", err)
+	}
+	if queued || merged {
+		t.Fatalf("mergeDuplicateChatImportAttribution(lookup failure) queued=%t merged=%t, want both false", queued, merged)
+	}
+}
+
+func TestMergePendingAttributionBackfillsOnlyMatchingRepresentative(t *testing.T) {
+	cwd := "/workspace/project"
+	projectID := "chat/project"
+	otherCWD := "/workspace/other"
+	batch := chatImportBatch{entries: []pendingChatImport{
+		{op: repository.ChatImportOp{Session: repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260606-other",
+			Source:          "gemini",
+			SourceSessionID: "other-session",
+			CWD:             &otherCWD,
+		}}}},
+		{op: repository.ChatImportOp{Session: repository.UpsertChatSessionInput{CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              "20260606-representative",
+			Source:          "gemini",
+			SourceSessionID: "representative-session",
+		}}}},
+	}}
+
+	merged := batch.mergePendingAttribution(chatImportContentRepresentative{
+		chatID:          "20260606-representative",
+		source:          "gemini",
+		sourceSessionID: "representative-session",
+	}, repository.CreateChatSessionInput{CWD: &cwd, ProjectID: &projectID})
+	if !merged {
+		t.Fatal("mergePendingAttribution() = false, want true for queued representative")
+	}
+	representative := batch.entries[1].op.Session.CreateChatSessionInput
+	if representative.CWD == nil || *representative.CWD != cwd {
+		t.Fatalf("representative CWD = %v, want %q", representative.CWD, cwd)
+	}
+	if representative.ProjectID == nil || *representative.ProjectID != projectID {
+		t.Fatalf("representative project_id = %v, want %q", representative.ProjectID, projectID)
+	}
+	if got := batch.entries[0].op.Session.CWD; got == nil || *got != otherCWD {
+		t.Fatalf("non-representative CWD = %v, want unchanged %q", got, otherCWD)
+	}
+	if batch.mergePendingAttribution(chatImportContentRepresentative{
+		chatID:          "20260606-missing",
+		source:          "gemini",
+		sourceSessionID: "missing-session",
+	}, repository.CreateChatSessionInput{CWD: &cwd}) {
+		t.Fatal("mergePendingAttribution() = true for missing representative, want false")
 	}
 }
 

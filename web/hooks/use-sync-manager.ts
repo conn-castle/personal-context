@@ -39,6 +39,7 @@ const COOLDOWN_MS = 30_000;
 const IDLE_POLL_MS = 60_000;
 const DEEP_IDLE_POLL_MS = 300_000;
 const DEEP_IDLE_THRESHOLD_MS = 600_000;
+const SELF_MUTATION_TTL_MS = 10_000;
 
 function isSyncVersionResponse(value: unknown): value is SyncVersionResponse {
   if (!value || typeof value !== "object") {
@@ -120,11 +121,21 @@ export function useSyncManager(
   const lastCheckRef = useRef(0);
   const lastActivityRef = useRef(Date.now());
   const selfMutationVersionRef = useRef<number | null>(null);
+  const selfMutationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
   const versionRef = useRef(0);
   const lastSyncAtRef = useRef<string | null>(null);
   const isSyncingRef = useRef(false);
   const onSyncDataRef = useRef(onSyncData);
   onSyncDataRef.current = onSyncData;
+
+  const clearSelfMutationTimer = useCallback(() => {
+    if (selfMutationTimerRef.current !== null) {
+      clearTimeout(selfMutationTimerRef.current);
+      selfMutationTimerRef.current = null;
+    }
+  }, []);
 
   /**
    * Core sync: check version, optionally fetch changes.
@@ -161,6 +172,7 @@ export function useSyncManager(
           if (selfMutationVersionRef.current !== null) {
             const storedVersion = selfMutationVersionRef.current;
             selfMutationVersionRef.current = null;
+            clearSelfMutationTimer();
             const isSelfOnly =
               storedVersion === 0 ||
               versionData.version === storedVersion + 1;
@@ -208,7 +220,7 @@ export function useSyncManager(
         setIsSyncing(false);
       }
     },
-    [enabled, cooldownMs]
+    [enabled, cooldownMs, clearSelfMutationTimer]
   );
 
   // Layer 1: Manual refresh (always fires, ignores cooldown)
@@ -220,7 +232,18 @@ export function useSyncManager(
   // can compare and only skip if the server version is exactly +1.
   const markMutation = useCallback(() => {
     selfMutationVersionRef.current = versionRef.current;
-  }, []);
+    clearSelfMutationTimer();
+    selfMutationTimerRef.current = setTimeout(() => {
+      selfMutationVersionRef.current = null;
+      selfMutationTimerRef.current = null;
+    }, SELF_MUTATION_TTL_MS);
+  }, [clearSelfMutationTimer]);
+
+  useEffect(() => {
+    return () => {
+      clearSelfMutationTimer();
+    };
+  }, [clearSelfMutationTimer]);
 
   // Layer 2: Interaction (click) — respects cooldown
   useEffect(() => {
@@ -253,6 +276,8 @@ export function useSyncManager(
   useEffect(() => {
     if (!enabled) return;
 
+    let cancelled = false;
+
     const tick = () => {
       if (document.visibilityState === "hidden") return;
       void doSync(false);
@@ -267,6 +292,7 @@ export function useSyncManager(
       const interval =
         idle > deepIdleThresholdMs ? deepIdlePollMs : idlePollMs;
       timerId = setTimeout(() => {
+        if (cancelled) return;
         tick();
         schedule();
       }, interval);
@@ -275,6 +301,7 @@ export function useSyncManager(
     schedule();
 
     return () => {
+      cancelled = true;
       clearTimeout(timerId);
     };
   }, [enabled, doSync, idlePollMs, deepIdlePollMs, deepIdleThresholdMs]);

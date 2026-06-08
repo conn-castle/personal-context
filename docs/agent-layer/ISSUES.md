@@ -27,6 +27,44 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-07 h3v6n2: chat import completeness check re-walks and re-hashes every transcript
+    Priority: Low. Area: cli/internal/cli/chat.go
+    Description: scanChatImportCompleteness does a full pre-pass that re-walks, re-parses, and re-hashes every transcript the main import loop then processes again, roughly doubling parse+hash I/O on large stores (the very high-file-count w8k3r1 scenario the check targets). Correct, just not free.
+    Next step: Fold the unique-session set into the main scan (record (source, source_session_id) and content hashes during the existing per-file loop) instead of a separate pre-pass, then compare against the store once at the end.
+    Notes: Surfaced reviewing the w8k3r1 import-completeness PR. Deferred as out-of-scope for the tight two-issue fix; it touches the correctness-critical import loop and warrants its own change.
+
+- Issue 2026-06-06 m2k7r9: fetchMore is outside the monotonic page-request sequence guard
+    Priority: Low. Area: web/hooks/use-records.ts
+    Description: `loadRecordsPage` (fetch/refresh paths) increments `recordsPageRequestSeqRef` and discards stale responses, but `fetchMore` reads/writes `cursorRef.current` and calls `updatePaginationState`/`mergeUniqueRecords` with no sequence check. A `fetchMore` in flight when a `fetchRecords`/`refreshRecords` resets page 1 can land its old page and clobber the cursor the newer load just set. Narrow window, pre-existing (original sequence-guard fix scoped only fetch/refresh).
+    Next step: Capture the request sequence at the start of `fetchMore` and discard its result if `recordsPageRequestSeqRef.current` advanced before it resolved (mirror `loadRecordsPage`).
+
+- Issue 2026-06-06 s5n3w8: selectRecord and refreshRecords reconcile race on selectedRecord
+    Priority: Low. Area: web/hooks/use-records.ts
+    Description: `selectRecord` writes `selectedRecord` with no shared ordering token, while the `replaceRecordsPage` reconcile (background `refreshRecords`) independently clears it. The two async writers can interleave: a reconcile may null a just-clicked record, or a slow `selectRecord` may resurrect a record the reconcile cleared. The functional `setState` updater narrows but does not close the window. Self-corrects on the next user action, so Low.
+    Next step: If addressed, gate detail-state writes on a shared monotonic sequence or abort token so the reconcile and selectRecord cannot interleave inconsistently.
+
+- Issue 2026-06-06 v6n8r4: GitHub reports default-branch Dependabot vulnerabilities
+    Priority: High. Area: dependency security
+    Description: GitHub reported 58 vulnerabilities on the default branch during PR #40 remote-branch cleanup (3 critical, 21 high, 30 moderate, 4 low). Details are in the repository Dependabot alerts.
+    Next step: Inspect the GitHub Dependabot alert list, upgrade affected dependencies where compatible, and record any accepted risk explicitly.
+
+- Issue 2026-06-06 t4p8m1: FTS chat search --offset is scan-and-discard (linear deep-pagination cost)
+    Priority: Low. Area: cli/internal/repository (sqlite+postgres) chat search
+    Description: `pc chat search`/`pc search` paginate the FTS path with SQL OFFSET, so deep pages re-scan and discard all skipped rows. Measured ~0.19 ms/row (`review` offset 0/500/1000/2000 = 0.19/0.36/0.56/0.75 s; `hydroponics` offset 4000 = 1.59 s vs 46 ms at 0); non-FTS `pc chat list` is constant-time by contrast. The JSON envelope already returns `next_cursor`.
+    Next step: Replace offset paging with keyset/cursor pagination on (rank, id) for the chat FTS path; reuse the existing next_cursor surface.
+    Notes: Deferred from the 2026-06 search-quality slice (that slice fixed top-k LIMIT latency, not offset cost). Lower priority than the resolved limit-latency bug.
+
+- Issue 2026-06-06 q9r2k7: Codex fork sessions replay full parent history (heavy content duplication at scale)
+    Priority: Medium. Area: cli chat import / storage / data model
+    Description: Codex forks import as distinct sessions that each carry a near-complete copy of the parent's items by design (1,111 forks from 220 parents on the reference store; codex raw dominates ~12 GB of 13 GB chats/). This inflates DB/raw storage and makes any shared-history term match the parent plus every fork. Intentional behavior per the v0.1.5 CHANGELOG — changing it needs a product/data-model decision, not a silent fix.
+    Next step: Decide whether to store only a fork's divergent tail with a pointer to the parent prefix and/or de-duplicate replayed items at the item layer; capture the decision in DECISIONS.md before implementing.
+    Notes: Surfaced in the v0.1.5 search-quality handoff §4. Related search-side symptom (one conversation returned many times) overlaps backlog fork-family grouping.
+
+- Issue 2026-06-04 q2v9m6: Gemini chat session identity is path-derived, not the in-file sessionId
+    Priority: Low. Area: cli/internal/chatimport/chatimport.go
+    Description: geminiSourceSessionID derives source_session_id from the file path (grandparent/parent/basename) with a stale comment claiming Gemini carries no usable session id; current Gemini session JSON does carry a stable top-level `sessionId`. Path-based identity works but is brittle (a moved/renamed tmp dir changes identity) and differs from codex/claude which key on the native id.
+    Next step: Switch Gemini identity to the in-file `sessionId` only during a fresh store rebuild — it rewrites every Gemini source_session_id, so doing it incrementally would churn/duplicate existing rows. Defer until such a rebuild.
+
 - Issue 2026-06-04 h5j6k7: Harden schema-level record asset key canonicality
     Priority: Low. Area: schema
     Description: Repository adapters now reject non-canonical record child asset keys, but canonical SQLite/Postgres schema artifacts still enforce only `figures/` and `data/` prefixes. Direct database writes can still persist keys outside `{kind}/{record_id}/{filename}` until schema constraints are tightened through the migration system.
@@ -37,20 +75,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: PR #34 pinned actions to SHAs and added `persist-credentials: false` to the read-only `ci.yml` checkouts. Two reviewer-suggested hardenings remain: `cache: false` on `setup-go` (a CI-speed vs cache-poisoning tradeoff) in `ci.yml` and `release.yml` build-release, and `persist-credentials: false` on `release.yml` checkouts. The release-pipeline change is risky because the homebrew-tap checkout (release.yml:116) feeds `peter-evans/create-pull-request`, which pushes; `release.yml` is tag-triggered and not exercised by PR CI, so the credential change can't be verified here.
     Next step: Decide the cache tradeoff explicitly; if applying `persist-credentials: false` to release.yml, verify `create-github-app-token` + `create-pull-request` still authenticate (token is passed explicitly) on a real tag run before relying on it.
 
-- Issue 2026-05-22 j4n7p3: Make screenshot fake-Chrome test scripts cross-platform
-    Priority: Low. Area: cli/internal/cli/screenshot_test.go
-    Description: `writeFakeChromeScript` and `writeFakeChromePNGScript` emit POSIX shell scripts (`#!/bin/sh`, `dd if=/dev/zero`) and are invoked by `TestScreenshotHappyPath`, `TestScreenshotDefaultOutput`, and the pre-existing `TestScreenshotPreservesRelativeFigurePaths`. CI runs Linux only (`.github/workflows/ci.yml` is ubuntu-latest), so this passes today, but a Windows test run would fail because `screenshotWithChrome` exec's the script directly.
-    Next step: Replace the shell scripts with a Go-level fake (e.g., write a minimal PNG via `os.WriteFile` and return a stubbed `screenshotWithChrome` impl), or add `runtime.GOOS == "windows"` skip guards to all callers including the pre-existing test.
-
 - Issue 2026-05-22 h9k2m4: Replace per-import hash of managed raw with schema-backed fingerprint
     Priority: Low. Area: cli/internal/cli/chat.go, schema
-    Description: Exact unchanged chat imports still pay source + managed file hashing cost, plus an O(N) `ListChatSessions(IncludeDeleted: true)` load per source per import to populate the lookup index. Append-only JSONL/NDJSON now uses a suffix import path, so this is a remaining optimization rather than the active-session bottleneck. See: s4w9x2.
+    Description: Exact unchanged chat imports still pay source + managed file hashing cost, plus an O(N) `ListChatSessions(IncludeDeleted: true)` load per source per import to populate the lookup index. Append-only JSONL/NDJSON now uses a suffix import path, so this is a remaining optimization rather than the active-session bottleneck.
     Next step: If large-history profiling shows exact-match hashing or the per-source list load remains expensive, design a schema-backed source fingerprint with explicit migration handling and consider a narrower index-load filter.
-
-- Issue 2026-05-17 s4w9x2: SearchAll fetches full match set into Go memory before pagination
-    Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/chat.go
-    Description: `SearchAll` runs per-domain (records, chats) queries with no LIMIT/OFFSET, merges them in Go, sorts by BM25 rank across domains, then slices client-side. For queries that match thousands of rows this is O(N) memory and adds latency. The recent CLI fix limits the CLI-side over-fetch via `Limit+1`, but the repository still pulls all matches into memory before applying Limit/Offset.
-    Next step: Push the union+rank+limit into SQL via UNION ALL with a shared rank expression, or cap each domain's fetch at `Limit+1` rows and merge. Update both backends and contract tests.
 
 - Issue 2026-05-17 a3i6f8: Snapshot replacement is rollback-safe but not crash-safe atomic
     Priority: Medium. Area: cli/internal/gitsnapshot/snapshot.go
@@ -61,11 +89,6 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/repository.go, schema
     Description: `CreateRecord` and `UpsertChatSession` each do a read-then-insert preflight to check that the ID isn't already used by the other table. Two concurrent writers can pass both probes and commit conflicting IDs. The races are unlikely in practice (chat IDs include random hex), but the invariant is real if the design relies on a shared ID namespace.
     Next step: Introduce a dedicated `id_registry` table with a unique constraint and reserve the ID transactionally on creation, or run both inserts inside the same transaction with a shared advisory lock. Update both backends; document the contract in DECISIONS.md.
-
-- Issue 2026-05-17 c8h9k1: Chat sync upsert + items replacement is not atomic
-    Priority: High. Area: cli/internal/sync/service.go
-    Description: `syncChangedChatsDirected` calls `UpsertChatSession` (which advances target `updated_at` to the source value) followed by `ReplaceChatItems`. If `ReplaceChatItems` fails, the chat row is left advanced while items remain stale, and the next sync sees equal timestamps (WinnerNone) and skips the chat — leaving the items table inconsistent indefinitely. Unlike records, chats use unconditional `ReplaceChatItems` so they are not self-healing across syncs.
-    Next step: Wrap the chat upsert + items replacement in a single repository-level transaction, or downgrade target `updated_at` on items failure so the next sync re-picks the chat. Add a failing-test reproducer (force `ReplaceChatItems` error, assert next sync corrects items).
 
 - Issue 2026-05-17 p2r3s4: Project-paths registry sync is insert-only and grows monotonically
     Priority: Medium. Area: cli/internal/sync/service.go cli/internal/repository
@@ -98,35 +121,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: `handleSyncData` callback ignores the `SyncChangesResponse` data from `useSyncManager` and does a full page-1 refetch via `refreshRecords()`. This wastes the incremental `GET /api/sync/changes` API call and resets pagination on every sync.
     Next step: Either use the incremental items to merge into the local record list, or remove the `GET /api/sync/changes` fetch from `useSyncManager` and use version-triggered full refetch only.
 
-- Issue 2026-03-10 o9p0q1a: refreshRecords does not clear stale selectedRecord
-    Priority: Low. Area: web/hooks/use-records.ts
-    Description: When `refreshRecords` replaces the record list (e.g., after sync), `selectedRecord` retains stale data. If the selected record was deleted by another client, it remains visible in the detail panel while absent from navigation.
-    Next step: After `refreshRecords`, check if `selectedRecord.id` is still in the new items list. If not, clear or re-fetch it.
-
-- Issue 2026-03-10 q3r4s5a: No request cancellation between concurrent fetch/refresh operations
-    Priority: Low. Area: web/hooks/use-records.ts
-    Description: Both `fetchRecords` and `refreshRecords` write to the same `records` state and `cursorRef`. Concurrent in-flight requests can overwrite each other's results, leaving cursor and records in inconsistent states.
-    Next step: Add an `AbortController` or monotonic request ID to discard stale responses.
-
 - Issue 2026-03-10 a1b2c3a: refreshRecords does not set isLoading during background sync
     Priority: Low. Area: web/hooks/use-records.ts
     Description: `refreshRecords` (called by sync manager on version change) never sets `isLoading`. Consumers see `false` throughout the fetch, so no loading indicator is shown during background refreshes.
     Next step: Decide if this is intentional (silent refresh) or if a separate `isRefreshing` state should be exposed.
-
-- Issue 2026-03-10 b3c4d5a: selfMutationRef timing window in useSyncManager
-    Priority: Low. Area: web/hooks/use-sync-manager.ts
-    Description: `markMutation()` sets `selfMutationRef` to `true`, but it is only consumed when a version change is detected. If the S3 `_version` bump hasn't propagated when the next sync fires, the flag stays `true` and suppresses the next legitimate external version change.
-    Next step: Add a TTL or auto-clear `selfMutationRef` after ~10 seconds if no version change was observed.
-
-- Issue 2026-03-10 c5d6e7a: deleteRecord error recovery clears the error via fetchRecords re-fetch
-    Priority: Low. Area: web/hooks/use-records.ts
-    Description: When `deleteRecord` fails, it sets an error and calls `fetchRecords` to roll back optimistic state. But `fetchRecords` starts with `setError(null)`, clearing the delete error. If the re-fetch succeeds, the user never sees the delete failure message.
-    Next step: Use a separate error channel or toast for mutation failures, or skip `setError(null)` when `fetchRecords` is called as a rollback.
-
-- Issue 2026-03-10 d7e8f9a: Layer 4 idle polling recursive setTimeout without cancel guard
-    Priority: Low. Area: web/hooks/use-sync-manager.ts
-    Description: The idle polling `schedule` function recursively calls itself via `setTimeout`. If the `useEffect` re-runs while an old `tick()` is executing `doSync`, both old and new polling chains can be active concurrently. The `isSyncingRef` guard (added in Round 1) prevents double `doSync` execution but the redundant timers remain.
-    Next step: Add a `cancelled` boolean in the effect that is set `true` in the cleanup function, checked before calling `schedule()` in the recursive callback.
 
 - Issue 2026-03-10 g3h4i5a: AssetCard download/delete handlers are no-ops
     Priority: Medium. Area: web/components/record-details.tsx
@@ -157,3 +155,8 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Priority: Low. Area: cli/scripts
     Description: `check_coverage.sh` and `check_coverage_per_package.sh` both run `go test` independently. Every test runs at least twice per CI job, doubling test execution time as the package count grows.
     Next step: Merge the two scripts or have the per-package script reuse the aggregate profile.
+
+- Issue 2026-03-06 b2c3d4: CLI package-level test function variables unsafe with t.Parallel
+    Priority: Low. Area: cli/internal/cli
+    Description: CLI tests still mutate package-level stubs such as `resolveHomeDirFn`, `screenshotWithChromeFn`, and cloud setup hooks, then restore via `t.Cleanup`. Safe today because cli package tests are not parallel, but adding parallel tests would cause data races.
+    Next step: If CLI tests need parallelism, refactor the remaining CLI command stubs into command-scoped dependencies or instance hooks.

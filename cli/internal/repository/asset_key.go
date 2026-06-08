@@ -8,13 +8,8 @@ import (
 // ValidateRecordAssetKey verifies that a child asset key is the canonical
 // relative path derived from its owning record and filename.
 func ValidateRecordAssetKey(kind string, recordID string, filename string, s3Key string) error {
-	if kind != "figures" && kind != "data" {
-		return fmt.Errorf("%w: unsupported asset key kind %q", ErrInvalidArgument, kind)
-	}
-	if err := validateAssetPathSegment("record id", recordID); err != nil {
-		return err
-	}
-	if err := validateAssetPathSegment("filename", filename); err != nil {
+	expected, err := CanonicalRecordAssetKey(kind, recordID, filename)
+	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(s3Key) == "" {
@@ -30,11 +25,24 @@ func ValidateRecordAssetKey(kind string, recordID string, filename string, s3Key
 	if len(parts) != 3 {
 		return fmt.Errorf("%w: s3_key must be %s/{record_id}/{filename}", ErrInvalidArgument, kind)
 	}
-	expected := kind + "/" + recordID + "/" + filename
 	if s3Key != expected {
 		return fmt.Errorf("%w: s3_key %q must equal %q", ErrInvalidArgument, s3Key, expected)
 	}
 	return nil
+}
+
+// CanonicalRecordAssetKey returns the canonical relative key for a child asset.
+func CanonicalRecordAssetKey(kind string, recordID string, filename string) (string, error) {
+	if kind != "figures" && kind != "data" {
+		return "", fmt.Errorf("%w: unsupported asset key kind %q", ErrInvalidArgument, kind)
+	}
+	if err := validateAssetPathSegment("record id", recordID); err != nil {
+		return "", err
+	}
+	if err := validateAssetPathSegment("filename", filename); err != nil {
+		return "", err
+	}
+	return kind + "/" + recordID + "/" + filename, nil
 }
 
 func validateAssetPathSegment(field string, value string) error {

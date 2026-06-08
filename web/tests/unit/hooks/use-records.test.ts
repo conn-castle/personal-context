@@ -2,7 +2,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useRecords } from "@/hooks/use-records";
-import type { RecordSummary, RecordDetail } from "@/lib/types";
+import type {
+  PaginatedResponse,
+  RecordSummary,
+  RecordDetail,
+} from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -630,9 +634,10 @@ describe("useRecords", () => {
         await result.current.deleteRecord("20260309-aabbccdd");
       });
 
-      // After rollback re-fetch, records should be restored
-      // Note: fetchRecords clears error, so error is null after successful re-fetch
+      // After rollback re-fetch, records should be restored and the mutation
+      // failure remains visible to the user.
       expect(result.current.records).toHaveLength(1);
+      expect(result.current.error).toContain("Failed to delete record");
     });
   });
 
@@ -958,6 +963,514 @@ describe("useRecords", () => {
       });
 
       expect(result.current.error).toBe("Failed to refresh records");
+    });
+
+    it("clears selectedRecord when the refreshed page no longer contains it", async () => {
+      const otherRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260308-other",
+      };
+
+      globalThis.fetch = mockFetch({
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      await act(async () => {
+        await result.current.fetchRecords();
+      });
+
+      globalThis.fetch = mockFetch({
+        "/api/records/20260309-aabbccdd": { record: mockRecordDetail },
+      });
+
+      await act(async () => {
+        await result.current.selectRecord("20260309-aabbccdd");
+      });
+
+      expect(result.current.selectedRecord?.id).toBe("20260309-aabbccdd");
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            items: [otherRecord],
+            total: 1,
+            next_cursor: null,
+          }),
+      });
+
+      await act(async () => {
+        await result.current.refreshRecords();
+      });
+
+      expect(result.current.records.map((record) => record.id)).toEqual([
+        "20260308-other",
+      ]);
+      expect(result.current.selectedRecord).toBeNull();
+    });
+
+    it("keeps selectedRecord when the refreshed page still contains it", async () => {
+      globalThis.fetch = mockFetch({
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      await act(async () => {
+        await result.current.fetchRecords();
+      });
+
+      globalThis.fetch = mockFetch({
+        "/api/records/20260309-aabbccdd": { record: mockRecordDetail },
+      });
+
+      await act(async () => {
+        await result.current.selectRecord("20260309-aabbccdd");
+      });
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            items: [mockRecord],
+            total: 1,
+            next_cursor: null,
+          }),
+      });
+
+      await act(async () => {
+        await result.current.refreshRecords();
+      });
+
+      expect(result.current.selectedRecord?.id).toBe("20260309-aabbccdd");
+    });
+
+    it("keeps a selection from a later page when a non-terminal refresh omits it", async () => {
+      const page2Record: RecordSummary = {
+        ...mockRecord,
+        id: "20260308-page2",
+      };
+      const page2Detail: RecordDetail = {
+        ...mockRecordDetail,
+        id: "20260308-page2",
+      };
+
+      // Page 1 reports more pages available (next_cursor set), so the full
+      // record set is not known from page 1 alone.
+      globalThis.fetch = mockFetch({
+        "/api/records": { items: [mockRecord], total: 2, next_cursor: "cursor1" },
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      await act(async () => {
+        await result.current.fetchRecords();
+      });
+
+      // Load page 2 so the selected record exists locally but is not on page 1.
+      globalThis.fetch = mockFetch({
+        "/api/records": { items: [page2Record], total: 2, next_cursor: null },
+      });
+
+      await act(async () => {
+        await result.current.fetchMore();
+      });
+
+      globalThis.fetch = mockFetch({
+        "/api/records/20260308-page2": { record: page2Detail },
+      });
+
+      await act(async () => {
+        await result.current.selectRecord("20260308-page2");
+      });
+
+      expect(result.current.selectedRecord?.id).toBe("20260308-page2");
+
+      // A background sync refreshes only page 1 (non-terminal: next_cursor set).
+      // The selected page-2 record is absent here, but absence must not be
+      // treated as deletion, so the selection survives.
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            items: [mockRecord],
+            total: 2,
+            next_cursor: "cursor1",
+          }),
+      });
+
+      await act(async () => {
+        await result.current.refreshRecords();
+      });
+
+      expect(result.current.selectedRecord?.id).toBe("20260308-page2");
+    });
+
+    it("clears a genuinely deleted selection when the terminal refresh omits it", async () => {
+      const otherRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260308-other",
+      };
+
+      globalThis.fetch = mockFetch({
+        "/api/records": { items: [mockRecord], total: 1, next_cursor: null },
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      await act(async () => {
+        await result.current.fetchRecords();
+      });
+
+      globalThis.fetch = mockFetch({
+        "/api/records/20260309-aabbccdd": { record: mockRecordDetail },
+      });
+
+      await act(async () => {
+        await result.current.selectRecord("20260309-aabbccdd");
+      });
+
+      expect(result.current.selectedRecord?.id).toBe("20260309-aabbccdd");
+
+      // Terminal refresh (next_cursor === null) that omits the selection means
+      // the record is genuinely gone, so the selection is cleared.
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            items: [otherRecord],
+            total: 1,
+            next_cursor: null,
+          }),
+      });
+
+      await act(async () => {
+        await result.current.refreshRecords();
+      });
+
+      expect(result.current.selectedRecord).toBeNull();
+    });
+
+    it("discards a stale first-page response when a newer fetch completes first", async () => {
+      const alphaRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260309-alpha",
+        project_id: "org/alpha",
+      };
+      const betaRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260309-beta",
+        project_id: "org/beta",
+      };
+      type RecordsHTTPResponse = {
+        ok: true;
+        json: () => Promise<PaginatedResponse<RecordSummary>>;
+      };
+      const pending: Array<{
+        url: string;
+        resolve: (response: RecordsHTTPResponse) => void;
+      }> = [];
+
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        return new Promise<RecordsHTTPResponse>((resolve) => {
+          pending.push({ url, resolve });
+        });
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      let alphaFetch: Promise<void> = Promise.resolve();
+      let betaFetch: Promise<void> = Promise.resolve();
+      await act(async () => {
+        alphaFetch = result.current.fetchRecords({ project: "org/alpha" });
+        betaFetch = result.current.fetchRecords({ project: "org/beta" });
+        await Promise.resolve();
+      });
+
+      expect(pending.map((request) => request.url)).toEqual([
+        "/api/records?project=org%2Falpha",
+        "/api/records?project=org%2Fbeta",
+      ]);
+
+      await act(async () => {
+        pending[1].resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [betaRecord],
+              total: 1,
+              next_cursor: "beta-cursor",
+            }),
+        });
+        await betaFetch;
+      });
+
+      await act(async () => {
+        pending[0].resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [alphaRecord],
+              total: 1,
+              next_cursor: "alpha-cursor",
+            }),
+        });
+        await alphaFetch;
+      });
+
+      expect(result.current.records.map((record) => record.id)).toEqual([
+        "20260309-beta",
+      ]);
+
+      const fetchMoreMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            items: [],
+            total: 1,
+            next_cursor: null,
+          }),
+      });
+      globalThis.fetch = fetchMoreMock;
+
+      await act(async () => {
+        await result.current.fetchMore();
+      });
+
+      expect(fetchMoreMock).toHaveBeenCalledWith(
+        expect.stringContaining("cursor=beta-cursor")
+      );
+    });
+
+    it("clears loading when a silent refresh supersedes a visible fetch", async () => {
+      const refreshedRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260309-refreshed",
+      };
+      type RecordsHTTPResponse = {
+        ok: true;
+        json: () => Promise<PaginatedResponse<RecordSummary>>;
+      };
+      const pending: Array<{
+        url: string;
+        resolve: (response: RecordsHTTPResponse) => void;
+      }> = [];
+
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        return new Promise<RecordsHTTPResponse>((resolve) => {
+          pending.push({ url, resolve });
+        });
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      let visibleFetch: Promise<void> = Promise.resolve();
+      await act(async () => {
+        visibleFetch = result.current.fetchRecords();
+        await Promise.resolve();
+      });
+
+      expect(result.current.isLoading).toBe(true);
+
+      let silentRefresh: Promise<void> = Promise.resolve();
+      await act(async () => {
+        silentRefresh = result.current.refreshRecords();
+        await Promise.resolve();
+      });
+
+      expect(pending.map((request) => request.url)).toEqual([
+        "/api/records",
+        "/api/records",
+      ]);
+
+      await act(async () => {
+        pending[1].resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [refreshedRecord],
+              total: 1,
+              next_cursor: null,
+            }),
+        });
+        await silentRefresh;
+      });
+
+      expect(result.current.records.map((record) => record.id)).toEqual([
+        "20260309-refreshed",
+      ]);
+
+      await act(async () => {
+        pending[0].resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [mockRecord],
+              total: 1,
+              next_cursor: null,
+            }),
+        });
+        await visibleFetch;
+      });
+
+      expect(result.current.records.map((record) => record.id)).toEqual([
+        "20260309-refreshed",
+      ]);
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    it("allows an older same-filter success to recover after a newer refresh fails", async () => {
+      const initialRecord: RecordSummary = {
+        ...mockRecord,
+        id: "20260309-initial",
+      };
+      type RecordsHTTPResponse = {
+        ok: boolean;
+        status?: number;
+        json: () => Promise<PaginatedResponse<RecordSummary> | { error: string }>;
+      };
+      const pending: Array<{
+        url: string;
+        resolve: (response: RecordsHTTPResponse) => void;
+      }> = [];
+
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        return new Promise<RecordsHTTPResponse>((resolve) => {
+          pending.push({ url, resolve });
+        });
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      let visibleFetch: Promise<void> = Promise.resolve();
+      await act(async () => {
+        visibleFetch = result.current.fetchRecords({ project: "org/proj" });
+        await Promise.resolve();
+      });
+
+      let silentRefresh: Promise<void> = Promise.resolve();
+      await act(async () => {
+        silentRefresh = result.current.refreshRecords();
+        await Promise.resolve();
+      });
+
+      expect(pending.map((request) => request.url)).toEqual([
+        "/api/records?project=org%2Fproj",
+        "/api/records?project=org%2Fproj",
+      ]);
+
+      await act(async () => {
+        pending[1].resolve({
+          ok: false,
+          status: 503,
+          json: () => Promise.resolve({ error: "Unavailable" }),
+        });
+        await silentRefresh;
+      });
+
+      expect(result.current.error).toBe("Failed to refresh records: 503");
+      expect(result.current.records).toEqual([]);
+
+      await act(async () => {
+        pending[0].resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              items: [initialRecord],
+              total: 1,
+              next_cursor: "initial-cursor",
+            }),
+        });
+        await visibleFetch;
+      });
+
+      expect(result.current.records.map((record) => record.id)).toEqual([
+        "20260309-initial",
+      ]);
+      expect(result.current.error).toBeNull();
+
+      const fetchMoreMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            items: [],
+            total: 1,
+            next_cursor: null,
+          }),
+      });
+      globalThis.fetch = fetchMoreMock;
+
+      await act(async () => {
+        await result.current.fetchMore();
+      });
+
+      expect(fetchMoreMock).toHaveBeenCalledWith(
+        expect.stringContaining("cursor=initial-cursor")
+      );
+    });
+
+    it("preserves pagination after a same-filter refresh fails", async () => {
+      const page2Record: RecordSummary = {
+        ...mockRecord,
+        id: "20260309-page2",
+      };
+
+      globalThis.fetch = mockFetch({
+        "/api/records": {
+          items: [mockRecord],
+          total: 2,
+          next_cursor: "cursor1",
+        },
+      });
+
+      const { result } = renderHook(() => useRecords());
+
+      await act(async () => {
+        await result.current.fetchRecords({ project: "org/proj" });
+      });
+
+      expect(result.current.hasMore).toBe(true);
+
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: () => Promise.resolve({ error: "Unavailable" }),
+      });
+
+      await act(async () => {
+        await result.current.refreshRecords();
+      });
+
+      expect(result.current.error).toBe("Failed to refresh records: 503");
+      expect(result.current.records.map((record) => record.id)).toEqual([
+        "20260309-aabbccdd",
+      ]);
+      expect(result.current.hasMore).toBe(true);
+
+      const fetchMoreMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            items: [page2Record],
+            total: 2,
+            next_cursor: null,
+          }),
+      });
+      globalThis.fetch = fetchMoreMock;
+
+      await act(async () => {
+        await result.current.fetchMore();
+      });
+
+      expect(fetchMoreMock).toHaveBeenCalledWith(
+        expect.stringContaining("cursor=cursor1")
+      );
+      expect(result.current.records.map((record) => record.id)).toEqual([
+        "20260309-aabbccdd",
+        "20260309-page2",
+      ]);
     });
   });
 });
