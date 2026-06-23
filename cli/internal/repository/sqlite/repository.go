@@ -358,6 +358,165 @@ func (r *Repository) DeleteRecord(ctx context.Context, id string) error {
 	return ensureRowsAffected(result)
 }
 
+// ReplaceRecordChildren upserts a record and replaces figure/data-file rows in one transaction.
+func (r *Repository) ReplaceRecordChildren(ctx context.Context, input repository.ReplaceRecordChildrenInput) (repository.Record, error) {
+	if strings.TrimSpace(input.Record.DayOrder) == "" {
+		input.Record.DayOrder = "n"
+	}
+	if err := input.Validate(); err != nil {
+		return repository.Record{}, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return repository.Record{}, mapSQLiteError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	exists, err := recordIDExistsTx(ctx, tx, input.Record.ID)
+	if err != nil {
+		return repository.Record{}, err
+	}
+	if !exists {
+		chatExists, err := chatSessionIDExistsTx(ctx, tx, input.Record.ID)
+		if err != nil {
+			return repository.Record{}, err
+		}
+		if chatExists {
+			return repository.Record{}, fmt.Errorf("%w: id %s already exists as chat session", repository.ErrConflict, input.Record.ID)
+		}
+	}
+
+	if err := replaceRecordRowTx(ctx, tx, input.Record, input.SetDeletedAt); err != nil {
+		return repository.Record{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM record_figures WHERE record_id = ?;`, input.Record.ID); err != nil {
+		return repository.Record{}, mapSQLiteError(err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM record_data_files WHERE record_id = ?;`, input.Record.ID); err != nil {
+		return repository.Record{}, mapSQLiteError(err)
+	}
+	for _, figure := range input.Figures {
+		if err := insertRecordFigureTx(ctx, tx, figure); err != nil {
+			return repository.Record{}, err
+		}
+	}
+	for _, file := range input.DataFiles {
+		if err := insertRecordDataFileTx(ctx, tx, file); err != nil {
+			return repository.Record{}, err
+		}
+	}
+	record, err := getRecordByIDTx(ctx, tx, input.Record.ID)
+	if err != nil {
+		return repository.Record{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return repository.Record{}, mapSQLiteError(err)
+	}
+	return record, nil
+}
+
+func recordIDExistsTx(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM records WHERE id = ? LIMIT 1;`, id).Scan(&exists); err != nil {
+		if errors.Is(mapSQLiteError(err), repository.ErrNotFound) {
+			return false, nil
+		}
+		return false, mapSQLiteError(err)
+	}
+	return true, nil
+}
+
+func chatSessionIDExistsTx(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM chat_session WHERE id = ? LIMIT 1;`, id).Scan(&exists); err != nil {
+		if errors.Is(mapSQLiteError(err), repository.ErrNotFound) {
+			return false, nil
+		}
+		return false, mapSQLiteError(err)
+	}
+	return true, nil
+}
+
+func replaceRecordRowTx(ctx context.Context, tx *sql.Tx, input repository.CreateRecordInput, setDeletedAt bool) error {
+	result, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO records (id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), COALESCE(?, STRFTIME('%Y-%m-%dT%H:%M:%fZ', 'now')), ?)
+         ON CONFLICT(id) DO UPDATE SET
+             date = excluded.date,
+             day_order = excluded.day_order,
+             html_content = excluded.html_content,
+             notes = excluded.notes,
+             project_id = excluded.project_id,
+             source_device_id = excluded.source_device_id,
+             source_ref = excluded.source_ref,
+             git_remote_url = excluded.git_remote_url,
+             git_hash = excluded.git_hash,
+             updated_at = COALESCE(excluded.updated_at, records.updated_at),
+             deleted_at = CASE WHEN ? THEN excluded.deleted_at ELSE records.deleted_at END;`,
+		input.ID,
+		input.Date,
+		input.DayOrder,
+		nullableString(input.HTMLContent),
+		nullableString(input.Notes),
+		input.ProjectID,
+		input.SourceDeviceID,
+		nullableString(input.SourceRef),
+		nullableString(input.GitRemoteURL),
+		nullableString(input.GitHash),
+		nullableTime(input.CreatedAt),
+		nullableTime(input.UpdatedAt),
+		nullableTime(input.DeletedAt),
+		setDeletedAt,
+	)
+	if err != nil {
+		return mapSQLiteError(err)
+	}
+	return ensureRowsAffected(result)
+}
+
+func getRecordByIDTx(ctx context.Context, tx *sql.Tx, id string) (repository.Record, error) {
+	row := tx.QueryRowContext(
+		ctx,
+		`SELECT id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at
+         FROM records WHERE id = ?;`,
+		id,
+	)
+	return scanRecord(row)
+}
+
+func insertRecordFigureTx(ctx context.Context, tx *sql.Tx, input repository.CreateRecordFigureInput) error {
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO record_figures(record_id, filename, s3_key, alt_text) VALUES(?, ?, ?, ?);`,
+		input.RecordID,
+		input.Filename,
+		input.S3Key,
+		nullableString(input.AltText),
+	); err != nil {
+		return mapSQLiteError(err)
+	}
+	return nil
+}
+
+func insertRecordDataFileTx(ctx context.Context, tx *sql.Tx, input repository.CreateRecordDataFileInput) error {
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO record_data_files(record_id, filename, s3_key, size, hash, description)
+         VALUES(?, ?, ?, ?, ?, ?);`,
+		input.RecordID,
+		input.Filename,
+		input.S3Key,
+		input.Size,
+		input.Hash,
+		nullableString(input.Description),
+	); err != nil {
+		return mapSQLiteError(err)
+	}
+	return nil
+}
+
 // CreateRecordFigure inserts a figure row.
 func (r *Repository) CreateRecordFigure(ctx context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
 	if err := repository.ValidateRecordAssetKey("figures", input.RecordID, input.Filename, input.S3Key); err != nil {

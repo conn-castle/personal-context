@@ -19,21 +19,24 @@ import (
 
 func newDoctorCommand(stdout io.Writer, stderr io.Writer) *cobra.Command {
 	var verbose bool
+	var fix bool
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check local system health",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runDoctor(cmd.Context(), stdout, stderr, doctorOptions{Verbose: verbose})
+			return runDoctor(cmd.Context(), stdout, stderr, doctorOptions{Verbose: verbose, Fix: fix})
 		},
 	}
 	cmd.Flags().BoolVar(&verbose, "verbose", false, "List per-chat detail for chat raw-source integrity failures")
+	cmd.Flags().BoolVar(&fix, "fix", false, "Delete orphaned local files and directories that have no database row")
 	return cmd
 }
 
 // doctorOptions controls optional doctor behavior.
 type doctorOptions struct {
 	Verbose bool
+	Fix     bool
 }
 
 // runDoctor performs local health checks and reports results.
@@ -85,11 +88,23 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer, opts doctorOp
 		}
 		return fmt.Errorf("doctor: orphaned figures check failed: %w", err)
 	}
-	warned, err = reportDoctorOrphans(stdout, "Orphaned figures", "figure directories", orphanFigs)
-	if err != nil {
-		return err
+	if opts.Fix && len(orphanFigs) > 0 {
+		if err := deleteOrphanRecordDirs(stack.FS, orphanFigs); err != nil {
+			if err := reportDoctorFailure(stdout, "write orphaned figures cleanup failure", "Orphaned figures", err); err != nil {
+				return err
+			}
+			return fmt.Errorf("doctor: orphaned figures cleanup failed: %w", err)
+		}
+		if err := reportDoctorFixedOrphans(stdout, "Orphaned figures", "figure directories", len(orphanFigs)); err != nil {
+			return err
+		}
+	} else {
+		warned, err = reportDoctorOrphans(stdout, "Orphaned figures", "figure directories", orphanFigs)
+		if err != nil {
+			return err
+		}
+		hasWarnings = hasWarnings || warned
 	}
-	hasWarnings = hasWarnings || warned
 
 	orphanData, err := findOrphans(ctx, stack.Repo, dataDirs)
 	if err != nil {
@@ -98,11 +113,23 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer, opts doctorOp
 		}
 		return fmt.Errorf("doctor: orphaned data check failed: %w", err)
 	}
-	warned, err = reportDoctorOrphans(stdout, "Orphaned data", "data directories", orphanData)
-	if err != nil {
-		return err
+	if opts.Fix && len(orphanData) > 0 {
+		if err := deleteOrphanRecordDirs(stack.FS, orphanData); err != nil {
+			if err := reportDoctorFailure(stdout, "write orphaned data cleanup failure", "Orphaned data", err); err != nil {
+				return err
+			}
+			return fmt.Errorf("doctor: orphaned data cleanup failed: %w", err)
+		}
+		if err := reportDoctorFixedOrphans(stdout, "Orphaned data", "data directories", len(orphanData)); err != nil {
+			return err
+		}
+	} else {
+		warned, err = reportDoctorOrphans(stdout, "Orphaned data", "data directories", orphanData)
+		if err != nil {
+			return err
+		}
+		hasWarnings = hasWarnings || warned
 	}
-	hasWarnings = hasWarnings || warned
 
 	chatRawDirs, err := stack.FS.ListChatSessionIDsOnDisk()
 	if err != nil {
@@ -115,11 +142,23 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer, opts doctorOp
 		}
 		return fmt.Errorf("doctor: orphaned chat raw check failed: %w", err)
 	}
-	warned, err = reportDoctorOrphans(stdout, "Orphaned chat raws", "chat raw directories", orphanChatRaws)
-	if err != nil {
-		return err
+	if opts.Fix && len(orphanChatRaws) > 0 {
+		if err := deleteOrphanChatRawDirs(stack.FS, orphanChatRaws); err != nil {
+			if err := reportDoctorFailure(stdout, "write orphaned chat raw cleanup failure", "Orphaned chat raws", err); err != nil {
+				return err
+			}
+			return fmt.Errorf("doctor: orphaned chat raw cleanup failed: %w", err)
+		}
+		if err := reportDoctorFixedOrphans(stdout, "Orphaned chat raws", "chat raw directories", len(orphanChatRaws)); err != nil {
+			return err
+		}
+	} else {
+		warned, err = reportDoctorOrphans(stdout, "Orphaned chat raws", "chat raw directories", orphanChatRaws)
+		if err != nil {
+			return err
+		}
+		hasWarnings = hasWarnings || warned
 	}
-	hasWarnings = hasWarnings || warned
 
 	// Check missing files for all tracked records, including items currently in trash.
 	records, err := stack.Repo.ListRecords(ctx, repository.ListRecordsFilter{IncludeDeleted: true})
@@ -152,6 +191,35 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer, opts doctorOp
 		return err
 	}
 	hasWarnings = hasWarnings || warned
+
+	orphanFigureFiles, err := findFigureFileOrphans(ctx, stack.Repo, stack.FS, records)
+	if err != nil {
+		if err := reportDoctorFailure(stdout, "write orphaned figure files failure", "Orphaned figure files", err); err != nil {
+			return err
+		}
+		return fmt.Errorf("doctor: orphaned figure files check failed: %w", err)
+	}
+	if opts.Fix && len(orphanFigureFiles) > 0 {
+		if err := deleteOrphanFigureFiles(stack.FS, orphanFigureFiles); err != nil {
+			if err := reportDoctorFailure(stdout, "write orphaned figure files cleanup failure", "Orphaned figure files", err); err != nil {
+				return err
+			}
+			return fmt.Errorf("doctor: orphaned figure files cleanup failed: %w", err)
+		}
+		if err := reportDoctorFixedOrphans(stdout, "Orphaned figure files", "figure files", len(orphanFigureFiles)); err != nil {
+			return err
+		}
+	} else if len(orphanFigureFiles) > 0 {
+		warned, err = reportDoctorOrphans(stdout, "Orphaned figure files", "figure files", orphanFigureFiles)
+		if err != nil {
+			return err
+		}
+		hasWarnings = hasWarnings || warned
+	} else {
+		if _, err := reportDoctorOrphans(stdout, "Orphaned figure files", "figure files", orphanFigureFiles); err != nil {
+			return err
+		}
+	}
 
 	// Chat sessions with managed raw_source_key are scanned regardless of
 	// soft-deleted status; doctor reports degraded durability for both.
@@ -277,6 +345,17 @@ func reportDoctorOrphans(w io.Writer, label string, noun string, paths []string)
 	return true, nil
 }
 
+func reportDoctorFixedOrphans(w io.Writer, label string, noun string, count int) error {
+	return writeDoctorf(
+		w,
+		"write "+strings.ToLower(label)+" fixed",
+		"%sFIXED -- removed %d orphaned %s\n",
+		doctorStatusPrefix(label),
+		count,
+		noun,
+	)
+}
+
 // reportDoctorMissingPaths emits either an OK line or a WARN line plus the
 // missing path list for figure/data-file checks.
 func reportDoctorMissingPaths(w io.Writer, label string, noun string, paths []string) (bool, error) {
@@ -346,6 +425,117 @@ func findChatRawOrphans(ctx context.Context, repo repository.Repository, chatIDs
 		}
 	}
 	return orphans, nil
+}
+
+func findFigureFileOrphans(ctx context.Context, repo repository.Repository, fs *filesystem.Client, records []repository.Record) ([]string, error) {
+	orphans := make([]string, 0)
+	for _, record := range records {
+		figures, err := repo.ListRecordFiguresByRecordID(ctx, record.ID)
+		if err != nil {
+			return nil, fmt.Errorf("list committed figures for %s: %w", record.ID, err)
+		}
+		referenced := make(map[string]struct{}, len(figures))
+		for _, figure := range figures {
+			referenced[figure.Filename] = struct{}{}
+		}
+		diskFiles, err := fs.ListFigureFilenames(record.ID)
+		if err != nil {
+			return nil, fmt.Errorf("list local figures for %s: %w", record.ID, err)
+		}
+		for _, filename := range diskFiles {
+			if _, ok := referenced[filename]; !ok {
+				orphans = append(orphans, record.ID+"/"+filename)
+			}
+		}
+	}
+	return orphans, nil
+}
+
+func deleteOrphanRecordDirs(fs *filesystem.Client, recordIDs []string) error {
+	seen := make(map[string]struct{}, len(recordIDs))
+	for _, id := range recordIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		if err := fs.DeleteRecordDir(id); err != nil {
+			return fmt.Errorf("delete orphaned record directory %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+func deleteOrphanChatRawDirs(fs *filesystem.Client, chatIDs []string) error {
+	for _, id := range chatIDs {
+		if err := fs.DeleteChatSource(id); err != nil {
+			return fmt.Errorf("delete orphaned chat raw directory %s: %w", id, err)
+		}
+	}
+	return nil
+}
+
+func deleteOrphanFigureFiles(fs *filesystem.Client, paths []string) error {
+	syncedDirs := make(map[string]struct{})
+	for _, path := range paths {
+		recordID, filename, ok := strings.Cut(path, "/")
+		if !ok {
+			return fmt.Errorf("orphaned figure path must be recordID/filename: %q", path)
+		}
+		if err := deleteRecordFigureFileFn(fs, recordID, filename); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("delete orphaned figure file %s: %w", path, err)
+		}
+		syncedDirs[filepath.Join(fs.BasePath(), "figures", recordID)] = struct{}{}
+	}
+	for dir := range syncedDirs {
+		if err := syncDirFn(dir); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("sync orphaned figure cleanup directory %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
+func reconcileLocalOrphans(ctx context.Context, stack *localStack) error {
+	figDirs, dataDirs, err := stack.FS.ListRecordIDsOnDisk()
+	if err != nil {
+		return fmt.Errorf("list disk directories: %w", err)
+	}
+	orphanFigs, err := findOrphans(ctx, stack.Repo, figDirs)
+	if err != nil {
+		return fmt.Errorf("find orphaned figure directories: %w", err)
+	}
+	orphanData, err := findOrphans(ctx, stack.Repo, dataDirs)
+	if err != nil {
+		return fmt.Errorf("find orphaned data directories: %w", err)
+	}
+	if err := deleteOrphanRecordDirs(stack.FS, append(append([]string{}, orphanFigs...), orphanData...)); err != nil {
+		return err
+	}
+
+	records, err := stack.Repo.ListRecords(ctx, repository.ListRecordsFilter{IncludeDeleted: true})
+	if err != nil {
+		return fmt.Errorf("list records: %w", err)
+	}
+	orphanFigureFiles, err := findFigureFileOrphans(ctx, stack.Repo, stack.FS, records)
+	if err != nil {
+		return fmt.Errorf("find orphaned figure files: %w", err)
+	}
+	if err := deleteOrphanFigureFiles(stack.FS, orphanFigureFiles); err != nil {
+		return err
+	}
+
+	chatRawDirs, err := stack.FS.ListChatSessionIDsOnDisk()
+	if err != nil {
+		return fmt.Errorf("list chat raw directories: %w", err)
+	}
+	orphanChatRaws, err := findChatRawOrphans(ctx, stack.Repo, chatRawDirs)
+	if err != nil {
+		return fmt.Errorf("find orphaned chat raw directories: %w", err)
+	}
+	if err := deleteOrphanChatRawDirs(stack.FS, orphanChatRaws); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // missingAttachmentScanner lets one helper visit either figures or data files

@@ -27,6 +27,16 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-23 b9v4x6: import orphan figure-file reconciliation uses N+1 figure queries
+    Priority: Low. Area: cli/internal/cli/doctor.go, cli/internal/repository
+    Description: `findFigureFileOrphans` calls `ListRecordFiguresByRecordID` once per record, and import invokes it during post-import reconciliation. This preserves the requested import-time orphan cleanup but makes reconciliation latency scale with total record count.
+    Next step: Design a bulk committed-figure listing path or a touched-record reconciliation mode, then update import/doctor callers with performance-focused tests.
+
+- Issue 2026-06-23 m5n8c2: stale per-file data attachments are not reconciled
+    Priority: Low. Area: cli/internal/cli/doctor.go, cli/internal/filesystem/filesystem.go
+    Description: Snapshot import now reconciles orphan figure files because import writes figure bytes. Data-file imports only replace DB rows, so stale files under `data/{recordID}/` whose rows were removed are outside the current crash-atomicity scope and can persist until a future data-file reconcile path exists.
+    Next step: Design symmetric data-file orphan detection/deletion for existing-record child-row replacement and `doctor --fix`, then add mutation-tested cleanup coverage.
+
 - Issue 2026-06-23 a8d2f1: AssetPreviewDialog has no DialogDescription / aria-describedby
     Priority: Low. Area: web/components/asset-preview-dialog.tsx
     Description: DialogContent renders a DialogTitle but no DialogDescription and no aria-describedby, so Radix logs a dev-only console warning ("Missing Description for DialogContent"). No production runtime impact. Surfaced in web/components audit (round-4 iter 16).
@@ -74,8 +84,8 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 - Issue 2026-06-22 d8k3w2: filesystem asset/chat-source renames are not directory-fsync durable
     Priority: Medium. Area: cli/internal/filesystem/filesystem.go, cli/internal/filesystem/chat_source.go
-    Description: copyInto (figures/data copy) and PromoteChatSourceStage (raw chat source promote + rollback) fsync file contents before rename but never fsync the containing directory after the rename. On the darwin/linux targets a rename's directory entry is not durably recorded until the directory metadata is flushed, so a hard crash between rename and the next natural sync can lose the just-written asset/chat-source even though the op reported success. The sibling gitsnapshot package already treats parent-dir fsync-after-rename as the repo durability standard (syncDir at snapshot.go:219, called at 478/531/559/1127). Local files are re-uploadable from S3/DB, so impact is recoverable, hence Medium.
-    Next step: Genuine tradeoff on implementation — (a) extract gitsnapshot's syncDir into a shared internal/fsutil helper (single source of truth, but a cross-package refactor) or (b) add a local directory-fsync helper/hook inside filesystem (self-contained, duplicates ~10 lines). Decide approach, then fsync the target dir after copyInto's rename and the active/rollback dirs in PromoteChatSourceStage. Capture the choice before implementing.
+    Description: copyInto (figures/data copy for normal add/edit paths) fsyncs file contents before rename but never fsyncs the containing directory after the rename. On darwin/linux a rename's directory entry is not durably recorded until directory metadata is flushed, so a hard crash between rename and the next natural sync can lose a just-written asset even though the op reported success. PromoteChatSourceStage is now covered by a local syncDir hook and parent-dir fsync; this remaining issue is limited to copyInto.
+    Next step: Add a local directory-fsync helper/hook to copyInto after its rename, mirroring PromoteChatSourceStage and gitsnapshot's durability pattern. Add failure-injection coverage for the sync error path.
 
 - Issue 2026-06-22 x7c2f4: Figure-ref parsing truncates filenames containing '#'
     Priority: Low. Area: cli/internal/recordio/recordio.go, web/lib/record-utils.ts
@@ -162,8 +172,8 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 - Issue 2026-05-11 q8r9s0: Snapshot import and restore-db replacement paths are not atomic
     Priority: High. Area: cli/internal/cli/snapshot_support.go
-    Description: `pc import` and `pc restore-db` can still mutate earlier database/file sections before a later record or filesystem failure occurs, so a mid-operation error can leave users with a partial restore despite chat raw-source rollback and upfront chat source-identity validation.
-    Next step: Design a staged or transactional replacement path for the full local SQLite database plus managed file payloads, then add failure tests proving the original state remains recoverable after post-backup errors.
+    Description: `pc import` and `pc restore-db` can still mutate earlier database/file sections before a later template/project/device/chat/restore failure occurs, so a mid-operation error can leave users with a partial operation. The record-child MERGE self-heal hole is fixed: figure bytes are durable before the record/child row transaction commits, UpdatedAt moves with that transaction, and orphan figure/chat raw cleanup is available via import reconciliation and `doctor --fix`.
+    Next step: Design a staged or transactional replacement path for the remaining full-operation import/restore-db scope, then add failure tests proving the original state remains recoverable after post-backup errors.
 
 - Issue 2026-05-11 n6p7q8: Multi-project web filter paginates over an incomplete client-side result set
     Priority: Medium. Area: web/components/spreadsheet-viewer.tsx

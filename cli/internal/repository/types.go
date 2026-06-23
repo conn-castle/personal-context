@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -173,6 +174,43 @@ type CreateRecordInput struct {
 	CreatedAt      *time.Time
 	UpdatedAt      *time.Time
 	DeletedAt      *time.Time
+}
+
+// ReplaceRecordChildrenInput contains a parent record write and its complete
+// replacement child set. Implementations must commit the record write, old child
+// deletion, and new child insertion atomically.
+type ReplaceRecordChildrenInput struct {
+	Record       CreateRecordInput
+	SetDeletedAt bool
+	Figures      []CreateRecordFigureInput
+	DataFiles    []CreateRecordDataFileInput
+}
+
+// Validate checks that the replacement record and child rows are internally
+// consistent before a repository implementation opens its transaction.
+func (input ReplaceRecordChildrenInput) Validate() error {
+	if strings.TrimSpace(input.Record.ID) == "" || strings.TrimSpace(input.Record.Date) == "" ||
+		strings.TrimSpace(input.Record.ProjectID) == "" || strings.TrimSpace(input.Record.SourceDeviceID) == "" {
+		return ErrInvalidArgument
+	}
+	recordID := input.Record.ID
+	for _, figure := range input.Figures {
+		if figure.RecordID != recordID {
+			return ErrInvalidArgument
+		}
+		if err := ValidateRecordAssetKey("figures", figure.RecordID, figure.Filename, figure.S3Key); err != nil {
+			return err
+		}
+	}
+	for _, file := range input.DataFiles {
+		if file.RecordID != recordID || strings.TrimSpace(file.Hash) == "" || file.Size < 0 {
+			return ErrInvalidArgument
+		}
+		if err := ValidateRecordAssetKey("data", file.RecordID, file.Filename, file.S3Key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // CreateProjectPathInput contains required fields for path registration.

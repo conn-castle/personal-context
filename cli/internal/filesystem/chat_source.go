@@ -3,6 +3,7 @@ package filesystem
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -205,6 +206,24 @@ func (c *Client) resolveManagedStageDir(stagedPath string) (string, error) {
 	return absStageDir, nil
 }
 
+// restoreChatRawBackup restores a previously backed-up active raw-source
+// directory and fsyncs chats/raw so the rollback rename is crash-durable.
+func restoreChatRawBackup(hooks fileOperationHooks, activeDir string, backupDir string) error {
+	if backupDir == "" {
+		return nil
+	}
+	if err := os.RemoveAll(activeDir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove failed chat raw promotion: %w", err)
+	}
+	if err := hooks.renameFile(backupDir, activeDir); err != nil {
+		return fmt.Errorf("restore previous chat raw source: %w", err)
+	}
+	if err := hooks.syncDir(filepath.Dir(activeDir)); err != nil {
+		return fmt.Errorf("sync restored chat raw parent: %w", err)
+	}
+	return nil
+}
+
 // PromoteChatSourceStage moves a staged chat raw source into the active
 // chats/raw/{chatID}/ directory, replacing any previous active raw source.
 // The replacement is rollback-safe: the previous active directory is moved
@@ -234,6 +253,7 @@ func (c *Client) PromoteChatSourceStage(stage ChatSourceStage) (StoredFile, erro
 		return StoredFile{}, fmt.Errorf("ensure chats/raw exists: %w", err)
 	}
 
+	hooks := c.hooks.withDefaults()
 	var backupDir string
 	if _, err := os.Stat(activeDir); err == nil {
 		nonce, nonceErr := randomHexNonce()
@@ -241,25 +261,30 @@ func (c *Client) PromoteChatSourceStage(stage ChatSourceStage) (StoredFile, erro
 			return StoredFile{}, nonceErr
 		}
 		backupDir = filepath.Join(c.basePath, "chats", "raw", ".backup-"+stage.ChatSessionID+"-"+nonce)
-		if err := os.Rename(activeDir, backupDir); err != nil {
+		if err := hooks.renameFile(activeDir, backupDir); err != nil {
 			return StoredFile{}, fmt.Errorf("backup previous chat raw source: %w", err)
 		}
 	} else if !os.IsNotExist(err) {
 		return StoredFile{}, fmt.Errorf("stat active chat raw dir: %w", err)
 	}
 
-	if err := c.hooks.withDefaults().renameFile(stageDir, activeDir); err != nil {
-		if backupDir != "" {
-			_ = os.Rename(backupDir, activeDir)
+	if err := hooks.renameFile(stageDir, activeDir); err != nil {
+		if rollbackErr := restoreChatRawBackup(hooks, activeDir, backupDir); rollbackErr != nil {
+			return StoredFile{}, fmt.Errorf("promote chat source stage: %w; rollback failed: %v", err, rollbackErr)
 		}
 		return StoredFile{}, fmt.Errorf("promote chat source stage: %w", err)
+	}
+	if err := hooks.syncDir(filepath.Dir(activeDir)); err != nil {
+		if rollbackErr := restoreChatRawBackup(hooks, activeDir, backupDir); rollbackErr != nil {
+			return StoredFile{}, fmt.Errorf("sync promoted chat raw parent: %w; rollback failed: %v", err, rollbackErr)
+		}
+		return StoredFile{}, fmt.Errorf("sync promoted chat raw parent: %w", err)
 	}
 
 	info, err := os.Stat(activePath)
 	if err != nil {
-		if backupDir != "" {
-			_ = os.RemoveAll(activeDir)
-			_ = os.Rename(backupDir, activeDir)
+		if rollbackErr := restoreChatRawBackup(hooks, activeDir, backupDir); rollbackErr != nil {
+			return StoredFile{}, fmt.Errorf("verify promoted chat source: %w; rollback failed: %v", err, rollbackErr)
 		}
 		return StoredFile{}, fmt.Errorf("verify promoted chat source: %w", err)
 	}
@@ -288,6 +313,10 @@ func (c *Client) DeleteChatSource(chatSessionID string) error {
 	dir := filepath.Join(c.basePath, "chats", "raw", chatSessionID)
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("remove chat raw source dir: %w", err)
+	}
+	hooks := c.hooks.withDefaults()
+	if err := hooks.syncDir(filepath.Dir(dir)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("sync chat raw directory after removing %s: %w", chatSessionID, err)
 	}
 	return nil
 }

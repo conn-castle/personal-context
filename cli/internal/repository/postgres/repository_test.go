@@ -502,6 +502,28 @@ func TestAssetQueriesAreUserScoped(t *testing.T) {
 		DayOrder:    "b",
 		HTMLContent: testHTML("<h1>user-b</h1>"),
 	})
+	if _, err := repoB.ReplaceRecordChildren(ctx, repository.ReplaceRecordChildrenInput{
+		Record: repository.CreateRecordInput{
+			ID:             recordA.ID,
+			Date:           "2026-03-05",
+			DayOrder:       "c",
+			HTMLContent:    testHTML("<h1>cross-user replace</h1>"),
+			ProjectID:      recordB.ProjectID,
+			SourceDeviceID: recordB.SourceDeviceID,
+		},
+	}); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("expected ErrConflict for cross-user record replacement, got %v", err)
+	}
+	if _, err := repoB.GetRecordByID(ctx, recordA.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for cross-user record after failed replacement, got %v", err)
+	}
+	unchangedA, err := repoA.GetRecordByID(ctx, recordA.ID)
+	if err != nil {
+		t.Fatalf("GetRecordByID(user A after failed replacement) error = %v", err)
+	}
+	if unchangedA.DayOrder != "a" {
+		t.Fatalf("cross-user replacement mutated user A record: %+v", unchangedA)
+	}
 
 	figureA, err := repoA.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
 		RecordID: recordA.ID,

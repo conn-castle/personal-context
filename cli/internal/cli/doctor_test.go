@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/conn-castle/personal-context/cli/internal/config"
+	"github.com/conn-castle/personal-context/cli/internal/filesystem"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 )
 
@@ -245,8 +246,8 @@ func TestDoctorOrphanedDataSuccessWriteError(t *testing.T) {
 func TestDoctorMissingFiguresSuccessWriteError(t *testing.T) {
 	setupEnv(t)
 
-	// 4th write is "Missing figures: OK".
-	stdout := &failAfterWriter{remaining: 3}
+	// 5th write is "Missing figures: OK".
+	stdout := &failAfterWriter{remaining: 4}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
@@ -256,8 +257,8 @@ func TestDoctorMissingFiguresSuccessWriteError(t *testing.T) {
 func TestDoctorMissingDataFilesSuccessWriteError(t *testing.T) {
 	setupEnv(t)
 
-	// 5th write is "Missing data files: OK".
-	stdout := &failAfterWriter{remaining: 4}
+	// 6th write is "Missing data files: OK".
+	stdout := &failAfterWriter{remaining: 5}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
@@ -267,9 +268,8 @@ func TestDoctorMissingDataFilesSuccessWriteError(t *testing.T) {
 func TestDoctorAllPassedWriteError(t *testing.T) {
 	setupEnv(t)
 
-	// 7th write is "All checks passed." after Database, Orphaned figures,
-	// Orphaned data, Missing figures, Missing data files, Missing chat raw sources.
-	stdout := &failAfterWriter{remaining: 6}
+	// 9th write is "All checks passed." after all local OK checks.
+	stdout := &failAfterWriter{remaining: 8}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
@@ -354,9 +354,8 @@ func TestDoctorMissingFiguresWarnWriteError(t *testing.T) {
 		t.Fatalf("remove figure: %v", err)
 	}
 
-	// Writes: "Database: OK", "Orphaned figures: OK", "Orphaned data: OK", "Missing figures: WARN"
-	// Fail on 4th write
-	stdout := &failAfterWriter{remaining: 3}
+	// Fail on 5th write (Missing figures: WARN).
+	stdout := &failAfterWriter{remaining: 4}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on Missing figures WARN")
@@ -377,8 +376,8 @@ func TestDoctorMissingFiguresWarnPathWriteError(t *testing.T) {
 		t.Fatalf("remove figure: %v", err)
 	}
 
-	// Fail on 5th write (the "  recordID/fig.png" path line after "Missing figures: WARN")
-	stdout := &failAfterWriter{remaining: 4}
+	// Fail on 6th write (the "  recordID/fig.png" path line after "Missing figures: WARN").
+	stdout := &failAfterWriter{remaining: 5}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on missing figure path line")
@@ -410,6 +409,9 @@ func TestDoctorHealthyNoRecords(t *testing.T) {
 	}
 	if !strings.Contains(out, "Missing data files: OK") {
 		t.Fatalf("expected 'Missing data files: OK', got %q", out)
+	}
+	if !strings.Contains(out, "Orphaned figure files:OK") {
+		t.Fatalf("expected 'Orphaned figure files:OK', got %q", out)
 	}
 	if !strings.Contains(out, "Missing chat raw sources:") {
 		t.Fatalf("expected 'Missing chat raw sources:' line, got %q", out)
@@ -562,6 +564,479 @@ func TestDoctorOrphanedChatRawDirectory(t *testing.T) {
 	if !strings.Contains(out, chatID) {
 		t.Fatalf("expected chat ID %s in warning, got %q", chatID, out)
 	}
+}
+
+func TestDoctorFixRemovesOrphanedDirectories(t *testing.T) {
+	homeDir := setupEnv(t)
+	recordID := addRecordWithContent(t,
+		`<html><img src="figures/fig.png">body</html>`,
+		"", "",
+		map[string][]byte{"fig.png": []byte("figure")},
+		map[string][]byte{"data.csv": []byte("a,b\n1,2\n")},
+	)
+	chatID := "20260514-feedcafe"
+	rawPath := filepath.Join(homeDir, "personal-context", "chats", "raw", chatID, "source.json")
+	if err := os.MkdirAll(filepath.Dir(rawPath), 0o700); err != nil {
+		t.Fatalf("mkdir raw dir: %v", err)
+	}
+	if err := os.WriteFile(rawPath, []byte(`{"id":"orphan"}`), 0o600); err != nil {
+		t.Fatalf("write raw source: %v", err)
+	}
+
+	db := openErrorPathsDB(t, homeDir)
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
+	}
+	if _, err := db.Exec("DELETE FROM records WHERE id = ?", recordID); err != nil {
+		t.Fatalf("hard delete record: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"doctor", "--fix"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("doctor --fix: %v\nstdout=%s", err, stdout.String())
+	}
+	out := stdout.String()
+	for _, want := range []string{"Orphaned figures:   FIXED", "Orphaned data:      FIXED", "Orphaned chat raws: FIXED"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected %q in output, got %q", want, out)
+		}
+	}
+	for _, path := range []string{
+		filepath.Join(homeDir, "personal-context", "figures", recordID),
+		filepath.Join(homeDir, "personal-context", "data", recordID),
+		filepath.Join(homeDir, "personal-context", "chats", "raw", chatID),
+	} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected %s removed, stat err = %v", path, err)
+		}
+	}
+}
+
+func TestDoctorFindsAndFixesOrphanedFigureFile(t *testing.T) {
+	homeDir := setupEnv(t)
+	recordID := addRecordWithContent(t,
+		`<html><img src="figures/kept.png">body</html>`,
+		"", "",
+		map[string][]byte{"kept.png": []byte("kept")},
+		nil,
+	)
+	orphanPath := filepath.Join(homeDir, "personal-context", "figures", recordID, "orphan.png")
+	if err := os.WriteFile(orphanPath, []byte("orphan"), 0o644); err != nil {
+		t.Fatalf("write orphan figure: %v", err)
+	}
+
+	stdout := &bytes.Buffer{}
+	cmd := NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"doctor"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected doctor to warn about orphaned figure file")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Orphaned figure files:WARN") || !strings.Contains(out, recordID+"/orphan.png") {
+		t.Fatalf("expected orphaned figure file warning, got %q", out)
+	}
+
+	stdout.Reset()
+	cmd = NewRootCommand(RootCommandOptions{Stdout: stdout, Stderr: &bytes.Buffer{}})
+	cmd.SetArgs([]string{"doctor", "--fix"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("doctor --fix: %v\nstdout=%s", err, stdout.String())
+	}
+	if _, err := os.Stat(orphanPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("expected orphan figure removed, stat err = %v", err)
+	}
+	keptPath := filepath.Join(homeDir, "personal-context", "figures", recordID, "kept.png")
+	if got, err := os.ReadFile(keptPath); err != nil || string(got) != "kept" {
+		t.Fatalf("expected kept figure preserved, got %q err=%v", got, err)
+	}
+	if !strings.Contains(stdout.String(), "Orphaned figure files:FIXED") {
+		t.Fatalf("expected fixed orphan figure files output, got %q", stdout.String())
+	}
+}
+
+func TestDoctorFixWriteErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		remaining int
+		setup     func(t *testing.T, homeDir string)
+	}{
+		{
+			name:      "orphaned figures fixed line",
+			remaining: 1,
+			setup: func(t *testing.T, homeDir string) {
+				recordID := addRecordWithContent(t,
+					`<html><img src="figures/fig.png">body</html>`,
+					"", "",
+					map[string][]byte{"fig.png": []byte("figure")},
+					nil,
+				)
+				db := openErrorPathsDB(t, homeDir)
+				if _, err := db.Exec("DELETE FROM records WHERE id = ?", recordID); err != nil {
+					t.Fatalf("hard delete record: %v", err)
+				}
+			},
+		},
+		{
+			name:      "orphaned data fixed line",
+			remaining: 2,
+			setup: func(t *testing.T, homeDir string) {
+				recordID := addRecordWithContent(t,
+					"<html>body</html>",
+					"", "",
+					nil,
+					map[string][]byte{"data.csv": []byte("a,b\n1,2\n")},
+				)
+				db := openErrorPathsDB(t, homeDir)
+				if _, err := db.Exec("DELETE FROM records WHERE id = ?", recordID); err != nil {
+					t.Fatalf("hard delete record: %v", err)
+				}
+			},
+		},
+		{
+			name:      "orphaned chat raw fixed line",
+			remaining: 3,
+			setup: func(t *testing.T, homeDir string) {
+				rawPath := filepath.Join(homeDir, "personal-context", "chats", "raw", "20260514-feedcafe", "source.json")
+				if err := os.MkdirAll(filepath.Dir(rawPath), 0o700); err != nil {
+					t.Fatalf("mkdir raw dir: %v", err)
+				}
+				if err := os.WriteFile(rawPath, []byte(`{"id":"orphan"}`), 0o600); err != nil {
+					t.Fatalf("write raw source: %v", err)
+				}
+			},
+		},
+		{
+			name:      "orphaned figure files fixed line",
+			remaining: 6,
+			setup: func(t *testing.T, homeDir string) {
+				recordID := addRecordWithContent(t,
+					`<html><img src="figures/kept.png">body</html>`,
+					"", "",
+					map[string][]byte{"kept.png": []byte("kept")},
+					nil,
+				)
+				orphanPath := filepath.Join(homeDir, "personal-context", "figures", recordID, "orphan.png")
+				if err := os.WriteFile(orphanPath, []byte("orphan"), 0o644); err != nil {
+					t.Fatalf("write orphan figure: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			homeDir := setupEnv(t)
+			tc.setup(t, homeDir)
+
+			stdout := &failAfterWriter{remaining: tc.remaining}
+			err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{Fix: true})
+			if err == nil || !strings.Contains(err.Error(), "write") {
+				t.Fatalf("runDoctor(--fix) error = %v, want write failure", err)
+			}
+		})
+	}
+}
+
+func TestReconcileLocalOrphansRemovesCrashArtifacts(t *testing.T) {
+	homeDir := setupEnv(t)
+	orphanRecordID := addRecordWithContent(t,
+		`<html><img src="figures/old.png">body</html>`,
+		"", "",
+		map[string][]byte{"old.png": []byte("old")},
+		map[string][]byte{"old.csv": []byte("a,b\n1,2\n")},
+	)
+	liveRecordID := addRecordWithContent(t,
+		`<html><img src="figures/kept.png">body</html>`,
+		"", "",
+		map[string][]byte{"kept.png": []byte("kept")},
+		nil,
+	)
+	staleFigurePath := filepath.Join(homeDir, "personal-context", "figures", liveRecordID, "stale.png")
+	if err := os.WriteFile(staleFigurePath, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write stale figure: %v", err)
+	}
+	chatID := "20260514-cafefeed"
+	rawDir := filepath.Join(homeDir, "personal-context", "chats", "raw", chatID)
+	if err := os.MkdirAll(rawDir, 0o700); err != nil {
+		t.Fatalf("mkdir raw dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rawDir, "source.json"), []byte(`{"id":"orphan"}`), 0o600); err != nil {
+		t.Fatalf("write raw source: %v", err)
+	}
+
+	db := openErrorPathsDB(t, homeDir)
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		t.Fatalf("enable foreign keys: %v", err)
+	}
+	if _, err := db.Exec("DELETE FROM records WHERE id = ?", orphanRecordID); err != nil {
+		t.Fatalf("hard delete record: %v", err)
+	}
+
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		t.Fatalf("openLocalStack() error = %v", err)
+	}
+	defer func() { _ = stack.Close() }()
+
+	if err := reconcileLocalOrphans(context.Background(), stack); err != nil {
+		t.Fatalf("reconcileLocalOrphans() error = %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(homeDir, "personal-context", "figures", orphanRecordID),
+		filepath.Join(homeDir, "personal-context", "data", orphanRecordID),
+		staleFigurePath,
+		rawDir,
+	} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("expected %s removed, stat err = %v", path, err)
+		}
+	}
+	keptFigurePath := filepath.Join(homeDir, "personal-context", "figures", liveRecordID, "kept.png")
+	if got, err := os.ReadFile(keptFigurePath); err != nil || string(got) != "kept" {
+		t.Fatalf("expected committed figure preserved, got %q err=%v", got, err)
+	}
+
+	if err := reconcileLocalOrphans(context.Background(), stack); err != nil {
+		t.Fatalf("second reconcileLocalOrphans() error = %v", err)
+	}
+}
+
+func TestDeleteOrphanFigureFilesRejectsMalformedPath(t *testing.T) {
+	homeDir := setupEnv(t)
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		t.Fatalf("openLocalStack() error = %v", err)
+	}
+	defer func() { _ = stack.Close() }()
+
+	err = deleteOrphanFigureFiles(stack.FS, []string{"missing-slash"})
+	if err == nil || !strings.Contains(err.Error(), "recordID/filename") {
+		t.Fatalf("deleteOrphanFigureFiles() error = %v, want malformed path error", err)
+	}
+}
+
+func TestFindFigureFileOrphansErrorPaths(t *testing.T) {
+	_, err := findFigureFileOrphans(context.Background(), &mockRepo{
+		listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+			return nil, errors.New("list figures boom")
+		},
+	}, nil, []repository.Record{{ID: "record-1"}})
+	if err == nil || !strings.Contains(err.Error(), "list committed figures") {
+		t.Fatalf("findFigureFileOrphans(repo error) error = %v", err)
+	}
+
+	homeDir := setupEnv(t)
+	stack, openErr := openLocalStack(homeDir)
+	if openErr != nil {
+		t.Fatalf("openLocalStack() error = %v", openErr)
+	}
+	defer func() { _ = stack.Close() }()
+	_, err = findFigureFileOrphans(context.Background(), &mockRepo{}, stack.FS, []repository.Record{{ID: "../bad"}})
+	if err == nil || !strings.Contains(err.Error(), "list local figures") {
+		t.Fatalf("findFigureFileOrphans(filesystem error) error = %v", err)
+	}
+}
+
+func TestDeleteOrphanHelpersSurfaceDeletionAndSyncErrors(t *testing.T) {
+	if err := deleteOrphanRecordDirs(nil, []string{"record-1"}); err == nil ||
+		!strings.Contains(err.Error(), "delete orphaned record directory") {
+		t.Fatalf("deleteOrphanRecordDirs(nil) error = %v", err)
+	}
+	if err := deleteOrphanChatRawDirs(nil, []string{"20260514-deadbeef"}); err == nil ||
+		!strings.Contains(err.Error(), "delete orphaned chat raw directory") {
+		t.Fatalf("deleteOrphanChatRawDirs(nil) error = %v", err)
+	}
+
+	originalDeleteRecordFigureFileFn := deleteRecordFigureFileFn
+	t.Cleanup(func() { deleteRecordFigureFileFn = originalDeleteRecordFigureFileFn })
+	deleteRecordFigureFileFn = func(*filesystem.Client, string, string) error {
+		return errors.New("delete boom")
+	}
+	if err := deleteOrphanFigureFiles(nil, []string{"record-1/stale.png"}); err == nil ||
+		!strings.Contains(err.Error(), "delete orphaned figure file") {
+		t.Fatalf("deleteOrphanFigureFiles(delete error) error = %v", err)
+	}
+
+	deleteRecordFigureFileFn = originalDeleteRecordFigureFileFn
+	homeDir := setupEnv(t)
+	stack, err := openLocalStack(homeDir)
+	if err != nil {
+		t.Fatalf("openLocalStack() error = %v", err)
+	}
+	defer func() { _ = stack.Close() }()
+
+	recordID := "record-1"
+	figurePath := filepath.Join(homeDir, "personal-context", "figures", recordID, "stale.png")
+	if err := os.MkdirAll(filepath.Dir(figurePath), 0o700); err != nil {
+		t.Fatalf("mkdir figure dir: %v", err)
+	}
+	if err := os.WriteFile(figurePath, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("write stale figure: %v", err)
+	}
+
+	originalSyncDirFn := syncDirFn
+	t.Cleanup(func() { syncDirFn = originalSyncDirFn })
+	syncDirFn = func(string) error {
+		return errors.New("sync boom")
+	}
+	if err := deleteOrphanFigureFiles(stack.FS, []string{recordID + "/stale.png"}); err == nil ||
+		!strings.Contains(err.Error(), "sync orphaned figure cleanup directory") {
+		t.Fatalf("deleteOrphanFigureFiles(sync error) error = %v", err)
+	}
+}
+
+func TestReconcileLocalOrphansErrorPaths(t *testing.T) {
+	ctx := context.Background()
+
+	if err := reconcileLocalOrphans(ctx, &localStack{Repo: &mockRepo{}}); err == nil ||
+		!strings.Contains(err.Error(), "list disk directories") {
+		t.Fatalf("reconcileLocalOrphans(nil filesystem) error = %v", err)
+	}
+
+	t.Run("find orphaned record directories", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack() error = %v", err)
+		}
+		defer func() { _ = stack.Close() }()
+		if err := os.MkdirAll(filepath.Join(homeDir, "personal-context", "figures", "record-1"), 0o700); err != nil {
+			t.Fatalf("mkdir orphan figure dir: %v", err)
+		}
+
+		err = reconcileLocalOrphans(ctx, &localStack{
+			FS: stack.FS,
+			Repo: &mockRepo{getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
+				return repository.Record{}, errors.New("lookup boom")
+			}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "find orphaned figure directories") {
+			t.Fatalf("reconcileLocalOrphans(find dirs) error = %v", err)
+		}
+	})
+
+	t.Run("list records", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack() error = %v", err)
+		}
+		defer func() { _ = stack.Close() }()
+
+		err = reconcileLocalOrphans(ctx, &localStack{
+			FS: stack.FS,
+			Repo: &mockRepo{listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+				return nil, errors.New("list records boom")
+			}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "list records") {
+			t.Fatalf("reconcileLocalOrphans(list records) error = %v", err)
+		}
+	})
+
+	t.Run("find orphaned figure files", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack() error = %v", err)
+		}
+		defer func() { _ = stack.Close() }()
+
+		err = reconcileLocalOrphans(ctx, &localStack{
+			FS: stack.FS,
+			Repo: &mockRepo{
+				listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+					return []repository.Record{{ID: "record-1"}}, nil
+				},
+				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
+					return nil, errors.New("list figures boom")
+				},
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "find orphaned figure files") {
+			t.Fatalf("reconcileLocalOrphans(find figure files) error = %v", err)
+		}
+	})
+
+	t.Run("delete orphaned figure files", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack() error = %v", err)
+		}
+		defer func() { _ = stack.Close() }()
+
+		recordID := "record-1"
+		figurePath := filepath.Join(homeDir, "personal-context", "figures", recordID, "stale.png")
+		if err := os.MkdirAll(filepath.Dir(figurePath), 0o700); err != nil {
+			t.Fatalf("mkdir figure dir: %v", err)
+		}
+		if err := os.WriteFile(figurePath, []byte("stale"), 0o644); err != nil {
+			t.Fatalf("write stale figure: %v", err)
+		}
+		originalSyncDirFn := syncDirFn
+		t.Cleanup(func() { syncDirFn = originalSyncDirFn })
+		syncDirFn = func(string) error {
+			return errors.New("sync boom")
+		}
+
+		err = reconcileLocalOrphans(ctx, &localStack{
+			FS: stack.FS,
+			Repo: &mockRepo{
+				listRecordsFn: func(context.Context, repository.ListRecordsFilter) ([]repository.Record, error) {
+					return []repository.Record{{ID: recordID}}, nil
+				},
+			},
+		})
+		if err == nil || !strings.Contains(err.Error(), "sync orphaned figure cleanup directory") {
+			t.Fatalf("reconcileLocalOrphans(delete figure files) error = %v", err)
+		}
+	})
+
+	t.Run("list chat raw directories", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack() error = %v", err)
+		}
+		defer func() { _ = stack.Close() }()
+		rawRoot := filepath.Join(homeDir, "personal-context", "chats", "raw")
+		if err := os.MkdirAll(filepath.Dir(rawRoot), 0o700); err != nil {
+			t.Fatalf("mkdir chats dir: %v", err)
+		}
+		if err := os.WriteFile(rawRoot, []byte("not-a-directory"), 0o600); err != nil {
+			t.Fatalf("write raw root blocker: %v", err)
+		}
+
+		err = reconcileLocalOrphans(ctx, &localStack{FS: stack.FS, Repo: &mockRepo{}})
+		if err == nil || !strings.Contains(err.Error(), "list chat raw directories") {
+			t.Fatalf("reconcileLocalOrphans(list chat raws) error = %v", err)
+		}
+	})
+
+	t.Run("find orphaned chat raw directories", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack() error = %v", err)
+		}
+		defer func() { _ = stack.Close() }()
+		chatID := "20260514-deadbeef"
+		if err := os.MkdirAll(filepath.Join(homeDir, "personal-context", "chats", "raw", chatID), 0o700); err != nil {
+			t.Fatalf("mkdir chat raw dir: %v", err)
+		}
+
+		err = reconcileLocalOrphans(ctx, &localStack{
+			FS: stack.FS,
+			Repo: &mockRepo{getChatByIDFn: func(context.Context, string) (repository.ChatSession, error) {
+				return repository.ChatSession{}, errors.New("chat lookup boom")
+			}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "find orphaned chat raw directories") {
+			t.Fatalf("reconcileLocalOrphans(find chat raws) error = %v", err)
+		}
+	})
 }
 
 func TestDoctorChatRawRootFile(t *testing.T) {
@@ -1012,6 +1487,14 @@ func (cloudRepoStub) GetSyncVersion(context.Context) (repository.SyncVersion, er
 	return repository.SyncVersion{}, nil
 }
 
+type failingCloudRepoStub struct {
+	repository.Repository
+}
+
+func (failingCloudRepoStub) GetSyncVersion(context.Context) (repository.SyncVersion, error) {
+	return repository.SyncVersion{}, errors.New("ping failed")
+}
+
 // --- Cloud connectivity check tests ---
 
 func TestDoctorCloudOK(t *testing.T) {
@@ -1034,6 +1517,26 @@ func TestDoctorCloudOK(t *testing.T) {
 	}
 	if !strings.Contains(out, "All checks passed.") {
 		t.Fatalf("expected all checks passed, got %q", out)
+	}
+}
+
+func TestDoctorCloudPingFailureShowsWarn(t *testing.T) {
+	setupEnv(t)
+
+	origCloud := openCloudStackFn
+	t.Cleanup(func() { openCloudStackFn = origCloud })
+	openCloudStackFn = func(context.Context, string, string) (*cloudStack, error) {
+		return &cloudStack{Repo: failingCloudRepoStub{}}, nil
+	}
+
+	stdout := &bytes.Buffer{}
+	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
+	if err == nil || !strings.Contains(err.Error(), "warnings found") {
+		t.Fatalf("runDoctor() error = %v, want warnings found", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "Cloud:") || !strings.Contains(out, "cloud DB unreachable") {
+		t.Fatalf("expected cloud DB warning, got %q", out)
 	}
 }
 
@@ -1095,10 +1598,9 @@ func TestDoctorCloudOKWriteError(t *testing.T) {
 		return &cloudStack{Repo: cloudRepoStub{}}, nil
 	}
 
-	// 6 local checks succeed (Database, Orphaned figures, Orphaned data,
-	// Missing figures, Missing data files, Missing chat raw sources). 7th
-	// write is Cloud: OK — fail there.
-	stdout := &failAfterWriter{remaining: 6}
+	// 8 local checks succeed (Database, orphan dirs/files, missing files, chat raw).
+	// 9th write is Cloud: OK — fail there.
+	stdout := &failAfterWriter{remaining: 8}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on Cloud: OK")
@@ -1114,8 +1616,8 @@ func TestDoctorCloudWarnWriteError(t *testing.T) {
 		return nil, errors.New("connection refused")
 	}
 
-	// 6 local checks succeed. 7th write is Cloud: WARN — fail there.
-	stdout := &failAfterWriter{remaining: 6}
+	// 7 local checks succeed. 8th write is Cloud: WARN — fail there.
+	stdout := &failAfterWriter{remaining: 7}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on Cloud: WARN")

@@ -350,6 +350,9 @@ func (m *mockRepo) GetSyncVersion(_ context.Context) (repository.SyncVersion, er
 func (m *mockRepo) CreateRecord(context.Context, repository.CreateRecordInput) (repository.Record, error) {
 	return repository.Record{}, repository.ErrNotFound
 }
+func (m *mockRepo) ReplaceRecordChildren(context.Context, repository.ReplaceRecordChildrenInput) (repository.Record, error) {
+	return repository.Record{}, repository.ErrNotFound
+}
 func (m *mockRepo) DeleteRecord(_ context.Context, id string) error {
 	if m.deleteRecordErr != nil {
 		return m.deleteRecordErr
