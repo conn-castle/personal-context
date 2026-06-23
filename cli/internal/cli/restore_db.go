@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -85,7 +86,7 @@ func runRestoreDB(ctx context.Context, stdout io.Writer, _ io.Writer, path strin
 	}
 	cleanupUnmarkedStaging = false
 	marker.Phase = restorePhaseCommitting
-	marker.Timestamp = newRestoreMarker(restorePhaseCommitting, stagingDir, backupPath).Timestamp
+	marker.Timestamp = restoreMarkerTimestamp()
 	if err := writeRestoreMarker(homeDir, marker); err != nil {
 		return err
 	}
@@ -94,20 +95,19 @@ func runRestoreDB(ctx context.Context, stdout io.Writer, _ io.Writer, path strin
 		BackupDir:      restorePayloadBackupDir(backupPath),
 		BeforeRollback: func() error { return markRestoreRollbackOnly(homeDir, marker) },
 	}); err != nil {
+		var committedCleanupErr *gitsnapshot.CommittedReplacementCleanupError
+		if errors.As(err, &committedCleanupErr) {
+			if finishErr := finishCommittedRestore(homeDir, marker); finishErr != nil {
+				return fmt.Errorf("promote restored store committed; finish cleanup failed: %w; replacement cleanup failed: %v", finishErr, err)
+			}
+			return fmt.Errorf("promote restored store committed; replacement cleanup failed: %w", err)
+		}
 		if cleanupErr := abortFailedRestorePromotion(homeDir, marker); cleanupErr != nil {
 			return fmt.Errorf("promote restored store: %w; abort cleanup failed: %v", err, cleanupErr)
 		}
 		return fmt.Errorf("promote restored store: %w", err)
 	}
-	marker.Phase = restorePhaseDone
-	marker.Timestamp = newRestoreMarker(restorePhaseDone, stagingDir, backupPath).Timestamp
-	if err := writeRestoreMarker(homeDir, marker); err != nil {
-		return err
-	}
-	if err := cleanupCompletedRestore(marker); err != nil {
-		return err
-	}
-	if err := removeRestoreMarker(homeDir); err != nil {
+	if err := finishCommittedRestore(homeDir, marker); err != nil {
 		return err
 	}
 
@@ -119,15 +119,21 @@ var replaceRestoreContentsFn = gitsnapshot.ReplaceContents
 
 func abortFailedRestorePromotion(homeDir string, marker restoreMarker) error {
 	marker.RollbackOnly = true
-	marker.Timestamp = newRestoreMarker(restorePhaseCommitting, marker.StagingDir, marker.BackupDir).Timestamp
+	marker.Timestamp = restoreMarkerTimestamp()
 	if err := writeRestoreMarker(homeDir, marker); err != nil {
 		return err
 	}
 	if err := gitsnapshot.RestoreReplacementBackup(basePath(homeDir), restorePayloadBackupDir(marker.BackupDir), restorePayloadEntries, marker.OriginalEntries); err != nil {
 		return fmt.Errorf("roll back failed restore promotion: %w", err)
 	}
+	return finishCommittedRestore(homeDir, marker)
+}
+
+// finishCommittedRestore records the committed state for homeDir, cleans the
+// marker-owned staging and payload backup paths, and removes the marker.
+func finishCommittedRestore(homeDir string, marker restoreMarker) error {
 	marker.Phase = restorePhaseDone
-	marker.Timestamp = newRestoreMarker(restorePhaseDone, marker.StagingDir, marker.BackupDir).Timestamp
+	marker.Timestamp = restoreMarkerTimestamp()
 	if err := writeRestoreMarker(homeDir, marker); err != nil {
 		return err
 	}
@@ -139,7 +145,7 @@ func abortFailedRestorePromotion(homeDir string, marker restoreMarker) error {
 
 func markRestoreRollbackOnly(homeDir string, marker restoreMarker) error {
 	marker.RollbackOnly = true
-	marker.Timestamp = newRestoreMarker(restorePhaseCommitting, marker.StagingDir, marker.BackupDir).Timestamp
+	marker.Timestamp = restoreMarkerTimestamp()
 	return writeRestoreMarker(homeDir, marker)
 }
 

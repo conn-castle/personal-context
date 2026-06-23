@@ -1504,6 +1504,55 @@ func TestCompleteReplacementRollsForwardRestoreStates(t *testing.T) {
 		assertReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
 		assertReplacementTestFile(t, filepath.Join(backupDir, ".pc", "pc.db"), "old-backup-db")
 	})
+
+	t.Run("removes deleted live entry when backup exists", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		backupDir := filepath.Join(t.TempDir(), "payload-backup")
+		entry := filepath.Join(".pc", "last_sync")
+		writeReplacementTestFile(t, filepath.Join(root, entry), "stale-sync")
+		writeReplacementTestFile(t, filepath.Join(backupDir, entry), "old-sync")
+
+		if err := CompleteReplacement(root, staging, backupDir, []string{entry}, nil); err != nil {
+			t.Fatalf("CompleteReplacement() error = %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(root, entry)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("deleted live entry should be removed during roll-forward, stat err=%v", err)
+		}
+		assertReplacementTestFile(t, filepath.Join(backupDir, entry), "old-sync")
+	})
+
+	t.Run("syncs already promoted entry parents before completion", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		backupDir := filepath.Join(t.TempDir(), "payload-backup")
+		nestedEntries := []string{filepath.Join(".pc", "pc.db"), filepath.Join("figures", "new-record", "new.png")}
+		writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
+		writeReplacementTestFile(t, filepath.Join(root, "figures", "new-record", "new.png"), "new-figure")
+		writeReplacementTestFile(t, filepath.Join(backupDir, ".pc", "pc.db"), "old-db")
+		synced := map[string]bool{}
+		origSync := syncDirFn
+		syncDirFn = func(dir string) error {
+			synced[filepath.Clean(dir)] = true
+			return origSync(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSync })
+
+		if err := CompleteReplacement(root, staging, backupDir, nestedEntries, nestedEntries); err != nil {
+			t.Fatalf("CompleteReplacement() error = %v", err)
+		}
+		for _, dir := range []string{
+			filepath.Join(root, ".pc"),
+			filepath.Join(backupDir, ".pc"),
+			filepath.Join(staging, ".pc"),
+			filepath.Join(root, "figures", "new-record"),
+			filepath.Join(staging, "figures", "new-record"),
+		} {
+			if !synced[filepath.Clean(dir)] {
+				t.Fatalf("CompleteReplacement did not sync already-promoted parent %s; synced=%v", dir, synced)
+			}
+		}
+	})
 }
 
 func TestCompleteReplacementErrorPaths(t *testing.T) {
@@ -1791,6 +1840,36 @@ func TestReplaceContentsProvidedBackupSyncFailures(t *testing.T) {
 		err := ReplaceContents(root, staging, ReplacementOptions{Entries: entries, BackupDir: backupDir})
 		if err == nil || !strings.Contains(err.Error(), "sync backup parent after backup removal") {
 			t.Fatalf("ReplaceContents() error = %v, want post-removal sync failure", err)
+		}
+		var committedCleanupErr *CommittedReplacementCleanupError
+		if !errors.As(err, &committedCleanupErr) {
+			t.Fatalf("ReplaceContents() error type = %T, want CommittedReplacementCleanupError", err)
+		}
+	})
+
+	t.Run("syncs each created backup ancestor", func(t *testing.T) {
+		root := t.TempDir()
+		backupDir := filepath.Join(root, ".pc", "backups", "restore-db-test", ".restore-payload")
+		synced := map[string]bool{}
+		origSync := syncDirFn
+		syncDirFn = func(dir string) error {
+			synced[filepath.Clean(dir)] = true
+			return origSync(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSync })
+
+		if _, err := createReplacementBackupDir(root, backupDir); err != nil {
+			t.Fatalf("createReplacementBackupDir() error = %v", err)
+		}
+		for _, dir := range []string{
+			root,
+			filepath.Join(root, ".pc"),
+			filepath.Join(root, ".pc", "backups"),
+			filepath.Join(root, ".pc", "backups", "restore-db-test"),
+		} {
+			if !synced[filepath.Clean(dir)] {
+				t.Fatalf("createReplacementBackupDir did not sync created ancestor parent %s; synced=%v", dir, synced)
+			}
 		}
 	})
 }

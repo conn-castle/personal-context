@@ -73,16 +73,11 @@ func TestRecoverInterruptedRestoreStagingPhaseDiscardsStaging(t *testing.T) {
 }
 
 func TestRecoverInterruptedRestoreCommittingRollsForwardAtEveryRenameBoundary(t *testing.T) {
-	totalSteps := -1
-	for steps := 0; ; steps++ {
-		if totalSteps >= 0 && steps > totalSteps {
-			break
-		}
+	stepFixture := setupRestoreAtomicityFixture(t)
+	totalSteps := countRestoreRenameSteps(stepFixture.homeDir, stepFixture.stagingDir)
+	for steps := 0; steps <= totalSteps; steps++ {
 		t.Run(fmt.Sprintf("steps_%02d", steps), func(t *testing.T) {
 			fixture := setupRestoreAtomicityFixture(t)
-			if totalSteps < 0 {
-				totalSteps = countRestoreRenameSteps(fixture.homeDir, fixture.stagingDir)
-			}
 			marker := committingRestoreMarkerForTest(t, fixture)
 			if err := writeRestoreMarker(fixture.homeDir, marker); err != nil {
 				t.Fatalf("writeRestoreMarker() error = %v", err)
@@ -210,6 +205,26 @@ func TestRestoreMarkerAndRecoveryErrorPaths(t *testing.T) {
 		}
 	})
 
+	t.Run("committing marker preserves empty entry lists", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		_ = addRestoreAtomicityOldRecord(t, homeDir)
+		marker := newRestoreMarker(
+			restorePhaseCommitting,
+			filepath.Join(basePath(homeDir), ".pc", "missing-staging"),
+			filepath.Join(basePath(homeDir), ".pc", "backups", "restore-db-empty-entries"),
+		)
+		marker.StagedEntries = []string{}
+		marker.OriginalEntries = []string{}
+		if err := writeRestoreMarker(homeDir, marker); err != nil {
+			t.Fatalf("writeRestoreMarker() error = %v", err)
+		}
+
+		if err := recoverInterruptedRestore(homeDir); err != nil {
+			t.Fatalf("recoverInterruptedRestore() error = %v, want empty entry lists accepted", err)
+		}
+		assertRestoreMarkerAndStagingCleaned(t, homeDir)
+	})
+
 	t.Run("write marker surfaces parent failure", func(t *testing.T) {
 		homeDir := t.TempDir()
 		pcDir := filepath.Join(basePath(homeDir), ".pc")
@@ -294,8 +309,8 @@ func TestRestoreDBMarkerPhaseFailurePaths(t *testing.T) {
 				}
 				return origCreateTempFile(dir, pattern)
 			}
+			t.Cleanup(func() { createTempFileFn = origCreateTempFile })
 			err := runRestoreDB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, snapshotDir)
-			createTempFileFn = origCreateTempFile
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("runRestoreDB() error = %v, want %s", err, tc.want)
 			}
@@ -323,8 +338,8 @@ func TestRestoreDBMarkerPhaseFailurePaths(t *testing.T) {
 			}
 			return origSync(dir)
 		}
+		t.Cleanup(func() { syncDirFn = origSync })
 		err := runRestoreDB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, snapshotDir)
-		syncDirFn = origSync
 		if err == nil || !strings.Contains(err.Error(), "sync restore payload backup cleanup") {
 			t.Fatalf("runRestoreDB() error = %v, want cleanup sync failure", err)
 		}
@@ -379,8 +394,8 @@ func TestRestoreDBPromoteFailureDoesNotLaterRollForward(t *testing.T) {
 		}
 		return errors.New("promote failed")
 	}
+	t.Cleanup(func() { replaceRestoreContentsFn = origReplace })
 	err := runRestoreDB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, snapshotDir)
-	replaceRestoreContentsFn = origReplace
 	if err == nil || !strings.Contains(err.Error(), "promote restored store") {
 		t.Fatalf("runRestoreDB() error = %v, want promote failure", err)
 	}
@@ -426,8 +441,8 @@ func TestRestoreDBPromoteFailureCleanupFailureLeavesCleanupOnlyMarker(t *testing
 		}
 		return errors.New("promote failed")
 	}
+	t.Cleanup(func() { replaceRestoreContentsFn = origReplace })
 	err := runRestoreDB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, snapshotDir)
-	replaceRestoreContentsFn = origReplace
 	if capturedStaging != "" {
 		t.Cleanup(func() { _ = os.Chmod(filepath.Join(capturedStaging, ".pc"), 0o700) })
 	}
@@ -450,6 +465,62 @@ func TestRestoreDBPromoteFailureCleanupFailureLeavesCleanupOnlyMarker(t *testing
 		t.Fatalf("recoverInterruptedRestore() error = %v", err)
 	}
 	assertRestoreStoreHasOnlyRecord(t, homeDir, oldID, "old.png", []byte("old-figure"), restoreAtomicityNewRecordID)
+	assertRestoreMarkerAndStagingCleaned(t, homeDir)
+}
+
+func TestRestoreDBCommittedCleanupFailureDoesNotRollback(t *testing.T) {
+	homeDir := setupEnv(t)
+	oldID := addRestoreAtomicityOldRecord(t, homeDir)
+	snapshotDir := t.TempDir()
+	writeSnapshotForCLITest(t, snapshotDir, restoreAtomicityNewSnapshot())
+
+	origReplace := replaceRestoreContentsFn
+	replaceRestoreContentsFn = func(root string, stagingRoot string, options gitsnapshot.ReplacementOptions) error {
+		for _, entry := range restorePayloadEntries {
+			live := filepath.Join(root, entry)
+			if !testPathExists(live) {
+				continue
+			}
+			backup := filepath.Join(options.BackupDir, entry)
+			if err := os.MkdirAll(filepath.Dir(backup), 0o700); err != nil {
+				return err
+			}
+			if err := os.Rename(live, backup); err != nil {
+				return err
+			}
+		}
+		for _, entry := range restorePayloadEntries {
+			staged := filepath.Join(stagingRoot, entry)
+			if !testPathExists(staged) {
+				continue
+			}
+			live := filepath.Join(root, entry)
+			if err := os.MkdirAll(filepath.Dir(live), 0o700); err != nil {
+				return err
+			}
+			if err := os.Rename(staged, live); err != nil {
+				return err
+			}
+		}
+		return &gitsnapshot.CommittedReplacementCleanupError{Err: errors.New("post-commit cleanup failed")}
+	}
+	t.Cleanup(func() { replaceRestoreContentsFn = origReplace })
+
+	stdout := &bytes.Buffer{}
+	err := runRestoreDB(context.Background(), stdout, &bytes.Buffer{}, snapshotDir)
+	if err == nil || !strings.Contains(err.Error(), "promote restored store committed") {
+		t.Fatalf("runRestoreDB() error = %v, want committed cleanup failure", err)
+	}
+	backupPath := restoreBackupPathFromOutput(t, stdout.String())
+	assertRestoreStoreHasOnlyRecord(t, homeDir, restoreAtomicityNewRecordID, "new.png", []byte("new-figure"), oldID)
+	assertRestoreMarkerAndStagingCleaned(t, homeDir)
+	if _, err := os.Stat(restorePayloadBackupDir(backupPath)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("internal restore payload backup should be cleaned immediately after committed cleanup failure, stat err=%v", err)
+	}
+	if err := recoverInterruptedRestore(homeDir); err != nil {
+		t.Fatalf("recoverInterruptedRestore() after committed cleanup failure = %v", err)
+	}
+	assertRestoreStoreHasOnlyRecord(t, homeDir, restoreAtomicityNewRecordID, "new.png", []byte("new-figure"), oldID)
 	assertRestoreMarkerAndStagingCleaned(t, homeDir)
 }
 
@@ -1150,6 +1221,13 @@ func assertRestoreStoreHasOnlyRecordOnDisk(t *testing.T, homeDir string, present
 	}
 	if absentCount != 0 {
 		t.Fatalf("record %s count = %d, want 0", absentID, absentCount)
+	}
+	var figureCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM record_figures WHERE record_id = ?`, presentID).Scan(&figureCount); err != nil {
+		t.Fatalf("query figure count for %s: %v", presentID, err)
+	}
+	if figureCount != 1 {
+		t.Fatalf("figure count for %s = %d, want 1", presentID, figureCount)
 	}
 	var gotFigure string
 	if err := db.QueryRow(`SELECT filename FROM record_figures WHERE record_id = ?`, presentID).Scan(&gotFigure); err != nil {

@@ -245,6 +245,24 @@ type ReplacementOptions struct {
 	BeforeRollback func() error
 }
 
+// CommittedReplacementCleanupError reports a cleanup failure after replacement
+// entries were promoted and durably committed. Callers must not roll back the
+// replacement when this error is returned; they should surface the cleanup
+// failure and retry or defer cleanup separately.
+type CommittedReplacementCleanupError struct {
+	Err error
+}
+
+// Error returns the underlying committed-cleanup failure message.
+func (e *CommittedReplacementCleanupError) Error() string {
+	return e.Err.Error()
+}
+
+// Unwrap returns the underlying committed-cleanup failure.
+func (e *CommittedReplacementCleanupError) Unwrap() error {
+	return e.Err
+}
+
 // Write stages a deterministic snapshot, then replaces the managed export entries under root.
 func Write(root string, snapshot Snapshot) error {
 	if strings.TrimSpace(root) == "" {
@@ -500,7 +518,9 @@ func writeSnapshotContents(root string, snapshot Snapshot) error {
 // semantics.
 // Args: root is the live parent directory; stagingRoot contains replacement
 // entries at matching relative paths; options names entries and backup behavior.
-// Returns: nil on success or an error after best-effort rollback.
+// Returns: nil on success, CommittedReplacementCleanupError when promotion
+// committed but backup cleanup failed, or another error after best-effort
+// rollback for pre-commit failures.
 func ReplaceContents(root string, stagingRoot string, options ReplacementOptions) error {
 	return replaceContents(root, stagingRoot, replacementOptions{
 		entries:        options.Entries,
@@ -547,10 +567,15 @@ func CompleteReplacement(root string, stagingRoot string, backupDir string, entr
 				return fmt.Errorf("inspect backup %s: %w", name, err)
 			}
 			if backupExists && !stagedExists {
-				continue
+				if _, ok := originallyStaged[name]; ok {
+					touchReplacementRename(touchedDirs, backupTarget, target)
+					touchReplacementRename(touchedDirs, staged, target)
+					continue
+				}
 			}
 			if !backupExists && !stagedExists {
 				if _, ok := originallyStaged[name]; ok {
+					touchReplacementRename(touchedDirs, staged, target)
 					continue
 				}
 			}
@@ -722,10 +747,10 @@ func replaceContents(root string, stagingRoot string, options replacementOptions
 	// removal errors are propagated so callers know cleanup is needed.
 	cleanupBackup = false
 	if err := os.RemoveAll(backupDir); err != nil {
-		return fmt.Errorf("remove snapshot backup dir: %w", err)
+		return &CommittedReplacementCleanupError{Err: fmt.Errorf("remove snapshot backup dir: %w", err)}
 	}
 	if err := syncAfterBackupRemoval(root, backupDir); err != nil {
-		return err
+		return &CommittedReplacementCleanupError{Err: err}
 	}
 
 	return nil
@@ -733,6 +758,9 @@ func replaceContents(root string, stagingRoot string, options replacementOptions
 
 func createReplacementBackupDir(root string, backupDir string) (string, error) {
 	if backupDir != "" {
+		if err := ensureReplacementParent(backupDir); err != nil {
+			return "", fmt.Errorf("create replacement backup parent: %w", err)
+		}
 		if err := os.MkdirAll(backupDir, 0o700); err != nil {
 			return "", fmt.Errorf("create replacement backup dir: %w", err)
 		}

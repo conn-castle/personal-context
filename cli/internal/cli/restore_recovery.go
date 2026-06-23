@@ -41,9 +41,13 @@ type restoreMarker struct {
 	StagingDir      string   `json:"staging_dir"`
 	BackupDir       string   `json:"backup_dir"`
 	Timestamp       string   `json:"timestamp"`
-	StagedEntries   []string `json:"staged_entries,omitempty"`
-	OriginalEntries []string `json:"original_entries,omitempty"`
+	StagedEntries   []string `json:"staged_entries"`
+	OriginalEntries []string `json:"original_entries"`
 	RollbackOnly    bool     `json:"rollback_only,omitempty"`
+}
+
+func restoreMarkerTimestamp() string {
+	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
 func newRestoreMarker(phase string, stagingDir string, backupDir string) restoreMarker {
@@ -51,7 +55,7 @@ func newRestoreMarker(phase string, stagingDir string, backupDir string) restore
 		Phase:      phase,
 		StagingDir: stagingDir,
 		BackupDir:  backupDir,
-		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
+		Timestamp:  restoreMarkerTimestamp(),
 	}
 }
 
@@ -159,7 +163,7 @@ func recoverCommittingRestore(homeDir string, marker restoreMarker) error {
 	if stagingErr == nil && !stagingInfo.IsDir() {
 		return fmt.Errorf("restore staging path is not a directory: %s", marker.StagingDir)
 	}
-	if !restorePathExists(payloadBackupDir) && stagingDirMissing && !restorePathExists(filepath.Join(marker.StagingDir, ".pc", "pc.db")) && liveDatabaseExists(base) {
+	if !restorePathExists(payloadBackupDir) && stagingDirMissing && liveDatabaseExists(base) {
 		return nil
 	}
 	if stagingDirExists {
