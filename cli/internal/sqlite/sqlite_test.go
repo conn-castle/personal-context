@@ -659,7 +659,7 @@ func TestApplyMigrationsPropagatesBeginTxFailure(t *testing.T) {
 	}
 }
 
-func TestForeignKeysEnabledOnAllPoolConnections(t *testing.T) {
+func TestPerConnectionPragmasEnabledOnAllPoolConnections(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "pc.db")
 	connection, err := Open(dbPath)
 	if err != nil {
@@ -669,20 +669,45 @@ func TestForeignKeysEnabledOnAllPoolConnections(t *testing.T) {
 
 	db := connection.DB()
 
-	// Hold one connection open via rows.
-	rows, err := db.Query("SELECT 1")
+	// Hold one connection open inside a transaction so the pool is forced to
+	// hand out a second, freshly-opened connection for the PRAGMA reads below.
+	// foreign_keys, synchronous, and busy_timeout are per-connection PRAGMAs:
+	// if they are configured against a single pooled connection (via
+	// db.ExecContext) instead of in the connection hook, this second connection
+	// reverts to driver defaults (busy_timeout=0, synchronous=FULL=2).
+	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
-		t.Fatalf("first query error = %v", err)
+		t.Fatalf("begin holding tx error = %v", err)
 	}
-	defer func() { _ = rows.Close() }()
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec("SELECT 1"); err != nil {
+		t.Fatalf("exec on holding tx error = %v", err)
+	}
 
-	// Force a second connection from the pool and verify FK pragma.
+	// Force a second connection from the pool and verify all per-connection
+	// PRAGMAs landed on it.
 	var fk int
 	if err := db.QueryRow("PRAGMA foreign_keys").Scan(&fk); err != nil {
 		t.Fatalf("PRAGMA foreign_keys on second conn error = %v", err)
 	}
 	if fk != 1 {
 		t.Fatalf("expected foreign_keys=1 on second pool connection, got %d", fk)
+	}
+
+	var synchronous int
+	if err := db.QueryRow("PRAGMA synchronous").Scan(&synchronous); err != nil {
+		t.Fatalf("PRAGMA synchronous on second conn error = %v", err)
+	}
+	if synchronous != 1 {
+		t.Fatalf("expected synchronous=NORMAL(1) on second pool connection, got %d", synchronous)
+	}
+
+	var busyTimeout int
+	if err := db.QueryRow("PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+		t.Fatalf("PRAGMA busy_timeout on second conn error = %v", err)
+	}
+	if busyTimeout != 5000 {
+		t.Fatalf("expected busy_timeout=5000 on second pool connection, got %d", busyTimeout)
 	}
 }
 

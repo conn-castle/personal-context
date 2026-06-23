@@ -18,8 +18,23 @@ import (
 
 func init() {
 	sqlitedriver.RegisterConnectionHook(func(conn sqlitedriver.ExecQuerierContext, dsn string) error {
-		_, err := conn.ExecContext(context.Background(), "PRAGMA foreign_keys = ON", nil)
-		return err
+		// foreign_keys, synchronous, and busy_timeout are per-connection PRAGMAs
+		// (not persisted in the database file like journal_mode). They must be
+		// applied to every pooled connection here, because database/sql may open
+		// additional connections that would otherwise fall back to driver
+		// defaults (busy_timeout=0, synchronous=FULL). journal_mode=WAL is set and
+		// validated separately in configureWithHooks because it is a persistent,
+		// database-level setting.
+		for _, pragma := range []string{
+			"PRAGMA foreign_keys = ON",
+			"PRAGMA synchronous = NORMAL",
+			"PRAGMA busy_timeout = 5000",
+		} {
+			if _, err := conn.ExecContext(context.Background(), pragma, nil); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
@@ -290,14 +305,10 @@ func configureWithHooks(ctx context.Context, db *sql.DB, hooks sqliteHooks) erro
 		return fmt.Errorf("unexpected journal mode %q", mode)
 	}
 
-	if _, err := db.ExecContext(ctx, `PRAGMA synchronous = NORMAL;`); err != nil {
-		return fmt.Errorf("set synchronous mode: %w", err)
-	}
-
-	if _, err := db.ExecContext(ctx, `PRAGMA busy_timeout = 5000;`); err != nil {
-		return fmt.Errorf("set busy timeout: %w", err)
-	}
-
+	// synchronous = NORMAL and busy_timeout = 5000 are per-connection PRAGMAs
+	// applied to every pooled connection in the RegisterConnectionHook in init();
+	// they intentionally are not set here, which would only configure one
+	// connection from the pool.
 	return nil
 }
 
