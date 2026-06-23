@@ -92,3 +92,47 @@ func TestApplySchemaFailsForNilPool(t *testing.T) {
 		t.Fatal("expected error for nil pool")
 	}
 }
+
+func TestLessSameDomainTiebreak(t *testing.T) {
+	chatResult := func(sessionID string, ordinal int) repository.DomainSearchResult {
+		return repository.DomainSearchResult{
+			Domain: "chats",
+			Chat: &repository.ChatSearchResult{
+				Session: repository.ChatSession{ID: sessionID},
+				Item:    repository.ChatItem{Ordinal: ordinal},
+			},
+		}
+	}
+	recordResult := func(id string) repository.DomainSearchResult {
+		return repository.DomainSearchResult{Domain: "records", Record: &repository.Record{ID: id}}
+	}
+
+	// Records tiebreak by id, mirroring `ORDER BY rank DESC, id`.
+	if !lessSameDomainTiebreak(recordResult("20260305-aaaaaaaa"), recordResult("20260305-bbbbbbbb")) {
+		t.Fatal("record tiebreak: lower id must sort first")
+	}
+	if lessSameDomainTiebreak(recordResult("20260305-bbbbbbbb"), recordResult("20260305-aaaaaaaa")) {
+		t.Fatal("record tiebreak: higher id must not sort first")
+	}
+
+	// Chats tiebreak by session id first, then ordinal.
+	if !lessSameDomainTiebreak(chatResult("20260305-aaaaaaaa", 99), chatResult("20260305-bbbbbbbb", 1)) {
+		t.Fatal("chat tiebreak: lower session id must sort first regardless of ordinal")
+	}
+
+	// Ordinals compare NUMERICALLY, not lexicographically, mirroring the SQL
+	// `ci.ordinal` column. Lexicographically "1000000" < "999999" ('1' < '9'),
+	// but numerically 999999 < 1000000. The merge must match SQL numeric order so
+	// the bounded per-domain LIMIT keeps the correct pagination boundary element.
+	if !lessSameDomainTiebreak(chatResult("20260305-deadbeef", 999_999), chatResult("20260305-deadbeef", 1_000_000)) {
+		t.Fatal("chat tiebreak: ordinal 999999 must sort before 1000000 (numeric order)")
+	}
+	if lessSameDomainTiebreak(chatResult("20260305-deadbeef", 1_000_000), chatResult("20260305-deadbeef", 999_999)) {
+		t.Fatal("chat tiebreak: ordinal 1000000 must not sort before 999999")
+	}
+
+	// Equal results are not strictly less than each other (irreflexive).
+	if lessSameDomainTiebreak(chatResult("20260305-deadbeef", 7), chatResult("20260305-deadbeef", 7)) {
+		t.Fatal("chat tiebreak: equal results must not report less-than")
+	}
+}

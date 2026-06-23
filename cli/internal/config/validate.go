@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -61,10 +60,11 @@ func ValidateS3Bucket(bucket string) error {
 	if strings.Contains(bucket, "..") {
 		return fmt.Errorf("S3 bucket name must not contain consecutive dots")
 	}
+	// AWS rejects any name in IPv4 dotted-quad format regardless of octet
+	// validity (e.g. 192.168.5.4 and 256.256.256.256 are both invalid), so the
+	// format match alone must reject — do not narrow it with net.ParseIP.
 	if ipv4Regexp.MatchString(bucket) {
-		if ip := net.ParseIP(bucket); ip != nil {
-			return fmt.Errorf("S3 bucket name must not be formatted as an IP address")
-		}
+		return fmt.Errorf("S3 bucket name must not be formatted as an IP address")
 	}
 	return nil
 }

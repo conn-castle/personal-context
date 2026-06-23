@@ -27,6 +27,26 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-23 t2p8v6: lessSameDomainTiebreak duplicated between sqlite and postgres
+    Priority: Low. Area: cli/internal/repository/sqlite/chat.go, cli/internal/repository/postgres/chat.go
+    Description: lessSameDomainTiebreak is defined identically in both the sqlite and postgres chat packages. Both already import the shared repository package, so this helper could live there (exported as LessSameDomainTiebreak) and be used by both adapters. Raised in PR #45 review.
+    Next step: Move lessSameDomainTiebreak to cli/internal/repository, export it, update both adapter callers, and add a shared unit test.
+
+- Issue 2026-06-23 r4g7n2: ValidateS3Region regex accepts impossible AWS region shapes
+    Priority: Low. Area: cli/internal/config/validate.go
+    Description: s3RegionRegexp `^[a-z]{2}(?:-[a-z0-9]+)+-\d+$` lets `(?:-[a-z0-9]+)+` repeat without bound, so bogus 4+ segment strings like `us-east-1-2` and `us-east-west-1` pass a validator whose stated job is to catch malformed regions; they then fail later at the AWS SDK call with a less clear error. It also hard-requires a 2-letter geography prefix.
+    Next step: Genuine tradeoff (AWS-evolution bet) — tightening toward AWS's canonical `^[a-z]{2}-[a-z]+-\d+$` plus the known gov/iso(b) 4-segment exceptions risks rejecting a future legitimate region. Present options (tighten vs. keep permissive) and let the human decide before implementing. Captured during config audit (round-3 iter 12).
+
+- Issue 2026-06-23 b6t1h9: ValidateS3Bucket accepts AWS-forbidden dot/hyphen adjacency
+    Priority: Low. Area: cli/internal/config/validate.go
+    Description: AWS S3 bucket rules forbid a dot adjacent to a hyphen (`.-` or `-.`), but ValidateS3Bucket only blocks consecutive dots (`..`). Names like `a.-b` and `my-.bucket` pass validation and are only rejected later by S3 at bucket-create time, partially defeating the validator's pre-empt purpose.
+    Next step: Mild scope decision — the package deliberately documents which AWS rules it enforces and the test suite enumerates that scope, so adding `.-`/`-.` rejection is "enforce more AWS rules than chosen", not a forced strict fix. Confirm the intended strictness scope, then add the adjacency check plus mutation-verified tests. Captured during config audit (round-3 iter 12).
+
+- Issue 2026-06-23 v3n8d1: Postgres GetSyncVersion first-insert race can spuriously return ErrNotFound
+    Priority: Low. Area: cli/internal/repository/postgres/repository.go
+    Description: GetSyncVersion does `INSERT ... ON CONFLICT (user_id) DO NOTHING RETURNING ...` and, on pgx.ErrNoRows, falls back to a SELECT. Under read-committed isolation, two concurrent first-time syncs for the same brand-new user can both miss the RETURNING (one loses the INSERT race), and the loser's fallback SELECT can run before the winner's INSERT commits, surfacing ErrNotFound. Very narrow window; usage is effectively singleton-per-user so real-world likelihood is low. Postgres-only path (Docker integration test).
+    Next step: Genuine tradeoff (changes the query shape) — switch to `ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id RETURNING ...` so the row is always returned and the fallback SELECT is removed. Verify against the Postgres integration suite. Capture before implementing.
+
 - Issue 2026-06-23 p9r1k4: Go CLI codebase docstring coverage is far below 80% threshold
     Priority: Low. Area: cli/ (all packages)
     Description: CodeRabbit pre-merge check reports 12.90% docstring coverage vs a configured 80% threshold. The gap is global (pre-existing across the entire codebase, not introduced by any single PR) and spans most exported functions and types.

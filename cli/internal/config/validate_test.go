@@ -52,6 +52,12 @@ func TestValidateS3Bucket(t *testing.T) {
 		{"contains slash", "my/bucket", true},
 		{"contains underscore", "my_bucket", true},
 		{"ip address format", "192.168.1.1", true},
+		// AWS rejects the dotted-quad FORMAT regardless of octet validity. These
+		// cases match ipv4Regexp but net.ParseIP returns nil (octets > 255), so
+		// they fail unless the format match alone rejects (not gated by ParseIP).
+		{"ip format out-of-range octets", "256.256.256.256", true},
+		{"ip format huge octets", "999.999.999.999", true},
+		{"ip format one out-of-range octet", "10.0.0.300", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

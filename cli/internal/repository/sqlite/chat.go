@@ -749,7 +749,7 @@ func (r *Repository) SearchAll(ctx context.Context, filter repository.UnifiedSea
 		if results[i].Domain != results[j].Domain {
 			return results[i].Domain < results[j].Domain
 		}
-		return domainResultID(results[i]) < domainResultID(results[j])
+		return lessSameDomainTiebreak(results[i], results[j])
 	})
 	start := pageOffset
 	if start > len(results) {
@@ -833,8 +833,8 @@ func (r *Repository) searchChatItemsForUnified(ctx context.Context, filter repos
 		args = append(args, timeutil.FormatUTCMillis(*filter.DateTo))
 	}
 	// ORDER BY tiebreaker (cs.id, ci.ordinal) MUST match the Go merge tiebreaker in
-	// domainResultID so the bounded per-domain LIMIT does not drop the boundary
-	// element during paginated SearchAll.
+	// lessSameDomainTiebreak so the bounded per-domain LIMIT does not drop the
+	// boundary element during paginated SearchAll.
 	sqlQuery := `SELECT ` + prefixedChatSessionColumns("cs") + `, ` + prefixedChatItemColumns("ci") + `,
             snippet(chat_item_fts, 0, '', '', '...', 12),
             -bm25(chat_item_fts)
@@ -1065,14 +1065,30 @@ func sqliteFTSQuery(query string) string {
 	return strings.Join(quoted, " ")
 }
 
-func domainResultID(result repository.DomainSearchResult) string {
-	if result.Record != nil {
-		return result.Record.ID
+// lessSameDomainTiebreak reports whether a sorts before b among two
+// same-domain, equal-rank SearchAll results. It mirrors the per-domain SQL
+// ORDER BY columnwise so the bounded per-domain LIMIT (offset+limit) never
+// drops or misorders the pagination boundary element:
+//   - records: by id (matches `ORDER BY -bm25 DESC, records.id`)
+//   - chats: by session id, then ordinal NUMERICALLY (matches
+//     `ORDER BY -bm25 DESC, cs.id, ci.ordinal`)
+//
+// Comparing the ordinal numerically — rather than via a fixed-width string key
+// — keeps the merge aligned with SQL for ordinals of any magnitude, including
+// values >= 1e6 where lexicographic comparison of decimal strings diverges from
+// numeric order. Callers must only invoke this for two results in the same
+// domain (the merge comparator gates on Domain equality first).
+func lessSameDomainTiebreak(a, b repository.DomainSearchResult) bool {
+	if a.Chat != nil && b.Chat != nil {
+		if a.Chat.Session.ID != b.Chat.Session.ID {
+			return a.Chat.Session.ID < b.Chat.Session.ID
+		}
+		return a.Chat.Item.Ordinal < b.Chat.Item.Ordinal
 	}
-	if result.Chat != nil {
-		return fmt.Sprintf("%s/%06d", result.Chat.Session.ID, result.Chat.Item.Ordinal)
+	if a.Record != nil && b.Record != nil {
+		return a.Record.ID < b.Record.ID
 	}
-	return ""
+	return false
 }
 
 func prefixedChatSessionColumns(alias string) string {
