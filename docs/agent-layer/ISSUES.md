@@ -27,6 +27,16 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-22 j4m8q2: Gemini source identity differs between JSON and JSONL transcript paths
+    Priority: Low. Area: cli/internal/chatimport/chatimport.go
+    Description: For source=gemini, the JSONL path forces sessionMeta=nil in unwrapChatLine so the path-derived geminiSourceSessionID always wins, but the JSON path's jsonTranscriptSessionFields.applyTo honors top-level session_id/conversation_id/chat_id/id for all sources including gemini. A real Gemini JSON carrying a top-level id identical across the project-name and project-hash copies of the same session would collapse both back to one identity — exactly the collision geminiSourceSessionID was built to prevent. Practical risk is low (per q2v9m6 real Gemini files carry no usable in-file id); the existing TestGeminiDuplicatePathsGetDistinctIdentities fixture has no id field so it does not cover this.
+    Next step: Decide whether path-derived gemini identity is canonical for both formats (then skip applyTo's id override when source==gemini, matching JSONL) — this changes behavior for any Gemini JSON that does carry an in-file id and would touch the gemini-fixture test. Capture the decision before implementing. Related: q2v9m6.
+
+- Issue 2026-06-22 k7p3r5: JSON (non-JSONL) transcript path has no per-element memory bound
+    Priority: Low. Area: cli/internal/chatimport/chatimport.go
+    Description: decodeJSONTranscriptItems calls decoder.Decode(&raw) per array element with no size cap, fully materializing each element into map[string]any. The JSONL path deliberately caps each row at 256 MiB (maxJSONLLineBytes) and surfaces bufio.ErrTooLong; the JSON path has no equivalent guard, so a single pathological array element (e.g. a huge embedded tool output) is materialized whole. Asymmetric DoS surface against read-only on-disk artifacts (low real-world risk). readGeminiProjectHash is fine — Decode into a 1-field struct streams without retaining other fields.
+    Next step: Decide whether to add an io.LimitReader cap on the JSON decode path mirroring maxJSONLLineBytes (rejects very large but valid JSON transcripts — a behavior tradeoff) or to accept the asymmetry and document it. Capture the choice before implementing.
+
 - Issue 2026-06-07 h3v6n2: chat import completeness check re-walks and re-hashes every transcript
     Priority: Low. Area: cli/internal/cli/chat.go
     Description: scanChatImportCompleteness does a full pre-pass that re-walks, re-parses, and re-hashes every transcript the main import loop then processes again, roughly doubling parse+hash I/O on large stores (the very high-file-count w8k3r1 scenario the check targets). Correct, just not free.
