@@ -643,18 +643,32 @@ func deleteStaleImportedFigures(ctx context.Context, stack *localStack, recordID
 }
 
 func ensureLocalEnvironment(ctx context.Context, homeDir string) error {
+	if err := recoverInterruptedRestore(homeDir); err != nil {
+		return fmt.Errorf("recover interrupted restore: %w", err)
+	}
+	return ensureLocalEnvironmentAt(ctx, homeDir, basePath(homeDir), dbPath(homeDir), true)
+}
+
+// ensureLocalEnvironmentAt initializes a local SQLite store at explicit paths.
+// Args: homeDir supplies the user config location, dataBasePath roots local
+// managed files, databasePath selects SQLite, and writeConfig controls whether
+// the live config file is created.
+// Returns: nil after migrations and seed templates are applied.
+func ensureLocalEnvironmentAt(ctx context.Context, homeDir string, dataBasePath string, databasePath string, writeConfig bool) error {
 	store, err := newConfigStoreFn(homeDir)
 	if err != nil {
 		return fmt.Errorf("create config store: %w", err)
 	}
-	pcDir := filepath.Join(basePath(homeDir), ".pc")
+	pcDir := filepath.Join(dataBasePath, ".pc")
 	if err := os.MkdirAll(pcDir, 0o700); err != nil {
 		return fmt.Errorf("create .pc directory: %w", err)
 	}
-	if err := ensureConfig(store); err != nil {
-		return fmt.Errorf("write config: %w", err)
+	if writeConfig {
+		if err := ensureConfig(store); err != nil {
+			return fmt.Errorf("write config: %w", err)
+		}
 	}
-	conn, err := openSQLiteFn(dbPath(homeDir))
+	conn, err := openSQLiteFn(databasePath)
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}

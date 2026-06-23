@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/conn-castle/personal-context/cli/internal/gitsnapshot"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
@@ -53,22 +54,102 @@ func runRestoreDB(ctx context.Context, stdout io.Writer, _ io.Writer, path strin
 	}
 	_, _ = fmt.Fprintf(stdout, "Backup created at %s\n", backupPath)
 
-	if err := wipeLocalState(homeDir); err != nil {
-		return err
-	}
-	if err := ensureLocalEnvironment(ctx, homeDir); err != nil {
-		return err
-	}
-	stack, err = openLocalStack(homeDir)
+	originalEntries, err := listExistingRestorePayloadEntries(basePath(homeDir))
 	if err != nil {
 		return err
 	}
-	defer func() { _ = stack.Close() }()
-	stats, err := importSnapshotIntoStack(ctx, stack, snapshot)
+	stagingDir, err := createRestoreStagingDir(homeDir)
 	if err != nil {
+		return err
+	}
+	cleanupUnmarkedStaging := true
+	defer func() {
+		if cleanupUnmarkedStaging {
+			_ = cleanupRestoreStaging(newRestoreMarker(restorePhaseStaging, stagingDir, backupPath))
+		}
+	}()
+	stats, err := buildRestoreStagedStore(ctx, homeDir, stagingDir, snapshot)
+	if err != nil {
+		return err
+	}
+	stagedEntries, err := listExistingRestorePayloadEntries(stagingDir)
+	if err != nil {
+		return err
+	}
+
+	marker := newRestoreMarker(restorePhaseStaging, stagingDir, backupPath)
+	marker.StagedEntries = stagedEntries
+	marker.OriginalEntries = originalEntries
+	if err := writeRestoreMarker(homeDir, marker); err != nil {
+		return err
+	}
+	cleanupUnmarkedStaging = false
+	marker.Phase = restorePhaseCommitting
+	marker.Timestamp = newRestoreMarker(restorePhaseCommitting, stagingDir, backupPath).Timestamp
+	if err := writeRestoreMarker(homeDir, marker); err != nil {
+		return err
+	}
+	if err := replaceRestoreContentsFn(basePath(homeDir), stagingDir, gitsnapshot.ReplacementOptions{
+		Entries:   restorePayloadEntries,
+		BackupDir: restorePayloadBackupDir(backupPath),
+	}); err != nil {
+		if cleanupErr := abortFailedRestorePromotion(homeDir, marker); cleanupErr != nil {
+			return fmt.Errorf("promote restored store: %w; abort cleanup failed: %v", err, cleanupErr)
+		}
+		return fmt.Errorf("promote restored store: %w", err)
+	}
+	marker.Phase = restorePhaseDone
+	marker.Timestamp = newRestoreMarker(restorePhaseDone, stagingDir, backupPath).Timestamp
+	if err := writeRestoreMarker(homeDir, marker); err != nil {
+		return err
+	}
+	if err := cleanupCompletedRestore(marker); err != nil {
+		return err
+	}
+	if err := removeRestoreMarker(homeDir); err != nil {
 		return err
 	}
 
 	_, _ = fmt.Fprintf(stdout, "Restore complete: created %d, updated %d, skipped %d\n", stats.Created, stats.Updated, stats.Skipped)
 	return nil
+}
+
+var replaceRestoreContentsFn = gitsnapshot.ReplaceContents
+
+func abortFailedRestorePromotion(homeDir string, marker restoreMarker) error {
+	if err := gitsnapshot.RestoreReplacementBackup(basePath(homeDir), restorePayloadBackupDir(marker.BackupDir), restorePayloadEntries, marker.OriginalEntries); err != nil {
+		return fmt.Errorf("roll back failed restore promotion: %w", err)
+	}
+	marker.Phase = restorePhaseDone
+	marker.Timestamp = newRestoreMarker(restorePhaseDone, marker.StagingDir, marker.BackupDir).Timestamp
+	if err := writeRestoreMarker(homeDir, marker); err != nil {
+		return err
+	}
+	if err := cleanupCompletedRestore(marker); err != nil {
+		return err
+	}
+	return removeRestoreMarker(homeDir)
+}
+
+func buildRestoreStagedStore(ctx context.Context, homeDir string, stagingDir string, snapshot gitsnapshot.Snapshot) (importStats, error) {
+	stagingDBPath := filepath.Join(stagingDir, ".pc", "pc.db")
+	if err := ensureLocalEnvironmentAt(ctx, homeDir, stagingDir, stagingDBPath, false); err != nil {
+		return importStats{}, err
+	}
+	stack, err := openLocalStackAt(homeDir, stagingDir, stagingDBPath)
+	if err != nil {
+		return importStats{}, err
+	}
+	stats, importErr := importSnapshotIntoStack(ctx, stack, snapshot)
+	closeErr := stack.Close()
+	if importErr != nil {
+		return stats, importErr
+	}
+	if closeErr != nil {
+		return stats, closeErr
+	}
+	if err := syncRestorePayload(stagingDir); err != nil {
+		return stats, err
+	}
+	return stats, nil
 }

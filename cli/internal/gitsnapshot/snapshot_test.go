@@ -186,6 +186,9 @@ func TestReadChatsRejectsMalformedChatExports(t *testing.T) {
 	if _, err := readChat(t.TempDir(), "../bad"); err == nil {
 		t.Fatal("expected invalid chat id to fail")
 	}
+	if _, err := readChat(t.TempDir(), "20260309-eeeeffff"); err == nil || !strings.Contains(err.Error(), "read chat metadata") {
+		t.Fatalf("expected missing chat metadata to fail, got %v", err)
+	}
 	if _, err := readChatItems(filepath.Join(t.TempDir(), "missing.jsonl"), "20260309-eeeeffff"); err == nil {
 		t.Fatal("expected missing chat items file to fail")
 	}
@@ -241,6 +244,14 @@ func TestReadChatsRejectsMalformedChatExports(t *testing.T) {
 	}
 	if _, err := readChat(chatDir, "20260309-eeeeffff"); err == nil || !strings.Contains(err.Error(), "does not match dir") {
 		t.Fatalf("expected metadata id mismatch error, got %v", err)
+	}
+
+	legacyMetadata := strings.Replace(metadata, `"source_session_id": "source",`, `"source_session_id": "source",`+"\n  "+`"source_path": "/tmp/legacy.json",`, 1)
+	if err := os.WriteFile(filepath.Join(chatDir, "metadata.json"), []byte(legacyMetadata), 0o644); err != nil {
+		t.Fatalf("write legacy metadata: %v", err)
+	}
+	if _, err := readChat(chatDir, "20260309-eeeeffff"); err == nil || !strings.Contains(err.Error(), "legacy source_path") {
+		t.Fatalf("expected legacy source_path error, got %v", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(chatDir, "metadata.json"), []byte(strings.Replace(metadata, `"started_at": "2026-03-09T14:00:00Z"`, `"started_at": "bad"`, 1)), 0o644); err != nil {
@@ -300,6 +311,17 @@ func TestReadChatsRejectsMalformedChatExports(t *testing.T) {
 	}
 	if items, err := readChatItems(filepath.Join(chatDir, "items.jsonl"), "20260309-eeeeffff"); err != nil || len(items) != 1 {
 		t.Fatalf("expected item with blank line to parse, items=%+v err=%v", items, err)
+	}
+
+	rawKeyMetadata := strings.Replace(metadata, `"source_device_id": "device/unit",`, `"source_device_id": "device/unit",`+"\n  "+`"raw_source_key": "chats/raw/other/source.json",`, 1)
+	if err := os.WriteFile(filepath.Join(chatDir, "metadata.json"), []byte(rawKeyMetadata), 0o644); err != nil {
+		t.Fatalf("write raw-key metadata: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chatDir, "items.jsonl"), []byte(""), 0o644); err != nil {
+		t.Fatalf("write empty items: %v", err)
+	}
+	if _, err := readChat(chatDir, "20260309-eeeeffff"); err == nil || !strings.Contains(err.Error(), "raw source key") {
+		t.Fatalf("expected raw source key error, got %v", err)
 	}
 
 	if err := Write("", Snapshot{}); err == nil {
@@ -1391,6 +1413,414 @@ func TestReplaceSnapshotContentsErrorPaths(t *testing.T) {
 	})
 }
 
+func TestReplaceContentsWithNestedRestoreEntries(t *testing.T) {
+	root := t.TempDir()
+	staging := t.TempDir()
+	backupDir := filepath.Join(root, ".pc", "backups", "restore-db-test", ".restore-payload")
+	entries := []string{
+		filepath.Join(".pc", "pc.db"),
+		filepath.Join(".pc", "last_sync"),
+		"figures",
+		filepath.Join("chats", "raw"),
+	}
+	writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "old-db")
+	writeReplacementTestFile(t, filepath.Join(root, ".pc", "last_sync"), "sync")
+	writeReplacementTestFile(t, filepath.Join(root, "figures", "old-record", "old.png"), "old-figure")
+	writeReplacementTestFile(t, filepath.Join(root, "chats", "raw", "old-chat", "source.json"), "old-chat")
+	writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+	writeReplacementTestFile(t, filepath.Join(staging, "figures", "new-record", "new.png"), "new-figure")
+
+	if err := ReplaceContents(root, staging, ReplacementOptions{Entries: entries, BackupDir: backupDir}); err != nil {
+		t.Fatalf("ReplaceContents() error = %v", err)
+	}
+	assertReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
+	assertReplacementTestFile(t, filepath.Join(root, "figures", "new-record", "new.png"), "new-figure")
+	for _, removed := range []string{
+		filepath.Join(root, ".pc", "last_sync"),
+		filepath.Join(root, "figures", "old-record"),
+		filepath.Join(root, "chats", "raw"),
+		backupDir,
+	} {
+		if _, err := os.Stat(removed); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to be removed, stat err=%v", removed, err)
+		}
+	}
+}
+
+func TestCompleteReplacementRollsForwardRestoreStates(t *testing.T) {
+	entries := []string{
+		filepath.Join(".pc", "pc.db"),
+		filepath.Join(".pc", "last_sync"),
+		"figures",
+	}
+
+	t.Run("backs up old entries and promotes staged entries", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		backupDir := filepath.Join(t.TempDir(), "payload-backup")
+		writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "old-db")
+		writeReplacementTestFile(t, filepath.Join(root, ".pc", "last_sync"), "sync")
+		writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+		writeReplacementTestFile(t, filepath.Join(staging, "figures", "new-record", "new.png"), "new-figure")
+
+		if err := CompleteReplacement(root, staging, backupDir, entries, []string{filepath.Join(".pc", "pc.db"), "figures"}); err != nil {
+			t.Fatalf("CompleteReplacement() error = %v", err)
+		}
+		assertReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
+		assertReplacementTestFile(t, filepath.Join(root, "figures", "new-record", "new.png"), "new-figure")
+		assertReplacementTestFile(t, filepath.Join(backupDir, ".pc", "pc.db"), "old-db")
+		assertReplacementTestFile(t, filepath.Join(backupDir, ".pc", "last_sync"), "sync")
+		if _, err := os.Stat(filepath.Join(root, ".pc", "last_sync")); !os.IsNotExist(err) {
+			t.Fatalf("last_sync should be removed during roll-forward, stat err=%v", err)
+		}
+	})
+
+	t.Run("keeps already promoted entry that did not have an old backup", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		backupDir := filepath.Join(t.TempDir(), "payload-backup")
+		writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
+		writeReplacementTestFile(t, filepath.Join(root, "figures", "new-record", "new.png"), "new-figure")
+		writeReplacementTestFile(t, filepath.Join(backupDir, ".pc", "pc.db"), "old-db")
+
+		if err := CompleteReplacement(root, staging, backupDir, entries, []string{filepath.Join(".pc", "pc.db"), "figures"}); err != nil {
+			t.Fatalf("CompleteReplacement() error = %v", err)
+		}
+		assertReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
+		assertReplacementTestFile(t, filepath.Join(root, "figures", "new-record", "new.png"), "new-figure")
+	})
+
+	t.Run("replaces conflicting live entry when backup already exists", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		backupDir := filepath.Join(t.TempDir(), "payload-backup")
+		writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "old-restored-db")
+		writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+		writeReplacementTestFile(t, filepath.Join(backupDir, ".pc", "pc.db"), "old-backup-db")
+
+		if err := CompleteReplacement(root, staging, backupDir, entries, []string{filepath.Join(".pc", "pc.db")}); err != nil {
+			t.Fatalf("CompleteReplacement() error = %v", err)
+		}
+		assertReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
+		assertReplacementTestFile(t, filepath.Join(backupDir, ".pc", "pc.db"), "old-backup-db")
+	})
+}
+
+func TestCompleteReplacementErrorPaths(t *testing.T) {
+	entries := []string{filepath.Join(".pc", "pc.db")}
+
+	t.Run("staged stat failure", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		if err := os.WriteFile(filepath.Join(staging, ".pc"), []byte("not a directory"), 0o644); err != nil {
+			t.Fatalf("write staging blocker: %v", err)
+		}
+		err := CompleteReplacement(root, staging, t.TempDir(), entries, entries)
+		if err == nil || !strings.Contains(err.Error(), "inspect staged") {
+			t.Fatalf("CompleteReplacement() error = %v, want staged inspect failure", err)
+		}
+	})
+
+	t.Run("backup rename failure", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "old-db")
+		writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+		origRename := renameFileFn
+		renameFileFn = func(string, string) error {
+			return errors.New("rename failed")
+		}
+		t.Cleanup(func() { renameFileFn = origRename })
+
+		err := CompleteReplacement(root, staging, t.TempDir(), entries, entries)
+		if err == nil || !strings.Contains(err.Error(), "backup existing") {
+			t.Fatalf("CompleteReplacement() error = %v, want backup failure", err)
+		}
+	})
+
+	t.Run("existing target stat failure", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+		if err := os.WriteFile(filepath.Join(root, ".pc"), []byte("not a directory"), 0o644); err != nil {
+			t.Fatalf("write root blocker: %v", err)
+		}
+
+		err := CompleteReplacement(root, staging, t.TempDir(), entries, entries)
+		if err == nil || !strings.Contains(err.Error(), "inspect existing") {
+			t.Fatalf("CompleteReplacement() error = %v, want existing inspect failure", err)
+		}
+	})
+
+	t.Run("backup stat failure", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		backupDir := t.TempDir()
+		writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "old-db")
+		writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+		if err := os.WriteFile(filepath.Join(backupDir, ".pc"), []byte("not a directory"), 0o644); err != nil {
+			t.Fatalf("write backup blocker: %v", err)
+		}
+
+		err := CompleteReplacement(root, staging, backupDir, entries, entries)
+		if err == nil || !strings.Contains(err.Error(), "inspect backup") {
+			t.Fatalf("CompleteReplacement() error = %v, want backup inspect failure", err)
+		}
+	})
+
+	t.Run("promote rename failure", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+		origRename := renameFileFn
+		renameFileFn = func(string, string) error {
+			return errors.New("rename failed")
+		}
+		t.Cleanup(func() { renameFileFn = origRename })
+
+		err := CompleteReplacement(root, staging, t.TempDir(), entries, entries)
+		if err == nil || !strings.Contains(err.Error(), "promote staged") {
+			t.Fatalf("CompleteReplacement() error = %v, want promote failure", err)
+		}
+	})
+
+	t.Run("sync failure", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+		origSync := syncDirFn
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(root) {
+				return errors.New("sync failed")
+			}
+			return origSync(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSync })
+
+		err := CompleteReplacement(root, staging, t.TempDir(), entries, entries)
+		if err == nil || !strings.Contains(err.Error(), "create target parent") {
+			t.Fatalf("CompleteReplacement() error = %v, want sync failure", err)
+		}
+	})
+}
+
+func TestRestoreReplacementBackupRestoresOldRestorePayload(t *testing.T) {
+	root := t.TempDir()
+	backupDir := filepath.Join(t.TempDir(), "payload-backup")
+	entries := []string{
+		filepath.Join(".pc", "pc.db"),
+		filepath.Join(".pc", "last_sync"),
+		"figures",
+	}
+	writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
+	writeReplacementTestFile(t, filepath.Join(root, "figures", "new-record", "new.png"), "new-figure")
+	writeReplacementTestFile(t, filepath.Join(backupDir, ".pc", "pc.db"), "old-db")
+	writeReplacementTestFile(t, filepath.Join(backupDir, ".pc", "last_sync"), "sync")
+
+	if err := RestoreReplacementBackup(root, backupDir, entries, []string{
+		filepath.Join(".pc", "pc.db"),
+		filepath.Join(".pc", "last_sync"),
+	}); err != nil {
+		t.Fatalf("RestoreReplacementBackup() error = %v", err)
+	}
+	assertReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "old-db")
+	assertReplacementTestFile(t, filepath.Join(root, ".pc", "last_sync"), "sync")
+	if _, err := os.Stat(filepath.Join(root, "figures")); !os.IsNotExist(err) {
+		t.Fatalf("figures should be removed during rollback, stat err=%v", err)
+	}
+}
+
+func TestRestoreReplacementBackupErrorPaths(t *testing.T) {
+	entries := []string{filepath.Join(".pc", "pc.db")}
+
+	t.Run("original entries validation failure", func(t *testing.T) {
+		err := RestoreReplacementBackup(t.TempDir(), t.TempDir(), entries, []string{"../outside"})
+		if err == nil || !strings.Contains(err.Error(), "replacement entry must be a relative path") {
+			t.Fatalf("RestoreReplacementBackup() error = %v, want original entry validation failure", err)
+		}
+	})
+
+	t.Run("backup stat failure", func(t *testing.T) {
+		backupDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(backupDir, ".pc"), []byte("not a directory"), 0o644); err != nil {
+			t.Fatalf("write backup blocker: %v", err)
+		}
+		err := RestoreReplacementBackup(t.TempDir(), backupDir, entries, nil)
+		if err == nil || !strings.Contains(err.Error(), "inspect backup") {
+			t.Fatalf("RestoreReplacementBackup() error = %v, want backup inspect failure", err)
+		}
+	})
+
+	t.Run("restore rename failure", func(t *testing.T) {
+		root := t.TempDir()
+		backupDir := t.TempDir()
+		writeReplacementTestFile(t, filepath.Join(backupDir, ".pc", "pc.db"), "old-db")
+		origRename := renameFileFn
+		renameFileFn = func(string, string) error {
+			return errors.New("rename failed")
+		}
+		t.Cleanup(func() { renameFileFn = origRename })
+
+		err := RestoreReplacementBackup(root, backupDir, entries, entries)
+		if err == nil || !strings.Contains(err.Error(), "restore .pc") {
+			t.Fatalf("RestoreReplacementBackup() error = %v, want restore rename failure", err)
+		}
+	})
+
+	t.Run("missing backup removes promoted entry", func(t *testing.T) {
+		root := t.TempDir()
+		writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
+
+		if err := RestoreReplacementBackup(root, t.TempDir(), entries, nil); err != nil {
+			t.Fatalf("RestoreReplacementBackup() error = %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(root, ".pc", "pc.db")); !os.IsNotExist(err) {
+			t.Fatalf("promoted db should be removed when backup is absent, stat err=%v", err)
+		}
+	})
+
+	t.Run("missing backup preserves original entry", func(t *testing.T) {
+		root := t.TempDir()
+		writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "old-db")
+
+		if err := RestoreReplacementBackup(root, t.TempDir(), entries, entries); err != nil {
+			t.Fatalf("RestoreReplacementBackup() error = %v", err)
+		}
+		assertReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "old-db")
+	})
+
+	t.Run("sync failure", func(t *testing.T) {
+		root := t.TempDir()
+		writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
+		origSync := syncDirFn
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(root) {
+				return errors.New("sync failed")
+			}
+			return origSync(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSync })
+
+		err := RestoreReplacementBackup(root, t.TempDir(), entries, nil)
+		if err == nil || !strings.Contains(err.Error(), "sync export root") {
+			t.Fatalf("RestoreReplacementBackup() error = %v, want sync failure", err)
+		}
+	})
+}
+
+func TestReplacementParentDurabilityErrorPaths(t *testing.T) {
+	t.Run("inspect parent failure", func(t *testing.T) {
+		blocker := filepath.Join(t.TempDir(), "blocker")
+		if err := os.WriteFile(blocker, []byte("file"), 0o600); err != nil {
+			t.Fatalf("write blocker: %v", err)
+		}
+		if err := ensureReplacementParent(filepath.Join(blocker, "child", "entry")); err == nil {
+			t.Fatal("expected ensureReplacementParent to fail when parent inspection hits a file")
+		}
+	})
+
+	t.Run("sync newly-created ancestor failure", func(t *testing.T) {
+		root := t.TempDir()
+		target := filepath.Join(root, "a", "b", "entry")
+		origSync := syncDirFn
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(root) {
+				return errors.New("sync failed")
+			}
+			return origSync(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSync })
+		err := ensureReplacementParent(target)
+		if err == nil || !strings.Contains(err.Error(), "sync failed") {
+			t.Fatalf("ensureReplacementParent() error = %v, want sync failure", err)
+		}
+	})
+}
+
+func TestSyncReplacementDirsSkipsMissingNestedDirs(t *testing.T) {
+	root := t.TempDir()
+	touched := map[string]struct{}{
+		filepath.Join(root, "already-removed"): {},
+	}
+	if err := syncReplacementDirs(root, touched); err != nil {
+		t.Fatalf("syncReplacementDirs() error = %v", err)
+	}
+}
+
+func TestReplaceContentsProvidedBackupSyncFailures(t *testing.T) {
+	root := t.TempDir()
+	staging := t.TempDir()
+	backupDir := filepath.Join(t.TempDir(), "payload-backup")
+	writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+	entries := []string{filepath.Join(".pc", "pc.db")}
+
+	t.Run("initial backup parent sync failure", func(t *testing.T) {
+		origSync := syncDirFn
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(filepath.Dir(backupDir)) {
+				return errors.New("sync failed")
+			}
+			return origSync(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSync })
+
+		err := ReplaceContents(root, staging, ReplacementOptions{Entries: entries, BackupDir: backupDir})
+		if err == nil || !strings.Contains(err.Error(), "sync replacement backup parent") {
+			t.Fatalf("ReplaceContents() error = %v, want backup parent sync failure", err)
+		}
+	})
+
+	t.Run("post-removal backup parent sync failure", func(t *testing.T) {
+		root := t.TempDir()
+		staging := t.TempDir()
+		backupDir := filepath.Join(t.TempDir(), "payload-backup")
+		writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+		origSync := syncDirFn
+		parentSyncs := 0
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(filepath.Dir(backupDir)) {
+				parentSyncs++
+				if parentSyncs == 2 {
+					return errors.New("sync failed")
+				}
+			}
+			return origSync(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSync })
+
+		err := ReplaceContents(root, staging, ReplacementOptions{Entries: entries, BackupDir: backupDir})
+		if err == nil || !strings.Contains(err.Error(), "sync backup parent after backup removal") {
+			t.Fatalf("ReplaceContents() error = %v, want post-removal sync failure", err)
+		}
+	})
+}
+
+func TestReplacementEntryValidation(t *testing.T) {
+	for _, entries := range [][]string{
+		nil,
+		{"/absolute"},
+		{"../outside"},
+	} {
+		if err := ReplaceContents(t.TempDir(), t.TempDir(), ReplacementOptions{Entries: entries}); err == nil {
+			t.Fatalf("ReplaceContents(%v) succeeded, want validation error", entries)
+		}
+	}
+	if err := CompleteReplacement(t.TempDir(), t.TempDir(), t.TempDir(), nil, nil); err == nil {
+		t.Fatal("expected CompleteReplacement with no entries to fail")
+	}
+	if err := RestoreReplacementBackup(t.TempDir(), t.TempDir(), nil, nil); err == nil {
+		t.Fatal("expected RestoreReplacementBackup with no entries to fail")
+	}
+
+	root := t.TempDir()
+	staging := t.TempDir()
+	writeReplacementTestFile(t, filepath.Join(staging, "entry"), "value")
+	if err := ReplaceContents(root, staging, ReplacementOptions{Entries: []string{"entry", "entry"}}); err != nil {
+		t.Fatalf("ReplaceContents() with duplicate entries error = %v", err)
+	}
+	assertReplacementTestFile(t, filepath.Join(root, "entry"), "value")
+}
+
 func TestSnapshotReplacementSyncsExportRoot(t *testing.T) {
 	now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
 	oldSnapshot := Snapshot{
@@ -1910,6 +2340,30 @@ func TestReadRecordRejectsMetadataAndNotesProblems(t *testing.T) {
 		}
 	})
 
+	t.Run("missing required project and device metadata", func(t *testing.T) {
+		_, recordDir := writeSnapshotFixture(t)
+		baseMetadata := `{
+  "format_version": 1,
+  "id": "20260309-aaaabbbb",
+  "date": "2026-03-09",
+  "day_order": "a0",
+  "has_notes": false,
+  "figures": [],
+  "data_files": [],
+  "created_at": "2026-03-09T12:00:00Z",
+  "updated_at": "2026-03-09T12:00:00Z"
+}`
+		mustWriteFileSnapshot(t, filepath.Join(recordDir, "metadata.json"), baseMetadata)
+		if _, err := readRecord(recordDir, filepath.Base(recordDir)); err == nil || !strings.Contains(err.Error(), "project_id is required") {
+			t.Fatalf("readRecord error = %v, want missing project_id", err)
+		}
+		withProject := strings.Replace(baseMetadata, `"day_order": "a0",`, `"day_order": "a0",`+"\n  "+`"project_id": "phase7/unit",`, 1)
+		mustWriteFileSnapshot(t, filepath.Join(recordDir, "metadata.json"), withProject)
+		if _, err := readRecord(recordDir, filepath.Base(recordDir)); err == nil || !strings.Contains(err.Error(), "source_device_id is required") {
+			t.Fatalf("readRecord error = %v, want missing source_device_id", err)
+		}
+	})
+
 	t.Run("invalid timestamps", func(t *testing.T) {
 		_, recordDir := writeSnapshotFixture(t)
 		writeMetadataJSON(t, recordDir, map[string]any{
@@ -1966,6 +2420,19 @@ func TestReadRecordRejectsMetadataAndNotesProblems(t *testing.T) {
 		}
 		if record.HTMLContent != nil {
 			t.Fatalf("HTMLContent = %q, want nil", *record.HTMLContent)
+		}
+	})
+
+	t.Run("record html read error", func(t *testing.T) {
+		_, recordDir := writeSnapshotFixture(t)
+		if err := os.Remove(filepath.Join(recordDir, "record.html")); err != nil {
+			t.Fatalf("remove record.html: %v", err)
+		}
+		if err := os.Mkdir(filepath.Join(recordDir, "record.html"), 0o755); err != nil {
+			t.Fatalf("mkdir record.html: %v", err)
+		}
+		if _, err := readRecord(recordDir, filepath.Base(recordDir)); err == nil || !strings.Contains(err.Error(), "read record.html") {
+			t.Fatalf("readRecord error = %v, want record.html read failure", err)
 		}
 	})
 
@@ -2561,5 +3028,21 @@ func mustWriteFileSnapshot(t *testing.T, path string, content string) {
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func writeReplacementTestFile(t *testing.T, path string, content string) {
+	t.Helper()
+	mustWriteFileSnapshot(t, path, content)
+}
+
+func assertReplacementTestFile(t *testing.T, path string, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(got) != want {
+		t.Fatalf("%s content = %q, want %q", path, got, want)
 	}
 }
