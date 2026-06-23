@@ -629,8 +629,8 @@ func TestReplaceRecordChildrenValidationConflictAndRollbackBranches(t *testing.T
 		{RecordID: seedID, Filename: "dup.csv", S3Key: "data/" + seedID + "/dup.csv", Size: 1, Hash: strings.Repeat("c", 64)},
 		{RecordID: seedID, Filename: "dup.csv", S3Key: "data/" + seedID + "/dup.csv", Size: 2, Hash: strings.Repeat("d", 64)},
 	}
-	if _, err := repo.ReplaceRecordChildren(ctx, replacement); err == nil {
-		t.Fatal("expected duplicate data-file replacement to fail")
+	if _, err := repo.ReplaceRecordChildren(ctx, replacement); !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("ReplaceRecordChildren(duplicate data-file replacement) error = %v, want ErrConflict", err)
 	}
 	afterRollback, err := repo.GetRecordByID(ctx, seedID)
 	if err != nil {

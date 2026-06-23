@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-23 b9v4x6: import orphan figure-file reconciliation uses N+1 figure queries
+    Priority: Low. Area: cli/internal/cli/doctor.go, cli/internal/repository
+    Description: `findFigureFileOrphans` calls `ListRecordFiguresByRecordID` once per record, and import invokes it during post-import reconciliation. This preserves the requested import-time orphan cleanup but makes reconciliation latency scale with total record count.
+    Next step: Design a bulk committed-figure listing path or a touched-record reconciliation mode, then update import/doctor callers with performance-focused tests.
+
 - Issue 2026-06-23 m5n8c2: stale per-file data attachments are not reconciled
     Priority: Low. Area: cli/internal/cli/doctor.go, cli/internal/filesystem/filesystem.go
     Description: Snapshot import now reconciles orphan figure files because import writes figure bytes. Data-file imports only replace DB rows, so stale files under `data/{recordID}/` whose rows were removed are outside the current crash-atomicity scope and can persist until a future data-file reconcile path exists.

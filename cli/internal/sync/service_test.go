@@ -4221,6 +4221,24 @@ func (m *memoryRepo) UpdateRecord(_ context.Context, input repository.UpdateReco
 }
 
 func (m *memoryRepo) ReplaceRecordChildren(_ context.Context, input repository.ReplaceRecordChildrenInput) (repository.Record, error) {
+	if err := input.Validate(); err != nil {
+		return repository.Record{}, err
+	}
+	seenFigures := make(map[string]struct{}, len(input.Figures))
+	for _, figureInput := range input.Figures {
+		if _, exists := seenFigures[figureInput.Filename]; exists {
+			return repository.Record{}, repository.ErrConflict
+		}
+		seenFigures[figureInput.Filename] = struct{}{}
+	}
+	seenDataFiles := make(map[string]struct{}, len(input.DataFiles))
+	for _, dataInput := range input.DataFiles {
+		if _, exists := seenDataFiles[dataInput.Filename]; exists {
+			return repository.Record{}, repository.ErrConflict
+		}
+		seenDataFiles[dataInput.Filename] = struct{}{}
+	}
+
 	record, exists := m.records[input.Record.ID]
 	if !exists {
 		record = repository.Record{

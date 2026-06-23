@@ -953,6 +953,13 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if len(insertedFigures) != 1 || insertedFigures[0].Filename != "inserted.png" {
 			t.Fatalf("unexpected inserted figures: %+v", insertedFigures)
 		}
+		insertedFiles, err := repo.ListRecordDataFilesByRecordID(ctx, inserted.ID)
+		if err != nil {
+			t.Fatalf("ListRecordDataFilesByRecordID(inserted) error = %v", err)
+		}
+		if len(insertedFiles) != 1 || insertedFiles[0].Filename != "inserted.csv" {
+			t.Fatalf("unexpected inserted data files: %+v", insertedFiles)
+		}
 
 		originalUpdatedAt := time.Date(2025, 3, 8, 9, 0, 0, 0, time.UTC)
 		record := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
