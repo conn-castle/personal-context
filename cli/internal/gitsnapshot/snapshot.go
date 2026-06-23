@@ -201,7 +201,37 @@ var (
 	removeFileFn = os.Remove
 	renameFileFn = os.Rename
 	chmodFileFn  = os.Chmod
+	syncDirFn    = syncDir
 )
+
+// syncableDir is the subset of *os.File used to durably flush a directory.
+type syncableDir interface {
+	Sync() error
+	Close() error
+}
+
+// openDirFn opens a directory for fsync. It is a seam (mirroring createTempFileFn)
+// so the Sync failure path in syncDir can be exercised in tests.
+var openDirFn = func(dir string) (syncableDir, error) {
+	return os.Open(dir)
+}
+
+// syncDir fsyncs a directory so that prior renames into or out of it survive a
+// crash. On the POSIX platforms this CLI targets (darwin, linux) a rename is
+// only durably recorded once the containing directory's own metadata is
+// flushed; without this the directory entry can be lost even after the renamed
+// file's contents were fsynced.
+func syncDir(dir string) error {
+	d, err := openDirFn(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
+}
 
 var managedSnapshotEntries = []string{"projects.json", "devices.json", "templates", "records", "chats"}
 
@@ -433,6 +463,23 @@ func writeSnapshotContents(root string, snapshot Snapshot) error {
 		return fmt.Errorf("write devices.json: %w", err)
 	}
 
+	// Flush the managed container directories so their child entries (record/chat
+	// id subdirectories, template files) are durable before these inodes are
+	// renamed into the export root. writeFile already fsynced each file's
+	// immediate parent (e.g. records/<id>), but never the records/chats/templates
+	// directories themselves, so without this their entries could be lost on a
+	// crash even though the renamed-in directory itself is present. templates/ and
+	// records/ are always created above; chats/ only when chats were staged.
+	containerDirs := []string{templatesDir, recordsDir}
+	if len(chats) > 0 {
+		containerDirs = append(containerDirs, chatsDir)
+	}
+	for _, dir := range containerDirs {
+		if err := syncDirFn(dir); err != nil {
+			return fmt.Errorf("sync staged %s: %w", filepath.Base(dir), err)
+		}
+	}
+
 	return nil
 }
 
@@ -478,6 +525,13 @@ func replaceSnapshotContents(root string, stagingRoot string) error {
 		promoted = append(promoted, name)
 	}
 
+	// Flush the export root so the promote renames are durably recorded. Without
+	// this, a crash after a successful return could lose the directory entries
+	// even though each staged file was fsynced, leaving a partial snapshot.
+	if err := syncDirFn(root); err != nil {
+		return restoreSnapshotContents(root, backupDir, movedExisting, promoted, fmt.Errorf("sync export root: %w", err), &cleanupBackup)
+	}
+
 	return nil
 }
 
@@ -499,6 +553,11 @@ func restoreSnapshotContents(root string, backupDir string, movedExisting []stri
 		if err := renameFileFn(filepath.Join(backupDir, name), target); err != nil {
 			restoreErrors = append(restoreErrors, fmt.Sprintf("restore %s: %v", name, err))
 		}
+	}
+	// Flush the export root so the restore renames are durably recorded before we
+	// report the original failure and (on success) delete the backup.
+	if err := syncDirFn(root); err != nil {
+		restoreErrors = append(restoreErrors, fmt.Sprintf("sync export root: %v", err))
 	}
 	if len(restoreErrors) > 0 {
 		*cleanupBackup = false
@@ -1060,6 +1119,12 @@ func writeFile(path string, content []byte) error {
 	}
 	cleanupTemp = false
 	if err := chmodFileFn(path, 0o644); err != nil {
+		return err
+	}
+	// Flush the parent directory so the rename of the staged file is durably
+	// recorded; an fsync of the file alone does not guarantee its directory entry
+	// survives a crash.
+	if err := syncDirFn(filepath.Dir(path)); err != nil {
 		return err
 	}
 	return nil

@@ -90,10 +90,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: Exact unchanged chat imports still pay source + managed file hashing cost, plus an O(N) `ListChatSessions(IncludeDeleted: true)` load per source per import to populate the lookup index. Append-only JSONL/NDJSON now uses a suffix import path, so this is a remaining optimization rather than the active-session bottleneck.
     Next step: If large-history profiling shows exact-match hashing or the per-source list load remains expensive, design a schema-backed source fingerprint with explicit migration handling and consider a narrower index-load filter.
 
-- Issue 2026-05-17 a3i6f8: Snapshot replacement is rollback-safe but not crash-safe atomic
-    Priority: Medium. Area: cli/internal/gitsnapshot/snapshot.go
-    Description: `replaceSnapshotContents` moves each managed entry independently (backup-then-promote per entry). If the process is killed between the backup loop and the promotion loop, the export root is left with a partial snapshot plus a backup dir, violating the atomic-replacement contract.
-    Next step: Refactor to swap the entire snapshot root via a single rename (write to `<root>.new`, rename old root to backup, rename new in, then delete backup). Make sure restore-on-failure handles the case where the original root was already renamed away.
+- Issue 2026-05-17 a3i6f8: Snapshot replacement is not a single atomic cross-entry swap
+    Priority: Low. Area: cli/internal/gitsnapshot/snapshot.go
+    Description: Durability is now handled — `Write` fsyncs each staged file, each container dir (templates/records/chats), and the export root after promotion, so renames survive a crash. The residual gap: `replaceSnapshotContents` still promotes the 5 managed entries via independent renames, so a crash mid-promotion can leave a durable but partial snapshot (recoverable via the leftover `.snapshot-backup-*` dir). A true single-rename swap is blocked because the export root is a git working tree containing `.git` and unmanaged files, so the whole root cannot be swapped.
+    Next step: If full atomicity is required, design a journal/marker file that recovery logic consults to finish or roll back an interrupted promotion (genuine tradeoff: adds a recovery code path and on-disk marker format). Otherwise document the per-entry-promotion semantics in DECISIONS.md and close.
 
 - Issue 2026-05-17 r6e0k3: Cross-table ID uniqueness for records vs chat_session is not atomically enforced
     Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/repository.go, schema
