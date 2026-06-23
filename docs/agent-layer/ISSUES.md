@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-23 p9r1k4: Go CLI codebase docstring coverage is far below 80% threshold
+    Priority: Low. Area: cli/ (all packages)
+    Description: CodeRabbit pre-merge check reports 12.90% docstring coverage vs a configured 80% threshold. The gap is global (pre-existing across the entire codebase, not introduced by any single PR) and spans most exported functions and types.
+    Next step: Audit which exported symbols lack docstrings, write a coverage pass, and re-check the threshold.
+
 - Issue 2026-06-22 d8k3w2: filesystem asset/chat-source renames are not directory-fsync durable
     Priority: Medium. Area: cli/internal/filesystem/filesystem.go, cli/internal/filesystem/chat_source.go
     Description: copyInto (figures/data copy) and PromoteChatSourceStage (raw chat source promote + rollback) fsync file contents before rename but never fsync the containing directory after the rename. On the darwin/linux targets a rename's directory entry is not durably recorded until the directory metadata is flushed, so a hard crash between rename and the next natural sync can lose the just-written asset/chat-source even though the op reported success. The sibling gitsnapshot package already treats parent-dir fsync-after-rename as the repo durability standard (syncDir at snapshot.go:219, called at 478/531/559/1127). Local files are re-uploadable from S3/DB, so impact is recoverable, hence Medium.
