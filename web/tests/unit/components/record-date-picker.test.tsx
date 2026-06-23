@@ -101,6 +101,30 @@ describe("RecordDatePicker", () => {
     expect(hasErrorBorder(reopened)).toBe(false);
   });
 
+  it("rejects impossible calendar dates like 2025-02-30 instead of rolling over", () => {
+    // Without the post-parse component check, `new Date("2025-02-30T00:00:00")`
+    // silently rolls over to March 2 and onSelectDate is called with the wrong
+    // day. With the fix, inputError must be set and onSelectDate must not fire.
+    const selected: Date[] = [];
+    render(
+      <RecordDatePicker
+        records={records}
+        onSelectDate={(date) => selected.push(date)}
+      />
+    );
+
+    const hasErrorBorder = (el: HTMLInputElement) =>
+      / border-destructive\b/.test(` ${el.className}`);
+
+    fireEvent.click(screen.getByRole("button", { name: "Jump to date" }));
+    const input = screen.getByPlaceholderText("e.g. 2025-03-05") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "2025-02-30" } });
+    fireEvent.submit(input.closest("form")!);
+
+    expect(selected).toHaveLength(0);
+    expect(hasErrorBorder(input)).toBe(true);
+  });
+
   it("selects the typed ISO date on its local calendar day, not the UTC day", () => {
     const selected: Date[] = [];
     render(

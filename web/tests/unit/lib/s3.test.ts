@@ -145,8 +145,10 @@ describe("S3 utilities", () => {
 
     // A fractional value must fail loud rather than be silently truncated
     // (parseInt("3600.9") -> 3600). "12abc" likewise must be rejected, not
-    // coerced to 12.
-    it.each(["3600.9", "12abc"])(
+    // coerced to 12. Hex/binary literals like "0x10" or "0b10" are accepted by
+    // Number() but must be rejected because PRESIGNED_URL_EXPIRY_SECONDS is an
+    // ops-managed config value, not a JavaScript numeric expression.
+    it.each(["3600.9", "12abc", "0x10", "0b10"])(
       "throws for non-integer PRESIGNED_URL_EXPIRY_SECONDS %j",
       async (raw) => {
         process.env.PRESIGNED_URL_EXPIRY_SECONDS = raw;
@@ -226,12 +228,16 @@ describe("S3 utilities", () => {
 
     // Raw JSON text (not JSON.stringify) so the numeric values survive: an
     // out-of-range literal like 1e400 round-trips to Infinity via JSON.parse,
-    // which is typeof "number" and would slip past the typeof guard. All three
-    // pass typeof === "number" but are not valid int64 sync versions.
+    // which is typeof "number" and would slip past the typeof guard. All pass
+    // typeof === "number" but are not valid int64 sync versions.
+    //
+    // Number.MAX_SAFE_INTEGER + 1 (9007199254740992) passes Number.isInteger
+    // but loses precision in JS arithmetic; Number.isSafeInteger rejects it.
     it.each([
       ["a float version", '{"version": 2.5, "updated_at": "2026-03-09T00:00:00Z"}'],
       ["a negative version", '{"version": -1, "updated_at": "2026-03-09T00:00:00Z"}'],
       ["an Infinity version (1e400)", '{"version": 1e400, "updated_at": "2026-03-09T00:00:00Z"}'],
+      ["an unsafe integer version (MAX_SAFE_INTEGER + 1)", '{"version": 9007199254740992, "updated_at": "2026-03-09T00:00:00Z"}'],
     ])(
       "throws for a JSON object with %s (version must be a non-negative integer)",
       async (_label, rawJson) => {
@@ -274,7 +280,9 @@ describe("S3 utilities", () => {
     // The legacy plain-text fallback must accept only a bare non-negative
     // decimal integer. parseInt() would silently coerce all of these to a
     // wrong "valid" version (e.g. "12abc" -> 12, "-7" -> -7, "1e3" -> 1).
-    it.each(["12abc", "+5", "-7", "1e3", "0x10", "3.5"])(
+    // "9007199254740992" is Number.MAX_SAFE_INTEGER + 1: it passes /^\d+$/ but
+    // Number.isSafeInteger rejects it to prevent precision loss.
+    it.each(["12abc", "+5", "-7", "1e3", "0x10", "3.5", "9007199254740992"])(
       "throws for malformed legacy plain-text version %j",
       async (raw) => {
         mockSend.mockResolvedValue({

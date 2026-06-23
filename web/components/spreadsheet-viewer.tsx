@@ -103,16 +103,21 @@ export function findNearestRecordByDate(
 
   // Parse each record date as local midnight so the comparison stays in the
   // same time basis as `targetDate` (which is local midnight from the picker).
+  // A single O(N) pass is sufficient — we only need the minimum-diff element.
   const targetTime = targetDate.getTime();
-  const [nearestRecord] = [...records].sort((left, right) => {
-    const leftDiff = Math.abs(
-      new Date(`${left.date}T00:00:00`).getTime() - targetTime
+  let nearestRecord = records[0];
+  let minDiff = Math.abs(
+    new Date(`${records[0].date}T00:00:00`).getTime() - targetTime
+  );
+  for (let i = 1; i < records.length; i++) {
+    const diff = Math.abs(
+      new Date(`${records[i].date}T00:00:00`).getTime() - targetTime
     );
-    const rightDiff = Math.abs(
-      new Date(`${right.date}T00:00:00`).getTime() - targetTime
-    );
-    return leftDiff - rightDiff;
-  });
+    if (diff < minDiff) {
+      minDiff = diff;
+      nearestRecord = records[i];
+    }
+  }
   return nearestRecord;
 }
 

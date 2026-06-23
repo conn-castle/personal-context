@@ -42,10 +42,10 @@ function parseVersionObject(body: string): { version: number; updated_at: string
     );
   }
 
-  // The sync version is an int64 counter; reject non-integer, negative, NaN, or
-  // Infinity values (all of which pass `typeof === "number"`) so corrupt
-  // payloads fail loud here instead of flowing into sync comparison logic.
-  if (!Number.isInteger(obj.version) || obj.version < 0) {
+  // The sync version is an int64 counter; reject non-integer, negative, NaN,
+  // Infinity, and values above Number.MAX_SAFE_INTEGER (2^53 − 1) which pass
+  // Number.isInteger but silently lose precision in JS arithmetic/comparison.
+  if (!Number.isSafeInteger(obj.version) || obj.version < 0) {
     throw new Error(
       "Failed to parse _version content: version must be a non-negative integer"
     );
@@ -94,11 +94,16 @@ function getConfiguredPresignExpirySeconds(): number {
     return DEFAULT_PRESIGN_EXPIRY_SECONDS;
   }
 
-  // Use Number() rather than parseInt() so non-integer values fail loud. With
-  // parseInt(), "3600.9" silently truncated to 3600 and "12abc" to 12, and the
-  // Number.isInteger guard below could never fire (parseInt always yields an
-  // integer or NaN).
-  const parsed = Number(raw.trim());
+  // Require a bare positive decimal integer. `Number()` accepts hex/binary
+  // literals (e.g. "0x10" -> 16, "0b10" -> 2) which would silently configure
+  // an unintended expiry lifetime, so gate with a decimal-only regex first.
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(
+      "PRESIGNED_URL_EXPIRY_SECONDS must be a positive integer"
+    );
+  }
+  const parsed = Number(trimmed);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(
       "PRESIGNED_URL_EXPIRY_SECONDS must be a positive integer"
@@ -167,9 +172,16 @@ export async function getS3Version(userId: string): Promise<{
     // Backward-compatible fallback: plain text int64 (Go CLI legacy format).
     // Require a bare non-negative decimal integer; `parseInt` would otherwise
     // silently accept corrupt prefixes ("12abc" -> 12), signs ("+5", "-7"), and
-    // scientific notation ("1e3" -> 1).
+    // scientific notation ("1e3" -> 1). Also guard the safe-integer boundary:
+    // values above Number.MAX_SAFE_INTEGER pass /^\d+$/ but lose precision.
     if (/^\d+$/.test(trimmedBody)) {
-      return { version: Number(trimmedBody), updated_at: "" };
+      const version = Number(trimmedBody);
+      if (!Number.isSafeInteger(version)) {
+        throw new Error(
+          `Failed to parse _version content: version must be a non-negative integer`
+        );
+      }
+      return { version, updated_at: "" };
     }
     throw new Error(`Failed to parse _version content: ${body}`);
   } catch (err: unknown) {
