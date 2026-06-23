@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-22 x7c2f4: Figure-ref parsing truncates filenames containing '#'
+    Priority: Low. Area: cli/internal/recordio/recordio.go, web/lib/record-utils.ts
+    Description: figSrcPattern and the web renderer's createFigureSrcAttributePattern both treat '#' (and '?') as a query/fragment delimiter to strip before filename lookup. A figure file legitimately named with a '#' (e.g. figures/plot#1.png, legal on POSIX/macOS) would be truncated to "plot" at both layers, so pc add/pc edit rejects it as missing and the web UI would fail to resolve it. '?' is effectively never a real filename so that half is benign.
+    Next step: If '#'-bearing figure filenames must be supported, decide a consistent rule (e.g. only strip a trailing query/fragment when preceded by a known extension, or percent-encode at storage time) and apply it to BOTH the CLI regex and web/lib/record-utils.ts together so the validate/rewrite contract stays in parity. Genuine tradeoff: any rule change must keep the two layers byte-aligned.
+
 - Issue 2026-06-22 j4m8q2: Gemini source identity differs between JSON and JSONL transcript paths
     Priority: Low. Area: cli/internal/chatimport/chatimport.go
     Description: For source=gemini, the JSONL path forces sessionMeta=nil in unwrapChatLine so the path-derived geminiSourceSessionID always wins, but the JSON path's jsonTranscriptSessionFields.applyTo honors top-level session_id/conversation_id/chat_id/id for all sources including gemini. A real Gemini JSON carrying a top-level id identical across the project-name and project-hash copies of the same session would collapse both back to one identity — exactly the collision geminiSourceSessionID was built to prevent. Practical risk is low (per q2v9m6 real Gemini files carry no usable in-file id); the existing TestGeminiDuplicatePathsGetDistinctIdentities fixture has no id field so it does not cover this.
