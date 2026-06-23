@@ -54,7 +54,7 @@ export function formatFileSize(bytes: number): string {
   // Pick the unit by the *rounded* kilobyte value, not the raw byte count.
   // Keying off raw bytes lets `toFixed(1)` round a value just under the MB
   // threshold up to "1024.0 KB" instead of crossing to "1.0 MB"
-  // (e.g. 1048575 bytes). Rounding first keeps the unit and the digits agreed.
+  // (e.g. 1048575 bytes). Rounding first keeps the unit and digits in agreement.
   const kb = bytes / 1024;
   if (Math.round(kb * 10) < 1024 * 10) return `${kb.toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
