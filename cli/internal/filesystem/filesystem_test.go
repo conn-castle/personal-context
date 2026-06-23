@@ -439,6 +439,42 @@ func TestCopyPropagatesCloseFailure(t *testing.T) {
 	}
 }
 
+func TestCopyPropagatesRenameFailureAndCleansUpTemp(t *testing.T) {
+	root := t.TempDir()
+	client, err := newClientWithHooks(root, fileOperationHooks{
+		renameFile: func(string, string) error { return errors.New("rename boom") },
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+
+	source := filepath.Join(t.TempDir(), "file.png")
+	if err := os.WriteFile(source, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+
+	stored, err := client.CopyFigure("20260305-a1b2c3d4", source)
+	if err == nil {
+		t.Fatalf("expected CopyFigure() to fail when rename fails, got %+v", stored)
+	}
+	if !strings.Contains(err.Error(), "rename to destination") {
+		t.Fatalf("expected rename error context, got %v", err)
+	}
+
+	// The failed copy must not leave the destination file or any staging
+	// temp file behind: the rename hook returned an error, so cleanupTemp
+	// must have removed the temp file. A direct os.Rename (bypassing the
+	// hook) would have succeeded and left the destination in place.
+	destDir := filepath.Join(root, "figures", "20260305-a1b2c3d4")
+	entries, readErr := os.ReadDir(destDir)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatalf("ReadDir(destDir) error = %v", readErr)
+	}
+	for _, e := range entries {
+		t.Fatalf("expected no leftover files after rename failure, found %q", e.Name())
+	}
+}
+
 func TestCopyFailsWhenSourceFileCannotBeOpened(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission-based test not reliable on Windows")

@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-22 d8k3w2: filesystem asset/chat-source renames are not directory-fsync durable
+    Priority: Medium. Area: cli/internal/filesystem/filesystem.go, cli/internal/filesystem/chat_source.go
+    Description: copyInto (figures/data copy) and PromoteChatSourceStage (raw chat source promote + rollback) fsync file contents before rename but never fsync the containing directory after the rename. On the darwin/linux targets a rename's directory entry is not durably recorded until the directory metadata is flushed, so a hard crash between rename and the next natural sync can lose the just-written asset/chat-source even though the op reported success. The sibling gitsnapshot package already treats parent-dir fsync-after-rename as the repo durability standard (syncDir at snapshot.go:219, called at 478/531/559/1127). Local files are re-uploadable from S3/DB, so impact is recoverable, hence Medium.
+    Next step: Genuine tradeoff on implementation — (a) extract gitsnapshot's syncDir into a shared internal/fsutil helper (single source of truth, but a cross-package refactor) or (b) add a local directory-fsync helper/hook inside filesystem (self-contained, duplicates ~10 lines). Decide approach, then fsync the target dir after copyInto's rename and the active/rollback dirs in PromoteChatSourceStage. Capture the choice before implementing.
+
 - Issue 2026-06-22 x7c2f4: Figure-ref parsing truncates filenames containing '#'
     Priority: Low. Area: cli/internal/recordio/recordio.go, web/lib/record-utils.ts
     Description: figSrcPattern and the web renderer's createFigureSrcAttributePattern both treat '#' (and '?') as a query/fragment delimiter to strip before filename lookup. A figure file legitimately named with a '#' (e.g. figures/plot#1.png, legal on POSIX/macOS) would be truncated to "plot" at both layers, so pc add/pc edit rejects it as missing and the web UI would fail to resolve it. '?' is effectively never a real filename so that half is benign.
