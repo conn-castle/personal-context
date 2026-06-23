@@ -246,8 +246,8 @@ func TestDoctorOrphanedDataSuccessWriteError(t *testing.T) {
 func TestDoctorMissingFiguresSuccessWriteError(t *testing.T) {
 	setupEnv(t)
 
-	// 4th write is "Missing figures: OK".
-	stdout := &failAfterWriter{remaining: 3}
+	// 5th write is "Missing figures: OK".
+	stdout := &failAfterWriter{remaining: 4}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
@@ -257,8 +257,8 @@ func TestDoctorMissingFiguresSuccessWriteError(t *testing.T) {
 func TestDoctorMissingDataFilesSuccessWriteError(t *testing.T) {
 	setupEnv(t)
 
-	// 5th write is "Missing data files: OK".
-	stdout := &failAfterWriter{remaining: 4}
+	// 6th write is "Missing data files: OK".
+	stdout := &failAfterWriter{remaining: 5}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
@@ -268,9 +268,8 @@ func TestDoctorMissingDataFilesSuccessWriteError(t *testing.T) {
 func TestDoctorAllPassedWriteError(t *testing.T) {
 	setupEnv(t)
 
-	// 7th write is "All checks passed." after Database, Orphaned figures,
-	// Orphaned data, Missing figures, Missing data files, Missing chat raw sources.
-	stdout := &failAfterWriter{remaining: 6}
+	// 9th write is "All checks passed." after all local OK checks.
+	stdout := &failAfterWriter{remaining: 8}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails")
@@ -355,9 +354,8 @@ func TestDoctorMissingFiguresWarnWriteError(t *testing.T) {
 		t.Fatalf("remove figure: %v", err)
 	}
 
-	// Writes: "Database: OK", "Orphaned figures: OK", "Orphaned data: OK", "Missing figures: WARN"
-	// Fail on 4th write
-	stdout := &failAfterWriter{remaining: 3}
+	// Fail on 5th write (Missing figures: WARN).
+	stdout := &failAfterWriter{remaining: 4}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on Missing figures WARN")
@@ -378,8 +376,8 @@ func TestDoctorMissingFiguresWarnPathWriteError(t *testing.T) {
 		t.Fatalf("remove figure: %v", err)
 	}
 
-	// Fail on 5th write (the "  recordID/fig.png" path line after "Missing figures: WARN")
-	stdout := &failAfterWriter{remaining: 4}
+	// Fail on 6th write (the "  recordID/fig.png" path line after "Missing figures: WARN").
+	stdout := &failAfterWriter{remaining: 5}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on missing figure path line")
@@ -411,6 +409,9 @@ func TestDoctorHealthyNoRecords(t *testing.T) {
 	}
 	if !strings.Contains(out, "Missing data files: OK") {
 		t.Fatalf("expected 'Missing data files: OK', got %q", out)
+	}
+	if !strings.Contains(out, "Orphaned figure files:OK") {
+		t.Fatalf("expected 'Orphaned figure files:OK', got %q", out)
 	}
 	if !strings.Contains(out, "Missing chat raw sources:") {
 		t.Fatalf("expected 'Missing chat raw sources:' line, got %q", out)
@@ -1597,9 +1598,9 @@ func TestDoctorCloudOKWriteError(t *testing.T) {
 		return &cloudStack{Repo: cloudRepoStub{}}, nil
 	}
 
-	// 7 local checks succeed (Database, orphan dirs, missing files, chat raw).
-	// 8th write is Cloud: OK — fail there.
-	stdout := &failAfterWriter{remaining: 7}
+	// 8 local checks succeed (Database, orphan dirs/files, missing files, chat raw).
+	// 9th write is Cloud: OK — fail there.
+	stdout := &failAfterWriter{remaining: 8}
 	err := runDoctor(context.Background(), stdout, &bytes.Buffer{}, doctorOptions{})
 	if err == nil {
 		t.Fatal("expected error when stdout write fails on Cloud: OK")

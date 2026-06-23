@@ -363,7 +363,7 @@ func (r *Repository) ReplaceRecordChildren(ctx context.Context, input repository
 	if strings.TrimSpace(input.Record.DayOrder) == "" {
 		input.Record.DayOrder = "n"
 	}
-	if err := validateReplaceRecordChildrenInput(input); err != nil {
+	if err := input.Validate(); err != nil {
 		return repository.Record{}, err
 	}
 
@@ -406,35 +406,14 @@ func (r *Repository) ReplaceRecordChildren(ctx context.Context, input repository
 			return repository.Record{}, err
 		}
 	}
+	record, err := getRecordByIDTx(ctx, tx, input.Record.ID)
+	if err != nil {
+		return repository.Record{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return repository.Record{}, mapSQLiteError(err)
 	}
-	return r.GetRecordByID(ctx, input.Record.ID)
-}
-
-func validateReplaceRecordChildrenInput(input repository.ReplaceRecordChildrenInput) error {
-	if strings.TrimSpace(input.Record.ID) == "" || strings.TrimSpace(input.Record.Date) == "" ||
-		strings.TrimSpace(input.Record.ProjectID) == "" || strings.TrimSpace(input.Record.SourceDeviceID) == "" {
-		return repository.ErrInvalidArgument
-	}
-	recordID := input.Record.ID
-	for _, figure := range input.Figures {
-		if figure.RecordID != recordID {
-			return repository.ErrInvalidArgument
-		}
-		if err := repository.ValidateRecordAssetKey("figures", figure.RecordID, figure.Filename, figure.S3Key); err != nil {
-			return err
-		}
-	}
-	for _, file := range input.DataFiles {
-		if file.RecordID != recordID || strings.TrimSpace(file.Hash) == "" || file.Size < 0 {
-			return repository.ErrInvalidArgument
-		}
-		if err := repository.ValidateRecordAssetKey("data", file.RecordID, file.Filename, file.S3Key); err != nil {
-			return err
-		}
-	}
-	return nil
+	return record, nil
 }
 
 func recordIDExistsTx(ctx context.Context, tx *sql.Tx, id string) (bool, error) {
@@ -495,6 +474,16 @@ func replaceRecordRowTx(ctx context.Context, tx *sql.Tx, input repository.Create
 		return mapSQLiteError(err)
 	}
 	return ensureRowsAffected(result)
+}
+
+func getRecordByIDTx(ctx context.Context, tx *sql.Tx, id string) (repository.Record, error) {
+	row := tx.QueryRowContext(
+		ctx,
+		`SELECT id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at
+         FROM records WHERE id = ?;`,
+		id,
+	)
+	return scanRecord(row)
 }
 
 func insertRecordFigureTx(ctx context.Context, tx *sql.Tx, input repository.CreateRecordFigureInput) error {

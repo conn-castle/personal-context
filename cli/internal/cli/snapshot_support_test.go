@@ -257,11 +257,13 @@ func TestImportSnapshotCrashAtomicity(t *testing.T) {
 		snapshot := atomicitySnapshot("20260310-aa11bb22", "plot.png", []byte("plot-v1"), time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC))
 
 		origRenameFileFn := renameFileFn
+		restoreRenameFileFn := func() { renameFileFn = origRenameFileFn }
+		t.Cleanup(restoreRenameFileFn)
 		renameFileFn = func(string, string) error {
 			return errors.New("rename boom")
 		}
 		_, err = importSnapshotIntoStack(ctx, stack, snapshot)
-		renameFileFn = origRenameFileFn
+		restoreRenameFileFn()
 		if err == nil || !strings.Contains(err.Error(), "write local figure") {
 			t.Fatalf("importSnapshotIntoStack(rename failure) error = %v, want figure write failure", err)
 		}
@@ -289,11 +291,13 @@ func TestImportSnapshotCrashAtomicity(t *testing.T) {
 		snapshot := atomicitySnapshot("20260310-bb22cc33", "plot.png", []byte("plot-v2"), time.Date(2026, 3, 10, 13, 0, 0, 0, time.UTC))
 
 		origCommitRecordChildrenFn := commitRecordChildrenFn
+		restoreCommitRecordChildrenFn := func() { commitRecordChildrenFn = origCommitRecordChildrenFn }
+		t.Cleanup(restoreCommitRecordChildrenFn)
 		commitRecordChildrenFn = func(context.Context, repository.Repository, repository.ReplaceRecordChildrenInput) (repository.Record, error) {
 			return repository.Record{}, errors.New("commit boom")
 		}
 		_, err = importSnapshotIntoStack(ctx, stack, snapshot)
-		commitRecordChildrenFn = origCommitRecordChildrenFn
+		restoreCommitRecordChildrenFn()
 		if err == nil || !strings.Contains(err.Error(), "replace record children rows") {
 			t.Fatalf("importSnapshotIntoStack(commit failure) error = %v, want row commit failure", err)
 		}
@@ -329,11 +333,13 @@ func TestImportSnapshotCrashAtomicity(t *testing.T) {
 		updated := atomicitySnapshot(recordID, "new.png", []byte("new"), time.Date(2026, 3, 10, 14, 1, 0, 0, time.UTC))
 
 		origDeleteRecordFigureFileFn := deleteRecordFigureFileFn
+		restoreDeleteRecordFigureFileFn := func() { deleteRecordFigureFileFn = origDeleteRecordFigureFileFn }
+		t.Cleanup(restoreDeleteRecordFigureFileFn)
 		deleteRecordFigureFileFn = func(*filesystem.Client, string, string) error {
 			return errors.New("delete stale boom")
 		}
 		_, err = importSnapshotIntoStack(ctx, stack, updated)
-		deleteRecordFigureFileFn = origDeleteRecordFigureFileFn
+		restoreDeleteRecordFigureFileFn()
 		if err == nil || !strings.Contains(err.Error(), "delete stale figure") {
 			t.Fatalf("importSnapshotIntoStack(cleanup failure) error = %v, want stale cleanup failure", err)
 		}

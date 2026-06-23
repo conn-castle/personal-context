@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-23 m5n8c2: stale per-file data attachments are not reconciled
+    Priority: Low. Area: cli/internal/cli/doctor.go, cli/internal/filesystem/filesystem.go
+    Description: Snapshot import now reconciles orphan figure files because import writes figure bytes. Data-file imports only replace DB rows, so stale files under `data/{recordID}/` whose rows were removed are outside the current crash-atomicity scope and can persist until a future data-file reconcile path exists.
+    Next step: Design symmetric data-file orphan detection/deletion for existing-record child-row replacement and `doctor --fix`, then add mutation-tested cleanup coverage.
+
 - Issue 2026-06-23 a8d2f1: AssetPreviewDialog has no DialogDescription / aria-describedby
     Priority: Low. Area: web/components/asset-preview-dialog.tsx
     Description: DialogContent renders a DialogTitle but no DialogDescription and no aria-describedby, so Radix logs a dev-only console warning ("Missing Description for DialogContent"). No production runtime impact. Surfaced in web/components audit (round-4 iter 16).

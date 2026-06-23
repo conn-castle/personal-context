@@ -215,6 +215,10 @@ func runDoctor(ctx context.Context, stdout io.Writer, _ io.Writer, opts doctorOp
 			return err
 		}
 		hasWarnings = hasWarnings || warned
+	} else {
+		if _, err := reportDoctorOrphans(stdout, "Orphaned figure files", "figure files", orphanFigureFiles); err != nil {
+			return err
+		}
 	}
 
 	// Chat sessions with managed raw_source_key are scanned regardless of

@@ -179,7 +179,7 @@ func (c *Client) ListFigureFilenames(recordID string) ([]string, error) {
 	entries, err := os.ReadDir(filepath.Join(c.basePath, "figures", recordID))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return []string{}, nil
 		}
 		return nil, err
 	}

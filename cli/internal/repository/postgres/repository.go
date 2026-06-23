@@ -345,7 +345,7 @@ func (r *Repository) ReplaceRecordChildren(ctx context.Context, input repository
 	if strings.TrimSpace(input.Record.DayOrder) == "" {
 		input.Record.DayOrder = "n"
 	}
-	if err := validateReplaceRecordChildrenInput(input); err != nil {
+	if err := input.Validate(); err != nil {
 		return repository.Record{}, err
 	}
 
@@ -376,7 +376,8 @@ func (r *Repository) ReplaceRecordChildren(ctx context.Context, input repository
 		}
 	}
 
-	if _, err := r.replaceRecordRowTx(ctx, tx, input.Record, input.SetDeletedAt); err != nil {
+	record, err := r.replaceRecordRowTx(ctx, tx, input.Record, input.SetDeletedAt)
+	if err != nil {
 		return repository.Record{}, err
 	}
 	if _, err := tx.Exec(ctx,
@@ -414,32 +415,7 @@ func (r *Repository) ReplaceRecordChildren(ctx context.Context, input repository
 	if err := tx.Commit(ctx); err != nil {
 		return repository.Record{}, mapPgError(err)
 	}
-	return r.GetRecordByID(ctx, input.Record.ID)
-}
-
-func validateReplaceRecordChildrenInput(input repository.ReplaceRecordChildrenInput) error {
-	if strings.TrimSpace(input.Record.ID) == "" || strings.TrimSpace(input.Record.Date) == "" ||
-		strings.TrimSpace(input.Record.ProjectID) == "" || strings.TrimSpace(input.Record.SourceDeviceID) == "" {
-		return repository.ErrInvalidArgument
-	}
-	recordID := input.Record.ID
-	for _, figure := range input.Figures {
-		if figure.RecordID != recordID {
-			return repository.ErrInvalidArgument
-		}
-		if err := repository.ValidateRecordAssetKey("figures", figure.RecordID, figure.Filename, figure.S3Key); err != nil {
-			return err
-		}
-	}
-	for _, file := range input.DataFiles {
-		if file.RecordID != recordID || strings.TrimSpace(file.Hash) == "" || file.Size < 0 {
-			return repository.ErrInvalidArgument
-		}
-		if err := repository.ValidateRecordAssetKey("data", file.RecordID, file.Filename, file.S3Key); err != nil {
-			return err
-		}
-	}
-	return nil
+	return record, nil
 }
 
 // recordIDExistsForOtherUserTx detects global record-id collisions hidden by

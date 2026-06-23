@@ -748,6 +748,9 @@ func TestListFigureFilenames(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListFigureFilenames() error = %v", err)
 		}
+		if names == nil {
+			t.Fatal("expected non-nil empty names for missing directory")
+		}
 		if len(names) != 0 {
 			t.Fatalf("expected empty names for missing directory, got %v", names)
 		}
