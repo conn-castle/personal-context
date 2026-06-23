@@ -142,7 +142,10 @@ func runAdd(ctx context.Context, stdout io.Writer, stderr io.Writer, inputPath s
 		recordDate = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 	}
 
-	// Generate record ID — date prefix must match the record's date field
+	// Generate record ID. The record's date field (set below from recordDate, a
+	// local calendar day) is the source of truth. The ID's date prefix is
+	// UTC-based (recordid.GenerateForDate) and may differ from the date field by
+	// a day near midnight; they are intentionally not required to match.
 	id, err := recordid.GenerateForDate(recordDate)
 	if err != nil {
 		return fmt.Errorf("generate record ID: %w", err)

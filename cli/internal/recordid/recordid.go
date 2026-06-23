@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"regexp"
-	"strings"
 	"time"
 )
 
@@ -17,7 +16,9 @@ var (
 )
 
 // GenerateForDate returns a record ID in the format {YYYYMMDD}-{8-random-hex}.
-// Args: date is the local date component that must be embedded in the ID.
+// Args: date supplies the prefix; it is normalized to UTC before formatting, so
+// the prefix is the UTC calendar day (which may differ from a local-time date by
+// a day near midnight).
 // Returns: a formatted record ID or an error when random bytes cannot be read.
 func GenerateForDate(date time.Time) (string, error) {
 	return GenerateForDateWithReader(date, entropySource)
@@ -37,23 +38,6 @@ func GenerateForDateWithReader(date time.Time, reader io.Reader) (string, error)
 	}
 
 	return fmt.Sprintf("%s-%x", date.UTC().Format(dateLayout), suffix), nil
-}
-
-// ExtractDate parses the YYYYMMDD prefix from a record ID.
-// Args: id is a record ID in canonical format.
-// Returns: the parsed UTC date at midnight or an error when format is invalid.
-func ExtractDate(id string) (time.Time, error) {
-	if !idPattern.MatchString(id) {
-		return time.Time{}, fmt.Errorf("invalid record ID: %q", id)
-	}
-
-	parts := strings.SplitN(id, "-", 2)
-	parsed, err := time.ParseInLocation(dateLayout, parts[0], time.UTC)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("parse record ID date: %w", err)
-	}
-
-	return parsed, nil
 }
 
 // Validate reports whether an ID matches the canonical record ID format.

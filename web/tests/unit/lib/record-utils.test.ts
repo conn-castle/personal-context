@@ -93,6 +93,18 @@ describe("formatFileSize", () => {
     expect(formatFileSize(1048576)).toBe("1.0 MB");
     expect(formatFileSize(2621440)).toBe("2.5 MB");
   });
+
+  it("rolls a value that would round to 1024.0 KB into MB instead", () => {
+    // 1048575 bytes is one byte below 1 MiB. The raw count is still < 1 MiB,
+    // but (1048575 / 1024).toFixed(1) rounds to "1024.0", which must not be
+    // emitted as "1024.0 KB". It should display as "1.0 MB".
+    expect(formatFileSize(1048575)).toBe("1.0 MB");
+    // 1048524 is the exact upper boundary: the largest byte count that still
+    // rounds to 1023.9 KB and stays in the KB tier. The very next byte crosses
+    // into the MB tier.
+    expect(formatFileSize(1048524)).toBe("1023.9 KB");
+    expect(formatFileSize(1048525)).toBe("1.0 MB");
+  });
 });
 
 // ---------------------------------------------------------------------------
