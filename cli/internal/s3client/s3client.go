@@ -160,14 +160,29 @@ func (c *Client) HeadVersion(ctx context.Context) (int64, string, error) {
 		return 0, "", fmt.Errorf("read version body: %w", err)
 	}
 
+	return parseVersionPayload(data)
+}
+
+// parseVersionPayload decodes the raw _version object body.
+// It accepts the JSON form {"version": N, "updated_at": "ISO"} and a
+// backward-compatible plain-text int64 (migration path), and rejects negative
+// versions so the read path can never return a value UpdateVersion would refuse
+// to write. Returns (version, updatedAt, error); updatedAt is "" for the
+// plain-text form.
+func parseVersionPayload(data []byte) (int64, string, error) {
 	trimmed := strings.TrimSpace(string(data))
 	if strings.HasPrefix(trimmed, "{") {
+		// Detect and parse off the same trimmed body so branch selection and
+		// decoding share one source of truth.
 		var payload versionReadPayload
-		if err := json.Unmarshal(data, &payload); err != nil {
+		if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
 			return 0, "", fmt.Errorf("parse version object: %w", err)
 		}
 		if payload.Version == nil || payload.UpdatedAt == nil {
 			return 0, "", fmt.Errorf("parse version object %q: version and updated_at are required", string(data))
+		}
+		if *payload.Version < 0 {
+			return 0, "", fmt.Errorf("parse version object %q: version must be non-negative", string(data))
 		}
 		return *payload.Version, *payload.UpdatedAt, nil
 	}
@@ -176,6 +191,9 @@ func (c *Client) HeadVersion(ctx context.Context) (int64, string, error) {
 	v, err := strconv.ParseInt(trimmed, 10, 64)
 	if err != nil {
 		return 0, "", fmt.Errorf("parse version %q: not valid JSON or integer", string(data))
+	}
+	if v < 0 {
+		return 0, "", fmt.Errorf("parse version %q: version must be non-negative", string(data))
 	}
 	return v, "", nil
 }

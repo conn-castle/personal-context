@@ -238,7 +238,7 @@ func (c *Client) copyInto(prefix string, recordID string, sourcePath string) (St
 	if err := hooks.closeFile(tempFile); err != nil {
 		return StoredFile{}, fmt.Errorf("close destination file %s: %w", targetPath, err)
 	}
-	if err := os.Rename(tempPath, targetPath); err != nil {
+	if err := hooks.renameFile(tempPath, targetPath); err != nil {
 		return StoredFile{}, fmt.Errorf("rename to destination %s: %w", targetPath, err)
 	}
 	cleanupTemp = false

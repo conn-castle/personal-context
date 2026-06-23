@@ -37,7 +37,15 @@ type metadata struct {
 	GitHash        *string `json:"git_hash"`
 }
 
-var figSrcPattern = regexp.MustCompile(`(?i)src\s*=\s*["']figures/([^"']+)["']`)
+// figSrcPattern matches HTML figure references of the form
+// src="figures/<name>" (single or double quoted). An optional query string or
+// hash fragment after the name is consumed but excluded from the captured
+// group, so the name matches the on-disk filename. This mirrors the web
+// renderer's figure-source pattern (web/lib/record-utils.ts), which strips
+// "?"/"#" suffixes before resolving the filename; keeping the two in sync
+// prevents `pc add`/`pc edit` from rejecting a record whose HTML the web UI
+// would render correctly.
+var figSrcPattern = regexp.MustCompile(`(?i)src\s*=\s*["']figures/([^"'?#]+)(?:[?#][^"']*)?["']`)
 
 // ParseInputFolder reads and validates a record input folder.
 // metadata.json, record.html, notes.md, figures/, data/ are optional.

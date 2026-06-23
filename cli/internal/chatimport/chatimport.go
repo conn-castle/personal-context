@@ -399,6 +399,13 @@ func applyItemSessionFields(session *repository.CreateChatSessionInput, payload 
 	// sessionId (camelCase) is the canonical key emitted in real Claude Code
 	// transcripts; session_id / conversation_id / chat_id cover snake_case
 	// variants used by other agents.
+	//
+	// This item-scoped key list intentionally differs from the session-meta
+	// appliers (applySessionFields, jsonTranscriptSessionFields.applyTo): it
+	// includes camelCase `sessionId` (which appears only on Claude item rows)
+	// and deliberately omits the generic `id`. `id` on a per-message item is
+	// typically a message uuid, not a session identifier, so honoring it here
+	// would corrupt session identity. Do not "harmonize" these lists.
 	for _, key := range []string{"session_id", "sessionId", "conversation_id", "chat_id"} {
 		if value := stringField(payload, key); value != nil && *value != "" {
 			isSidechain, _ := payload["isSidechain"].(bool)
@@ -639,6 +646,9 @@ type jsonTranscriptSessionFields map[string]string
 func (fields jsonTranscriptSessionFields) applyTo(session *repository.CreateChatSessionInput) {
 	// Prefer the canonical session keys before falling back to the generic
 	// "id" field, which some vendors reuse for unrelated draft/internal ids.
+	// This mirrors the session-meta list in applySessionFields (includes `id`,
+	// omits camelCase `sessionId`); see that function for why the item-scoped
+	// applyItemSessionFields uses a different key set.
 	for _, key := range []string{"session_id", "conversation_id", "chat_id", "id"} {
 		if value, ok := fields[key]; ok {
 			session.SourceSessionID = value
@@ -932,6 +942,12 @@ func geminiSourceSessionID(path string, base string) string {
 func applySessionFields(session *repository.CreateChatSessionInput, payload map[string]any, fallbackSourceSessionID string) {
 	// Prefer the canonical session keys before falling back to the generic
 	// "id" field, which some vendors reuse for unrelated draft/internal ids.
+	//
+	// This session-meta key list intentionally differs from the item-scoped
+	// applyItemSessionFields: it includes `id` (codex session_meta payloads key
+	// the session on `id`) and omits camelCase `sessionId` (which appears only
+	// on Claude item rows, never on the metadata rows that reach this function).
+	// Do not "harmonize" these lists.
 	for _, key := range []string{"session_id", "conversation_id", "chat_id", "id"} {
 		if value := stringField(payload, key); value != nil && *value != "" {
 			if session.SourceSessionID == fallbackSourceSessionID || session.SourceSessionID == *value {

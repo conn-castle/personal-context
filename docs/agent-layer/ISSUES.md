@@ -27,6 +27,31 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-23 p9r1k4: Go CLI codebase docstring coverage is far below 80% threshold
+    Priority: Low. Area: cli/ (all packages)
+    Description: CodeRabbit pre-merge check reports 12.90% docstring coverage vs a configured 80% threshold. The gap is global (pre-existing across the entire codebase, not introduced by any single PR) and spans most exported functions and types.
+    Next step: Audit which exported symbols lack docstrings, write a coverage pass, and re-check the threshold.
+
+- Issue 2026-06-22 d8k3w2: filesystem asset/chat-source renames are not directory-fsync durable
+    Priority: Medium. Area: cli/internal/filesystem/filesystem.go, cli/internal/filesystem/chat_source.go
+    Description: copyInto (figures/data copy) and PromoteChatSourceStage (raw chat source promote + rollback) fsync file contents before rename but never fsync the containing directory after the rename. On the darwin/linux targets a rename's directory entry is not durably recorded until the directory metadata is flushed, so a hard crash between rename and the next natural sync can lose the just-written asset/chat-source even though the op reported success. The sibling gitsnapshot package already treats parent-dir fsync-after-rename as the repo durability standard (syncDir at snapshot.go:219, called at 478/531/559/1127). Local files are re-uploadable from S3/DB, so impact is recoverable, hence Medium.
+    Next step: Genuine tradeoff on implementation — (a) extract gitsnapshot's syncDir into a shared internal/fsutil helper (single source of truth, but a cross-package refactor) or (b) add a local directory-fsync helper/hook inside filesystem (self-contained, duplicates ~10 lines). Decide approach, then fsync the target dir after copyInto's rename and the active/rollback dirs in PromoteChatSourceStage. Capture the choice before implementing.
+
+- Issue 2026-06-22 x7c2f4: Figure-ref parsing truncates filenames containing '#'
+    Priority: Low. Area: cli/internal/recordio/recordio.go, web/lib/record-utils.ts
+    Description: figSrcPattern and the web renderer's createFigureSrcAttributePattern both treat '#' (and '?') as a query/fragment delimiter to strip before filename lookup. A figure file legitimately named with a '#' (e.g. figures/plot#1.png, legal on POSIX/macOS) would be truncated to "plot" at both layers, so pc add/pc edit rejects it as missing and the web UI would fail to resolve it. '?' is effectively never a real filename so that half is benign.
+    Next step: If '#'-bearing figure filenames must be supported, decide a consistent rule (e.g. only strip a trailing query/fragment when preceded by a known extension, or percent-encode at storage time) and apply it to BOTH the CLI regex and web/lib/record-utils.ts together so the validate/rewrite contract stays in parity. Genuine tradeoff: any rule change must keep the two layers byte-aligned.
+
+- Issue 2026-06-22 j4m8q2: Gemini source identity differs between JSON and JSONL transcript paths
+    Priority: Low. Area: cli/internal/chatimport/chatimport.go
+    Description: For source=gemini, the JSONL path forces sessionMeta=nil in unwrapChatLine so the path-derived geminiSourceSessionID always wins, but the JSON path's jsonTranscriptSessionFields.applyTo honors top-level session_id/conversation_id/chat_id/id for all sources including gemini. A real Gemini JSON carrying a top-level id identical across the project-name and project-hash copies of the same session would collapse both back to one identity — exactly the collision geminiSourceSessionID was built to prevent. Practical risk is low (per q2v9m6 real Gemini files carry no usable in-file id); the existing TestGeminiDuplicatePathsGetDistinctIdentities fixture has no id field so it does not cover this.
+    Next step: Decide whether path-derived gemini identity is canonical for both formats (then skip applyTo's id override when source==gemini, matching JSONL) — this changes behavior for any Gemini JSON that does carry an in-file id and would touch the gemini-fixture test. Capture the decision before implementing. Related: q2v9m6.
+
+- Issue 2026-06-22 k7p3r5: JSON (non-JSONL) transcript path has no per-element memory bound
+    Priority: Low. Area: cli/internal/chatimport/chatimport.go
+    Description: decodeJSONTranscriptItems calls decoder.Decode(&raw) per array element with no size cap, fully materializing each element into map[string]any. The JSONL path deliberately caps each row at 256 MiB (maxJSONLLineBytes) and surfaces bufio.ErrTooLong; the JSON path has no equivalent guard, so a single pathological array element (e.g. a huge embedded tool output) is materialized whole. Asymmetric DoS surface against read-only on-disk artifacts (low real-world risk). readGeminiProjectHash is fine — Decode into a 1-field struct streams without retaining other fields.
+    Next step: Decide whether to add an io.LimitReader cap on the JSON decode path mirroring maxJSONLLineBytes (rejects very large but valid JSON transcripts — a behavior tradeoff) or to accept the asymmetry and document it. Capture the choice before implementing.
+
 - Issue 2026-06-07 h3v6n2: chat import completeness check re-walks and re-hashes every transcript
     Priority: Low. Area: cli/internal/cli/chat.go
     Description: scanChatImportCompleteness does a full pre-pass that re-walks, re-parses, and re-hashes every transcript the main import loop then processes again, roughly doubling parse+hash I/O on large stores (the very high-file-count w8k3r1 scenario the check targets). Correct, just not free.
@@ -80,10 +105,10 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
     Description: Exact unchanged chat imports still pay source + managed file hashing cost, plus an O(N) `ListChatSessions(IncludeDeleted: true)` load per source per import to populate the lookup index. Append-only JSONL/NDJSON now uses a suffix import path, so this is a remaining optimization rather than the active-session bottleneck.
     Next step: If large-history profiling shows exact-match hashing or the per-source list load remains expensive, design a schema-backed source fingerprint with explicit migration handling and consider a narrower index-load filter.
 
-- Issue 2026-05-17 a3i6f8: Snapshot replacement is rollback-safe but not crash-safe atomic
-    Priority: Medium. Area: cli/internal/gitsnapshot/snapshot.go
-    Description: `replaceSnapshotContents` moves each managed entry independently (backup-then-promote per entry). If the process is killed between the backup loop and the promotion loop, the export root is left with a partial snapshot plus a backup dir, violating the atomic-replacement contract.
-    Next step: Refactor to swap the entire snapshot root via a single rename (write to `<root>.new`, rename old root to backup, rename new in, then delete backup). Make sure restore-on-failure handles the case where the original root was already renamed away.
+- Issue 2026-05-17 a3i6f8: Snapshot replacement is not a single atomic cross-entry swap
+    Priority: Low. Area: cli/internal/gitsnapshot/snapshot.go
+    Description: Durability is now handled — `Write` fsyncs each staged file, each container dir (templates/records/chats), and the export root after promotion, so renames survive a crash. The residual gap: `replaceSnapshotContents` still promotes the 5 managed entries via independent renames, so a crash mid-promotion can leave a durable but partial snapshot (recoverable via the leftover `.snapshot-backup-*` dir). A true single-rename swap is blocked because the export root is a git working tree containing `.git` and unmanaged files, so the whole root cannot be swapped.
+    Next step: If full atomicity is required, design a journal/marker file that recovery logic consults to finish or roll back an interrupted promotion (genuine tradeoff: adds a recovery code path and on-disk marker format). Otherwise document the per-entry-promotion semantics in DECISIONS.md and close.
 
 - Issue 2026-05-17 r6e0k3: Cross-table ID uniqueness for records vs chat_session is not atomically enforced
     Priority: Medium. Area: cli/internal/repository/{sqlite,postgres}/repository.go, schema

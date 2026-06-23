@@ -1391,6 +1391,381 @@ func TestReplaceSnapshotContentsErrorPaths(t *testing.T) {
 	})
 }
 
+func TestSnapshotReplacementSyncsExportRoot(t *testing.T) {
+	now := time.Date(2026, 3, 9, 12, 0, 0, 0, time.UTC)
+	oldSnapshot := Snapshot{
+		Templates: []Template{{Name: "old", HTMLContent: "<html>old</html>"}},
+		Projects:  []RegistryEntry{{ID: "phase7/old", CreatedAt: now, UpdatedAt: now}},
+		Devices:   []RegistryEntry{{ID: "device/old", CreatedAt: now, UpdatedAt: now}},
+	}
+	newSnapshot := Snapshot{
+		Templates: []Template{{Name: "new", HTMLContent: "<html>new</html>"}},
+		Projects:  []RegistryEntry{{ID: "phase7/new", CreatedAt: now, UpdatedAt: now}},
+		Devices:   []RegistryEntry{{ID: "device/new", CreatedAt: now, UpdatedAt: now}},
+	}
+
+	t.Run("write fsyncs the export root after promoting entries", func(t *testing.T) {
+		root := t.TempDir()
+
+		var syncedRoot bool
+		origSyncDir := syncDirFn
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(root) {
+				syncedRoot = true
+			}
+			return origSyncDir(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSyncDir })
+
+		if err := Write(root, newSnapshot); err != nil {
+			t.Fatalf("Write(newSnapshot): %v", err)
+		}
+		if !syncedRoot {
+			t.Fatal("Write did not fsync the export root after promoting managed entries")
+		}
+	})
+
+	t.Run("write fsyncs each managed container directory during staging", func(t *testing.T) {
+		root := t.TempDir()
+		// Include a chat so chats/ is created and its container fsync is exercised;
+		// chats/ is created lazily and is otherwise correctly skipped.
+		snapshotWithChat := newSnapshot
+		snapshotWithChat.Chats = []ChatSession{{
+			ID:              "20260309-aaaabbbb",
+			Source:          "codex",
+			SourceSessionID: "session-sync",
+			SourceDeviceID:  "device/unit",
+			StartedAt:       now,
+			LastActivityAt:  now,
+			CreatedAt:       now,
+			UpdatedAt:       now,
+		}}
+
+		stagedSyncs := map[string]bool{}
+		origSyncDir := syncDirFn
+		syncDirFn = func(dir string) error {
+			if strings.Contains(dir, ".snapshot-staging-") {
+				stagedSyncs[filepath.Base(dir)] = true
+			}
+			return origSyncDir(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSyncDir })
+
+		if err := Write(root, snapshotWithChat); err != nil {
+			t.Fatalf("Write(snapshotWithChat): %v", err)
+		}
+		for _, name := range []string{"templates", "records", "chats"} {
+			if !stagedSyncs[name] {
+				t.Fatalf("Write did not fsync staged %s/ directory before promotion", name)
+			}
+		}
+	})
+
+	t.Run("write skips the chats container fsync when no chats are staged", func(t *testing.T) {
+		root := t.TempDir()
+
+		var chatsSynced bool
+		origSyncDir := syncDirFn
+		syncDirFn = func(dir string) error {
+			if filepath.Base(dir) == "chats" && strings.Contains(dir, ".snapshot-staging-") {
+				chatsSynced = true
+			}
+			return origSyncDir(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSyncDir })
+
+		// newSnapshot has no chats, so chats/ is never created and must be skipped.
+		if err := Write(root, newSnapshot); err != nil {
+			t.Fatalf("Write(newSnapshot): %v", err)
+		}
+		if chatsSynced {
+			t.Fatal("Write fsynced a chats/ directory that was never created")
+		}
+	})
+
+	t.Run("staged container sync failure rolls back to the prior snapshot", func(t *testing.T) {
+		root := t.TempDir()
+		if err := Write(root, oldSnapshot); err != nil {
+			t.Fatalf("Write(oldSnapshot): %v", err)
+		}
+		oldManifest, err := Manifest(root)
+		if err != nil {
+			t.Fatalf("Manifest(old): %v", err)
+		}
+
+		origSyncDir := syncDirFn
+		syncDirFn = func(dir string) error {
+			// Fail the staged records/ container flush, before any promotion, so the
+			// staged write is aborted and the prior snapshot is left intact.
+			if filepath.Base(dir) == "records" && strings.Contains(dir, ".snapshot-staging-") {
+				return errors.New("sync records failed")
+			}
+			return origSyncDir(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSyncDir })
+
+		err = Write(root, newSnapshot)
+		if err == nil || !strings.Contains(err.Error(), "sync staged records") {
+			t.Fatalf("Write(newSnapshot) error = %v, want staged records sync failure", err)
+		}
+
+		syncDirFn = origSyncDir
+		currentManifest, err := Manifest(root)
+		if err != nil {
+			t.Fatalf("Manifest(current): %v", err)
+		}
+		if !reflect.DeepEqual(currentManifest, oldManifest) {
+			t.Fatalf("snapshot changed after staged container sync failure\nold=%v\ncurrent=%v", oldManifest, currentManifest)
+		}
+	})
+
+	t.Run("export-root sync failure rolls back to the prior snapshot", func(t *testing.T) {
+		root := t.TempDir()
+		if err := Write(root, oldSnapshot); err != nil {
+			t.Fatalf("Write(oldSnapshot): %v", err)
+		}
+		oldManifest, err := Manifest(root)
+		if err != nil {
+			t.Fatalf("Manifest(old): %v", err)
+		}
+
+		origSyncDir := syncDirFn
+		rootSyncs := 0
+		syncDirFn = func(dir string) error {
+			// Fail only the FIRST export-root flush — the commit-point sync after
+			// every managed entry was promoted. The rollback's own export-root sync
+			// must succeed so the restore is durable and the backup dir is cleaned
+			// up, proving the commit-point failure rolls back fully.
+			if filepath.Clean(dir) == filepath.Clean(root) {
+				rootSyncs++
+				if rootSyncs == 1 {
+					return errors.New("sync root failed")
+				}
+			}
+			return origSyncDir(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSyncDir })
+
+		err = Write(root, newSnapshot)
+		if err == nil || !strings.Contains(err.Error(), "sync export root") {
+			t.Fatalf("Write(newSnapshot) error = %v, want export-root sync failure", err)
+		}
+		if rootSyncs < 2 {
+			t.Fatalf("rollback did not fsync the export root after restoring; rootSyncs=%d", rootSyncs)
+		}
+
+		currentManifest, err := Manifest(root)
+		if err != nil {
+			t.Fatalf("Manifest(current): %v", err)
+		}
+		if !reflect.DeepEqual(currentManifest, oldManifest) {
+			t.Fatalf("snapshot changed after export-root sync failure\nold=%v\ncurrent=%v", oldManifest, currentManifest)
+		}
+	})
+
+	t.Run("restore export-root sync failure preserves the backup directory", func(t *testing.T) {
+		root := t.TempDir()
+		stagingRoot, err := os.MkdirTemp(root, ".snapshot-staging-*")
+		if err != nil {
+			t.Fatalf("create staging root: %v", err)
+		}
+		if err := writeSnapshotContents(root, oldSnapshot); err != nil {
+			t.Fatalf("writeSnapshotContents(old): %v", err)
+		}
+		if err := writeSnapshotContents(stagingRoot, newSnapshot); err != nil {
+			t.Fatalf("writeSnapshotContents(new): %v", err)
+		}
+
+		// Force a promote failure so the restore path runs, and make every
+		// export-root fsync fail so the restore's own durability flush also fails.
+		// The combined failure must be reported and the backup dir preserved for
+		// manual recovery.
+		origRename := renameFileFn
+		renameFileFn = func(from string, to string) error {
+			fromDir := filepath.Base(filepath.Dir(from))
+			if filepath.Base(from) == "devices.json" && strings.HasPrefix(fromDir, ".snapshot-staging-") {
+				return errors.New("promote failed")
+			}
+			return origRename(from, to)
+		}
+		origSyncDir := syncDirFn
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(root) {
+				return errors.New("sync root failed")
+			}
+			return origSyncDir(dir)
+		}
+		t.Cleanup(func() {
+			renameFileFn = origRename
+			syncDirFn = origSyncDir
+		})
+
+		err = replaceSnapshotContents(root, stagingRoot)
+		if err == nil || !strings.Contains(err.Error(), "failed to restore previous snapshot state") {
+			t.Fatalf("replaceSnapshotContents() error = %v, want restore failure detail", err)
+		}
+		if !strings.Contains(err.Error(), "sync export root") {
+			t.Fatalf("replaceSnapshotContents() error = %v, want restore export-root sync failure", err)
+		}
+
+		// Restore failed, so the backup dir must NOT have been cleaned up.
+		syncDirFn = origSyncDir
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			t.Fatalf("read root: %v", err)
+		}
+		var backupFound bool
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".snapshot-backup-") {
+				backupFound = true
+			}
+		}
+		if !backupFound {
+			t.Fatal("backup directory was removed despite a restore failure; original data is unrecoverable")
+		}
+	})
+
+	t.Run("writeFile fsyncs the parent directory after renaming the staged file", func(t *testing.T) {
+		root := t.TempDir()
+		path := filepath.Join(root, "projects.json")
+
+		origSyncDir := syncDirFn
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(root) {
+				return errors.New("sync parent failed")
+			}
+			return origSyncDir(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSyncDir })
+
+		err := writeFile(path, []byte("contents"))
+		if err == nil || !strings.Contains(err.Error(), "sync parent failed") {
+			t.Fatalf("writeFile() error = %v, want parent-directory sync failure", err)
+		}
+	})
+
+	t.Run("successful write removes backup dir and fsyncs root a second time", func(t *testing.T) {
+		root := t.TempDir()
+		if err := Write(root, oldSnapshot); err != nil {
+			t.Fatalf("Write(oldSnapshot): %v", err)
+		}
+
+		origSyncDir := syncDirFn
+		rootSyncs := 0
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(root) {
+				rootSyncs++
+			}
+			return origSyncDir(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSyncDir })
+
+		if err := Write(root, newSnapshot); err != nil {
+			t.Fatalf("Write(newSnapshot): %v", err)
+		}
+		// Expect at least two root fsyncs: one at the commit point and one after
+		// the backup directory is removed, making the deletion durable.
+		if rootSyncs < 2 {
+			t.Fatalf("Write synced the export root %d time(s); want at least 2 (commit + post-backup-removal)", rootSyncs)
+		}
+		// Backup dir must be gone so no stale entries remain.
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			t.Fatalf("ReadDir(root): %v", err)
+		}
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".snapshot-backup-") {
+				t.Fatalf("backup directory %q was not removed after a successful write", e.Name())
+			}
+		}
+	})
+
+	t.Run("second root fsync failure after backup removal propagates error", func(t *testing.T) {
+		root := t.TempDir()
+		if err := Write(root, oldSnapshot); err != nil {
+			t.Fatalf("Write(oldSnapshot): %v", err)
+		}
+
+		origSyncDir := syncDirFn
+		rootSyncs := 0
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(root) {
+				rootSyncs++
+				// Fail only the second root sync (post-backup-removal).
+				if rootSyncs == 2 {
+					return errors.New("sync root after backup removal failed")
+				}
+			}
+			return origSyncDir(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSyncDir })
+
+		err := Write(root, newSnapshot)
+		if err == nil || !strings.Contains(err.Error(), "sync export root after backup removal") {
+			t.Fatalf("Write(newSnapshot) error = %v, want post-backup-removal sync failure", err)
+		}
+		// Despite the second fsync failure, the snapshot contents must be correct
+		// (the promotion already succeeded and the first sync committed it).
+		syncDirFn = origSyncDir
+		got, rerr := Read(root)
+		if rerr != nil {
+			t.Fatalf("Read(root) after second-fsync failure: %v", rerr)
+		}
+		if !reflect.DeepEqual(got.Templates, newSnapshot.Templates) ||
+			!reflect.DeepEqual(got.Projects, newSnapshot.Projects) ||
+			!reflect.DeepEqual(got.Devices, newSnapshot.Devices) {
+			t.Fatalf("snapshot contents after second-fsync failure:\ngot=%#v\nwant promoted snapshot=%#v", got, newSnapshot)
+		}
+	})
+}
+
+func TestSyncDirDurabilityHelper(t *testing.T) {
+	t.Run("returns nil for a real directory", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write file: %v", err)
+		}
+		if err := syncDir(dir); err != nil {
+			t.Fatalf("syncDir(%q) = %v, want nil", dir, err)
+		}
+	})
+
+	t.Run("propagates open failure for a missing directory", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "does-not-exist")
+		if err := syncDir(missing); err == nil {
+			t.Fatalf("syncDir(%q) = nil, want open failure", missing)
+		}
+	})
+
+	t.Run("propagates fsync failure", func(t *testing.T) {
+		// Open then close a real directory handle so its Sync returns a genuine
+		// "file already closed" error, exercising the durability-flush failure
+		// path that a directory fsync would hit on a read-only or failing volume.
+		dir := t.TempDir()
+		closed, err := os.Open(dir)
+		if err != nil {
+			t.Fatalf("open dir: %v", err)
+		}
+		if err := closed.Close(); err != nil {
+			t.Fatalf("close dir: %v", err)
+		}
+
+		origOpenDir := openDirFn
+		openDirFn = func(string) (syncableDir, error) { return closed, nil }
+		t.Cleanup(func() { openDirFn = origOpenDir })
+
+		err = syncDir(dir)
+		if err == nil {
+			t.Fatalf("syncDir(%q) = nil, want fsync failure", dir)
+		}
+		// The Sync error must be surfaced verbatim, not masked by a later Close
+		// error or swallowed.
+		if !strings.Contains(err.Error(), "file already closed") {
+			t.Fatalf("syncDir(%q) = %v, want the propagated fsync error", dir, err)
+		}
+	})
+}
+
 func TestReadRejectsTemplateDirectoryProblems(t *testing.T) {
 	if _, err := Read(" "); err == nil {
 		t.Fatal("expected Read to reject an empty root")

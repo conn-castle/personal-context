@@ -323,6 +323,46 @@ func TestValidateFigureRefsExternalURLsIgnored(t *testing.T) {
 	}
 }
 
+// TestValidateFigureRefsQueryAndFragmentSuffixes guards the contract that a
+// figure reference carrying a query string or hash fragment resolves to the
+// bare on-disk filename, matching the web renderer (web/lib/record-utils.ts).
+// Without suffix stripping, `figures/plot.png?v=2` is reported missing even
+// though plot.png exists, so the same HTML the web UI renders fine would be
+// rejected by `pc add`/`pc edit`.
+func TestValidateFigureRefsQueryAndFragmentSuffixes(t *testing.T) {
+	present := []string{"/in/figures/plot.png", "/in/figures/diagram.svg"}
+
+	cases := []struct {
+		name string
+		html string
+	}{
+		{"query string", `<img src="figures/plot.png?v=2">`},
+		{"hash fragment", `<img src="figures/plot.png#frag">`},
+		{"query and fragment", `<img src="figures/plot.png?v=2#frag">`},
+		{"single-quoted with query", `<img src='figures/diagram.svg?cache=bust'>`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateFigureRefs(tc.html, present); err != nil {
+				t.Fatalf("expected suffixed figure ref to resolve to bare filename, got %v", err)
+			}
+		})
+	}
+}
+
+// TestValidateFigureRefsMissingFileWithSuffixReportsBareName verifies that a
+// genuinely missing figure is still reported, and that the suffix is stripped
+// from the reported name so the message names the file the user must add.
+func TestValidateFigureRefsMissingFileWithSuffixReportsBareName(t *testing.T) {
+	err := validateFigureRefs(`<img src="figures/absent.png?v=9#x">`, nil)
+	if err == nil {
+		t.Fatal("expected error for missing figure file")
+	}
+	if got := err.Error(); !strings.Contains(got, "absent.png") || strings.Contains(got, "?") || strings.Contains(got, "#") {
+		t.Fatalf("expected error to name bare 'absent.png' without suffix, got %q", got)
+	}
+}
+
 func writeFile(t *testing.T, dir, name, content string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
