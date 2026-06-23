@@ -142,6 +142,21 @@ describe("S3 utilities", () => {
         "PRESIGNED_URL_EXPIRY_SECONDS must be a positive integer"
       );
     });
+
+    // A fractional value must fail loud rather than be silently truncated
+    // (parseInt("3600.9") -> 3600). "12abc" likewise must be rejected, not
+    // coerced to 12.
+    it.each(["3600.9", "12abc"])(
+      "throws for non-integer PRESIGNED_URL_EXPIRY_SECONDS %j",
+      async (raw) => {
+        process.env.PRESIGNED_URL_EXPIRY_SECONDS = raw;
+        mockGetSignedUrl.mockResolvedValue("https://signed.example.com/key");
+
+        await expect(getPresignedUrl("key", userId)).rejects.toThrow(
+          "PRESIGNED_URL_EXPIRY_SECONDS must be a positive integer"
+        );
+      }
+    );
   });
 
   describe("getS3Version", () => {
@@ -209,6 +224,28 @@ describe("S3 utilities", () => {
       );
     });
 
+    // Raw JSON text (not JSON.stringify) so the numeric values survive: an
+    // out-of-range literal like 1e400 round-trips to Infinity via JSON.parse,
+    // which is typeof "number" and would slip past the typeof guard. All three
+    // pass typeof === "number" but are not valid int64 sync versions.
+    it.each([
+      ["a float version", '{"version": 2.5, "updated_at": "2026-03-09T00:00:00Z"}'],
+      ["a negative version", '{"version": -1, "updated_at": "2026-03-09T00:00:00Z"}'],
+      ["an Infinity version (1e400)", '{"version": 1e400, "updated_at": "2026-03-09T00:00:00Z"}'],
+    ])(
+      "throws for a JSON object with %s (version must be a non-negative integer)",
+      async (_label, rawJson) => {
+        mockSend.mockResolvedValue({
+          Body: {
+            transformToString: () => Promise.resolve(rawJson),
+          },
+        });
+        await expect(getS3Version(userId)).rejects.toThrow(
+          "version must be a non-negative integer"
+        );
+      }
+    );
+
     it("falls back to plain text int64 (Go CLI legacy format)", async () => {
       mockSend.mockResolvedValue({
         Body: { transformToString: () => Promise.resolve("42") },
@@ -233,6 +270,21 @@ describe("S3 utilities", () => {
         "Failed to parse _version content"
       );
     });
+
+    // The legacy plain-text fallback must accept only a bare non-negative
+    // decimal integer. parseInt() would silently coerce all of these to a
+    // wrong "valid" version (e.g. "12abc" -> 12, "-7" -> -7, "1e3" -> 1).
+    it.each(["12abc", "+5", "-7", "1e3", "0x10", "3.5"])(
+      "throws for malformed legacy plain-text version %j",
+      async (raw) => {
+        mockSend.mockResolvedValue({
+          Body: { transformToString: () => Promise.resolve(raw) },
+        });
+        await expect(getS3Version(userId)).rejects.toThrow(
+          "Failed to parse _version content"
+        );
+      }
+    );
 
     it("rethrows non-NotFound errors", async () => {
       mockSend.mockRejectedValue(new Error("NetworkError"));

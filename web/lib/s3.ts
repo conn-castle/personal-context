@@ -42,6 +42,15 @@ function parseVersionObject(body: string): { version: number; updated_at: string
     );
   }
 
+  // The sync version is an int64 counter; reject non-integer, negative, NaN, or
+  // Infinity values (all of which pass `typeof === "number"`) so corrupt
+  // payloads fail loud here instead of flowing into sync comparison logic.
+  if (!Number.isInteger(obj.version) || obj.version < 0) {
+    throw new Error(
+      "Failed to parse _version content: version must be a non-negative integer"
+    );
+  }
+
   return {
     version: obj.version,
     updated_at: obj.updated_at,
@@ -85,7 +94,11 @@ function getConfiguredPresignExpirySeconds(): number {
     return DEFAULT_PRESIGN_EXPIRY_SECONDS;
   }
 
-  const parsed = Number.parseInt(raw, 10);
+  // Use Number() rather than parseInt() so non-integer values fail loud. With
+  // parseInt(), "3600.9" silently truncated to 3600 and "12abc" to 12, and the
+  // Number.isInteger guard below could never fire (parseInt always yields an
+  // integer or NaN).
+  const parsed = Number(raw.trim());
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(
       "PRESIGNED_URL_EXPIRY_SECONDS must be a positive integer"
@@ -152,9 +165,11 @@ export async function getS3Version(userId: string): Promise<{
     }
 
     // Backward-compatible fallback: plain text int64 (Go CLI legacy format).
-    const v = parseInt(trimmedBody, 10);
-    if (!isNaN(v)) {
-      return { version: v, updated_at: "" };
+    // Require a bare non-negative decimal integer; `parseInt` would otherwise
+    // silently accept corrupt prefixes ("12abc" -> 12), signs ("+5", "-7"), and
+    // scientific notation ("1e3" -> 1).
+    if (/^\d+$/.test(trimmedBody)) {
+      return { version: Number(trimmedBody), updated_at: "" };
     }
     throw new Error(`Failed to parse _version content: ${body}`);
   } catch (err: unknown) {

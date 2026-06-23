@@ -65,6 +65,20 @@ describe("isValidISOTimestamp", () => {
     ["2025-03-04T14:32:00+00:00", true],
     ["not-a-timestamp", false],
     ["", false],
+    // Impossible calendar dates must be rejected. Plain `new Date(ts)` rolls
+    // these over (Feb 30 -> Mar 2) and reports them valid, so the date portion
+    // is validated explicitly.
+    ["2025-02-30T14:00:00Z", false],
+    ["2025-04-31T00:00:00Z", false],
+    ["2025-02-29T00:00:00Z", false],
+    ["2024-02-29T00:00:00Z", true],
+    // Timezone-offset timestamps that fall on a different UTC day must still be
+    // accepted: validating the UTC-shifted components instead of the literal
+    // date in the string would wrongly reject these.
+    ["2025-06-22T02:00:00+05:00", true],
+    ["2025-06-22T22:00:00-05:00", true],
+    // ...but an impossible date is still rejected even with an offset.
+    ["2025-02-30T02:00:00+05:00", false],
   ])("isValidISOTimestamp(%s) => %s", (input, expected) => {
     expect(isValidISOTimestamp(input)).toBe(expected);
   });

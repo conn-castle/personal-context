@@ -46,11 +46,20 @@ export function isValidDate(date: string): boolean {
 /**
  * Validates an ISO 8601 timestamp string.
  *
+ * The leading date portion must be a real calendar date (e.g. `2025-02-30` is
+ * rejected). The check is timezone-offset safe: it validates the literal
+ * `YYYY-MM-DD` in the string rather than the UTC-shifted components, so a valid
+ * offset timestamp such as `2025-06-22T02:00:00+05:00` is accepted even though
+ * it falls on a different UTC day.
+ *
  * @param ts - The timestamp string to validate.
  * @returns True if parseable as a valid date.
  */
 export function isValidISOTimestamp(ts: string): boolean {
   if (!ISO_TIMESTAMP_REGEX.test(ts)) return false;
+  // Validate the calendar date independently of any timezone offset. The regex
+  // guarantees positions 0-9 are the `YYYY-MM-DD` date portion.
+  if (!isValidDate(ts.slice(0, 10))) return false;
   const parsed = new Date(ts);
   return !isNaN(parsed.getTime());
 }
