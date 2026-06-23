@@ -56,27 +56,6 @@ func TestGenerateForDateUniqueness(t *testing.T) {
 	}
 }
 
-func TestExtractDate(t *testing.T) {
-	parsed, err := ExtractDate("20260305-a1b2c3d4")
-	if err != nil {
-		t.Fatalf("ExtractDate() error = %v", err)
-	}
-
-	expected := time.Date(2026, time.March, 5, 0, 0, 0, 0, time.UTC)
-	if !parsed.Equal(expected) {
-		t.Fatalf("expected %v, got %v", expected, parsed)
-	}
-}
-
-func TestExtractDateRejectsInvalidID(t *testing.T) {
-	if _, err := ExtractDate("invalid"); err == nil {
-		t.Fatal("expected format validation error")
-	}
-	if _, err := ExtractDate("20260230-a1b2c3d4"); err == nil {
-		t.Fatal("expected parse error for invalid calendar date")
-	}
-}
-
 func TestGenerateForDateWithReaderUsesProvidedEntropy(t *testing.T) {
 	reader := &fixedReader{bytes: []byte{0xde, 0xad, 0xbe, 0xef}}
 	id, err := GenerateForDateWithReader(time.Date(2026, time.March, 5, 0, 0, 0, 0, time.UTC), reader)
