@@ -57,10 +57,16 @@ export function RecordDatePicker({ records, onSelectDate }: RecordDatePickerProp
 
   const handleInputSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!inputValue.trim()) return
+    const trimmed = inputValue.trim()
+    if (!trimmed) return
 
-    // Try to parse the input as a date
-    const parsed = new Date(inputValue)
+    // A bare `YYYY-MM-DD` string is parsed by `new Date()` as UTC midnight,
+    // which shifts the local calendar day back for users west of UTC and would
+    // not match the calendar path (which builds local midnight). Parse the
+    // placeholder ISO format as local midnight to stay consistent. Other
+    // free-form inputs (e.g. "March 5 2025") already parse in local time.
+    const isoDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(trimmed)
+    const parsed = new Date(isoDateOnly ? `${trimmed}T00:00:00` : trimmed)
     if (isNaN(parsed.getTime())) {
       setInputError(true)
       return
@@ -88,12 +94,23 @@ export function RecordDatePicker({ records, onSelectDate }: RecordDatePickerProp
     },
   }
 
+  // Reset any in-progress input/error when the popover closes (Escape or
+  // outside-click), so a dismissed-but-unsubmitted entry does not reappear
+  // stale (with its error border) the next time the popover opens.
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (!nextOpen) {
+      setInputValue('')
+      setInputError(false)
+    }
+  }
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon-sm">
+            <Button variant="ghost" size="icon-sm" aria-label="Jump to date">
               <CalendarDays className="w-4 h-4" />
             </Button>
           </PopoverTrigger>

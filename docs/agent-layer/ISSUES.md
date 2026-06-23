@@ -27,6 +27,16 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-23 a8d2f1: AssetPreviewDialog has no DialogDescription / aria-describedby
+    Priority: Low. Area: web/components/asset-preview-dialog.tsx
+    Description: DialogContent renders a DialogTitle but no DialogDescription and no aria-describedby, so Radix logs a dev-only console warning ("Missing Description for DialogContent"). No production runtime impact. Surfaced in web/components audit (round-4 iter 16).
+    Next step: Genuine tradeoff — add a real DialogDescription (changes visible dialog content) vs. set `aria-describedby={undefined}` on DialogContent to silence the warning without adding copy. Decide which, then apply. Same pattern likely applies to other dialogs.
+
+- Issue 2026-06-23 p3k9w7: ProjectPicker shows "Clear All" selected when there are no projects
+    Priority: Low. Area: web/components/project-picker.tsx
+    Description: `isAllSelected = selectedProjects.length === projects.length` is `true` when both are 0, so the header row renders "Clear All" with a filled checkmark even though nothing exists to select. Cosmetic only; clicking it with an empty set is a no-op. Surfaced in web/components audit (round-4 iter 16).
+    Next step: Mild framing tradeoff — guard with `projects.length > 0 && selectedProjects.length === projects.length`, or treat empty-projects as a distinct empty-state. Pick one, then pin with a component test.
+
 - Issue 2026-06-23 w4d9k1: requireUser DB failure escapes the api-error contract as a framework 500
     Priority: Low. Area: web/lib/auth-helpers.ts, web/app/api/*/route.ts
     Description: Every authenticated route awaits `requireUser(req)` (or `requireSessionUser()`) BEFORE its per-route try/catch (e.g. records/route.ts:66 runs before the try at :70). If the auth DB lookup in `validateApiKey` (auth-helpers.ts:63) or `auth()` rejects (pool exhaustion, transient DB error), the rejection propagates out of the handler with no api-error.ts body, surfacing as a framework-level 500 that violates the enforced error-response contract (Decision e4t6y1). Healthy DB makes this rare.

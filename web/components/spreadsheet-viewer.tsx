@@ -66,25 +66,51 @@ function getSelectedRecordIndex(
 }
 
 /**
+ * Formats a Date as a `YYYY-MM-DD` string using its LOCAL calendar components.
+ *
+ * RecordDatePicker constructs the target Date from local midnight
+ * (`new Date(dateStr + 'T00:00:00')`) and matches the calendar against local
+ * date components, so the comparison key must also be derived locally.
+ * Using `toISOString()` (UTC) here would shift the day back for users east of
+ * UTC (positive offset, e.g. Asia/Tokyo) and break exact-date matching.
+ *
+ * @param date - The date to format.
+ * @returns The local-calendar date as `YYYY-MM-DD`.
+ */
+export function toLocalDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Finds the exact-date record or the nearest record by date when no exact match exists.
  *
  * @param records - The current filtered record list.
- * @param targetDate - The requested calendar date.
+ * @param targetDate - The requested calendar date (local midnight).
  * @returns The best record to jump to, if one exists.
  */
-function findNearestRecordByDate(
+export function findNearestRecordByDate(
   records: RecordSummary[],
   targetDate: Date
 ): RecordSummary | undefined {
-  const targetDateStr = targetDate.toISOString().split("T")[0];
+  const targetDateStr = toLocalDateKey(targetDate);
   const exactMatch = records.find((record) => record.date === targetDateStr);
   if (exactMatch) {
     return exactMatch;
   }
 
+  // Parse each record date as local midnight so the comparison stays in the
+  // same time basis as `targetDate` (which is local midnight from the picker).
+  const targetTime = targetDate.getTime();
   const [nearestRecord] = [...records].sort((left, right) => {
-    const leftDiff = Math.abs(new Date(left.date).getTime() - targetDate.getTime());
-    const rightDiff = Math.abs(new Date(right.date).getTime() - targetDate.getTime());
+    const leftDiff = Math.abs(
+      new Date(`${left.date}T00:00:00`).getTime() - targetTime
+    );
+    const rightDiff = Math.abs(
+      new Date(`${right.date}T00:00:00`).getTime() - targetTime
+    );
     return leftDiff - rightDiff;
   });
   return nearestRecord;

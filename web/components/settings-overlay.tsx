@@ -123,11 +123,15 @@ export function SettingsOverlay({
    * @returns Human-readable date/time string.
    */
   function formatSyncTime(iso: string): string {
-    try {
-      return new Date(iso).toLocaleString();
-    } catch {
+    // `new Date(iso)` returns an Invalid Date (it does not throw) for a
+    // malformed string, and `toLocaleString()` on an Invalid Date yields the
+    // literal "Invalid Date" rather than throwing — so a try/catch never fires.
+    // Guard explicitly and fall back to the raw value for unparseable input.
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) {
       return iso;
     }
+    return parsed.toLocaleString();
   }
 
   return (
