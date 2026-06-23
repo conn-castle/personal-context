@@ -57,13 +57,33 @@ export function RecordDatePicker({ records, onSelectDate }: RecordDatePickerProp
 
   const handleInputSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!inputValue.trim()) return
+    const trimmed = inputValue.trim()
+    if (!trimmed) return
 
-    // Try to parse the input as a date
-    const parsed = new Date(inputValue)
+    // A bare `YYYY-MM-DD` string is parsed by `new Date()` as UTC midnight,
+    // which shifts the local calendar day back for users west of UTC and would
+    // not match the calendar path (which builds local midnight). Parse the
+    // placeholder ISO format as local midnight to stay consistent. Other
+    // free-form inputs (e.g. "March 5 2025") already parse in local time.
+    const isoDateOnlyMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    const parsed = new Date(isoDateOnlyMatch ? `${trimmed}T00:00:00` : trimmed)
     if (isNaN(parsed.getTime())) {
       setInputError(true)
       return
+    }
+    // Reject impossible calendar dates like 2025-02-30: JS silently rolls them
+    // over to the next valid date, so the isNaN check passes but the user would
+    // navigate to the wrong record. Verify the parsed components match the input.
+    if (isoDateOnlyMatch) {
+      const [, y, m, d] = isoDateOnlyMatch
+      if (
+        parsed.getFullYear() !== Number(y) ||
+        parsed.getMonth() + 1 !== Number(m) ||
+        parsed.getDate() !== Number(d)
+      ) {
+        setInputError(true)
+        return
+      }
     }
 
     setInputError(false)
@@ -88,12 +108,23 @@ export function RecordDatePicker({ records, onSelectDate }: RecordDatePickerProp
     },
   }
 
+  // Reset any in-progress input/error when the popover closes (Escape or
+  // outside-click), so a dismissed-but-unsubmitted entry does not reappear
+  // stale (with its error border) the next time the popover opens.
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (!nextOpen) {
+      setInputValue('')
+      setInputError(false)
+    }
+  }
+
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <Button variant="ghost" size="icon-sm">
+            <Button variant="ghost" size="icon-sm" aria-label="Jump to date">
               <CalendarDays className="w-4 h-4" />
             </Button>
           </PopoverTrigger>

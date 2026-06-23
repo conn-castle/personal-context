@@ -170,6 +170,7 @@ export function RecordMetadataBar({ record, onDelete, onRestore, isEmpty }: Reco
                       className="text-primary hover:underline"
                     >
                       <ExternalLink className="w-3 h-3" />
+                      <span className="sr-only">View commit</span>
                     </a>
                   )}
                 </div>

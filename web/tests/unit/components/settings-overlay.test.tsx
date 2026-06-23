@@ -75,4 +75,23 @@ describe("SettingsOverlay", () => {
 
     expect(screen.queryByText("Sync error")).toBeNull();
   });
+
+  it("falls back to the raw string for an unparseable lastSyncAt", () => {
+    render(
+      <SettingsOverlay
+        open
+        onClose={() => undefined}
+        syncVersion={7}
+        lastSyncAt="not-a-timestamp"
+        syncError={null}
+        onDataChanged={() => undefined}
+      />
+    );
+
+    // A malformed timestamp produces an Invalid Date whose toLocaleString()
+    // yields the literal "Invalid Date" (it does not throw, so the old
+    // try/catch never fired). The guard must surface the raw value instead.
+    expect(screen.getByText("not-a-timestamp")).toBeTruthy();
+    expect(screen.queryByText("Invalid Date")).toBeNull();
+  });
 });

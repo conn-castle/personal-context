@@ -233,6 +233,14 @@ export async function PATCH(
       updated_at: string;
     }[];
 
+    // The record existed at the read above, but a concurrent hard-purge
+    // (DELETE /api/records/trash) can remove it before this UPDATE runs.
+    // Treat the vanished row as a clean 404 rather than dereferencing
+    // undefined below (which would surface as an opaque 500).
+    if (updateRows.length === 0) {
+      return notFound(`Record not found: ${id}`);
+    }
+
     const updated = updateRows[0];
 
     // Read sync_version and bump S3
