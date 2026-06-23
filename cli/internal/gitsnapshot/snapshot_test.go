@@ -1711,8 +1711,10 @@ func TestSnapshotReplacementSyncsExportRoot(t *testing.T) {
 		if rerr != nil {
 			t.Fatalf("Read(root) after second-fsync failure: %v", rerr)
 		}
-		if len(got.Templates) == 0 || got.Templates[0].Name != "new" {
-			t.Fatalf("snapshot contents after second-fsync failure: got templates %v, want [{Name:new}]", got.Templates)
+		if !reflect.DeepEqual(got.Templates, newSnapshot.Templates) ||
+			!reflect.DeepEqual(got.Projects, newSnapshot.Projects) ||
+			!reflect.DeepEqual(got.Devices, newSnapshot.Devices) {
+			t.Fatalf("snapshot contents after second-fsync failure:\ngot=%#v\nwant promoted snapshot=%#v", got, newSnapshot)
 		}
 	})
 }
