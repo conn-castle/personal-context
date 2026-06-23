@@ -86,6 +86,15 @@ func dbPath(homeDir string) string {
 // openLocalStack initializes all local dependencies: config, SQLite, repository, filesystem.
 // The caller must call Close() when done.
 func openLocalStack(homeDir string) (*localStack, error) {
+	if err := recoverInterruptedRestore(homeDir); err != nil {
+		return nil, fmt.Errorf("recover interrupted restore: %w", err)
+	}
+	return openLocalStackAt(homeDir, basePath(homeDir), dbPath(homeDir))
+}
+
+// openLocalStackAt initializes local dependencies for an explicit data root and
+// SQLite database path while still reading user configuration from homeDir.
+func openLocalStackAt(homeDir string, dataBasePath string, databasePath string) (*localStack, error) {
 	store, err := newConfigStoreFn(homeDir)
 	if err != nil {
 		return nil, fmt.Errorf("create config store: %w", err)
@@ -96,7 +105,7 @@ func openLocalStack(homeDir string) (*localStack, error) {
 		return nil, fmt.Errorf("read config: %w", err)
 	}
 
-	conn, err := openSQLiteFn(dbPath(homeDir))
+	conn, err := openSQLiteFn(databasePath)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
@@ -111,7 +120,7 @@ func openLocalStack(homeDir string) (*localStack, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("apply migrations: %w", err)
 	}
-	if err := verifyCanonicalSchemaTablesDuringOpen(context.Background(), conn.DB(), basePath(homeDir)); err != nil {
+	if err := verifyCanonicalSchemaTablesDuringOpen(context.Background(), conn.DB(), dataBasePath); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
@@ -122,7 +131,7 @@ func openLocalStack(homeDir string) (*localStack, error) {
 		return nil, fmt.Errorf("create repository: %w", err)
 	}
 
-	fsClient, err := newFilesystemClientFn(basePath(homeDir))
+	fsClient, err := newFilesystemClientFn(dataBasePath)
 	if err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("create filesystem client: %w", err)

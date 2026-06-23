@@ -235,6 +235,34 @@ func syncDir(dir string) error {
 
 var managedSnapshotEntries = []string{"projects.json", "devices.json", "templates", "records", "chats"}
 
+// ReplacementOptions configures a durable replacement of named entries under a
+// root. Entries must be relative paths. BackupDir is optional; when empty, a
+// temporary backup directory is created under root. BeforeRollback is called
+// after a replacement error is detected and before best-effort rollback starts.
+type ReplacementOptions struct {
+	Entries        []string
+	BackupDir      string
+	BeforeRollback func() error
+}
+
+// CommittedReplacementCleanupError reports a cleanup failure after replacement
+// entries were promoted and durably committed. Callers must not roll back the
+// replacement when this error is returned; they should surface the cleanup
+// failure and retry or defer cleanup separately.
+type CommittedReplacementCleanupError struct {
+	Err error
+}
+
+// Error returns the underlying committed-cleanup failure message.
+func (e *CommittedReplacementCleanupError) Error() string {
+	return e.Err.Error()
+}
+
+// Unwrap returns the underlying committed-cleanup failure.
+func (e *CommittedReplacementCleanupError) Unwrap() error {
+	return e.Err
+}
+
 // Write stages a deterministic snapshot, then replaces the managed export entries under root.
 func Write(root string, snapshot Snapshot) error {
 	if strings.TrimSpace(root) == "" {
@@ -483,10 +511,178 @@ func writeSnapshotContents(root string, snapshot Snapshot) error {
 	return nil
 }
 
-func replaceSnapshotContents(root string, stagingRoot string) error {
-	backupDir, err := os.MkdirTemp(root, ".snapshot-backup-*")
+// ReplaceContents durably replaces named root entries from stagingRoot. Root,
+// stagingRoot, and any supplied BackupDir must be on the same filesystem because
+// entries are promoted with rename(2). Missing staged entries intentionally
+// delete the corresponding live entries after backup, matching full-replacement
+// semantics.
+// Args: root is the live parent directory; stagingRoot contains replacement
+// entries at matching relative paths; options names entries and backup behavior.
+// Returns: nil on success, CommittedReplacementCleanupError when promotion
+// committed but backup cleanup failed, or another error after best-effort
+// rollback for pre-commit failures.
+func ReplaceContents(root string, stagingRoot string, options ReplacementOptions) error {
+	return replaceContents(root, stagingRoot, replacementOptions{
+		entries:        options.Entries,
+		backupDir:      options.BackupDir,
+		beforeRollback: options.BeforeRollback,
+	})
+}
+
+// CompleteReplacement rolls forward an interrupted same-filesystem replacement
+// using existing staging and backup directories.
+// Args: root is the live parent directory; stagingRoot contains any entries not
+// yet promoted; backupDir stores old live entries; entries names the managed
+// set; stagedEntries is the marker-persisted set of staged entries that existed
+// before promotion started, used to recognize entries already promoted.
+// Returns: nil when all remaining staged entries are promoted durably.
+func CompleteReplacement(root string, stagingRoot string, backupDir string, entries []string, stagedEntries []string) error {
+	cleanEntries, err := cleanReplacementEntries(entries)
 	if err != nil {
-		return fmt.Errorf("create snapshot backup dir: %w", err)
+		return err
+	}
+	originallyStaged := map[string]struct{}{}
+	for _, entry := range stagedEntries {
+		cleaned := filepath.Clean(entry)
+		originallyStaged[cleaned] = struct{}{}
+	}
+
+	touchedDirs := map[string]struct{}{}
+	for _, name := range cleanEntries {
+		staged := filepath.Join(stagingRoot, name)
+		stagedExists, err := pathExists(staged)
+		if err != nil {
+			return fmt.Errorf("inspect staged %s: %w", name, err)
+		}
+
+		target := filepath.Join(root, name)
+		backupTarget := filepath.Join(backupDir, name)
+		targetExists, err := pathExists(target)
+		if err != nil {
+			return fmt.Errorf("inspect existing %s: %w", name, err)
+		}
+		if targetExists {
+			backupExists, err := pathExists(backupTarget)
+			if err != nil {
+				return fmt.Errorf("inspect backup %s: %w", name, err)
+			}
+			if backupExists && !stagedExists {
+				if _, ok := originallyStaged[name]; ok {
+					touchReplacementRename(touchedDirs, backupTarget, target)
+					touchReplacementRename(touchedDirs, staged, target)
+					continue
+				}
+			}
+			if !backupExists && !stagedExists {
+				if _, ok := originallyStaged[name]; ok {
+					touchReplacementRename(touchedDirs, staged, target)
+					continue
+				}
+			}
+			if backupExists {
+				if err := os.RemoveAll(target); err != nil {
+					return fmt.Errorf("remove conflicting live %s: %w", name, err)
+				}
+				touchReplacementDir(touchedDirs, filepath.Dir(target))
+			} else {
+				if err := ensureReplacementParent(backupTarget); err != nil {
+					return fmt.Errorf("create backup parent for %s: %w", name, err)
+				}
+				if err := renameFileFn(target, backupTarget); err != nil {
+					return fmt.Errorf("backup existing %s: %w", name, err)
+				}
+				touchReplacementRename(touchedDirs, target, backupTarget)
+			}
+		}
+		if !stagedExists {
+			continue
+		}
+		if err := ensureReplacementParent(target); err != nil {
+			return fmt.Errorf("create target parent for %s: %w", name, err)
+		}
+		if err := renameFileFn(staged, target); err != nil {
+			return fmt.Errorf("promote staged %s: %w", name, err)
+		}
+		touchReplacementRename(touchedDirs, staged, target)
+	}
+	if err := syncReplacementDirs(root, touchedDirs); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RestoreReplacementBackup rolls back an interrupted same-filesystem replacement
+// from backupDir.
+// Args: root is the live parent directory; backupDir stores old live entries;
+// entries names the managed set to restore or clear; originalEntries is the
+// marker-persisted subset that existed before promotion, so an unbacked original
+// target is preserved while an unbacked new-only target is removed.
+// Returns: nil when the live tree is durably returned to the backup state.
+func RestoreReplacementBackup(root string, backupDir string, entries []string, originalEntries []string) error {
+	cleanEntries, err := cleanReplacementEntries(entries)
+	if err != nil {
+		return err
+	}
+	originalEntrySet, err := replacementEntrySet(originalEntries)
+	if err != nil {
+		return err
+	}
+
+	touchedDirs := map[string]struct{}{}
+	for i := len(cleanEntries) - 1; i >= 0; i-- {
+		name := cleanEntries[i]
+		target := filepath.Join(root, name)
+		backupTarget := filepath.Join(backupDir, name)
+		backupExists, err := pathExists(backupTarget)
+		if err != nil {
+			return fmt.Errorf("inspect backup %s: %w", name, err)
+		}
+		if !backupExists {
+			if _, ok := originalEntrySet[name]; ok {
+				continue
+			}
+		}
+		if err := os.RemoveAll(target); err != nil {
+			return fmt.Errorf("clear target %s: %w", name, err)
+		}
+		touchReplacementDir(touchedDirs, filepath.Dir(target))
+		if !backupExists {
+			continue
+		}
+		if err := ensureReplacementParent(target); err != nil {
+			return fmt.Errorf("create restore parent for %s: %w", name, err)
+		}
+		if err := renameFileFn(backupTarget, target); err != nil {
+			return fmt.Errorf("restore %s: %w", name, err)
+		}
+		touchReplacementRename(touchedDirs, backupTarget, target)
+	}
+	if err := syncReplacementDirs(root, touchedDirs); err != nil {
+		return err
+	}
+	return nil
+}
+
+type replacementOptions struct {
+	entries        []string
+	backupDir      string
+	beforeRollback func() error
+}
+
+func replaceSnapshotContents(root string, stagingRoot string) error {
+	return replaceContents(root, stagingRoot, replacementOptions{
+		entries: managedSnapshotEntries,
+	})
+}
+
+func replaceContents(root string, stagingRoot string, options replacementOptions) error {
+	entries, err := cleanReplacementEntries(options.entries)
+	if err != nil {
+		return err
+	}
+	backupDir, err := createReplacementBackupDir(root, options.backupDir)
+	if err != nil {
+		return err
 	}
 	cleanupBackup := true
 	defer func() {
@@ -495,67 +691,239 @@ func replaceSnapshotContents(root string, stagingRoot string) error {
 		}
 	}()
 
-	movedExisting := make([]string, 0, len(managedSnapshotEntries))
-	promoted := make([]string, 0, len(managedSnapshotEntries))
-	for _, name := range managedSnapshotEntries {
+	movedExisting := make([]string, 0, len(entries))
+	promoted := make([]string, 0, len(entries))
+	touchedDirs := map[string]struct{}{}
+	for _, name := range entries {
 		target := filepath.Join(root, name)
-		if _, err := os.Lstat(target); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, fmt.Errorf("inspect existing %s: %w", name, err), &cleanupBackup)
+		exists, err := pathExists(target)
+		if err != nil {
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("inspect existing %s: %w", name, err), &cleanupBackup, options.beforeRollback)
 		}
-		if err := renameFileFn(target, filepath.Join(backupDir, name)); err != nil {
-			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, fmt.Errorf("backup existing %s: %w", name, err), &cleanupBackup)
+		if !exists {
+			continue
 		}
+		backupTarget := filepath.Join(backupDir, name)
+		if err := ensureReplacementParent(backupTarget); err != nil {
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("create backup parent for %s: %w", name, err), &cleanupBackup, options.beforeRollback)
+		}
+		if err := renameFileFn(target, backupTarget); err != nil {
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("backup existing %s: %w", name, err), &cleanupBackup, options.beforeRollback)
+		}
+		touchReplacementRename(touchedDirs, target, backupTarget)
 		movedExisting = append(movedExisting, name)
 	}
 
-	for _, name := range managedSnapshotEntries {
+	for _, name := range entries {
 		staged := filepath.Join(stagingRoot, name)
-		if _, err := os.Lstat(staged); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, fmt.Errorf("inspect staged %s: %w", name, err), &cleanupBackup)
+		exists, err := pathExists(staged)
+		if err != nil {
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("inspect staged %s: %w", name, err), &cleanupBackup, options.beforeRollback)
 		}
-		if err := renameFileFn(staged, filepath.Join(root, name)); err != nil {
-			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, fmt.Errorf("promote staged %s: %w", name, err), &cleanupBackup)
+		if !exists {
+			continue
 		}
+		target := filepath.Join(root, name)
+		if err := ensureReplacementParent(target); err != nil {
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("create target parent for %s: %w", name, err), &cleanupBackup, options.beforeRollback)
+		}
+		if err := renameFileFn(staged, target); err != nil {
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("promote staged %s: %w", name, err), &cleanupBackup, options.beforeRollback)
+		}
+		touchReplacementRename(touchedDirs, staged, target)
 		promoted = append(promoted, name)
 	}
 
-	// Flush the export root so the promote renames are durably recorded. Without
-	// this, a crash after a successful return could lose the directory entries
-	// even though each staged file was fsynced, leaving a partial snapshot.
-	if err := syncDirFn(root); err != nil {
-		return restoreSnapshotContents(root, backupDir, movedExisting, promoted, fmt.Errorf("sync export root: %w", err), &cleanupBackup)
+	// Flush the export root and any nested directories touched by promotion so
+	// the rename set is durably recorded. Without this, a crash after a
+	// successful return could lose directory entries even though staged files
+	// were fsynced, leaving a partial replacement.
+	if err := syncReplacementDirs(root, touchedDirs); err != nil {
+		return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, err, &cleanupBackup, options.beforeRollback)
 	}
 
-	// The snapshot is now committed. Remove the backup directory and flush root
-	// again so the removal is durable before we return success. Without this
-	// second sync, a crash between return and the OS persisting the directory
-	// entry deletion could resurrect the backup directory, leaving stale data
-	// that could confuse future reads. Backup-removal errors are non-fatal
-	// (the snapshot write succeeded) but are propagated so callers know cleanup
-	// is needed.
+	// The replacement is now committed. Remove the backup directory and flush the
+	// backup parent so the removal is durable before returning success. Backup
+	// removal errors are propagated so callers know cleanup is needed.
 	cleanupBackup = false
 	if err := os.RemoveAll(backupDir); err != nil {
-		return fmt.Errorf("remove snapshot backup dir: %w", err)
+		return &CommittedReplacementCleanupError{Err: fmt.Errorf("remove snapshot backup dir: %w", err)}
 	}
-	if err := syncDirFn(root); err != nil {
-		return fmt.Errorf("sync export root after backup removal: %w", err)
+	if err := syncAfterBackupRemoval(root, backupDir); err != nil {
+		return &CommittedReplacementCleanupError{Err: err}
 	}
 
 	return nil
 }
 
-func restoreSnapshotContents(root string, backupDir string, movedExisting []string, promoted []string, cause error, cleanupBackup *bool) error {
+func createReplacementBackupDir(root string, backupDir string) (string, error) {
+	if backupDir != "" {
+		if err := ensureReplacementParent(backupDir); err != nil {
+			return "", fmt.Errorf("create replacement backup parent: %w", err)
+		}
+		if err := os.MkdirAll(backupDir, 0o700); err != nil {
+			return "", fmt.Errorf("create replacement backup dir: %w", err)
+		}
+		if err := syncDirFn(filepath.Dir(backupDir)); err != nil {
+			return "", fmt.Errorf("sync replacement backup parent: %w", err)
+		}
+		return backupDir, nil
+	}
+	created, err := os.MkdirTemp(root, ".snapshot-backup-*")
+	if err != nil {
+		return "", fmt.Errorf("create snapshot backup dir: %w", err)
+	}
+	return created, nil
+}
+
+func cleanReplacementEntries(entries []string) ([]string, error) {
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("replacement entries are required")
+	}
+	return cleanReplacementEntryList(entries)
+}
+
+func replacementEntrySet(entries []string) (map[string]struct{}, error) {
+	cleaned, err := cleanReplacementEntryList(entries)
+	if err != nil {
+		return nil, err
+	}
+	set := make(map[string]struct{}, len(cleaned))
+	for _, entry := range cleaned {
+		set[entry] = struct{}{}
+	}
+	return set, nil
+}
+
+func cleanReplacementEntryList(entries []string) ([]string, error) {
+	cleaned := make([]string, 0, len(entries))
+	seen := map[string]struct{}{}
+	for _, entry := range entries {
+		entry = filepath.Clean(entry)
+		if entry == "." || filepath.IsAbs(entry) || entry == ".." || strings.HasPrefix(entry, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("replacement entry must be a relative path under root: %q", entry)
+		}
+		if _, ok := seen[entry]; ok {
+			continue
+		}
+		seen[entry] = struct{}{}
+		cleaned = append(cleaned, entry)
+	}
+	return cleaned, nil
+}
+
+func pathExists(path string) (bool, error) {
+	if _, err := os.Lstat(path); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func ensureReplacementParent(path string) error {
+	parent := filepath.Dir(path)
+	missingParents := make([]string, 0)
+	for dir := parent; ; dir = filepath.Dir(dir) {
+		if _, err := os.Lstat(dir); err == nil {
+			break
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		missingParents = append(missingParents, dir)
+		next := filepath.Dir(dir)
+		if next == dir {
+			break
+		}
+	}
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return err
+	}
+	for i := len(missingParents) - 1; i >= 0; i-- {
+		if err := syncDirFn(filepath.Dir(missingParents[i])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func touchReplacementRename(touchedDirs map[string]struct{}, from string, to string) {
+	touchReplacementDir(touchedDirs, filepath.Dir(from))
+	touchReplacementDir(touchedDirs, filepath.Dir(to))
+}
+
+func touchReplacementDir(touchedDirs map[string]struct{}, dir string) {
+	if dir == "" || dir == "." {
+		return
+	}
+	touchedDirs[filepath.Clean(dir)] = struct{}{}
+}
+
+func syncReplacementDirs(root string, touchedDirs map[string]struct{}) error {
+	root = filepath.Clean(root)
+	touchedDirs[root] = struct{}{}
+	dirs := make([]string, 0, len(touchedDirs))
+	for dir := range touchedDirs {
+		dirs = append(dirs, filepath.Clean(dir))
+	}
+	sort.Slice(dirs, func(i, j int) bool {
+		if dirs[i] == root {
+			return true
+		}
+		if dirs[j] == root {
+			return false
+		}
+		return dirs[i] < dirs[j]
+	})
+	for _, dir := range dirs {
+		if err := syncDirFn(dir); err != nil {
+			if os.IsNotExist(err) && dir != root {
+				continue
+			}
+			if dir == root {
+				return fmt.Errorf("sync export root: %w", err)
+			}
+			return fmt.Errorf("sync replacement directory %s: %w", dir, err)
+		}
+	}
+	return nil
+}
+
+func syncAfterBackupRemoval(root string, backupDir string) error {
+	root = filepath.Clean(root)
+	parent := filepath.Clean(filepath.Dir(backupDir))
+	if parent == root {
+		if err := syncDirFn(root); err != nil {
+			return fmt.Errorf("sync export root after backup removal: %w", err)
+		}
+		return nil
+	}
+	if err := syncDirFn(parent); err != nil {
+		return fmt.Errorf("sync backup parent after backup removal: %w", err)
+	}
+	return nil
+}
+
+func rollbackSnapshotContents(root string, backupDir string, movedExisting []string, promoted []string, touchedDirs map[string]struct{}, cause error, cleanupBackup *bool, beforeRollback func() error) error {
+	if beforeRollback != nil {
+		if err := beforeRollback(); err != nil {
+			*cleanupBackup = false
+			return fmt.Errorf("%w; prepare replacement rollback: %v", cause, err)
+		}
+	}
+	return restoreSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, cause, cleanupBackup)
+}
+
+func restoreSnapshotContents(root string, backupDir string, movedExisting []string, promoted []string, touchedDirs map[string]struct{}, cause error, cleanupBackup *bool) error {
 	restoreErrors := make([]string, 0)
 	for i := len(promoted) - 1; i >= 0; i-- {
 		name := promoted[i]
-		if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
+		target := filepath.Join(root, name)
+		if err := os.RemoveAll(target); err != nil {
 			restoreErrors = append(restoreErrors, fmt.Sprintf("remove promoted %s: %v", name, err))
+		} else {
+			touchReplacementDir(touchedDirs, filepath.Dir(target))
 		}
 	}
 	for i := len(movedExisting) - 1; i >= 0; i-- {
@@ -565,13 +933,21 @@ func restoreSnapshotContents(root string, backupDir string, movedExisting []stri
 			restoreErrors = append(restoreErrors, fmt.Sprintf("clear target %s: %v", name, err))
 			continue
 		}
-		if err := renameFileFn(filepath.Join(backupDir, name), target); err != nil {
+		touchReplacementDir(touchedDirs, filepath.Dir(target))
+		backupTarget := filepath.Join(backupDir, name)
+		if err := ensureReplacementParent(target); err != nil {
+			restoreErrors = append(restoreErrors, fmt.Sprintf("create target parent %s: %v", name, err))
+			continue
+		}
+		if err := renameFileFn(backupTarget, target); err != nil {
 			restoreErrors = append(restoreErrors, fmt.Sprintf("restore %s: %v", name, err))
+		} else {
+			touchReplacementRename(touchedDirs, backupTarget, target)
 		}
 	}
 	// Flush the export root so the restore renames are durably recorded before we
 	// report the original failure and (on success) delete the backup.
-	if err := syncDirFn(root); err != nil {
+	if err := syncReplacementDirs(root, touchedDirs); err != nil {
 		restoreErrors = append(restoreErrors, fmt.Sprintf("sync export root: %v", err))
 	}
 	if len(restoreErrors) > 0 {

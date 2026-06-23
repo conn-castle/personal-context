@@ -2,8 +2,10 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 
 	"github.com/conn-castle/personal-context/cli/internal/gitsnapshot"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
@@ -53,22 +55,119 @@ func runRestoreDB(ctx context.Context, stdout io.Writer, _ io.Writer, path strin
 	}
 	_, _ = fmt.Fprintf(stdout, "Backup created at %s\n", backupPath)
 
-	if err := wipeLocalState(homeDir); err != nil {
-		return err
-	}
-	if err := ensureLocalEnvironment(ctx, homeDir); err != nil {
-		return err
-	}
-	stack, err = openLocalStack(homeDir)
+	originalEntries, err := listExistingRestorePayloadEntries(basePath(homeDir))
 	if err != nil {
 		return err
 	}
-	defer func() { _ = stack.Close() }()
-	stats, err := importSnapshotIntoStack(ctx, stack, snapshot)
+	stagingDir, err := createRestoreStagingDir(homeDir)
 	if err != nil {
+		return err
+	}
+	cleanupUnmarkedStaging := true
+	defer func() {
+		if cleanupUnmarkedStaging {
+			_ = cleanupRestoreStaging(newRestoreMarker(restorePhaseStaging, stagingDir, backupPath))
+		}
+	}()
+	stats, err := buildRestoreStagedStore(ctx, homeDir, stagingDir, snapshot)
+	if err != nil {
+		return err
+	}
+	stagedEntries, err := listExistingRestorePayloadEntries(stagingDir)
+	if err != nil {
+		return err
+	}
+
+	marker := newRestoreMarker(restorePhaseStaging, stagingDir, backupPath)
+	marker.StagedEntries = stagedEntries
+	marker.OriginalEntries = originalEntries
+	if err := writeRestoreMarker(homeDir, marker); err != nil {
+		return err
+	}
+	cleanupUnmarkedStaging = false
+	marker.Phase = restorePhaseCommitting
+	marker.Timestamp = restoreMarkerTimestamp()
+	if err := writeRestoreMarker(homeDir, marker); err != nil {
+		return err
+	}
+	if err := replaceRestoreContentsFn(basePath(homeDir), stagingDir, gitsnapshot.ReplacementOptions{
+		Entries:        restorePayloadEntries,
+		BackupDir:      restorePayloadBackupDir(backupPath),
+		BeforeRollback: func() error { return markRestoreRollbackOnly(homeDir, marker) },
+	}); err != nil {
+		var committedCleanupErr *gitsnapshot.CommittedReplacementCleanupError
+		if errors.As(err, &committedCleanupErr) {
+			if finishErr := finishCommittedRestore(homeDir, marker); finishErr != nil {
+				return fmt.Errorf("promote restored store committed; finish cleanup failed: %w; replacement cleanup failed: %v", finishErr, err)
+			}
+			return fmt.Errorf("promote restored store committed; replacement cleanup failed: %w", err)
+		}
+		if cleanupErr := abortFailedRestorePromotion(homeDir, marker); cleanupErr != nil {
+			return fmt.Errorf("promote restored store: %w; abort cleanup failed: %v", err, cleanupErr)
+		}
+		return fmt.Errorf("promote restored store: %w", err)
+	}
+	if err := finishCommittedRestore(homeDir, marker); err != nil {
 		return err
 	}
 
 	_, _ = fmt.Fprintf(stdout, "Restore complete: created %d, updated %d, skipped %d\n", stats.Created, stats.Updated, stats.Skipped)
 	return nil
+}
+
+var replaceRestoreContentsFn = gitsnapshot.ReplaceContents
+
+func abortFailedRestorePromotion(homeDir string, marker restoreMarker) error {
+	marker.RollbackOnly = true
+	marker.Timestamp = restoreMarkerTimestamp()
+	if err := writeRestoreMarker(homeDir, marker); err != nil {
+		return err
+	}
+	if err := gitsnapshot.RestoreReplacementBackup(basePath(homeDir), restorePayloadBackupDir(marker.BackupDir), restorePayloadEntries, marker.OriginalEntries); err != nil {
+		return fmt.Errorf("roll back failed restore promotion: %w", err)
+	}
+	return finishCommittedRestore(homeDir, marker)
+}
+
+// finishCommittedRestore records the committed state for homeDir, cleans the
+// marker-owned staging and payload backup paths, and removes the marker.
+func finishCommittedRestore(homeDir string, marker restoreMarker) error {
+	marker.Phase = restorePhaseDone
+	marker.Timestamp = restoreMarkerTimestamp()
+	if err := writeRestoreMarker(homeDir, marker); err != nil {
+		return err
+	}
+	if err := cleanupCompletedRestore(marker); err != nil {
+		return err
+	}
+	return removeRestoreMarker(homeDir)
+}
+
+func markRestoreRollbackOnly(homeDir string, marker restoreMarker) error {
+	marker.RollbackOnly = true
+	marker.Timestamp = restoreMarkerTimestamp()
+	return writeRestoreMarker(homeDir, marker)
+}
+
+func buildRestoreStagedStore(ctx context.Context, homeDir string, stagingDir string, snapshot gitsnapshot.Snapshot) (importStats, error) {
+	stagingDBPath := filepath.Join(stagingDir, ".pc", "pc.db")
+	if err := ensureLocalEnvironmentAt(ctx, homeDir, stagingDir, stagingDBPath, false); err != nil {
+		return importStats{}, err
+	}
+	stack, err := openLocalStackAt(homeDir, stagingDir, stagingDBPath)
+	if err != nil {
+		return importStats{}, err
+	}
+	stats, importErr := importSnapshotIntoStack(ctx, stack, snapshot)
+	closeErr := stack.Close()
+	if importErr != nil {
+		return stats, importErr
+	}
+	if closeErr != nil {
+		return stats, closeErr
+	}
+	if err := syncRestorePayload(stagingDir); err != nil {
+		return stats, err
+	}
+	return stats, nil
 }
