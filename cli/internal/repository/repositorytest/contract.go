@@ -999,6 +999,27 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		if err := repo.DeleteRecord(ctx, "20259999-missing00"); !errors.Is(err, repository.ErrNotFound) {
 			t.Fatalf("expected ErrNotFound for missing record delete, got %v", err)
 		}
+
+		// Updating a valid-but-nonexistent row must return ErrNotFound, not a
+		// zero-value success. Both adapters implement this (SQLite via
+		// ensureRowsAffected, Postgres via RETURNING -> ErrNoRows -> mapPgError);
+		// these assertions pin that shared contract so a regression that silently
+		// returns a zero-value result with nil error is caught.
+		if _, err := repo.UpdateRecord(ctx, repository.UpdateRecordInput{
+			ID:             "20259999-missing00",
+			Date:           "2025-03-03",
+			DayOrder:       "a",
+			ProjectID:      "missing/project",
+			SourceDeviceID: "missing-device",
+		}); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound for missing record update, got %v", err)
+		}
+		if _, err := repo.UpdateRecordFigure(ctx, repository.UpdateRecordFigureInput{ID: 99999999}); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound for missing figure update, got %v", err)
+		}
+		if _, err := repo.UpdateRecordDataFile(ctx, repository.UpdateRecordDataFileInput{ID: 99999999}); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("expected ErrNotFound for missing data-file update, got %v", err)
+		}
 	})
 
 	t.Run("updated_at window filters are inclusive", func(t *testing.T) {

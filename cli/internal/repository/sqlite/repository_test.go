@@ -531,23 +531,47 @@ func TestSearchHelpers(t *testing.T) {
 		t.Fatalf("sqliteFTSQuery() = %q", query)
 	}
 
-	recordID := domainResultID(repository.DomainSearchResult{
-		Record: &repository.Record{ID: "20260305-aabbccdd"},
-	})
-	if recordID != "20260305-aabbccdd" {
-		t.Fatalf("record domainResultID = %q", recordID)
+	chatResult := func(sessionID string, ordinal int) repository.DomainSearchResult {
+		return repository.DomainSearchResult{
+			Domain: "chats",
+			Chat: &repository.ChatSearchResult{
+				Session: repository.ChatSession{ID: sessionID},
+				Item:    repository.ChatItem{Ordinal: ordinal},
+			},
+		}
 	}
-	chatID := domainResultID(repository.DomainSearchResult{
-		Chat: &repository.ChatSearchResult{
-			Session: repository.ChatSession{ID: "20260305-deadbeef"},
-			Item:    repository.ChatItem{Ordinal: 7},
-		},
-	})
-	if chatID != "20260305-deadbeef/000007" {
-		t.Fatalf("chat domainResultID = %q", chatID)
+	recordResult := func(id string) repository.DomainSearchResult {
+		return repository.DomainSearchResult{Domain: "records", Record: &repository.Record{ID: id}}
 	}
-	if emptyID := domainResultID(repository.DomainSearchResult{}); emptyID != "" {
-		t.Fatalf("empty domainResultID = %q, want empty", emptyID)
+
+	// Records tiebreak by id, mirroring `ORDER BY ..., records.id`.
+	if !lessSameDomainTiebreak(recordResult("20260305-aaaaaaaa"), recordResult("20260305-bbbbbbbb")) {
+		t.Fatal("record tiebreak: lower id must sort first")
+	}
+	if lessSameDomainTiebreak(recordResult("20260305-bbbbbbbb"), recordResult("20260305-aaaaaaaa")) {
+		t.Fatal("record tiebreak: higher id must not sort first")
+	}
+
+	// Chats tiebreak by session id first, then ordinal.
+	if !lessSameDomainTiebreak(chatResult("20260305-aaaaaaaa", 99), chatResult("20260305-bbbbbbbb", 1)) {
+		t.Fatal("chat tiebreak: lower session id must sort first regardless of ordinal")
+	}
+
+	// Ordinals compare NUMERICALLY, not lexicographically. This is the case the
+	// removed `%06d` string key got wrong: lexicographically "1000000" < "999999"
+	// (because '1' < '9'), but numerically 999999 < 1000000. The merge must match
+	// SQL's numeric `ci.ordinal` order so the bounded per-domain LIMIT keeps the
+	// correct pagination boundary element for sessions with very high ordinals.
+	if !lessSameDomainTiebreak(chatResult("20260305-deadbeef", 999_999), chatResult("20260305-deadbeef", 1_000_000)) {
+		t.Fatal("chat tiebreak: ordinal 999999 must sort before 1000000 (numeric order)")
+	}
+	if lessSameDomainTiebreak(chatResult("20260305-deadbeef", 1_000_000), chatResult("20260305-deadbeef", 999_999)) {
+		t.Fatal("chat tiebreak: ordinal 1000000 must not sort before 999999")
+	}
+
+	// Equal results are not strictly less than each other (irreflexive).
+	if lessSameDomainTiebreak(chatResult("20260305-deadbeef", 7), chatResult("20260305-deadbeef", 7)) {
+		t.Fatal("chat tiebreak: equal results must not report less-than")
 	}
 }
 
@@ -2530,20 +2554,6 @@ func TestWriteChatImportBatchValidationAndEmpty(t *testing.T) {
 func TestSQLiteChatSmallHelperBranches(t *testing.T) {
 	if got := sqliteFTSQuery(`quoted "needle"`); got != `"quoted" """needle"""` {
 		t.Fatalf("sqliteFTSQuery() = %q", got)
-	}
-	recordID := domainResultID(repository.DomainSearchResult{Record: &repository.Record{ID: "record-id"}})
-	if recordID != "record-id" {
-		t.Fatalf("domainResultID(record) = %q", recordID)
-	}
-	chatID := domainResultID(repository.DomainSearchResult{Chat: &repository.ChatSearchResult{
-		Session: repository.ChatSession{ID: "chat-id"},
-		Item:    repository.ChatItem{Ordinal: 7},
-	}})
-	if chatID != "chat-id/000007" {
-		t.Fatalf("domainResultID(chat) = %q", chatID)
-	}
-	if empty := domainResultID(repository.DomainSearchResult{}); empty != "" {
-		t.Fatalf("domainResultID(empty) = %q", empty)
 	}
 	where, args, err := listRecordsPredicateSQL(repository.ListRecordsFilter{Query: strPtr("needle")}, "", true)
 	if err != nil {

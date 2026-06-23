@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-23 v3n8d1: Postgres GetSyncVersion first-insert race can spuriously return ErrNotFound
+    Priority: Low. Area: cli/internal/repository/postgres/repository.go
+    Description: GetSyncVersion does `INSERT ... ON CONFLICT (user_id) DO NOTHING RETURNING ...` and, on pgx.ErrNoRows, falls back to a SELECT. Under read-committed isolation, two concurrent first-time syncs for the same brand-new user can both miss the RETURNING (one loses the INSERT race), and the loser's fallback SELECT can run before the winner's INSERT commits, surfacing ErrNotFound. Very narrow window; usage is effectively singleton-per-user so real-world likelihood is low. Postgres-only path (Docker integration test).
+    Next step: Genuine tradeoff (changes the query shape) — switch to `ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id RETURNING ...` so the row is always returned and the fallback SELECT is removed. Verify against the Postgres integration suite. Capture before implementing.
+
 - Issue 2026-06-23 p9r1k4: Go CLI codebase docstring coverage is far below 80% threshold
     Priority: Low. Area: cli/ (all packages)
     Description: CodeRabbit pre-merge check reports 12.90% docstring coverage vs a configured 80% threshold. The gap is global (pre-existing across the entire codebase, not introduced by any single PR) and spans most exported functions and types.
