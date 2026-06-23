@@ -613,16 +613,14 @@ func RestoreReplacementBackup(root string, backupDir string, entries []string, o
 			if _, ok := originalEntrySet[name]; ok {
 				continue
 			}
-			if err := os.RemoveAll(target); err != nil {
-				return fmt.Errorf("clear target %s: %w", name, err)
-			}
-			touchReplacementDir(touchedDirs, filepath.Dir(target))
-			continue
 		}
 		if err := os.RemoveAll(target); err != nil {
 			return fmt.Errorf("clear target %s: %w", name, err)
 		}
 		touchReplacementDir(touchedDirs, filepath.Dir(target))
+		if !backupExists {
+			continue
+		}
 		if err := ensureReplacementParent(target); err != nil {
 			return fmt.Errorf("create restore parent for %s: %w", name, err)
 		}
