@@ -372,6 +372,11 @@ func TestRestoreDBPromoteFailureDoesNotLaterRollForward(t *testing.T) {
 			}
 			break
 		}
+		if options.BeforeRollback != nil {
+			if err := options.BeforeRollback(); err != nil {
+				return err
+			}
+		}
 		return errors.New("promote failed")
 	}
 	err := runRestoreDB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, snapshotDir)
@@ -414,6 +419,11 @@ func TestRestoreDBPromoteFailureCleanupFailureLeavesCleanupOnlyMarker(t *testing
 		if err := os.Chmod(filepath.Join(stagingRoot, ".pc"), 0o500); err != nil {
 			return err
 		}
+		if options.BeforeRollback != nil {
+			if err := options.BeforeRollback(); err != nil {
+				return err
+			}
+		}
 		return errors.New("promote failed")
 	}
 	err := runRestoreDB(context.Background(), &bytes.Buffer{}, &bytes.Buffer{}, snapshotDir)
@@ -443,18 +453,55 @@ func TestRestoreDBPromoteFailureCleanupFailureLeavesCleanupOnlyMarker(t *testing
 	assertRestoreMarkerAndStagingCleaned(t, homeDir)
 }
 
+func TestRecoverInterruptedRestoreRollbackOnlyNeverRollsForward(t *testing.T) {
+	fixture := setupRestoreAtomicityFixture(t)
+	marker := committingRestoreMarkerForTest(t, fixture)
+	marker.RollbackOnly = true
+	if err := writeRestoreMarker(fixture.homeDir, marker); err != nil {
+		t.Fatalf("writeRestoreMarker() error = %v", err)
+	}
+	base := basePath(fixture.homeDir)
+	payloadBackupDir := restorePayloadBackupDir(fixture.backupPath)
+	for _, entry := range restorePayloadEntries {
+		live := filepath.Join(base, entry)
+		if !testPathExists(live) {
+			continue
+		}
+		backup := filepath.Join(payloadBackupDir, entry)
+		if err := os.MkdirAll(filepath.Dir(backup), 0o700); err != nil {
+			t.Fatalf("create backup parent for %s: %v", entry, err)
+		}
+		if err := os.Rename(live, backup); err != nil {
+			t.Fatalf("backup live %s: %v", entry, err)
+		}
+	}
+	for _, entry := range restorePayloadEntries {
+		staged := filepath.Join(fixture.stagingDir, entry)
+		if !testPathExists(staged) {
+			continue
+		}
+		live := filepath.Join(base, entry)
+		if err := os.MkdirAll(filepath.Dir(live), 0o700); err != nil {
+			t.Fatalf("create live parent for %s: %v", entry, err)
+		}
+		if err := os.Rename(staged, live); err != nil {
+			t.Fatalf("promote staged %s: %v", entry, err)
+		}
+		break
+	}
+
+	if err := recoverInterruptedRestore(fixture.homeDir); err != nil {
+		t.Fatalf("recoverInterruptedRestore() error = %v", err)
+	}
+	assertRestoreStoreHasOnlyRecord(t, fixture.homeDir, fixture.oldID, "old.png", []byte("old-figure"), restoreAtomicityNewRecordID)
+	assertRestoreMarkerAndStagingCleaned(t, fixture.homeDir)
+}
+
 func TestAbortFailedRestorePromotionErrorPaths(t *testing.T) {
 	t.Run("rollback failure", func(t *testing.T) {
 		homeDir := setupEnv(t)
-		backupFile := filepath.Join(basePath(homeDir), ".pc", "backups", "restore-db-file")
-		if err := os.MkdirAll(filepath.Dir(backupFile), 0o700); err != nil {
-			t.Fatalf("mkdir backup parent: %v", err)
-		}
-		if err := os.WriteFile(backupFile, []byte("not a directory"), 0o600); err != nil {
-			t.Fatalf("write backup file: %v", err)
-		}
-		marker := newRestoreMarker(restorePhaseCommitting, filepath.Join(t.TempDir(), "stage"), backupFile)
-		marker.OriginalEntries = []string{filepath.Join(".pc", "pc.db")}
+		marker := newRestoreMarker(restorePhaseCommitting, filepath.Join(t.TempDir(), "stage"), filepath.Join(basePath(homeDir), ".pc", "backups", "restore-db-test"))
+		marker.OriginalEntries = []string{"/not-relative"}
 		err := abortFailedRestorePromotion(homeDir, marker)
 		if err == nil || !strings.Contains(err.Error(), "roll back failed restore promotion") {
 			t.Fatalf("abortFailedRestorePromotion() error = %v, want rollback failure", err)
@@ -484,6 +531,23 @@ func TestAbortFailedRestorePromotionErrorPaths(t *testing.T) {
 		}
 		assertRestoreStoreHasOnlyRecordOnDisk(t, homeDir, oldID, "old.png", []byte("old-figure"), restoreAtomicityNewRecordID)
 	})
+}
+
+func TestCreateRestoreStagingDirFailsWhenParentSyncFails(t *testing.T) {
+	homeDir := setupEnv(t)
+	pcDir := filepath.Join(basePath(homeDir), ".pc")
+	origSync := syncDirFn
+	syncDirFn = func(dir string) error {
+		if filepath.Clean(dir) == filepath.Clean(pcDir) {
+			return errors.New("sync failed")
+		}
+		return origSync(dir)
+	}
+	t.Cleanup(func() { syncDirFn = origSync })
+
+	if _, err := createRestoreStagingDir(homeDir); err == nil || !strings.Contains(err.Error(), "sync restore staging parent") {
+		t.Fatalf("createRestoreStagingDir() error = %v, want staging parent sync failure", err)
+	}
 }
 
 func TestRestoreRecoverySupportErrorPaths(t *testing.T) {
@@ -577,6 +641,19 @@ func TestRestoreRecoverySupportErrorPaths(t *testing.T) {
 		}
 	})
 
+	t.Run("committing rollback-only rollback failure fails loud", func(t *testing.T) {
+		fixture := setupRestoreAtomicityFixture(t)
+		marker := committingRestoreMarkerForTest(t, fixture)
+		marker.RollbackOnly = true
+		marker.OriginalEntries = []string{"/not-relative"}
+		if err := writeRestoreMarker(fixture.homeDir, marker); err != nil {
+			t.Fatalf("writeRestoreMarker() error = %v", err)
+		}
+		if err := recoverInterruptedRestore(fixture.homeDir); err == nil || !strings.Contains(err.Error(), "roll back interrupted restore") {
+			t.Fatalf("recoverInterruptedRestore() error = %v, want rollback failure", err)
+		}
+	})
+
 	t.Run("committing rollback surfaces backup inspection failure", func(t *testing.T) {
 		homeDir := setupEnv(t)
 		if err := os.Remove(dbPath(homeDir)); err != nil {
@@ -597,6 +674,25 @@ func TestRestoreRecoverySupportErrorPaths(t *testing.T) {
 		}
 		if err := recoverInterruptedRestore(homeDir); err == nil || !strings.Contains(err.Error(), "roll back interrupted restore") {
 			t.Fatalf("recoverInterruptedRestore() error = %v, want rollback failure", err)
+		}
+	})
+
+	t.Run("committing staging path file fails loud", func(t *testing.T) {
+		fixture := setupRestoreAtomicityFixture(t)
+		marker := committingRestoreMarkerForTest(t, fixture)
+		stagingFile := filepath.Join(basePath(fixture.homeDir), ".pc", "restore-staging-file")
+		if err := os.RemoveAll(fixture.stagingDir); err != nil {
+			t.Fatalf("remove staging dir: %v", err)
+		}
+		if err := os.WriteFile(stagingFile, []byte("not a directory"), 0o600); err != nil {
+			t.Fatalf("write staging file: %v", err)
+		}
+		marker.StagingDir = stagingFile
+		if err := writeRestoreMarker(fixture.homeDir, marker); err != nil {
+			t.Fatalf("writeRestoreMarker() error = %v", err)
+		}
+		if err := recoverInterruptedRestore(fixture.homeDir); err == nil || !strings.Contains(err.Error(), "restore staging path is not a directory") {
+			t.Fatalf("recoverInterruptedRestore() error = %v, want staging file failure", err)
 		}
 	})
 
@@ -643,6 +739,29 @@ func TestRestoreRecoverySupportErrorPaths(t *testing.T) {
 			t.Fatalf("recoverInterruptedRestore() error = %v", err)
 		}
 		assertRestoreMarkerAndStagingCleaned(t, homeDir)
+	})
+
+	t.Run("committing cleanup failure leaves marker for retry", func(t *testing.T) {
+		fixture := setupRestoreAtomicityFixture(t)
+		marker := committingRestoreMarkerForTest(t, fixture)
+		if err := writeRestoreMarker(fixture.homeDir, marker); err != nil {
+			t.Fatalf("writeRestoreMarker() error = %v", err)
+		}
+		simulateRestoreRenameSteps(t, fixture.homeDir, fixture.stagingDir, fixture.backupPath, countRestoreRenameSteps(fixture.homeDir, fixture.stagingDir))
+		origSync := syncDirFn
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(fixture.backupPath) {
+				return errors.New("sync failed")
+			}
+			return origSync(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSync })
+		if err := recoverInterruptedRestore(fixture.homeDir); err == nil || !strings.Contains(err.Error(), "sync restore payload backup cleanup") {
+			t.Fatalf("recoverInterruptedRestore() error = %v, want cleanup sync failure", err)
+		}
+		if _, err := os.Stat(restoreMarkerPath(fixture.homeDir)); err != nil {
+			t.Fatalf("marker should remain for cleanup retry, stat err=%v", err)
+		}
 	})
 
 	t.Run("create staging dir sync failure", func(t *testing.T) {

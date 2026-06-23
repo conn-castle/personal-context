@@ -43,6 +43,7 @@ type restoreMarker struct {
 	Timestamp       string   `json:"timestamp"`
 	StagedEntries   []string `json:"staged_entries,omitempty"`
 	OriginalEntries []string `json:"original_entries,omitempty"`
+	RollbackOnly    bool     `json:"rollback_only,omitempty"`
 }
 
 func newRestoreMarker(phase string, stagingDir string, backupDir string) restoreMarker {
@@ -142,6 +143,15 @@ func recoverCommittingRestore(homeDir string, marker restoreMarker) error {
 	}
 	if marker.OriginalEntries == nil {
 		return fmt.Errorf("restore marker committing phase is missing original_entries")
+	}
+	if marker.RollbackOnly {
+		if err := gitsnapshot.RestoreReplacementBackup(base, payloadBackupDir, restorePayloadEntries, marker.OriginalEntries); err != nil {
+			return fmt.Errorf("roll back interrupted restore: %w", err)
+		}
+		if !liveDatabaseExists(base) {
+			return fmt.Errorf("roll back interrupted restore: restored database is missing")
+		}
+		return nil
 	}
 	stagingInfo, stagingErr := os.Stat(marker.StagingDir)
 	stagingDirExists := stagingErr == nil && stagingInfo.IsDir()

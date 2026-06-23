@@ -237,10 +237,12 @@ var managedSnapshotEntries = []string{"projects.json", "devices.json", "template
 
 // ReplacementOptions configures a durable replacement of named entries under a
 // root. Entries must be relative paths. BackupDir is optional; when empty, a
-// temporary backup directory is created under root.
+// temporary backup directory is created under root. BeforeRollback is called
+// after a replacement error is detected and before best-effort rollback starts.
 type ReplacementOptions struct {
-	Entries   []string
-	BackupDir string
+	Entries        []string
+	BackupDir      string
+	BeforeRollback func() error
 }
 
 // Write stages a deterministic snapshot, then replaces the managed export entries under root.
@@ -501,8 +503,9 @@ func writeSnapshotContents(root string, snapshot Snapshot) error {
 // Returns: nil on success or an error after best-effort rollback.
 func ReplaceContents(root string, stagingRoot string, options ReplacementOptions) error {
 	return replaceContents(root, stagingRoot, replacementOptions{
-		entries:   options.Entries,
-		backupDir: options.BackupDir,
+		entries:        options.Entries,
+		backupDir:      options.BackupDir,
+		beforeRollback: options.BeforeRollback,
 	})
 }
 
@@ -636,8 +639,9 @@ func RestoreReplacementBackup(root string, backupDir string, entries []string, o
 }
 
 type replacementOptions struct {
-	entries   []string
-	backupDir string
+	entries        []string
+	backupDir      string
+	beforeRollback func() error
 }
 
 func replaceSnapshotContents(root string, stagingRoot string) error {
@@ -669,17 +673,17 @@ func replaceContents(root string, stagingRoot string, options replacementOptions
 		target := filepath.Join(root, name)
 		exists, err := pathExists(target)
 		if err != nil {
-			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("inspect existing %s: %w", name, err), &cleanupBackup)
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("inspect existing %s: %w", name, err), &cleanupBackup, options.beforeRollback)
 		}
 		if !exists {
 			continue
 		}
 		backupTarget := filepath.Join(backupDir, name)
 		if err := ensureReplacementParent(backupTarget); err != nil {
-			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("create backup parent for %s: %w", name, err), &cleanupBackup)
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("create backup parent for %s: %w", name, err), &cleanupBackup, options.beforeRollback)
 		}
 		if err := renameFileFn(target, backupTarget); err != nil {
-			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("backup existing %s: %w", name, err), &cleanupBackup)
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("backup existing %s: %w", name, err), &cleanupBackup, options.beforeRollback)
 		}
 		touchReplacementRename(touchedDirs, target, backupTarget)
 		movedExisting = append(movedExisting, name)
@@ -689,17 +693,17 @@ func replaceContents(root string, stagingRoot string, options replacementOptions
 		staged := filepath.Join(stagingRoot, name)
 		exists, err := pathExists(staged)
 		if err != nil {
-			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("inspect staged %s: %w", name, err), &cleanupBackup)
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("inspect staged %s: %w", name, err), &cleanupBackup, options.beforeRollback)
 		}
 		if !exists {
 			continue
 		}
 		target := filepath.Join(root, name)
 		if err := ensureReplacementParent(target); err != nil {
-			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("create target parent for %s: %w", name, err), &cleanupBackup)
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("create target parent for %s: %w", name, err), &cleanupBackup, options.beforeRollback)
 		}
 		if err := renameFileFn(staged, target); err != nil {
-			return restoreSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("promote staged %s: %w", name, err), &cleanupBackup)
+			return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, fmt.Errorf("promote staged %s: %w", name, err), &cleanupBackup, options.beforeRollback)
 		}
 		touchReplacementRename(touchedDirs, staged, target)
 		promoted = append(promoted, name)
@@ -710,7 +714,7 @@ func replaceContents(root string, stagingRoot string, options replacementOptions
 	// successful return could lose directory entries even though staged files
 	// were fsynced, leaving a partial replacement.
 	if err := syncReplacementDirs(root, touchedDirs); err != nil {
-		return restoreSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, err, &cleanupBackup)
+		return rollbackSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, err, &cleanupBackup, options.beforeRollback)
 	}
 
 	// The replacement is now committed. Remove the backup directory and flush the
@@ -871,6 +875,16 @@ func syncAfterBackupRemoval(root string, backupDir string) error {
 		return fmt.Errorf("sync backup parent after backup removal: %w", err)
 	}
 	return nil
+}
+
+func rollbackSnapshotContents(root string, backupDir string, movedExisting []string, promoted []string, touchedDirs map[string]struct{}, cause error, cleanupBackup *bool, beforeRollback func() error) error {
+	if beforeRollback != nil {
+		if err := beforeRollback(); err != nil {
+			*cleanupBackup = false
+			return fmt.Errorf("%w; prepare replacement rollback: %v", cause, err)
+		}
+	}
+	return restoreSnapshotContents(root, backupDir, movedExisting, promoted, touchedDirs, cause, cleanupBackup)
 }
 
 func restoreSnapshotContents(root string, backupDir string, movedExisting []string, promoted []string, touchedDirs map[string]struct{}, cause error, cleanupBackup *bool) error {

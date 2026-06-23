@@ -1795,6 +1795,75 @@ func TestReplaceContentsProvidedBackupSyncFailures(t *testing.T) {
 	})
 }
 
+func TestReplaceContentsCallsHookBeforeRollback(t *testing.T) {
+	root := t.TempDir()
+	staging := t.TempDir()
+	backupDir := filepath.Join(t.TempDir(), "payload-backup")
+	entries := []string{filepath.Join(".pc", "pc.db")}
+	writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "old-db")
+	writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+	origSync := syncDirFn
+	syncDirFn = func(dir string) error {
+		if filepath.Clean(dir) == filepath.Clean(root) {
+			return errors.New("sync failed")
+		}
+		return origSync(dir)
+	}
+	t.Cleanup(func() { syncDirFn = origSync })
+
+	hookCalled := false
+	err := ReplaceContents(root, staging, ReplacementOptions{
+		Entries:   entries,
+		BackupDir: backupDir,
+		BeforeRollback: func() error {
+			hookCalled = true
+			assertReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
+			assertReplacementTestFile(t, filepath.Join(backupDir, ".pc", "pc.db"), "old-db")
+			return nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "sync export root") {
+		t.Fatalf("ReplaceContents() error = %v, want sync failure", err)
+	}
+	if !hookCalled {
+		t.Fatal("BeforeRollback hook was not called")
+	}
+	assertReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "old-db")
+}
+
+func TestReplaceContentsRetainsInterruptedStateWhenRollbackHookFails(t *testing.T) {
+	root := t.TempDir()
+	staging := t.TempDir()
+	backupDir := filepath.Join(t.TempDir(), "payload-backup")
+	entries := []string{filepath.Join(".pc", "pc.db")}
+	writeReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "old-db")
+	writeReplacementTestFile(t, filepath.Join(staging, ".pc", "pc.db"), "new-db")
+	origSync := syncDirFn
+	syncDirFn = func(dir string) error {
+		if filepath.Clean(dir) == filepath.Clean(root) {
+			return errors.New("sync failed")
+		}
+		return origSync(dir)
+	}
+	t.Cleanup(func() { syncDirFn = origSync })
+
+	err := ReplaceContents(root, staging, ReplacementOptions{
+		Entries:   entries,
+		BackupDir: backupDir,
+		BeforeRollback: func() error {
+			return errors.New("marker write failed")
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "prepare replacement rollback") {
+		t.Fatalf("ReplaceContents() error = %v, want rollback hook failure", err)
+	}
+	assertReplacementTestFile(t, filepath.Join(root, ".pc", "pc.db"), "new-db")
+	assertReplacementTestFile(t, filepath.Join(backupDir, ".pc", "pc.db"), "old-db")
+	if _, err := os.Stat(filepath.Join(staging, ".pc", "pc.db")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staged db exists after promotion = %v, want missing", err)
+	}
+}
+
 func TestReplacementEntryValidation(t *testing.T) {
 	for _, entries := range [][]string{
 		nil,

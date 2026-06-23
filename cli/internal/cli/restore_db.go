@@ -90,8 +90,9 @@ func runRestoreDB(ctx context.Context, stdout io.Writer, _ io.Writer, path strin
 		return err
 	}
 	if err := replaceRestoreContentsFn(basePath(homeDir), stagingDir, gitsnapshot.ReplacementOptions{
-		Entries:   restorePayloadEntries,
-		BackupDir: restorePayloadBackupDir(backupPath),
+		Entries:        restorePayloadEntries,
+		BackupDir:      restorePayloadBackupDir(backupPath),
+		BeforeRollback: func() error { return markRestoreRollbackOnly(homeDir, marker) },
 	}); err != nil {
 		if cleanupErr := abortFailedRestorePromotion(homeDir, marker); cleanupErr != nil {
 			return fmt.Errorf("promote restored store: %w; abort cleanup failed: %v", err, cleanupErr)
@@ -117,6 +118,11 @@ func runRestoreDB(ctx context.Context, stdout io.Writer, _ io.Writer, path strin
 var replaceRestoreContentsFn = gitsnapshot.ReplaceContents
 
 func abortFailedRestorePromotion(homeDir string, marker restoreMarker) error {
+	marker.RollbackOnly = true
+	marker.Timestamp = newRestoreMarker(restorePhaseCommitting, marker.StagingDir, marker.BackupDir).Timestamp
+	if err := writeRestoreMarker(homeDir, marker); err != nil {
+		return err
+	}
 	if err := gitsnapshot.RestoreReplacementBackup(basePath(homeDir), restorePayloadBackupDir(marker.BackupDir), restorePayloadEntries, marker.OriginalEntries); err != nil {
 		return fmt.Errorf("roll back failed restore promotion: %w", err)
 	}
@@ -129,6 +135,12 @@ func abortFailedRestorePromotion(homeDir string, marker restoreMarker) error {
 		return err
 	}
 	return removeRestoreMarker(homeDir)
+}
+
+func markRestoreRollbackOnly(homeDir string, marker restoreMarker) error {
+	marker.RollbackOnly = true
+	marker.Timestamp = newRestoreMarker(restorePhaseCommitting, marker.StagingDir, marker.BackupDir).Timestamp
+	return writeRestoreMarker(homeDir, marker)
 }
 
 func buildRestoreStagedStore(ctx context.Context, homeDir string, stagingDir string, snapshot gitsnapshot.Snapshot) (importStats, error) {
