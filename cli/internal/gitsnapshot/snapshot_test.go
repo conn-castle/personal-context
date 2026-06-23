@@ -1643,6 +1643,78 @@ func TestSnapshotReplacementSyncsExportRoot(t *testing.T) {
 			t.Fatalf("writeFile() error = %v, want parent-directory sync failure", err)
 		}
 	})
+
+	t.Run("successful write removes backup dir and fsyncs root a second time", func(t *testing.T) {
+		root := t.TempDir()
+		if err := Write(root, oldSnapshot); err != nil {
+			t.Fatalf("Write(oldSnapshot): %v", err)
+		}
+
+		origSyncDir := syncDirFn
+		rootSyncs := 0
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(root) {
+				rootSyncs++
+			}
+			return origSyncDir(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSyncDir })
+
+		if err := Write(root, newSnapshot); err != nil {
+			t.Fatalf("Write(newSnapshot): %v", err)
+		}
+		// Expect at least two root fsyncs: one at the commit point and one after
+		// the backup directory is removed, making the deletion durable.
+		if rootSyncs < 2 {
+			t.Fatalf("Write synced the export root %d time(s); want at least 2 (commit + post-backup-removal)", rootSyncs)
+		}
+		// Backup dir must be gone so no stale entries remain.
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			t.Fatalf("ReadDir(root): %v", err)
+		}
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".snapshot-backup-") {
+				t.Fatalf("backup directory %q was not removed after a successful write", e.Name())
+			}
+		}
+	})
+
+	t.Run("second root fsync failure after backup removal propagates error", func(t *testing.T) {
+		root := t.TempDir()
+		if err := Write(root, oldSnapshot); err != nil {
+			t.Fatalf("Write(oldSnapshot): %v", err)
+		}
+
+		origSyncDir := syncDirFn
+		rootSyncs := 0
+		syncDirFn = func(dir string) error {
+			if filepath.Clean(dir) == filepath.Clean(root) {
+				rootSyncs++
+				// Fail only the second root sync (post-backup-removal).
+				if rootSyncs == 2 {
+					return errors.New("sync root after backup removal failed")
+				}
+			}
+			return origSyncDir(dir)
+		}
+		t.Cleanup(func() { syncDirFn = origSyncDir })
+
+		err := Write(root, newSnapshot)
+		if err == nil || !strings.Contains(err.Error(), "sync export root after backup removal") {
+			t.Fatalf("Write(newSnapshot) error = %v, want post-backup-removal sync failure", err)
+		}
+		// Despite the second fsync failure, the snapshot contents must be correct
+		// (the promotion already succeeded and the first sync committed it).
+		syncDirFn = origSyncDir
+		got, rerr := Read(root)
+		if rerr != nil {
+			t.Fatalf("Read(root) after second-fsync failure: %v", rerr)
+		}
+		if len(got.Templates) == 0 || got.Templates[0].Name != "new" {
+			t.Fatalf("snapshot contents after second-fsync failure: got templates %v, want [{Name:new}]", got.Templates)
+		}
+	})
 }
 
 func TestSyncDirDurabilityHelper(t *testing.T) {

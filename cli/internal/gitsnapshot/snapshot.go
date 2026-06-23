@@ -532,6 +532,21 @@ func replaceSnapshotContents(root string, stagingRoot string) error {
 		return restoreSnapshotContents(root, backupDir, movedExisting, promoted, fmt.Errorf("sync export root: %w", err), &cleanupBackup)
 	}
 
+	// The snapshot is now committed. Remove the backup directory and flush root
+	// again so the removal is durable before we return success. Without this
+	// second sync, a crash between return and the OS persisting the directory
+	// entry deletion could resurrect the backup directory, leaving stale data
+	// that could confuse future reads. Backup-removal errors are non-fatal
+	// (the snapshot write succeeded) but are propagated so callers know cleanup
+	// is needed.
+	cleanupBackup = false
+	if err := os.RemoveAll(backupDir); err != nil {
+		return fmt.Errorf("remove snapshot backup dir: %w", err)
+	}
+	if err := syncDirFn(root); err != nil {
+		return fmt.Errorf("sync export root after backup removal: %w", err)
+	}
+
 	return nil
 }
 
