@@ -3312,9 +3312,10 @@ func TestServeFile_PathTraversalGuard(t *testing.T) {
 }
 
 // --- handleServeFile: filepath.Abs error path ---
-// filepath.Abs only fails on OS-level errors which are not normally injectable in tests.
-// The guard is exercised via the symlink/sibling test above. The remaining gap in
-// handleServeFile is the data file type (already covered by TestServeFile_DataFileType).
+// filepath.Abs only fails when os.Getwd() fails (OS-level error not normally injectable
+// in tests). The handler returns 500 for those cases. The sibling-dir test above covers
+// the path-outside-dataDir guard (which still returns 404). The data file type branch
+// is covered by TestServeFile_DataFileType.
 
 // --- Start: listen error when port is already in use ---
 

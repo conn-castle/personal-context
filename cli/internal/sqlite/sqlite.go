@@ -31,7 +31,7 @@ func init() {
 			"PRAGMA busy_timeout = 5000",
 		} {
 			if _, err := conn.ExecContext(context.Background(), pragma, nil); err != nil {
-				return err
+				return fmt.Errorf("connection hook %q: %w", pragma, err)
 			}
 		}
 		return nil

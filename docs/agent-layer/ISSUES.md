@@ -27,6 +27,11 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-23 t2p8v6: lessSameDomainTiebreak duplicated between sqlite and postgres
+    Priority: Low. Area: cli/internal/repository/sqlite/chat.go, cli/internal/repository/postgres/chat.go
+    Description: lessSameDomainTiebreak is defined identically in both the sqlite and postgres chat packages. Both already import the shared repository package, so this helper could live there (exported as LessSameDomainTiebreak) and be used by both adapters. Raised in PR #45 review.
+    Next step: Move lessSameDomainTiebreak to cli/internal/repository, export it, update both adapter callers, and add a shared unit test.
+
 - Issue 2026-06-23 r4g7n2: ValidateS3Region regex accepts impossible AWS region shapes
     Priority: Low. Area: cli/internal/config/validate.go
     Description: s3RegionRegexp `^[a-z]{2}(?:-[a-z0-9]+)+-\d+$` lets `(?:-[a-z0-9]+)+` repeat without bound, so bogus 4+ segment strings like `us-east-1-2` and `us-east-west-1` pass a validator whose stated job is to catch malformed regions; they then fail later at the AWS SDK call with a less clear error. It also hard-requires a 2-letter geography prefix.

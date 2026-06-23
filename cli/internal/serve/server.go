@@ -1364,15 +1364,20 @@ func (s *Server) handleServeFile(w http.ResponseWriter, r *http.Request) {
 
 	filePath := filepath.Join(s.dataDir, fileType, recordID, filename)
 
-	// Verify the resolved path is within the data directory
+	// Verify the resolved path is within the data directory.
+	// filepath.Abs only fails when os.Getwd() fails, which is a server-side OS
+	// error, not a missing-resource condition. Return 500 and log so the failure
+	// is visible to operators.
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
-		http.NotFound(w, r)
+		log.Printf("handleServeFile: filepath.Abs(%q): %v", filePath, err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	absDataDir, err := filepath.Abs(s.dataDir)
 	if err != nil {
-		http.NotFound(w, r)
+		log.Printf("handleServeFile: filepath.Abs(dataDir=%q): %v", s.dataDir, err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
 	}
 	if !strings.HasPrefix(absPath, absDataDir+string(os.PathSeparator)) {
