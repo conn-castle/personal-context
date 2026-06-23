@@ -175,6 +175,16 @@ type CreateRecordInput struct {
 	DeletedAt      *time.Time
 }
 
+// ReplaceRecordChildrenInput contains a parent record write and its complete
+// replacement child set. Implementations must commit the record write, old child
+// deletion, and new child insertion atomically.
+type ReplaceRecordChildrenInput struct {
+	Record       CreateRecordInput
+	SetDeletedAt bool
+	Figures      []CreateRecordFigureInput
+	DataFiles    []CreateRecordDataFileInput
+}
+
 // CreateProjectPathInput contains required fields for path registration.
 type CreateProjectPathInput struct {
 	ProjectID string

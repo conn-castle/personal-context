@@ -340,6 +340,210 @@ func (r *Repository) DeleteRecord(ctx context.Context, id string) error {
 	return ensureRowsAffected(tag)
 }
 
+// ReplaceRecordChildren upserts a record and replaces figure/data-file rows in one transaction.
+func (r *Repository) ReplaceRecordChildren(ctx context.Context, input repository.ReplaceRecordChildrenInput) (repository.Record, error) {
+	if strings.TrimSpace(input.Record.DayOrder) == "" {
+		input.Record.DayOrder = "n"
+	}
+	if err := validateReplaceRecordChildrenInput(input); err != nil {
+		return repository.Record{}, err
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return repository.Record{}, mapPgError(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	exists, err := r.recordIDExists(ctx, tx, input.Record.ID)
+	if err != nil {
+		return repository.Record{}, err
+	}
+	if !exists {
+		ownedByOtherUser, err := r.recordIDExistsForOtherUserTx(ctx, tx, input.Record.ID)
+		if err != nil {
+			return repository.Record{}, err
+		}
+		if ownedByOtherUser {
+			return repository.Record{}, fmt.Errorf("%w: id %s already exists as record for another user", repository.ErrConflict, input.Record.ID)
+		}
+		chatExists, err := r.chatSessionIDExistsTx(ctx, tx, input.Record.ID)
+		if err != nil {
+			return repository.Record{}, err
+		}
+		if chatExists {
+			return repository.Record{}, fmt.Errorf("%w: id %s already exists as chat session", repository.ErrConflict, input.Record.ID)
+		}
+	}
+
+	if _, err := r.replaceRecordRowTx(ctx, tx, input.Record, input.SetDeletedAt); err != nil {
+		return repository.Record{}, err
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM record_figures AS f
+         USING records AS s
+         WHERE f.record_id = $1
+           AND s.id = f.record_id
+           AND s.user_id = $2`,
+		input.Record.ID,
+		r.userID,
+	); err != nil {
+		return repository.Record{}, mapPgError(err)
+	}
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM record_data_files AS d
+         USING records AS s
+         WHERE d.record_id = $1
+           AND s.id = d.record_id
+           AND s.user_id = $2`,
+		input.Record.ID,
+		r.userID,
+	); err != nil {
+		return repository.Record{}, mapPgError(err)
+	}
+	for _, figure := range input.Figures {
+		if err := r.insertRecordFigureTx(ctx, tx, figure); err != nil {
+			return repository.Record{}, err
+		}
+	}
+	for _, file := range input.DataFiles {
+		if err := r.insertRecordDataFileTx(ctx, tx, file); err != nil {
+			return repository.Record{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return repository.Record{}, mapPgError(err)
+	}
+	return r.GetRecordByID(ctx, input.Record.ID)
+}
+
+func validateReplaceRecordChildrenInput(input repository.ReplaceRecordChildrenInput) error {
+	if strings.TrimSpace(input.Record.ID) == "" || strings.TrimSpace(input.Record.Date) == "" ||
+		strings.TrimSpace(input.Record.ProjectID) == "" || strings.TrimSpace(input.Record.SourceDeviceID) == "" {
+		return repository.ErrInvalidArgument
+	}
+	recordID := input.Record.ID
+	for _, figure := range input.Figures {
+		if figure.RecordID != recordID {
+			return repository.ErrInvalidArgument
+		}
+		if err := repository.ValidateRecordAssetKey("figures", figure.RecordID, figure.Filename, figure.S3Key); err != nil {
+			return err
+		}
+	}
+	for _, file := range input.DataFiles {
+		if file.RecordID != recordID || strings.TrimSpace(file.Hash) == "" || file.Size < 0 {
+			return repository.ErrInvalidArgument
+		}
+		if err := repository.ValidateRecordAssetKey("data", file.RecordID, file.Filename, file.S3Key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// recordIDExistsForOtherUserTx detects global record-id collisions hidden by
+// user-scoped lookups so replacement upserts can report ErrConflict.
+func (r *Repository) recordIDExistsForOtherUserTx(ctx context.Context, tx pgx.Tx, id string) (bool, error) {
+	var userID string
+	if err := tx.QueryRow(ctx, `SELECT user_id FROM records WHERE id = $1 LIMIT 1`, id).Scan(&userID); err != nil {
+		if errors.Is(mapPgError(err), repository.ErrNotFound) {
+			return false, nil
+		}
+		return false, mapPgError(err)
+	}
+	return userID != r.userID, nil
+}
+
+func (r *Repository) chatSessionIDExistsTx(ctx context.Context, tx pgx.Tx, id string) (bool, error) {
+	var exists int
+	if err := tx.QueryRow(ctx, `SELECT 1 FROM chat_session WHERE user_id = $1 AND id = $2 LIMIT 1`, r.userID, id).Scan(&exists); err != nil {
+		if errors.Is(mapPgError(err), repository.ErrNotFound) {
+			return false, nil
+		}
+		return false, mapPgError(err)
+	}
+	return true, nil
+}
+
+func (r *Repository) replaceRecordRowTx(ctx context.Context, tx pgx.Tx, input repository.CreateRecordInput, setDeletedAt bool) (repository.Record, error) {
+	row := tx.QueryRow(
+		ctx,
+		`INSERT INTO records (id, user_id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12, NOW()), COALESCE($13, NOW()), $14)
+         ON CONFLICT (id) DO UPDATE SET
+             date = EXCLUDED.date,
+             day_order = EXCLUDED.day_order,
+             html_content = EXCLUDED.html_content,
+             notes = EXCLUDED.notes,
+             project_id = EXCLUDED.project_id,
+             source_device_id = EXCLUDED.source_device_id,
+             source_ref = EXCLUDED.source_ref,
+             git_remote_url = EXCLUDED.git_remote_url,
+             git_hash = EXCLUDED.git_hash,
+             updated_at = COALESCE(EXCLUDED.updated_at, records.updated_at),
+             deleted_at = CASE WHEN $15 THEN EXCLUDED.deleted_at ELSE records.deleted_at END
+         WHERE records.user_id = $2
+         RETURNING id, user_id, date, day_order, html_content, notes, project_id, source_device_id, source_ref, git_remote_url, git_hash, created_at, updated_at, deleted_at`,
+		input.ID,
+		r.userID,
+		input.Date,
+		input.DayOrder,
+		input.HTMLContent,
+		input.Notes,
+		input.ProjectID,
+		input.SourceDeviceID,
+		input.SourceRef,
+		input.GitRemoteURL,
+		input.GitHash,
+		input.CreatedAt,
+		input.UpdatedAt,
+		input.DeletedAt,
+		setDeletedAt,
+	)
+	return scanRecord(row)
+}
+
+func (r *Repository) insertRecordFigureTx(ctx context.Context, tx pgx.Tx, input repository.CreateRecordFigureInput) error {
+	tag, err := tx.Exec(
+		ctx,
+		`INSERT INTO record_figures(record_id, filename, s3_key, alt_text)
+         SELECT id, $3, $4, $5
+         FROM records
+         WHERE id = $1 AND user_id = $2`,
+		input.RecordID,
+		r.userID,
+		input.Filename,
+		input.S3Key,
+		input.AltText,
+	)
+	if err != nil {
+		return mapPgError(err)
+	}
+	return ensureRowsAffected(tag)
+}
+
+func (r *Repository) insertRecordDataFileTx(ctx context.Context, tx pgx.Tx, input repository.CreateRecordDataFileInput) error {
+	tag, err := tx.Exec(
+		ctx,
+		`INSERT INTO record_data_files(record_id, filename, s3_key, size, hash, description)
+         SELECT id, $3, $4, $5, $6, $7
+         FROM records
+         WHERE id = $1 AND user_id = $2`,
+		input.RecordID,
+		r.userID,
+		input.Filename,
+		input.S3Key,
+		input.Size,
+		input.Hash,
+		input.Description,
+	)
+	if err != nil {
+		return mapPgError(err)
+	}
+	return ensureRowsAffected(tag)
+}
+
 // CreateRecordFigure inserts a figure row.
 func (r *Repository) CreateRecordFigure(ctx context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
 	if err := repository.ValidateRecordAssetKey("figures", input.RecordID, input.Filename, input.S3Key); err != nil {

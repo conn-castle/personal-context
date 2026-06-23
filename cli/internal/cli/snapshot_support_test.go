@@ -14,10 +14,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"testing/iotest"
 	"time"
 
 	"github.com/conn-castle/personal-context/cli/internal/config"
+	"github.com/conn-castle/personal-context/cli/internal/filesystem"
 	"github.com/conn-castle/personal-context/cli/internal/gitsnapshot"
 	"github.com/conn-castle/personal-context/cli/internal/repository"
 	"github.com/conn-castle/personal-context/cli/internal/sqlite"
@@ -242,6 +244,313 @@ func TestSnapshotSupportRoundTripAndUpdatePaths(t *testing.T) {
 	}
 }
 
+func TestImportSnapshotCrashAtomicity(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("figure rename failure leaves no row and reimport converges", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+		snapshot := atomicitySnapshot("20260310-aa11bb22", "plot.png", []byte("plot-v1"), time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC))
+
+		origRenameFileFn := renameFileFn
+		renameFileFn = func(string, string) error {
+			return errors.New("rename boom")
+		}
+		_, err = importSnapshotIntoStack(ctx, stack, snapshot)
+		renameFileFn = origRenameFileFn
+		if err == nil || !strings.Contains(err.Error(), "write local figure") {
+			t.Fatalf("importSnapshotIntoStack(rename failure) error = %v, want figure write failure", err)
+		}
+		if _, err := stack.Repo.GetRecordByID(ctx, "20260310-aa11bb22"); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("record should not be committed after figure rename failure, err = %v", err)
+		}
+
+		stats, err := importSnapshotIntoStack(ctx, stack, snapshot)
+		if err != nil {
+			t.Fatalf("reimport after rename failure: %v", err)
+		}
+		if stats.Created != 1 || stats.Updated != 0 || stats.Skipped != 0 {
+			t.Fatalf("reimport stats = %+v, want one created record", stats)
+		}
+		assertCommittedFigureFiles(t, ctx, stack, "20260310-aa11bb22", map[string]string{"plot.png": "plot-v1"})
+	})
+
+	t.Run("row commit failure leaves updated_at unchanged and reimport converges", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+		snapshot := atomicitySnapshot("20260310-bb22cc33", "plot.png", []byte("plot-v2"), time.Date(2026, 3, 10, 13, 0, 0, 0, time.UTC))
+
+		origCommitRecordChildrenFn := commitRecordChildrenFn
+		commitRecordChildrenFn = func(context.Context, repository.Repository, repository.ReplaceRecordChildrenInput) (repository.Record, error) {
+			return repository.Record{}, errors.New("commit boom")
+		}
+		_, err = importSnapshotIntoStack(ctx, stack, snapshot)
+		commitRecordChildrenFn = origCommitRecordChildrenFn
+		if err == nil || !strings.Contains(err.Error(), "replace record children rows") {
+			t.Fatalf("importSnapshotIntoStack(commit failure) error = %v, want row commit failure", err)
+		}
+		if _, err := stack.Repo.GetRecordByID(ctx, "20260310-bb22cc33"); !errors.Is(err, repository.ErrNotFound) {
+			t.Fatalf("record should not be committed after row failure, err = %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(basePath(homeDir), "figures", "20260310-bb22cc33", "plot.png")); err != nil {
+			t.Fatalf("figure bytes should have been written before row commit failure: %v", err)
+		}
+
+		stats, err := importSnapshotIntoStack(ctx, stack, snapshot)
+		if err != nil {
+			t.Fatalf("reimport after row failure: %v", err)
+		}
+		if stats.Created != 1 || stats.Updated != 0 || stats.Skipped != 0 {
+			t.Fatalf("reimport stats = %+v, want one created record", stats)
+		}
+		assertCommittedFigureFiles(t, ctx, stack, "20260310-bb22cc33", map[string]string{"plot.png": "plot-v2"})
+	})
+
+	t.Run("post-commit cleanup failure leaves committed row and next import reconciles orphan", func(t *testing.T) {
+		homeDir := setupEnv(t)
+		stack, err := openLocalStack(homeDir)
+		if err != nil {
+			t.Fatalf("openLocalStack(): %v", err)
+		}
+		t.Cleanup(func() { _ = stack.Close() })
+		recordID := "20260310-cc33dd44"
+		initial := atomicitySnapshot(recordID, "old.png", []byte("old"), time.Date(2026, 3, 10, 14, 0, 0, 0, time.UTC))
+		if _, err := importSnapshotIntoStack(ctx, stack, initial); err != nil {
+			t.Fatalf("initial import: %v", err)
+		}
+		updated := atomicitySnapshot(recordID, "new.png", []byte("new"), time.Date(2026, 3, 10, 14, 1, 0, 0, time.UTC))
+
+		origDeleteRecordFigureFileFn := deleteRecordFigureFileFn
+		deleteRecordFigureFileFn = func(*filesystem.Client, string, string) error {
+			return errors.New("delete stale boom")
+		}
+		_, err = importSnapshotIntoStack(ctx, stack, updated)
+		deleteRecordFigureFileFn = origDeleteRecordFigureFileFn
+		if err == nil || !strings.Contains(err.Error(), "delete stale figure") {
+			t.Fatalf("importSnapshotIntoStack(cleanup failure) error = %v, want stale cleanup failure", err)
+		}
+		record, err := stack.Repo.GetRecordByID(ctx, recordID)
+		if err != nil {
+			t.Fatalf("GetRecordByID(after cleanup failure): %v", err)
+		}
+		if !record.UpdatedAt.Equal(updated.Records[0].UpdatedAt) {
+			t.Fatalf("record UpdatedAt = %s, want committed snapshot timestamp %s", record.UpdatedAt, updated.Records[0].UpdatedAt)
+		}
+		if _, err := os.Stat(filepath.Join(basePath(homeDir), "figures", recordID, "old.png")); err != nil {
+			t.Fatalf("old figure should remain after injected cleanup failure: %v", err)
+		}
+
+		stats, err := importSnapshotIntoStack(ctx, stack, updated)
+		if err != nil {
+			t.Fatalf("reimport after cleanup failure: %v", err)
+		}
+		if stats.Created != 0 || stats.Updated != 0 || stats.Skipped != 1 {
+			t.Fatalf("reimport stats = %+v, want skipped record plus reconcile", stats)
+		}
+		assertCommittedFigureFiles(t, ctx, stack, recordID, map[string]string{"new.png": "new"})
+		if _, err := os.Stat(filepath.Join(basePath(homeDir), "figures", recordID, "old.png")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("old orphan figure should be reconciled on reimport, stat err = %v", err)
+		}
+	})
+}
+
+func atomicitySnapshot(recordID string, filename string, content []byte, updatedAt time.Time) gitsnapshot.Snapshot {
+	return withCLISnapshotDefaults(gitsnapshot.Snapshot{
+		Records: []gitsnapshot.Record{{
+			ID:             recordID,
+			Date:           updatedAt.Format("2006-01-02"),
+			DayOrder:       "a",
+			ProjectID:      "test/default-project",
+			SourceDeviceID: "test-device",
+			HTMLContent:    strPtr(`<html><body><img src="figures/` + filename + `"></body></html>`),
+			Figures: []gitsnapshot.Figure{{
+				Filename: filename,
+				S3Key:    filepath.ToSlash(filepath.Join("figures", recordID, filename)),
+				Content:  content,
+			}},
+			CreatedAt: updatedAt.Add(-time.Hour),
+			UpdatedAt: updatedAt,
+		}},
+	})
+}
+
+func assertCommittedFigureFiles(t *testing.T, ctx context.Context, stack *localStack, recordID string, want map[string]string) {
+	t.Helper()
+	figures, err := stack.Repo.ListRecordFiguresByRecordID(ctx, recordID)
+	if err != nil {
+		t.Fatalf("ListRecordFiguresByRecordID(%s): %v", recordID, err)
+	}
+	rows := make(map[string]struct{}, len(figures))
+	for _, figure := range figures {
+		rows[figure.Filename] = struct{}{}
+	}
+	diskFiles, err := stack.FS.ListFigureFilenames(recordID)
+	if err != nil {
+		t.Fatalf("ListFigureFilenames(%s): %v", recordID, err)
+	}
+	if len(diskFiles) != len(want) || len(rows) != len(want) {
+		t.Fatalf("figure row/file counts rows=%v disk=%v want=%v", rows, diskFiles, want)
+	}
+	for _, filename := range diskFiles {
+		if _, ok := rows[filename]; !ok {
+			t.Fatalf("on-disk figure %s/%s has no committed row; rows=%v", recordID, filename, rows)
+		}
+		wantContent, ok := want[filename]
+		if !ok {
+			t.Fatalf("unexpected on-disk figure %s/%s; want filenames=%v", recordID, filename, want)
+		}
+		path, err := stack.FS.ResolveFigurePath(recordID, filename)
+		if err != nil {
+			t.Fatalf("ResolveFigurePath(%s/%s): %v", recordID, filename, err)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile(%s): %v", path, err)
+		}
+		if string(got) != wantContent {
+			t.Fatalf("figure %s content = %q, want %q", filename, got, wantContent)
+		}
+	}
+}
+
+func TestSnapshotSupportDurabilityErrorPaths(t *testing.T) {
+	t.Run("stage raw source write failure cleans staging directory", func(t *testing.T) {
+		fsClient, err := filesystem.NewClient(t.TempDir())
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+		chatID := "20260514-deadbeef"
+		rawKey := "chats/raw/" + chatID + "/source.json"
+
+		originalCreateTempFileFn := createTempFileFn
+		t.Cleanup(func() { createTempFileFn = originalCreateTempFileFn })
+		createTempFileFn = func(string, string) (atomicTempFile, error) {
+			return nil, errors.New("create temp boom")
+		}
+
+		stage, err := stageSnapshotChatRawSource(&localStack{FS: fsClient}, gitsnapshot.ChatSession{
+			ID:               chatID,
+			RawSourceKey:     &rawKey,
+			RawSourceContent: []byte("raw"),
+		})
+		if err == nil || !strings.Contains(err.Error(), "stage chat raw source") {
+			t.Fatalf("stageSnapshotChatRawSource() stage=%+v error=%v, want staging write error", stage, err)
+		}
+		rawRoot := filepath.Join(fsClient.BasePath(), "chats", "raw")
+		entries, readErr := os.ReadDir(rawRoot)
+		if readErr != nil {
+			t.Fatalf("ReadDir(rawRoot) error = %v", readErr)
+		}
+		for _, entry := range entries {
+			if strings.HasPrefix(entry.Name(), ".staging-") {
+				t.Fatalf("staging directory leaked after write failure: %s", entry.Name())
+			}
+		}
+	})
+
+	t.Run("imported figure directory sync failure is surfaced", func(t *testing.T) {
+		fsClient, err := filesystem.NewClient(t.TempDir())
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+		originalSyncDirFn := syncDirFn
+		t.Cleanup(func() { syncDirFn = originalSyncDirFn })
+		recordID := "20260514-aabbccdd"
+		figureDirSyncs := 0
+		syncDirFn = func(dir string) error {
+			if dir == filepath.Join(fsClient.BasePath(), "figures", recordID) {
+				figureDirSyncs++
+			}
+			if figureDirSyncs == 2 {
+				return errors.New("figure dir sync boom")
+			}
+			return nil
+		}
+
+		_, err = writeImportedRecordFigures(&localStack{FS: fsClient}, gitsnapshot.Record{
+			ID: recordID,
+			Figures: []gitsnapshot.Figure{{
+				Filename: "plot.png",
+				S3Key:    "figures/" + recordID + "/plot.png",
+				Content:  []byte("plot"),
+			}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "sync local figure directory") {
+			t.Fatalf("writeImportedRecordFigures() error = %v, want figure directory sync error", err)
+		}
+	})
+
+	t.Run("stale figure list and sync failures are surfaced", func(t *testing.T) {
+		fsClient, err := filesystem.NewClient(t.TempDir())
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+		err = deleteStaleImportedFigures(context.Background(), &localStack{Repo: &mockRepo{}, FS: fsClient}, "../bad")
+		if err == nil || !strings.Contains(err.Error(), "list local figures") {
+			t.Fatalf("deleteStaleImportedFigures(invalid id) error = %v, want list local figures error", err)
+		}
+
+		recordID := "record-1"
+		figurePath, err := fsClient.ResolveFigurePath(recordID, "stale.png")
+		if err != nil {
+			t.Fatalf("ResolveFigurePath() error = %v", err)
+		}
+		if err := os.MkdirAll(filepath.Dir(figurePath), 0o700); err != nil {
+			t.Fatalf("MkdirAll(figure dir) error = %v", err)
+		}
+		if err := os.WriteFile(figurePath, []byte("stale"), 0o644); err != nil {
+			t.Fatalf("WriteFile(stale figure) error = %v", err)
+		}
+		originalSyncDirFn := syncDirFn
+		t.Cleanup(func() { syncDirFn = originalSyncDirFn })
+		syncDirFn = func(string) error {
+			return errors.New("stale cleanup sync boom")
+		}
+		err = deleteStaleImportedFigures(context.Background(), &localStack{Repo: &mockRepo{}, FS: fsClient}, recordID)
+		if err == nil || !strings.Contains(err.Error(), "sync stale figure cleanup") {
+			t.Fatalf("deleteStaleImportedFigures(sync error) error = %v, want cleanup sync error", err)
+		}
+	})
+}
+
+func TestEnsureLocalEnvironmentErrorBranches(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("config path is blocked", func(t *testing.T) {
+		homeDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(basePath(homeDir), ".pc", "config.json"), 0o700); err != nil {
+			t.Fatalf("create config path blocker: %v", err)
+		}
+		err := ensureLocalEnvironment(ctx, homeDir)
+		if err == nil || !strings.Contains(err.Error(), "write config") {
+			t.Fatalf("ensureLocalEnvironment(config blocker) error = %v, want write config error", err)
+		}
+	})
+
+	t.Run("migration apply failure", func(t *testing.T) {
+		originalSQLiteMigrationsFSFn := sqliteMigrationsFSFn
+		t.Cleanup(func() { sqliteMigrationsFSFn = originalSQLiteMigrationsFSFn })
+		sqliteMigrationsFSFn = func() (fs.FS, error) {
+			return fstest.MapFS{
+				"001_bad.sql": {Data: []byte("this is not sql")},
+			}, nil
+		}
+
+		err := ensureLocalEnvironment(ctx, t.TempDir())
+		if err == nil || !strings.Contains(err.Error(), "apply migrations") {
+			t.Fatalf("ensureLocalEnvironment(bad migration) error = %v, want apply migrations error", err)
+		}
+	})
+}
+
 func TestRunExportImportRestoreAndVerifyLocal(t *testing.T) {
 	ctx := context.Background()
 	sourceHome := setupEnv(t)
@@ -412,6 +721,9 @@ func TestSnapshotCommandErrorPathsAndHelpers(t *testing.T) {
 	if err := compareSnapshotDirs(manifestA, manifestB); err != nil {
 		t.Fatalf("compareSnapshotDirs(equal): %v", err)
 	}
+	if err := compareSnapshotDirs(manifestA, filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("expected compareSnapshotDirs to fail when second manifest is missing")
+	}
 	if err := os.WriteFile(filepath.Join(manifestB, "templates", "text-only.html"), []byte("<html>changed</html>"), 0o644); err != nil {
 		t.Fatalf("mutate manifestB: %v", err)
 	}
@@ -446,6 +758,7 @@ type snapshotRepoStub struct {
 	getRecordByIDFn      func(context.Context, string) (repository.Record, error)
 	createRecordFn       func(context.Context, repository.CreateRecordInput) (repository.Record, error)
 	updateRecordFn       func(context.Context, repository.UpdateRecordInput) (repository.Record, error)
+	replaceChildrenFn    func(context.Context, repository.ReplaceRecordChildrenInput) (repository.Record, error)
 	deleteRecordFigureFn func(context.Context, int64) error
 	deleteRecordDataFn   func(context.Context, int64) error
 	createRecordFigureFn func(context.Context, repository.CreateRecordFigureInput) (repository.RecordFigure, error)
@@ -499,6 +812,13 @@ func (s *snapshotRepoStub) UpdateRecord(ctx context.Context, input repository.Up
 		return s.updateRecordFn(ctx, input)
 	}
 	return s.mockRepo.UpdateRecord(ctx, input)
+}
+
+func (s *snapshotRepoStub) ReplaceRecordChildren(ctx context.Context, input repository.ReplaceRecordChildrenInput) (repository.Record, error) {
+	if s.replaceChildrenFn != nil {
+		return s.replaceChildrenFn(ctx, input)
+	}
+	return s.mockRepo.ReplaceRecordChildren(ctx, input)
 }
 
 func (s *snapshotRepoStub) DeleteRecordFigure(ctx context.Context, id int64) error {
@@ -763,130 +1083,40 @@ func TestImportSnapshotIntoStackErrorPaths(t *testing.T) {
 			wantSubstring: "get record",
 		},
 		{
-			name: "create record",
+			name: "replace children for new record",
 			repo: &snapshotRepoStub{
 				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
 					return repository.Record{}, repository.ErrNotFound
 				},
-				createRecordFn: func(context.Context, repository.CreateRecordInput) (repository.Record, error) {
-					return repository.Record{}, errors.New("create failed")
+				replaceChildrenFn: func(context.Context, repository.ReplaceRecordChildrenInput) (repository.Record, error) {
+					return repository.Record{}, errors.New("replace failed")
 				},
 			},
-			wantSubstring: "create record",
+			wantSubstring: "replace record children rows",
 		},
 		{
-			name: "update record",
+			name: "replace children for existing record",
 			repo: &snapshotRepoStub{
 				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
 					return repository.Record{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
 				},
-				updateRecordFn: func(context.Context, repository.UpdateRecordInput) (repository.Record, error) {
-					return repository.Record{}, errors.New("update failed")
+				replaceChildrenFn: func(context.Context, repository.ReplaceRecordChildrenInput) (repository.Record, error) {
+					return repository.Record{}, errors.New("replace failed")
 				},
 			},
-			wantSubstring: "update record",
+			wantSubstring: "replace record children rows",
 		},
 		{
-			name: "delete figure",
+			name: "list committed figures after replace",
 			repo: &snapshotRepoStub{
 				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
 					return repository.Record{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
-				},
-				updateRecordFn: func(context.Context, repository.UpdateRecordInput) (repository.Record, error) {
-					return repository.Record{}, nil
-				},
-				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
-					return []repository.RecordFigure{{ID: 1, RecordID: "20260309-beadfeed", Filename: "old.png"}}, nil
-				},
-				deleteRecordFigureFn: func(context.Context, int64) error {
-					return errors.New("delete figure failed")
-				},
-			},
-			wantSubstring: "delete existing figure",
-		},
-		{
-			name: "list existing figures",
-			repo: &snapshotRepoStub{
-				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
-					return repository.Record{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
-				},
-				updateRecordFn: func(context.Context, repository.UpdateRecordInput) (repository.Record, error) {
-					return repository.Record{}, nil
 				},
 				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
 					return nil, errors.New("list figures failed")
 				},
 			},
-			wantSubstring: "list existing figures",
-		},
-		{
-			name: "delete data file",
-			repo: &snapshotRepoStub{
-				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
-					return repository.Record{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
-				},
-				updateRecordFn: func(context.Context, repository.UpdateRecordInput) (repository.Record, error) {
-					return repository.Record{}, nil
-				},
-				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
-					return nil, nil
-				},
-				listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
-					return []repository.RecordDataFile{{ID: 1, RecordID: "20260309-beadfeed", Filename: "old.csv"}}, nil
-				},
-				deleteRecordDataFn: func(context.Context, int64) error {
-					return errors.New("delete data file failed")
-				},
-			},
-			wantSubstring: "delete existing data file",
-		},
-		{
-			name: "list existing data files",
-			repo: &snapshotRepoStub{
-				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
-					return repository.Record{ID: "20260309-beadfeed", UpdatedAt: time.Date(2026, 3, 9, 11, 0, 0, 0, time.UTC)}, nil
-				},
-				updateRecordFn: func(context.Context, repository.UpdateRecordInput) (repository.Record, error) {
-					return repository.Record{}, nil
-				},
-				listFiguresFn: func(context.Context, string) ([]repository.RecordFigure, error) {
-					return nil, nil
-				},
-				listDataFilesFn: func(context.Context, string) ([]repository.RecordDataFile, error) {
-					return nil, errors.New("list data files failed")
-				},
-			},
-			wantSubstring: "list existing data files",
-		},
-		{
-			name: "create figure row",
-			repo: &snapshotRepoStub{
-				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
-					return repository.Record{}, repository.ErrNotFound
-				},
-				createRecordFn: func(context.Context, repository.CreateRecordInput) (repository.Record, error) {
-					return repository.Record{}, nil
-				},
-				createRecordFigureFn: func(context.Context, repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
-					return repository.RecordFigure{}, errors.New("create figure row failed")
-				},
-			},
-			wantSubstring: "create figure row",
-		},
-		{
-			name: "create data file row",
-			repo: &snapshotRepoStub{
-				getRecordByIDFn: func(context.Context, string) (repository.Record, error) {
-					return repository.Record{}, repository.ErrNotFound
-				},
-				createRecordFn: func(context.Context, repository.CreateRecordInput) (repository.Record, error) {
-					return repository.Record{}, nil
-				},
-				createRecordDataFn: func(context.Context, repository.CreateRecordDataFileInput) (repository.RecordDataFile, error) {
-					return repository.RecordDataFile{}, errors.New("create data file row failed")
-				},
-			},
-			wantSubstring: "create data file row",
+			wantSubstring: "list committed figures",
 		},
 	}
 

@@ -458,6 +458,265 @@ func TestRecordAssetKeyValidationBranches(t *testing.T) {
 	}
 }
 
+func TestReplaceRecordChildrenValidationConflictAndRollbackBranches(t *testing.T) {
+	repo, _ := newConcreteRepo(t)
+	ctx := context.Background()
+
+	projectID := "replace/project"
+	deviceID := "replace-device"
+	if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: projectID}); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: deviceID}); err != nil {
+		t.Fatalf("CreateDevice() error = %v", err)
+	}
+
+	validInput := func(id string) repository.ReplaceRecordChildrenInput {
+		return repository.ReplaceRecordChildrenInput{
+			Record: repository.CreateRecordInput{
+				ID:             id,
+				Date:           "2026-03-05",
+				DayOrder:       "a",
+				HTMLContent:    strPtr("<h1>replace</h1>"),
+				ProjectID:      projectID,
+				SourceDeviceID: deviceID,
+			},
+		}
+	}
+
+	for _, tc := range []struct {
+		name   string
+		input  repository.ReplaceRecordChildrenInput
+		wantID string
+	}{
+		{
+			name:   "missing record fields",
+			input:  repository.ReplaceRecordChildrenInput{},
+			wantID: "",
+		},
+		{
+			name: "mismatched figure record id",
+			input: func() repository.ReplaceRecordChildrenInput {
+				input := validInput("20260305-1111aaaa")
+				input.Figures = []repository.CreateRecordFigureInput{{
+					RecordID: "20260305-2222bbbb",
+					Filename: "plot.png",
+					S3Key:    "figures/20260305-2222bbbb/plot.png",
+				}}
+				return input
+			}(),
+			wantID: "20260305-1111aaaa",
+		},
+		{
+			name: "negative data file size",
+			input: func() repository.ReplaceRecordChildrenInput {
+				input := validInput("20260305-3333cccc")
+				input.DataFiles = []repository.CreateRecordDataFileInput{{
+					RecordID: input.Record.ID,
+					Filename: "data.csv",
+					S3Key:    "data/" + input.Record.ID + "/data.csv",
+					Size:     -1,
+					Hash:     strings.Repeat("a", 64),
+				}}
+				return input
+			}(),
+			wantID: "20260305-3333cccc",
+		},
+		{
+			name: "empty data file hash",
+			input: func() repository.ReplaceRecordChildrenInput {
+				input := validInput("20260305-4444dddd")
+				input.DataFiles = []repository.CreateRecordDataFileInput{{
+					RecordID: input.Record.ID,
+					Filename: "data.csv",
+					S3Key:    "data/" + input.Record.ID + "/data.csv",
+					Size:     1,
+				}}
+				return input
+			}(),
+			wantID: "20260305-4444dddd",
+		},
+		{
+			name: "non-canonical figure key",
+			input: func() repository.ReplaceRecordChildrenInput {
+				input := validInput("20260305-5555eeee")
+				input.Figures = []repository.CreateRecordFigureInput{{
+					RecordID: input.Record.ID,
+					Filename: "plot.png",
+					S3Key:    "figures/" + input.Record.ID + "/wrong.png",
+				}}
+				return input
+			}(),
+			wantID: "20260305-5555eeee",
+		},
+		{
+			name: "non-canonical data file key",
+			input: func() repository.ReplaceRecordChildrenInput {
+				input := validInput("20260305-99992222")
+				input.DataFiles = []repository.CreateRecordDataFileInput{{
+					RecordID: input.Record.ID,
+					Filename: "data.csv",
+					S3Key:    "data/" + input.Record.ID + "/wrong.csv",
+					Size:     1,
+					Hash:     strings.Repeat("e", 64),
+				}}
+				return input
+			}(),
+			wantID: "20260305-99992222",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := repo.ReplaceRecordChildren(ctx, tc.input)
+			if !errors.Is(err, repository.ErrInvalidArgument) {
+				t.Fatalf("ReplaceRecordChildren() error = %v, want ErrInvalidArgument", err)
+			}
+			if tc.wantID != "" {
+				if _, err := repo.GetRecordByID(ctx, tc.wantID); !errors.Is(err, repository.ErrNotFound) {
+					t.Fatalf("invalid replacement created record %s: %v", tc.wantID, err)
+				}
+			}
+		})
+	}
+
+	conflictingChatID := "20260305-6666ffff"
+	if _, _, err := repo.UpsertChatSession(ctx, repository.UpsertChatSessionInput{
+		CreateChatSessionInput: repository.CreateChatSessionInput{
+			ID:              conflictingChatID,
+			Source:          "codex",
+			SourceSessionID: "replace-conflict",
+			SourceDeviceID:  deviceID,
+			StartedAt:       time.Date(2026, time.March, 5, 10, 0, 0, 0, time.UTC),
+			LastActivityAt:  time.Date(2026, time.March, 5, 10, 1, 0, 0, time.UTC),
+		},
+	}); err != nil {
+		t.Fatalf("UpsertChatSession(conflict seed) error = %v", err)
+	}
+	_, err := repo.ReplaceRecordChildren(ctx, validInput(conflictingChatID))
+	if !errors.Is(err, repository.ErrConflict) {
+		t.Fatalf("ReplaceRecordChildren(chat id conflict) error = %v, want ErrConflict", err)
+	}
+	if _, err := repo.GetRecordByID(ctx, conflictingChatID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("chat id conflict created record: %v", err)
+	}
+
+	missingParent := validInput("20260305-77770000")
+	missingParent.Record.ProjectID = "missing-project"
+	_, err = repo.ReplaceRecordChildren(ctx, missingParent)
+	if !errors.Is(err, repository.ErrForeignKeyViolation) {
+		t.Fatalf("ReplaceRecordChildren(missing project) error = %v, want ErrForeignKeyViolation", err)
+	}
+	if _, err := repo.GetRecordByID(ctx, missingParent.Record.ID); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("foreign-key failure created record: %v", err)
+	}
+
+	seedID := "20260305-88881111"
+	seed := validInput(seedID)
+	seed.Record.Date = "2026-03-05"
+	seed.DataFiles = []repository.CreateRecordDataFileInput{{
+		RecordID: seedID,
+		Filename: "kept.csv",
+		S3Key:    "data/" + seedID + "/kept.csv",
+		Size:     4,
+		Hash:     strings.Repeat("b", 64),
+	}}
+	if _, err := repo.ReplaceRecordChildren(ctx, seed); err != nil {
+		t.Fatalf("ReplaceRecordChildren(seed) error = %v", err)
+	}
+
+	replacement := validInput(seedID)
+	replacement.Record.Date = "2026-03-06"
+	replacement.DataFiles = []repository.CreateRecordDataFileInput{
+		{RecordID: seedID, Filename: "dup.csv", S3Key: "data/" + seedID + "/dup.csv", Size: 1, Hash: strings.Repeat("c", 64)},
+		{RecordID: seedID, Filename: "dup.csv", S3Key: "data/" + seedID + "/dup.csv", Size: 2, Hash: strings.Repeat("d", 64)},
+	}
+	if _, err := repo.ReplaceRecordChildren(ctx, replacement); err == nil {
+		t.Fatal("expected duplicate data-file replacement to fail")
+	}
+	afterRollback, err := repo.GetRecordByID(ctx, seedID)
+	if err != nil {
+		t.Fatalf("GetRecordByID(after rollback) error = %v", err)
+	}
+	if afterRollback.Date != "2026-03-05" {
+		t.Fatalf("record changed despite duplicate child rollback: %+v", afterRollback)
+	}
+	files, err := repo.ListRecordDataFilesByRecordID(ctx, seedID)
+	if err != nil {
+		t.Fatalf("ListRecordDataFilesByRecordID(after rollback) error = %v", err)
+	}
+	if len(files) != 1 || files[0].Filename != "kept.csv" {
+		t.Fatalf("data files changed despite duplicate child rollback: %+v", files)
+	}
+}
+
+func TestReplaceRecordChildrenPropagatesTransactionQueryFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		dropTable     string
+		recordID      string
+		canCheckNoRow bool
+	}{
+		{
+			name:      "record existence query fails",
+			dropTable: "records",
+			recordID:  "20260305-11113333",
+		},
+		{
+			name:          "chat id conflict query fails",
+			dropTable:     "chat_session",
+			recordID:      "20260305-22224444",
+			canCheckNoRow: true,
+		},
+		{
+			name:          "figure child deletion fails and rolls back record row",
+			dropTable:     "record_figures",
+			recordID:      "20260305-33335555",
+			canCheckNoRow: true,
+		},
+		{
+			name:          "data-file child deletion fails and rolls back record row",
+			dropTable:     "record_data_files",
+			recordID:      "20260305-44446666",
+			canCheckNoRow: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, db := newConcreteRepo(t)
+			ctx := context.Background()
+
+			projectID := "replace/errors-project"
+			deviceID := "replace-errors-device"
+			if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: projectID}); err != nil {
+				t.Fatalf("CreateProject() error = %v", err)
+			}
+			if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: deviceID}); err != nil {
+				t.Fatalf("CreateDevice() error = %v", err)
+			}
+			if _, err := db.ExecContext(ctx, "DROP TABLE "+tc.dropTable); err != nil {
+				t.Fatalf("drop %s: %v", tc.dropTable, err)
+			}
+
+			_, err := repo.ReplaceRecordChildren(ctx, repository.ReplaceRecordChildrenInput{
+				Record: repository.CreateRecordInput{
+					ID:             tc.recordID,
+					Date:           "2026-03-05",
+					DayOrder:       "a",
+					HTMLContent:    strPtr("<h1>replace</h1>"),
+					ProjectID:      projectID,
+					SourceDeviceID: deviceID,
+				},
+			})
+			if err == nil {
+				t.Fatal("expected replacement to fail after schema table was removed")
+			}
+			if tc.canCheckNoRow {
+				if _, err := repo.GetRecordByID(ctx, tc.recordID); !errors.Is(err, repository.ErrNotFound) {
+					t.Fatalf("failed replacement committed record %s: %v", tc.recordID, err)
+				}
+			}
+		})
+	}
+}
+
 func TestTemplateProjectAndDeviceListBehavior(t *testing.T) {
 	repo, _ := newConcreteRepo(t)
 	ctx := context.Background()
@@ -2632,6 +2891,19 @@ func TestMethodsFailLoudlyWhenDBIsClosed(t *testing.T) {
 		{name: "SoftDeleteRecord", run: func() error { return repo.SoftDeleteRecord(ctx, "20260320-abcd1234") }},
 		{name: "RestoreRecord", run: func() error { return repo.RestoreRecord(ctx, "20260320-abcd1234") }},
 		{name: "DeleteRecord", run: func() error { return repo.DeleteRecord(ctx, "20260320-abcd1234") }},
+		{name: "ReplaceRecordChildren", run: func() error {
+			_, err := repo.ReplaceRecordChildren(ctx, repository.ReplaceRecordChildrenInput{
+				Record: repository.CreateRecordInput{
+					ID:             "20260320-abcd1234",
+					Date:           "2026-03-20",
+					DayOrder:       "a",
+					HTMLContent:    strPtr("<h1>x</h1>"),
+					ProjectID:      projectID,
+					SourceDeviceID: deviceID,
+				},
+			})
+			return err
+		}},
 		{name: "CreateRecordFigure", run: func() error {
 			_, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
 				RecordID: "20260320-abcd1234",

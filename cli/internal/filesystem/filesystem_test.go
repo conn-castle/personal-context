@@ -707,6 +707,85 @@ func TestListRecordIDsOnDisk(t *testing.T) {
 	})
 }
 
+func TestListFigureFilenames(t *testing.T) {
+	t.Run("regular files are returned and nested directories are ignored", func(t *testing.T) {
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		recordID := "20260305-a1b2c3d4"
+		figureDir := filepath.Join(root, "figures", recordID)
+		if err := os.MkdirAll(filepath.Join(figureDir, "nested"), 0o755); err != nil {
+			t.Fatalf("MkdirAll(nested) error = %v", err)
+		}
+		for _, name := range []string{"a.png", "b.csv"} {
+			if err := os.WriteFile(filepath.Join(figureDir, name), []byte(name), 0o644); err != nil {
+				t.Fatalf("WriteFile(%s) error = %v", name, err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(figureDir, "nested", "ignored.png"), []byte("x"), 0o644); err != nil {
+			t.Fatalf("WriteFile(nested) error = %v", err)
+		}
+
+		names, err := client.ListFigureFilenames(recordID)
+		if err != nil {
+			t.Fatalf("ListFigureFilenames() error = %v", err)
+		}
+		if len(names) != 2 || names[0] != "a.png" || names[1] != "b.csv" {
+			t.Fatalf("ListFigureFilenames() = %v, want [a.png b.csv]", names)
+		}
+	})
+
+	t.Run("missing record directory returns empty list", func(t *testing.T) {
+		client, err := NewClient(t.TempDir())
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		names, err := client.ListFigureFilenames("20260305-a1b2c3d4")
+		if err != nil {
+			t.Fatalf("ListFigureFilenames() error = %v", err)
+		}
+		if len(names) != 0 {
+			t.Fatalf("expected empty names for missing directory, got %v", names)
+		}
+	})
+
+	t.Run("rejects invalid record id before reading disk", func(t *testing.T) {
+		client, err := NewClient(t.TempDir())
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		if _, err := client.ListFigureFilenames("../bad"); err == nil {
+			t.Fatal("expected invalid record id to fail")
+		}
+	})
+
+	t.Run("non-directory record path returns error", func(t *testing.T) {
+		root := t.TempDir()
+		client, err := NewClient(root)
+		if err != nil {
+			t.Fatalf("NewClient() error = %v", err)
+		}
+
+		recordID := "20260305-a1b2c3d4"
+		recordPath := filepath.Join(root, "figures", recordID)
+		if err := os.MkdirAll(filepath.Dir(recordPath), 0o755); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+		if err := os.WriteFile(recordPath, []byte("not-a-dir"), 0o644); err != nil {
+			t.Fatalf("WriteFile(recordPath) error = %v", err)
+		}
+
+		if _, err := client.ListFigureFilenames(recordID); err == nil {
+			t.Fatal("expected file in place of record directory to fail")
+		}
+	})
+}
+
 func TestNilReceiverGuards(t *testing.T) {
 	var nilClient *Client
 
@@ -726,6 +805,16 @@ func TestNilReceiverGuards(t *testing.T) {
 		}
 	})
 
+	t.Run("ListFigureFilenames returns error", func(t *testing.T) {
+		_, err := nilClient.ListFigureFilenames("record-1")
+		if err == nil {
+			t.Fatal("expected nil client ListFigureFilenames to fail")
+		}
+		if !strings.Contains(err.Error(), "filesystem client is required") {
+			t.Fatalf("expected 'filesystem client is required' in error, got %v", err)
+		}
+	})
+
 	t.Run("DeleteRecordDir returns error", func(t *testing.T) {
 		err := nilClient.DeleteRecordDir("record-1")
 		if err == nil {
@@ -735,6 +824,15 @@ func TestNilReceiverGuards(t *testing.T) {
 			t.Fatalf("expected 'filesystem client is required' in error, got %v", err)
 		}
 	})
+}
+
+func TestSyncDir(t *testing.T) {
+	if err := syncDir(t.TempDir()); err != nil {
+		t.Fatalf("syncDir(existing dir) error = %v", err)
+	}
+	if err := syncDir(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("expected syncDir to fail for missing directory")
+	}
 }
 
 func TestDeleteRecordDir(t *testing.T) {
@@ -770,6 +868,61 @@ func TestDeleteRecordDir(t *testing.T) {
 		}
 		if _, err := os.Stat(dataDir); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("expected data dir to be removed, got err=%v", err)
+		}
+	})
+
+	t.Run("syncs containing dirs after removal", func(t *testing.T) {
+		root := t.TempDir()
+		var syncedDirs []string
+		client, err := newClientWithHooks(root, fileOperationHooks{
+			syncDir: func(dir string) error {
+				syncedDirs = append(syncedDirs, dir)
+				return nil
+			},
+		})
+		if err != nil {
+			t.Fatalf("newClientWithHooks() error = %v", err)
+		}
+
+		for _, dir := range []string{
+			filepath.Join(root, "figures", "record-1"),
+			filepath.Join(root, "data", "record-1"),
+		} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+			}
+		}
+
+		if err := client.DeleteRecordDir("record-1"); err != nil {
+			t.Fatalf("DeleteRecordDir() error = %v", err)
+		}
+		want := []string{filepath.Join(root, "figures"), filepath.Join(root, "data")}
+		if len(syncedDirs) != len(want) {
+			t.Fatalf("synced dirs = %v, want %v", syncedDirs, want)
+		}
+		for i := range want {
+			if syncedDirs[i] != want[i] {
+				t.Fatalf("synced dirs = %v, want %v", syncedDirs, want)
+			}
+		}
+	})
+
+	t.Run("returns containing dir sync errors", func(t *testing.T) {
+		root := t.TempDir()
+		client, err := newClientWithHooks(root, fileOperationHooks{
+			syncDir: func(string) error {
+				return errors.New("sync boom")
+			},
+		})
+		if err != nil {
+			t.Fatalf("newClientWithHooks() error = %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "figures", "record-1"), 0o755); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+
+		if err := client.DeleteRecordDir("record-1"); err == nil || !strings.Contains(err.Error(), "sync figures directory") {
+			t.Fatalf("expected containing dir sync error, got %v", err)
 		}
 	})
 

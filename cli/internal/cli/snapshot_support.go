@@ -25,6 +25,14 @@ var downloadCloudFigureFn = func(ctx context.Context, cloud *cloudStack, key str
 	return cloud.S3.Download(ctx, key)
 }
 
+var commitRecordChildrenFn = func(ctx context.Context, repo repository.Repository, input repository.ReplaceRecordChildrenInput) (repository.Record, error) {
+	return repo.ReplaceRecordChildren(ctx, input)
+}
+
+var deleteRecordFigureFileFn = func(fs *filesystem.Client, recordID string, filename string) error {
+	return fs.DeleteFigure(recordID, filename)
+}
+
 func buildLocalSnapshot(ctx context.Context, stack *localStack, filter repository.ListRecordsFilter) (gitsnapshot.Snapshot, error) {
 	return buildSnapshot(ctx, stack.Repo, stack.Repo, func(_ context.Context, figure repository.RecordFigure) ([]byte, error) {
 		path, err := stack.FS.ResolveFigurePath(figure.RecordID, figure.Filename)
@@ -379,6 +387,9 @@ func importSnapshotIntoStack(ctx context.Context, stack *localStack, snapshot gi
 		rollback.cleanup(stack)
 	}
 
+	if err := reconcileLocalOrphans(ctx, stack); err != nil {
+		return stats, fmt.Errorf("reconcile local orphans after import: %w", err)
+	}
 	return stats, nil
 }
 
@@ -521,103 +532,111 @@ func upsertTemplate(ctx context.Context, repo repository.Repository, tmpl gitsna
 }
 
 func createImportedRecord(ctx context.Context, stack *localStack, record gitsnapshot.Record) error {
-	createdAt := record.CreatedAt.UTC()
-	updatedAt := record.UpdatedAt.UTC()
-	if _, err := stack.Repo.CreateRecord(ctx, repository.CreateRecordInput{
-		ID:             record.ID,
-		Date:           record.Date,
-		DayOrder:       record.DayOrder,
-		HTMLContent:    record.HTMLContent,
-		Notes:          record.Notes,
-		ProjectID:      record.ProjectID,
-		SourceDeviceID: record.SourceDeviceID,
-		SourceRef:      record.SourceRef,
-		GitRemoteURL:   record.GitRemoteURL,
-		GitHash:        record.GitHash,
-		CreatedAt:      &createdAt,
-		UpdatedAt:      &updatedAt,
-	}); err != nil {
-		return fmt.Errorf("create record %s: %w", record.ID, err)
-	}
-	if err := replaceRecordChildren(ctx, stack, record); err != nil {
-		return err
-	}
-	return nil
+	return replaceRecordChildren(ctx, stack, record)
 }
 
 func updateImportedRecord(ctx context.Context, stack *localStack, record gitsnapshot.Record) error {
-	updatedAt := record.UpdatedAt.UTC()
-	if _, err := stack.Repo.UpdateRecord(ctx, repository.UpdateRecordInput{
-		ID:             record.ID,
-		Date:           record.Date,
-		DayOrder:       record.DayOrder,
-		HTMLContent:    record.HTMLContent,
-		Notes:          record.Notes,
-		ProjectID:      record.ProjectID,
-		SourceDeviceID: record.SourceDeviceID,
-		SourceRef:      record.SourceRef,
-		GitRemoteURL:   record.GitRemoteURL,
-		GitHash:        record.GitHash,
-		UpdatedAt:      &updatedAt,
-		SetDeletedAt:   true,
-	}); err != nil {
-		return fmt.Errorf("update record %s: %w", record.ID, err)
-	}
-	if err := replaceRecordChildren(ctx, stack, record); err != nil {
-		return err
-	}
-	return nil
+	return replaceRecordChildren(ctx, stack, record)
 }
 
 func replaceRecordChildren(ctx context.Context, stack *localStack, record gitsnapshot.Record) error {
-	existingFigures, err := stack.Repo.ListRecordFiguresByRecordID(ctx, record.ID)
+	figures, err := writeImportedRecordFigures(stack, record)
 	if err != nil {
-		return fmt.Errorf("list existing figures for %s: %w", record.ID, err)
+		return err
 	}
-	for _, figure := range existingFigures {
-		if err := stack.Repo.DeleteRecordFigure(ctx, figure.ID); err != nil {
-			return fmt.Errorf("delete existing figure %s/%s: %w", record.ID, figure.Filename, err)
-		}
-	}
-	existingDataFiles, err := stack.Repo.ListRecordDataFilesByRecordID(ctx, record.ID)
-	if err != nil {
-		return fmt.Errorf("list existing data files for %s: %w", record.ID, err)
-	}
-	for _, file := range existingDataFiles {
-		if err := stack.Repo.DeleteRecordDataFile(ctx, file.ID); err != nil {
-			return fmt.Errorf("delete existing data file %s/%s: %w", record.ID, file.Filename, err)
-		}
-	}
-	if err := stack.FS.DeleteRecordDir(record.ID); err != nil {
-		return fmt.Errorf("reset local files for %s: %w", record.ID, err)
-	}
-	for _, figure := range record.Figures {
-		path, err := stack.FS.ResolveFigurePath(record.ID, figure.Filename)
-		if err != nil {
-			return err
-		}
-		if err := writeTextFileAtomically(path, figure.Content, 0o700, 0o644); err != nil {
-			return fmt.Errorf("write local figure %s/%s: %w", record.ID, figure.Filename, err)
-		}
-		if _, err := stack.Repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
-			RecordID: record.ID,
-			Filename: figure.Filename,
-			S3Key:    figure.S3Key,
-			AltText:  figure.AltText,
-		}); err != nil {
-			return fmt.Errorf("create figure row %s/%s: %w", record.ID, figure.Filename, err)
-		}
-	}
+	dataFiles := make([]repository.CreateRecordDataFileInput, 0, len(record.DataFiles))
 	for _, file := range record.DataFiles {
-		if _, err := stack.Repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+		dataFiles = append(dataFiles, repository.CreateRecordDataFileInput{
 			RecordID:    record.ID,
 			Filename:    file.Filename,
 			S3Key:       file.S3Key,
 			Size:        file.Size,
 			Hash:        file.Hash,
 			Description: file.Description,
-		}); err != nil {
-			return fmt.Errorf("create data file row %s/%s: %w", record.ID, file.Filename, err)
+		})
+	}
+	createdAt := record.CreatedAt.UTC()
+	updatedAt := record.UpdatedAt.UTC()
+	if _, err := commitRecordChildrenFn(ctx, stack.Repo, repository.ReplaceRecordChildrenInput{
+		Record: repository.CreateRecordInput{
+			ID:             record.ID,
+			Date:           record.Date,
+			DayOrder:       record.DayOrder,
+			HTMLContent:    record.HTMLContent,
+			Notes:          record.Notes,
+			ProjectID:      record.ProjectID,
+			SourceDeviceID: record.SourceDeviceID,
+			SourceRef:      record.SourceRef,
+			GitRemoteURL:   record.GitRemoteURL,
+			GitHash:        record.GitHash,
+			CreatedAt:      &createdAt,
+			UpdatedAt:      &updatedAt,
+		},
+		SetDeletedAt: true,
+		Figures:      figures,
+		DataFiles:    dataFiles,
+	}); err != nil {
+		return fmt.Errorf("replace record children rows %s: %w", record.ID, err)
+	}
+	if err := deleteStaleImportedFigures(ctx, stack, record.ID); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeImportedRecordFigures(stack *localStack, record gitsnapshot.Record) ([]repository.CreateRecordFigureInput, error) {
+	figures := make([]repository.CreateRecordFigureInput, 0, len(record.Figures))
+	figureDir := ""
+	for _, figure := range record.Figures {
+		path, err := stack.FS.ResolveFigurePath(record.ID, figure.Filename)
+		if err != nil {
+			return nil, err
+		}
+		if err := writeTextFileAtomically(path, figure.Content, 0o700, 0o644); err != nil {
+			return nil, fmt.Errorf("write local figure %s/%s: %w", record.ID, figure.Filename, err)
+		}
+		figureDir = filepath.Dir(path)
+		figures = append(figures, repository.CreateRecordFigureInput{
+			RecordID: record.ID,
+			Filename: figure.Filename,
+			S3Key:    figure.S3Key,
+			AltText:  figure.AltText,
+		})
+	}
+	if figureDir != "" {
+		if err := syncDirFn(figureDir); err != nil {
+			return nil, fmt.Errorf("sync local figure directory %s: %w", record.ID, err)
+		}
+	}
+	return figures, nil
+}
+
+func deleteStaleImportedFigures(ctx context.Context, stack *localStack, recordID string) error {
+	committed, err := stack.Repo.ListRecordFiguresByRecordID(ctx, recordID)
+	if err != nil {
+		return fmt.Errorf("list committed figures for %s: %w", recordID, err)
+	}
+	referenced := make(map[string]struct{}, len(committed))
+	for _, figure := range committed {
+		referenced[figure.Filename] = struct{}{}
+	}
+	diskFiles, err := stack.FS.ListFigureFilenames(recordID)
+	if err != nil {
+		return fmt.Errorf("list local figures for %s: %w", recordID, err)
+	}
+	deletedAny := false
+	for _, filename := range diskFiles {
+		if _, ok := referenced[filename]; ok {
+			continue
+		}
+		if err := deleteRecordFigureFileFn(stack.FS, recordID, filename); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("delete stale figure %s/%s: %w", recordID, filename, err)
+		}
+		deletedAny = true
+	}
+	if deletedAny {
+		if err := syncDirFn(filepath.Join(stack.FS.BasePath(), "figures", recordID)); err != nil {
+			return fmt.Errorf("sync stale figure cleanup for %s: %w", recordID, err)
 		}
 	}
 	return nil

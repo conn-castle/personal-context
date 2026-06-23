@@ -4220,6 +4220,61 @@ func (m *memoryRepo) UpdateRecord(_ context.Context, input repository.UpdateReco
 	return record, nil
 }
 
+func (m *memoryRepo) ReplaceRecordChildren(_ context.Context, input repository.ReplaceRecordChildrenInput) (repository.Record, error) {
+	record, exists := m.records[input.Record.ID]
+	if !exists {
+		record = repository.Record{
+			ID:        input.Record.ID,
+			CreatedAt: derefTime(input.Record.CreatedAt),
+		}
+	}
+	record.Date = input.Record.Date
+	record.DayOrder = input.Record.DayOrder
+	record.HTMLContent = input.Record.HTMLContent
+	record.Notes = cloneStringPtr(input.Record.Notes)
+	record.ProjectID = input.Record.ProjectID
+	record.SourceDeviceID = input.Record.SourceDeviceID
+	record.SourceRef = cloneStringPtr(input.Record.SourceRef)
+	record.GitRemoteURL = cloneStringPtr(input.Record.GitRemoteURL)
+	record.GitHash = cloneStringPtr(input.Record.GitHash)
+	record.UpdatedAt = derefTime(input.Record.UpdatedAt)
+	if input.SetDeletedAt {
+		record.DeletedAt = cloneTimePtr(input.Record.DeletedAt)
+	}
+	m.records[input.Record.ID] = record
+
+	figures := make(map[string]repository.RecordFigure, len(input.Figures))
+	for _, figureInput := range input.Figures {
+		figure := repository.RecordFigure{
+			ID:       m.nextFigureID,
+			RecordID: figureInput.RecordID,
+			Filename: figureInput.Filename,
+			S3Key:    figureInput.S3Key,
+			AltText:  cloneStringPtr(figureInput.AltText),
+		}
+		m.nextFigureID++
+		figures[figure.Filename] = figure
+	}
+	m.figuresByRecord[input.Record.ID] = figures
+
+	dataFiles := make(map[string]repository.RecordDataFile, len(input.DataFiles))
+	for _, dataInput := range input.DataFiles {
+		dataFile := repository.RecordDataFile{
+			ID:          m.nextDataID,
+			RecordID:    dataInput.RecordID,
+			Filename:    dataInput.Filename,
+			S3Key:       dataInput.S3Key,
+			Size:        dataInput.Size,
+			Hash:        dataInput.Hash,
+			Description: cloneStringPtr(dataInput.Description),
+		}
+		m.nextDataID++
+		dataFiles[dataFile.Filename] = dataFile
+	}
+	m.dataByRecord[input.Record.ID] = dataFiles
+	return record, nil
+}
+
 func (m *memoryRepo) ListRecords(_ context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error) {
 	if m.listRecordsErr != nil {
 		return nil, m.listRecordsErr

@@ -900,6 +900,178 @@ func RunContractSuite(t *testing.T, factory RepositoryFactory) {
 		}
 	})
 
+	t.Run("replace record children upserts and rolls back atomically", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		if _, err := repo.CreateProject(ctx, repository.CreateRegistryInput{ID: "contract/default-project"}); err != nil {
+			t.Fatalf("CreateProject(default) error = %v", err)
+		}
+		if _, err := repo.CreateDevice(ctx, repository.CreateRegistryInput{ID: "contract-device"}); err != nil {
+			t.Fatalf("CreateDevice(default) error = %v", err)
+		}
+
+		createdAt := time.Date(2025, 3, 7, 10, 0, 0, 0, time.UTC)
+		updatedAt := time.Date(2025, 3, 7, 11, 0, 0, 0, time.UTC)
+		inserted, err := repo.ReplaceRecordChildren(ctx, repository.ReplaceRecordChildrenInput{
+			Record: repository.CreateRecordInput{
+				ID:             "20250307-3333cccc",
+				Date:           "2025-03-07",
+				DayOrder:       "m",
+				HTMLContent:    strPtr("<h1>Inserted</h1>"),
+				Notes:          strPtr("inserted notes"),
+				ProjectID:      "contract/default-project",
+				SourceDeviceID: "contract-device",
+				CreatedAt:      &createdAt,
+				UpdatedAt:      &updatedAt,
+			},
+			Figures: []repository.CreateRecordFigureInput{{
+				RecordID: "20250307-3333cccc",
+				Filename: "inserted.png",
+				S3Key:    "figures/20250307-3333cccc/inserted.png",
+				AltText:  strPtr("inserted"),
+			}},
+			DataFiles: []repository.CreateRecordDataFileInput{{
+				RecordID:    "20250307-3333cccc",
+				Filename:    "inserted.csv",
+				S3Key:       "data/20250307-3333cccc/inserted.csv",
+				Size:        12,
+				Hash:        "1111111111111111111111111111111111111111111111111111111111111111",
+				Description: strPtr("inserted"),
+			}},
+		})
+		if err != nil {
+			t.Fatalf("ReplaceRecordChildren(insert) error = %v", err)
+		}
+		if inserted.ID != "20250307-3333cccc" || !inserted.CreatedAt.Equal(createdAt) || !inserted.UpdatedAt.Equal(updatedAt) {
+			t.Fatalf("unexpected inserted record: %+v", inserted)
+		}
+		insertedFigures, err := repo.ListRecordFiguresByRecordID(ctx, inserted.ID)
+		if err != nil {
+			t.Fatalf("ListRecordFiguresByRecordID(inserted) error = %v", err)
+		}
+		if len(insertedFigures) != 1 || insertedFigures[0].Filename != "inserted.png" {
+			t.Fatalf("unexpected inserted figures: %+v", insertedFigures)
+		}
+
+		originalUpdatedAt := time.Date(2025, 3, 8, 9, 0, 0, 0, time.UTC)
+		record := mustCreateRecord(t, ctx, repo, repository.CreateRecordInput{
+			ID:          "20250308-4444dddd",
+			Date:        "2025-03-08",
+			DayOrder:    "a",
+			HTMLContent: strPtr("<h1>Before</h1>"),
+			UpdatedAt:   &originalUpdatedAt,
+		})
+		if _, err := repo.CreateRecordFigure(ctx, repository.CreateRecordFigureInput{
+			RecordID: record.ID,
+			Filename: "old.png",
+			S3Key:    "figures/20250308-4444dddd/old.png",
+			AltText:  strPtr("old"),
+		}); err != nil {
+			t.Fatalf("CreateRecordFigure(old) error = %v", err)
+		}
+		if _, err := repo.CreateRecordDataFile(ctx, repository.CreateRecordDataFileInput{
+			RecordID:    record.ID,
+			Filename:    "old.csv",
+			S3Key:       "data/20250308-4444dddd/old.csv",
+			Size:        7,
+			Hash:        "2222222222222222222222222222222222222222222222222222222222222222",
+			Description: strPtr("old"),
+		}); err != nil {
+			t.Fatalf("CreateRecordDataFile(old) error = %v", err)
+		}
+		if err := repo.SoftDeleteRecord(ctx, record.ID); err != nil {
+			t.Fatalf("SoftDeleteRecord() error = %v", err)
+		}
+
+		replacementUpdatedAt := time.Date(2025, 3, 8, 12, 0, 0, 0, time.UTC)
+		replaced, err := repo.ReplaceRecordChildren(ctx, repository.ReplaceRecordChildrenInput{
+			Record: repository.CreateRecordInput{
+				ID:             record.ID,
+				Date:           "2025-03-09",
+				DayOrder:       "b",
+				HTMLContent:    strPtr("<h1>After</h1>"),
+				Notes:          strPtr("after notes"),
+				ProjectID:      record.ProjectID,
+				SourceDeviceID: record.SourceDeviceID,
+				UpdatedAt:      &replacementUpdatedAt,
+			},
+			SetDeletedAt: true,
+			Figures: []repository.CreateRecordFigureInput{
+				{RecordID: record.ID, Filename: "new-a.png", S3Key: "figures/20250308-4444dddd/new-a.png", AltText: strPtr("new a")},
+				{RecordID: record.ID, Filename: "new-b.png", S3Key: "figures/20250308-4444dddd/new-b.png", AltText: strPtr("new b")},
+			},
+			DataFiles: []repository.CreateRecordDataFileInput{{
+				RecordID:    record.ID,
+				Filename:    "new.csv",
+				S3Key:       "data/20250308-4444dddd/new.csv",
+				Size:        9,
+				Hash:        "3333333333333333333333333333333333333333333333333333333333333333",
+				Description: strPtr("new"),
+			}},
+		})
+		if err != nil {
+			t.Fatalf("ReplaceRecordChildren(update) error = %v", err)
+		}
+		if replaced.Date != "2025-03-09" || replaced.DayOrder != "b" || !replaced.UpdatedAt.Equal(replacementUpdatedAt) || replaced.DeletedAt != nil {
+			t.Fatalf("unexpected replaced record: %+v", replaced)
+		}
+		figures, err := repo.ListRecordFiguresByRecordID(ctx, record.ID)
+		if err != nil {
+			t.Fatalf("ListRecordFiguresByRecordID(replaced) error = %v", err)
+		}
+		if len(figures) != 2 || figures[0].Filename != "new-a.png" || figures[1].Filename != "new-b.png" {
+			t.Fatalf("unexpected replaced figures: %+v", figures)
+		}
+		files, err := repo.ListRecordDataFilesByRecordID(ctx, record.ID)
+		if err != nil {
+			t.Fatalf("ListRecordDataFilesByRecordID(replaced) error = %v", err)
+		}
+		if len(files) != 1 || files[0].Filename != "new.csv" {
+			t.Fatalf("unexpected replaced data files: %+v", files)
+		}
+
+		_, err = repo.ReplaceRecordChildren(ctx, repository.ReplaceRecordChildrenInput{
+			Record: repository.CreateRecordInput{
+				ID:             record.ID,
+				Date:           "2025-03-10",
+				DayOrder:       "c",
+				HTMLContent:    strPtr("<h1>Bad</h1>"),
+				ProjectID:      record.ProjectID,
+				SourceDeviceID: record.SourceDeviceID,
+				UpdatedAt:      ptrTime(time.Date(2025, 3, 8, 13, 0, 0, 0, time.UTC)),
+			},
+			Figures: []repository.CreateRecordFigureInput{
+				{RecordID: record.ID, Filename: "dup.png", S3Key: "figures/20250308-4444dddd/dup.png"},
+				{RecordID: record.ID, Filename: "dup.png", S3Key: "figures/20250308-4444dddd/dup.png"},
+			},
+		})
+		if err == nil {
+			t.Fatal("expected duplicate replacement child to fail")
+		}
+		afterRollback, err := repo.GetRecordByID(ctx, record.ID)
+		if err != nil {
+			t.Fatalf("GetRecordByID(after rollback) error = %v", err)
+		}
+		if afterRollback.Date != "2025-03-09" || !afterRollback.UpdatedAt.Equal(replacementUpdatedAt) {
+			t.Fatalf("record changed despite rollback: %+v", afterRollback)
+		}
+		figures, err = repo.ListRecordFiguresByRecordID(ctx, record.ID)
+		if err != nil {
+			t.Fatalf("ListRecordFiguresByRecordID(after rollback) error = %v", err)
+		}
+		if len(figures) != 2 || figures[0].Filename != "new-a.png" || figures[1].Filename != "new-b.png" {
+			t.Fatalf("figures changed despite rollback: %+v", figures)
+		}
+		files, err = repo.ListRecordDataFilesByRecordID(ctx, record.ID)
+		if err != nil {
+			t.Fatalf("ListRecordDataFilesByRecordID(after rollback) error = %v", err)
+		}
+		if len(files) != 1 || files[0].Filename != "new.csv" {
+			t.Fatalf("data files changed despite rollback: %+v", files)
+		}
+	})
+
 	t.Run("list filters and invalid arguments", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()

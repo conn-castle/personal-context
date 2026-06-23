@@ -22,6 +22,9 @@ type Repository interface {
 	SoftDeleteRecord(ctx context.Context, id string) error
 	RestoreRecord(ctx context.Context, id string) error
 	DeleteRecord(ctx context.Context, id string) error
+	// ReplaceRecordChildren writes a record row and its complete replacement
+	// figure/data-file child set in one backend transaction.
+	ReplaceRecordChildren(ctx context.Context, input ReplaceRecordChildrenInput) (Record, error)
 
 	CreateRecordFigure(ctx context.Context, input CreateRecordFigureInput) (RecordFigure, error)
 	GetRecordFigureByID(ctx context.Context, id int64) (RecordFigure, error)

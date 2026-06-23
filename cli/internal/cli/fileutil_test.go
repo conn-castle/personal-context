@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -46,6 +48,104 @@ func TestWriteTextFileAtomicallyCreatesParentDir(t *testing.T) {
 	}
 	if !parentInfo.IsDir() {
 		t.Fatal("expected parent to be a directory")
+	}
+}
+
+func TestWriteTextFileAtomicallySyncsCreatedParentDirs(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a", "b", "file.txt")
+	originalSyncDirFn := syncDirFn
+	t.Cleanup(func() { syncDirFn = originalSyncDirFn })
+	var syncedDirs []string
+	syncDirFn = func(dir string) error {
+		syncedDirs = append(syncedDirs, dir)
+		return nil
+	}
+
+	if err := writeTextFileAtomically(path, []byte("durable dirs"), 0o755, 0o644); err != nil {
+		t.Fatalf("writeTextFileAtomically() error = %v", err)
+	}
+
+	want := []string{root, filepath.Join(root, "a"), filepath.Join(root, "a", "b")}
+	if len(syncedDirs) != len(want) {
+		t.Fatalf("synced dirs = %v, want %v", syncedDirs, want)
+	}
+	for i := range want {
+		if syncedDirs[i] != want[i] {
+			t.Fatalf("synced dirs = %v, want %v", syncedDirs, want)
+		}
+	}
+}
+
+func TestWriteTextFileAtomicallyCreatedParentDirSyncError(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "a", "file.txt")
+	originalSyncDirFn := syncDirFn
+	t.Cleanup(func() { syncDirFn = originalSyncDirFn })
+	syncDirFn = func(string) error {
+		return errors.New("mkdir sync boom")
+	}
+
+	err := writeTextFileAtomically(path, []byte("data"), 0o755, 0o644)
+	if err == nil || !strings.Contains(err.Error(), "sync parent directory for created directory") {
+		t.Fatalf("expected created directory sync error, got %v", err)
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("target file should not be written after created-dir sync failure, stat err = %v", statErr)
+	}
+}
+
+func TestWriteTextFileAtomicallyParentPathIsFile(t *testing.T) {
+	root := t.TempDir()
+	blocker := filepath.Join(root, "a")
+	if err := os.WriteFile(blocker, []byte("not-a-dir"), 0o644); err != nil {
+		t.Fatalf("WriteFile(blocker) error = %v", err)
+	}
+
+	err := writeTextFileAtomically(filepath.Join(blocker, "file.txt"), []byte("data"), 0o755, 0o644)
+	if err == nil || !strings.Contains(err.Error(), "exists and is not a directory") {
+		t.Fatalf("expected parent path file error, got %v", err)
+	}
+
+	err = writeTextFileAtomically(filepath.Join(blocker, "b", "file.txt"), []byte("data"), 0o755, 0o644)
+	if err == nil || !strings.Contains(err.Error(), "not a directory") {
+		t.Fatalf("expected nested parent path file error, got %v", err)
+	}
+}
+
+func TestEnsureDirDurablyMkdirRace(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "a", "b")
+	originalSyncDirFn := syncDirFn
+	t.Cleanup(func() { syncDirFn = originalSyncDirFn })
+	syncDirFn = func(dir string) error {
+		if dir == root {
+			if err := os.Mkdir(target, 0o755); err != nil && !errors.Is(err, os.ErrExist) {
+				t.Fatalf("Mkdir(target) during parent sync error = %v", err)
+			}
+		}
+		return nil
+	}
+
+	if err := ensureDirDurably(target, 0o755); err != nil {
+		t.Fatalf("ensureDirDurably() should tolerate concurrent directory creation, got %v", err)
+	}
+}
+
+func TestEnsureDirDurablyPropagatesParentCreationError(t *testing.T) {
+	root := t.TempDir()
+	originalSyncDirFn := syncDirFn
+	t.Cleanup(func() { syncDirFn = originalSyncDirFn })
+	syncDirFn = func(dir string) error {
+		if dir == root {
+			return errors.New("parent sync boom")
+		}
+		return nil
+	}
+
+	err := ensureDirDurably(filepath.Join(root, "a", "b"), 0o755)
+	if err == nil || !strings.Contains(err.Error(), "parent sync boom") {
+		t.Fatalf("expected parent creation error, got %v", err)
 	}
 }
 
@@ -108,6 +208,168 @@ func TestWriteTextFileAtomicallyEmptyContent(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected empty file, got %q", got)
+	}
+}
+
+func TestWriteTextFileAtomicallySyncsParentDirAfterRename(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "synced.txt")
+	originalSyncDirFn := syncDirFn
+	t.Cleanup(func() { syncDirFn = originalSyncDirFn })
+	var syncedDirs []string
+	syncDirFn = func(dir string) error {
+		syncedDirs = append(syncedDirs, dir)
+		return nil
+	}
+
+	if err := writeTextFileAtomically(path, []byte("durable"), 0o755, 0o644); err != nil {
+		t.Fatalf("writeTextFileAtomically() error = %v", err)
+	}
+
+	if len(syncedDirs) != 1 || syncedDirs[0] != filepath.Dir(path) {
+		t.Fatalf("synced dirs = %v, want [%s]", syncedDirs, filepath.Dir(path))
+	}
+}
+
+func TestWriteTextFileAtomicallyParentDirSyncError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sync-error.txt")
+	originalSyncDirFn := syncDirFn
+	t.Cleanup(func() { syncDirFn = originalSyncDirFn })
+	syncDirFn = func(string) error {
+		return errors.New("sync boom")
+	}
+
+	err := writeTextFileAtomically(path, []byte("renamed"), 0o755, 0o644)
+	if err == nil || !strings.Contains(err.Error(), "sync parent directory") {
+		t.Fatalf("expected parent sync error, got %v", err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatalf("renamed file should remain inspectable after sync failure: %v", readErr)
+	}
+	if string(got) != "renamed" {
+		t.Fatalf("content after sync failure = %q, want renamed", got)
+	}
+}
+
+type failingAtomicTempFile struct {
+	path     string
+	failOp   string
+	closeCnt int
+}
+
+func (f *failingAtomicTempFile) Write([]byte) (int, error) {
+	if f.failOp == "write" {
+		return 0, errors.New("write boom")
+	}
+	return 0, nil
+}
+
+func (f *failingAtomicTempFile) Sync() error {
+	if f.failOp == "sync" {
+		return errors.New("sync boom")
+	}
+	return nil
+}
+
+func (f *failingAtomicTempFile) Close() error {
+	f.closeCnt++
+	if f.failOp == "close" {
+		return errors.New("close boom")
+	}
+	return nil
+}
+
+func (f *failingAtomicTempFile) Chmod(os.FileMode) error {
+	if f.failOp == "chmod" {
+		return errors.New("chmod boom")
+	}
+	return nil
+}
+
+func (f *failingAtomicTempFile) Name() string {
+	return f.path
+}
+
+func TestWriteTextFileAtomicallyTempFileFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		failOp  string
+		wantErr string
+	}{
+		{name: "chmod", failOp: "chmod", wantErr: "set permissions"},
+		{name: "write", failOp: "write", wantErr: "write temp file"},
+		{name: "sync", failOp: "sync", wantErr: "sync temp file"},
+		{name: "close", failOp: "close", wantErr: "close temp file"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			originalCreateTempFileFn := createTempFileFn
+			t.Cleanup(func() { createTempFileFn = originalCreateTempFileFn })
+
+			temp := &failingAtomicTempFile{
+				path:   filepath.Join(t.TempDir(), "staged.tmp"),
+				failOp: tc.failOp,
+			}
+			createTempFileFn = func(string, string) (atomicTempFile, error) {
+				return temp, nil
+			}
+
+			path := filepath.Join(t.TempDir(), "out.txt")
+			err := writeTextFileAtomically(path, []byte("data"), 0o755, 0o644)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("writeTextFileAtomically() error = %v, want %q", err, tc.wantErr)
+			}
+			if tc.failOp != "close" && temp.closeCnt == 0 {
+				t.Fatalf("%s failure did not close temp file", tc.failOp)
+			}
+		})
+	}
+}
+
+type stubSyncableDir struct {
+	syncErr  error
+	closeErr error
+	closed   bool
+}
+
+func (d *stubSyncableDir) Sync() error {
+	return d.syncErr
+}
+
+func (d *stubSyncableDir) Close() error {
+	d.closed = true
+	return d.closeErr
+}
+
+func TestSyncDirErrors(t *testing.T) {
+	originalOpenDirFn := openDirFn
+	t.Cleanup(func() { openDirFn = originalOpenDirFn })
+
+	openDirFn = func(string) (syncableDir, error) {
+		return nil, errors.New("open boom")
+	}
+	if err := syncDir(t.TempDir()); err == nil || !strings.Contains(err.Error(), "open boom") {
+		t.Fatalf("syncDir(open failure) error = %v", err)
+	}
+
+	syncFail := &stubSyncableDir{syncErr: errors.New("sync boom")}
+	openDirFn = func(string) (syncableDir, error) {
+		return syncFail, nil
+	}
+	if err := syncDir(t.TempDir()); err == nil || !strings.Contains(err.Error(), "sync boom") {
+		t.Fatalf("syncDir(sync failure) error = %v", err)
+	}
+	if !syncFail.closed {
+		t.Fatal("syncDir should close directory after sync failure")
+	}
+
+	closeFail := &stubSyncableDir{closeErr: errors.New("close boom")}
+	openDirFn = func(string) (syncableDir, error) {
+		return closeFail, nil
+	}
+	if err := syncDir(t.TempDir()); err == nil || !strings.Contains(err.Error(), "close boom") {
+		t.Fatalf("syncDir(close failure) error = %v", err)
 	}
 }
 

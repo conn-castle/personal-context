@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ type fileOperationHooks struct {
 	syncFile   func(*os.File) error
 	closeFile  func(*os.File) error
 	renameFile func(string, string) error
+	syncDir    func(string) error
 }
 
 func defaultFileOperationHooks() fileOperationHooks {
@@ -19,6 +21,7 @@ func defaultFileOperationHooks() fileOperationHooks {
 		syncFile:   func(f *os.File) error { return f.Sync() },
 		closeFile:  func(f *os.File) error { return f.Close() },
 		renameFile: os.Rename,
+		syncDir:    syncDir,
 	}
 }
 
@@ -33,7 +36,23 @@ func (h fileOperationHooks) withDefaults() fileOperationHooks {
 	if h.renameFile == nil {
 		h.renameFile = defaults.renameFile
 	}
+	if h.syncDir == nil {
+		h.syncDir = defaults.syncDir
+	}
 	return h
+}
+
+// syncDir fsyncs a directory so prior renames in that directory survive a crash.
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // StoredFile describes a copied asset on disk.
@@ -147,6 +166,32 @@ func (c *Client) ListRecordIDsOnDisk() (figures []string, data []string, err err
 	return figures, data, nil
 }
 
+// ListFigureFilenames returns file names stored under figures/{recordID}.
+// Args: recordID identifies the record.
+// Returns: regular file names, an empty slice for a missing directory, or an error.
+func (c *Client) ListFigureFilenames(recordID string) ([]string, error) {
+	if c == nil {
+		return nil, fmt.Errorf("filesystem client is required")
+	}
+	if err := validatePathSegment("record id", recordID); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(filepath.Join(c.basePath, "figures", recordID))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	result := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() && validatePathSegment("entry", e.Name()) == nil {
+			result = append(result, e.Name())
+		}
+	}
+	return result, nil
+}
+
 // DeleteRecordDir removes the entire figure and data directories for a record.
 // Args: recordID identifies the record.
 // Returns: nil on success; tolerates missing directories.
@@ -157,10 +202,14 @@ func (c *Client) DeleteRecordDir(recordID string) error {
 	if err := validatePathSegment("record id", recordID); err != nil {
 		return err
 	}
+	hooks := c.hooks.withDefaults()
 	for _, prefix := range []string{"figures", "data"} {
 		dir := filepath.Join(c.basePath, prefix, recordID)
 		if err := os.RemoveAll(dir); err != nil {
 			return fmt.Errorf("remove %s/%s: %w", prefix, recordID, err)
+		}
+		if err := hooks.syncDir(filepath.Dir(dir)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("sync %s directory after removing %s: %w", prefix, recordID, err)
 		}
 	}
 	return nil

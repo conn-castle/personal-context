@@ -19,45 +19,46 @@ import (
 
 // mockRepo is a minimal repository mock for unit-testing command logic.
 type mockRepo struct {
-	getTemplateByNameFn    func(ctx context.Context, name string) (repository.Template, error)
-	createTemplateFn       func(ctx context.Context, input repository.CreateTemplateInput) (repository.Template, error)
-	createRecordFn         func(ctx context.Context, input repository.CreateRecordInput) (repository.Record, error)
-	getRecordByIDFn        func(ctx context.Context, id string) (repository.Record, error)
-	listRecordsFn          func(ctx context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error)
-	countRecordsFn         func(ctx context.Context, filter repository.ListRecordsFilter) (int, error)
-	countChildrenFn        func(ctx context.Context, recordIDs []string) (map[string]repository.ChildCounts, error)
-	listFiguresFn          func(ctx context.Context, recordID string) ([]repository.RecordFigure, error)
-	createFigureFn         func(ctx context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error)
-	updateFigureFn         func(ctx context.Context, input repository.UpdateRecordFigureInput) (repository.RecordFigure, error)
-	deleteFigureFn         func(ctx context.Context, id int64) error
-	listDataFilesFn        func(ctx context.Context, recordID string) ([]repository.RecordDataFile, error)
-	createDataFileFn       func(ctx context.Context, input repository.CreateRecordDataFileInput) (repository.RecordDataFile, error)
-	updateDataFileFn       func(ctx context.Context, input repository.UpdateRecordDataFileInput) (repository.RecordDataFile, error)
-	deleteDataFileFn       func(ctx context.Context, id int64) error
-	listTemplatesFn        func(ctx context.Context) ([]repository.Template, error)
-	createProjectFn        func(ctx context.Context, input repository.CreateRegistryInput) (repository.Project, error)
-	getProjectByIDFn       func(ctx context.Context, id string) (repository.Project, error)
-	listProjectsFn         func(ctx context.Context, includeArchived bool) ([]repository.Project, error)
-	upsertProjectFn        func(ctx context.Context, project repository.Project) (bool, error)
-	listProjectPathsFn     func(ctx context.Context, projectID *string) ([]repository.ProjectPath, error)
-	createDeviceFn         func(ctx context.Context, input repository.CreateRegistryInput) (repository.Device, error)
-	getDeviceByIDFn        func(ctx context.Context, id string) (repository.Device, error)
-	listDevicesFn          func(ctx context.Context, includeArchived bool) ([]repository.Device, error)
-	upsertDeviceFn         func(ctx context.Context, device repository.Device) (bool, error)
-	upsertChatSessionFn    func(ctx context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error)
-	getChatByIDFn          func(ctx context.Context, id string) (repository.ChatSession, error)
-	getChatBySourceFn      func(ctx context.Context, source string, sourceSessionID string) (repository.ChatSession, error)
-	listChatSessionsFn     func(ctx context.Context, filter repository.ListChatSessionsFilter) ([]repository.ChatSession, error)
-	countChatSessionsFn    func(ctx context.Context, filter repository.ListChatSessionsFilter) (int, error)
-	countChatItemsFn       func(ctx context.Context, filter repository.CountChatItemsFilter) (int, error)
-	listChatItemsFn        func(ctx context.Context, sessionID string) ([]repository.ChatItem, error)
-	searchChatItemsFn      func(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error)
-	countSearchChatItemsFn func(ctx context.Context, filter repository.SearchChatItemsFilter) (int, error)
-	maxChatOrdinalFn       func(ctx context.Context, sessionID string) (int, error)
-	createChatItemFn       func(ctx context.Context, input repository.CreateChatItemInput) (repository.ChatItem, error)
-	appendChatItemsFn      func(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error
-	replaceChatItemsFn     func(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error
-	writeChatBatchFn       func(ctx context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error)
+	getTemplateByNameFn     func(ctx context.Context, name string) (repository.Template, error)
+	createTemplateFn        func(ctx context.Context, input repository.CreateTemplateInput) (repository.Template, error)
+	createRecordFn          func(ctx context.Context, input repository.CreateRecordInput) (repository.Record, error)
+	getRecordByIDFn         func(ctx context.Context, id string) (repository.Record, error)
+	replaceRecordChildrenFn func(ctx context.Context, input repository.ReplaceRecordChildrenInput) (repository.Record, error)
+	listRecordsFn           func(ctx context.Context, filter repository.ListRecordsFilter) ([]repository.Record, error)
+	countRecordsFn          func(ctx context.Context, filter repository.ListRecordsFilter) (int, error)
+	countChildrenFn         func(ctx context.Context, recordIDs []string) (map[string]repository.ChildCounts, error)
+	listFiguresFn           func(ctx context.Context, recordID string) ([]repository.RecordFigure, error)
+	createFigureFn          func(ctx context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error)
+	updateFigureFn          func(ctx context.Context, input repository.UpdateRecordFigureInput) (repository.RecordFigure, error)
+	deleteFigureFn          func(ctx context.Context, id int64) error
+	listDataFilesFn         func(ctx context.Context, recordID string) ([]repository.RecordDataFile, error)
+	createDataFileFn        func(ctx context.Context, input repository.CreateRecordDataFileInput) (repository.RecordDataFile, error)
+	updateDataFileFn        func(ctx context.Context, input repository.UpdateRecordDataFileInput) (repository.RecordDataFile, error)
+	deleteDataFileFn        func(ctx context.Context, id int64) error
+	listTemplatesFn         func(ctx context.Context) ([]repository.Template, error)
+	createProjectFn         func(ctx context.Context, input repository.CreateRegistryInput) (repository.Project, error)
+	getProjectByIDFn        func(ctx context.Context, id string) (repository.Project, error)
+	listProjectsFn          func(ctx context.Context, includeArchived bool) ([]repository.Project, error)
+	upsertProjectFn         func(ctx context.Context, project repository.Project) (bool, error)
+	listProjectPathsFn      func(ctx context.Context, projectID *string) ([]repository.ProjectPath, error)
+	createDeviceFn          func(ctx context.Context, input repository.CreateRegistryInput) (repository.Device, error)
+	getDeviceByIDFn         func(ctx context.Context, id string) (repository.Device, error)
+	listDevicesFn           func(ctx context.Context, includeArchived bool) ([]repository.Device, error)
+	upsertDeviceFn          func(ctx context.Context, device repository.Device) (bool, error)
+	upsertChatSessionFn     func(ctx context.Context, input repository.UpsertChatSessionInput) (repository.ChatSession, bool, error)
+	getChatByIDFn           func(ctx context.Context, id string) (repository.ChatSession, error)
+	getChatBySourceFn       func(ctx context.Context, source string, sourceSessionID string) (repository.ChatSession, error)
+	listChatSessionsFn      func(ctx context.Context, filter repository.ListChatSessionsFilter) ([]repository.ChatSession, error)
+	countChatSessionsFn     func(ctx context.Context, filter repository.ListChatSessionsFilter) (int, error)
+	countChatItemsFn        func(ctx context.Context, filter repository.CountChatItemsFilter) (int, error)
+	listChatItemsFn         func(ctx context.Context, sessionID string) ([]repository.ChatItem, error)
+	searchChatItemsFn       func(ctx context.Context, filter repository.SearchChatItemsFilter) ([]repository.ChatSearchResult, error)
+	countSearchChatItemsFn  func(ctx context.Context, filter repository.SearchChatItemsFilter) (int, error)
+	maxChatOrdinalFn        func(ctx context.Context, sessionID string) (int, error)
+	createChatItemFn        func(ctx context.Context, input repository.CreateChatItemInput) (repository.ChatItem, error)
+	appendChatItemsFn       func(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error
+	replaceChatItemsFn      func(ctx context.Context, sessionID string, items []repository.CreateChatItemInput) error
+	writeChatBatchFn        func(ctx context.Context, ops []repository.ChatImportOp) ([]repository.ChatImportResult, error)
 }
 
 func (m *mockRepo) GetTemplateByName(ctx context.Context, name string) (repository.Template, error) {
@@ -130,6 +131,33 @@ func (m *mockRepo) CountRecordChildren(ctx context.Context, recordIDs []string) 
 func (m *mockRepo) SoftDeleteRecord(context.Context, string) error { return nil }
 func (m *mockRepo) RestoreRecord(context.Context, string) error    { return nil }
 func (m *mockRepo) DeleteRecord(context.Context, string) error     { return nil }
+func (m *mockRepo) ReplaceRecordChildren(ctx context.Context, input repository.ReplaceRecordChildrenInput) (repository.Record, error) {
+	if m.replaceRecordChildrenFn != nil {
+		return m.replaceRecordChildrenFn(ctx, input)
+	}
+	record := repository.Record{
+		ID:             input.Record.ID,
+		Date:           input.Record.Date,
+		DayOrder:       input.Record.DayOrder,
+		HTMLContent:    input.Record.HTMLContent,
+		Notes:          input.Record.Notes,
+		ProjectID:      input.Record.ProjectID,
+		SourceDeviceID: input.Record.SourceDeviceID,
+		SourceRef:      input.Record.SourceRef,
+		GitRemoteURL:   input.Record.GitRemoteURL,
+		GitHash:        input.Record.GitHash,
+	}
+	if input.Record.CreatedAt != nil {
+		record.CreatedAt = input.Record.CreatedAt.UTC()
+	}
+	if input.Record.UpdatedAt != nil {
+		record.UpdatedAt = input.Record.UpdatedAt.UTC()
+	}
+	if input.SetDeletedAt {
+		record.DeletedAt = input.Record.DeletedAt
+	}
+	return record, nil
+}
 func (m *mockRepo) CreateRecordFigure(ctx context.Context, input repository.CreateRecordFigureInput) (repository.RecordFigure, error) {
 	if m.createFigureFn != nil {
 		return m.createFigureFn(ctx, input)

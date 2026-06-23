@@ -3,6 +3,7 @@ package filesystem
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -234,6 +235,7 @@ func (c *Client) PromoteChatSourceStage(stage ChatSourceStage) (StoredFile, erro
 		return StoredFile{}, fmt.Errorf("ensure chats/raw exists: %w", err)
 	}
 
+	hooks := c.hooks.withDefaults()
 	var backupDir string
 	if _, err := os.Stat(activeDir); err == nil {
 		nonce, nonceErr := randomHexNonce()
@@ -241,25 +243,32 @@ func (c *Client) PromoteChatSourceStage(stage ChatSourceStage) (StoredFile, erro
 			return StoredFile{}, nonceErr
 		}
 		backupDir = filepath.Join(c.basePath, "chats", "raw", ".backup-"+stage.ChatSessionID+"-"+nonce)
-		if err := os.Rename(activeDir, backupDir); err != nil {
+		if err := hooks.renameFile(activeDir, backupDir); err != nil {
 			return StoredFile{}, fmt.Errorf("backup previous chat raw source: %w", err)
 		}
 	} else if !os.IsNotExist(err) {
 		return StoredFile{}, fmt.Errorf("stat active chat raw dir: %w", err)
 	}
 
-	if err := c.hooks.withDefaults().renameFile(stageDir, activeDir); err != nil {
+	if err := hooks.renameFile(stageDir, activeDir); err != nil {
 		if backupDir != "" {
-			_ = os.Rename(backupDir, activeDir)
+			_ = hooks.renameFile(backupDir, activeDir)
 		}
 		return StoredFile{}, fmt.Errorf("promote chat source stage: %w", err)
+	}
+	if err := hooks.syncDir(filepath.Dir(activeDir)); err != nil {
+		if backupDir != "" {
+			_ = os.RemoveAll(activeDir)
+			_ = hooks.renameFile(backupDir, activeDir)
+		}
+		return StoredFile{}, fmt.Errorf("sync promoted chat raw parent: %w", err)
 	}
 
 	info, err := os.Stat(activePath)
 	if err != nil {
 		if backupDir != "" {
 			_ = os.RemoveAll(activeDir)
-			_ = os.Rename(backupDir, activeDir)
+			_ = hooks.renameFile(backupDir, activeDir)
 		}
 		return StoredFile{}, fmt.Errorf("verify promoted chat source: %w", err)
 	}
@@ -288,6 +297,10 @@ func (c *Client) DeleteChatSource(chatSessionID string) error {
 	dir := filepath.Join(c.basePath, "chats", "raw", chatSessionID)
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("remove chat raw source dir: %w", err)
+	}
+	hooks := c.hooks.withDefaults()
+	if err := hooks.syncDir(filepath.Dir(dir)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("sync chat raw directory after removing %s: %w", chatSessionID, err)
 	}
 	return nil
 }

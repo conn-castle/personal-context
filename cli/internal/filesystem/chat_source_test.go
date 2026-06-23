@@ -187,6 +187,79 @@ func TestChatSourceRollsBackPreviousOnReimport(t *testing.T) {
 	}
 }
 
+func TestPromoteChatSourceStageSyncsRawParentAfterPromote(t *testing.T) {
+	base := t.TempDir()
+	chatID := "20260315-abcdef12"
+	rawDir := filepath.Join(base, "chats", "raw")
+	var syncedDirs []string
+	client, err := newClientWithHooks(base, fileOperationHooks{
+		syncDir: func(dir string) error {
+			syncedDirs = append(syncedDirs, dir)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("newClientWithHooks() error = %v", err)
+	}
+	source := filepath.Join(t.TempDir(), "session.json")
+	if err := os.WriteFile(source, []byte("NEW"), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	stage, err := client.CopyChatSourceToStage(chatID, source)
+	if err != nil {
+		t.Fatalf("CopyChatSourceToStage() error = %v", err)
+	}
+
+	if _, err := client.PromoteChatSourceStage(stage); err != nil {
+		t.Fatalf("PromoteChatSourceStage() error = %v", err)
+	}
+
+	if len(syncedDirs) != 1 || syncedDirs[0] != rawDir {
+		t.Fatalf("synced dirs = %v, want [%s]", syncedDirs, rawDir)
+	}
+}
+
+func TestPromoteChatSourceStageSyncDirFailureRollsBackBackup(t *testing.T) {
+	base := t.TempDir()
+	chatID := "20260315-abcdef12"
+	client, err := newClientWithHooks(base, fileOperationHooks{
+		syncDir: func(string) error {
+			return errors.New("sync raw dir")
+		},
+	})
+	if err != nil {
+		t.Fatalf("newClientWithHooks() error = %v", err)
+	}
+	activeDir := filepath.Join(base, "chats", "raw", chatID)
+	if err := os.MkdirAll(activeDir, 0o700); err != nil {
+		t.Fatalf("mkdir active: %v", err)
+	}
+	activePath := filepath.Join(activeDir, "source.json")
+	if err := os.WriteFile(activePath, []byte("OLD"), 0o600); err != nil {
+		t.Fatalf("write active: %v", err)
+	}
+	source := filepath.Join(t.TempDir(), "session.json")
+	if err := os.WriteFile(source, []byte("NEW"), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	stage, err := client.CopyChatSourceToStage(chatID, source)
+	if err != nil {
+		t.Fatalf("CopyChatSourceToStage() error = %v", err)
+	}
+
+	_, err = client.PromoteChatSourceStage(stage)
+	if err == nil || !strings.Contains(err.Error(), "sync promoted chat raw parent") {
+		t.Fatalf("expected sync error, got %v", err)
+	}
+	got, readErr := os.ReadFile(activePath)
+	if readErr != nil {
+		t.Fatalf("read restored active: %v", readErr)
+	}
+	if string(got) != "OLD" {
+		t.Fatalf("expected backup rollback to restore old content, got %q", string(got))
+	}
+}
+
 func TestDeleteChatSource(t *testing.T) {
 	base := t.TempDir()
 	client, _ := NewClient(base)
@@ -207,6 +280,53 @@ func TestDeleteChatSource(t *testing.T) {
 	// Idempotent.
 	if err := client.DeleteChatSource(chatID); err != nil {
 		t.Fatalf("idempotent delete error: %v", err)
+	}
+}
+
+func TestDeleteChatSourceSyncsRawParent(t *testing.T) {
+	base := t.TempDir()
+	var syncedDirs []string
+	client, err := newClientWithHooks(base, fileOperationHooks{
+		syncDir: func(dir string) error {
+			syncedDirs = append(syncedDirs, dir)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("newClientWithHooks() error = %v", err)
+	}
+	chatID := "20260315-abcdef12"
+	dir := filepath.Join(base, "chats", "raw", chatID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	if err := client.DeleteChatSource(chatID); err != nil {
+		t.Fatalf("DeleteChatSource() error = %v", err)
+	}
+	want := []string{filepath.Join(base, "chats", "raw")}
+	if len(syncedDirs) != len(want) || syncedDirs[0] != want[0] {
+		t.Fatalf("synced dirs = %v, want %v", syncedDirs, want)
+	}
+}
+
+func TestDeleteChatSourceSyncFailure(t *testing.T) {
+	base := t.TempDir()
+	client, err := newClientWithHooks(base, fileOperationHooks{
+		syncDir: func(string) error {
+			return errors.New("sync boom")
+		},
+	})
+	if err != nil {
+		t.Fatalf("newClientWithHooks() error = %v", err)
+	}
+	chatID := "20260315-abcdef12"
+	if err := os.MkdirAll(filepath.Join(base, "chats", "raw", chatID), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	if err := client.DeleteChatSource(chatID); err == nil || !strings.Contains(err.Error(), "sync chat raw directory") {
+		t.Fatalf("expected sync failure, got %v", err)
 	}
 }
 
@@ -347,13 +467,17 @@ func TestCopyChatSourceToStageRejectsDirectorySource(t *testing.T) {
 func TestPromoteChatSourceStageRenameFailureRollsBackBackup(t *testing.T) {
 	base := t.TempDir()
 	chatID := "20260315-abcdef12"
-	client, _ := newClientWithHooks(base, fileOperationHooks{
-		renameFile: func(string, string) error {
-			return errors.New("simulated stage rename failure")
-		},
-	})
 	rawDir := filepath.Join(base, "chats", "raw")
 	activeDir := filepath.Join(rawDir, chatID)
+	stageDir := filepath.Join(rawDir, ".staging-"+chatID)
+	client, _ := newClientWithHooks(base, fileOperationHooks{
+		renameFile: func(oldPath string, newPath string) error {
+			if oldPath == stageDir && newPath == activeDir {
+				return errors.New("simulated stage rename failure")
+			}
+			return os.Rename(oldPath, newPath)
+		},
+	})
 	if err := os.MkdirAll(activeDir, 0o700); err != nil {
 		t.Fatalf("mkdir active: %v", err)
 	}
@@ -361,7 +485,6 @@ func TestPromoteChatSourceStageRenameFailureRollsBackBackup(t *testing.T) {
 	if err := os.WriteFile(activePath, []byte("OLD"), 0o600); err != nil {
 		t.Fatalf("write active: %v", err)
 	}
-	stageDir := filepath.Join(rawDir, ".staging-"+chatID)
 	if err := os.MkdirAll(stageDir, 0o700); err != nil {
 		t.Fatalf("mkdir stage: %v", err)
 	}
