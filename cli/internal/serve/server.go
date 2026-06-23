@@ -900,9 +900,10 @@ func (s *Server) handlePatchRecord(w http.ResponseWriter, r *http.Request) {
 		DeletedAt:      existing.DeletedAt,
 	}
 
-	// Apply PATCH fields
+	// Apply PATCH fields. validatePatchBody already guarantees project_id is a
+	// non-empty string with no surrounding whitespace, so no re-check is needed here.
 	if value, ok := normalizedBody["project_id"]; ok {
-		if projectID, ok := value.(string); ok && strings.TrimSpace(projectID) != "" {
+		if projectID, ok := value.(string); ok {
 			input.ProjectID = projectID
 		}
 	}
@@ -1185,12 +1186,12 @@ func generateKeyBetween(a, b string) string {
 }
 
 // generateKeyFallback provides deterministic keys when GenerateBetween fails (defense-in-depth).
+// Only a determines the result: an empty a yields the canonical first key "a0", and any
+// non-empty a yields a+"V" regardless of b. b is retained in the signature to mirror
+// generateKeyBetween's (a, b) shape at the call site.
 func generateKeyFallback(a, b string) string {
 	if a == "" {
 		return "a0"
-	}
-	if b == "" {
-		return a + "V"
 	}
 	return a + "V"
 }
@@ -1369,7 +1370,11 @@ func (s *Server) handleServeFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	absDataDir, _ := filepath.Abs(s.dataDir)
+	absDataDir, err := filepath.Abs(s.dataDir)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
 	if !strings.HasPrefix(absPath, absDataDir+string(os.PathSeparator)) {
 		http.NotFound(w, r)
 		return
