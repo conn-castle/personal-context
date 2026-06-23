@@ -513,6 +513,38 @@ describe("PATCH /api/records/[id]/order", () => {
     expect(body.code).toBe("NOT_FOUND");
   });
 
+  it("returns 404 when the record is hard-purged between the read and the update", async () => {
+    // Record exists at the initial read (active, not deleted)...
+    mockSql.mockResolvedValueOnce([
+      { id: recordId, date: "2025-03-04", day_order: "a1" },
+    ]);
+    // ...siblings read succeeds...
+    mockSql.mockResolvedValueOnce([
+      { id: "20250304-11111111", day_order: "a0" },
+    ]);
+    // ...but a concurrent hard-purge removes the row before the UPDATE, so
+    // the UPDATE ... RETURNING matches nothing.
+    mockSql.mockResolvedValueOnce([]);
+
+    const req = new NextRequest(
+      `http://localhost/api/records/${recordId}/order`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ position: { kind: "first" } }),
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+    const res = await PATCH(req, makeContext(recordId));
+
+    // Without the guard, `updateRows[0]` is undefined and reading `.id`
+    // throws, surfacing as an opaque 500 INTERNAL_ERROR. The guard turns the
+    // vanished row into a clean 404 and never bumps the sync version.
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.code).toBe("NOT_FOUND");
+    expect(mockBumpS3Version).not.toHaveBeenCalled();
+  });
+
   it("returns 200 when S3 version bump fails after reorder commits", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 

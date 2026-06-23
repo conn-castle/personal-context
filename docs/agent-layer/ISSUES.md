@@ -27,6 +27,16 @@ Deferred defects, maintainability refactors, technical debt, risks, and engineer
 
 <!-- ENTRIES START -->
 
+- Issue 2026-06-23 w4d9k1: requireUser DB failure escapes the api-error contract as a framework 500
+    Priority: Low. Area: web/lib/auth-helpers.ts, web/app/api/*/route.ts
+    Description: Every authenticated route awaits `requireUser(req)` (or `requireSessionUser()`) BEFORE its per-route try/catch (e.g. records/route.ts:66 runs before the try at :70). If the auth DB lookup in `validateApiKey` (auth-helpers.ts:63) or `auth()` rejects (pool exhaustion, transient DB error), the rejection propagates out of the handler with no api-error.ts body, surfacing as a framework-level 500 that violates the enforced error-response contract (Decision e4t6y1). Healthy DB makes this rare.
+    Next step: Genuine tradeoff on placement — either wrap the auth DB calls inside auth-helpers and return `internalError(...)`, or move each route's `await requireUser(req)` inside its existing try block (touches every authenticated route). Pick one approach for consistency, then add a test that the auth-DB-failure path returns a contract-compliant body. Surfaced in web/app/api audit (round-4 iter 15).
+
+- Issue 2026-06-23 q7r2m5: reorder generateKeyBetween throws (500) on duplicate sibling day_order
+    Priority: Low. Area: web/app/api/records/[id]/order/route.ts
+    Description: computeFractionalIndex calls `generateKeyBetween(prevOrder, refOrder)` / `(refOrder, nextOrder)` for before/after positions. The fractional-indexing library throws ("a must be less than b") if the two bounding keys are equal or out of order. If two sibling records ever share an identical day_order (data drift, manual insert, prior bug), the throw is uncaught inside computeFractionalIndex, propagates to the handler catch, and returns an opaque 500 instead of a meaningful error. Only triggers on already-corrupt ordering data; first/last positions are safe (one bound is null).
+    Next step: Genuine tradeoff — the correct recovery (renormalize/repack sibling day_order, or pick a different neighbor) is a design decision, not a one-line fix. Decide a policy, then handle the duplicate-bound case deterministically with mutation-verified tests. Surfaced in web/app/api audit (round-4 iter 15).
+
 - Issue 2026-06-23 t2p8v6: lessSameDomainTiebreak duplicated between sqlite and postgres
     Priority: Low. Area: cli/internal/repository/sqlite/chat.go, cli/internal/repository/postgres/chat.go
     Description: lessSameDomainTiebreak is defined identically in both the sqlite and postgres chat packages. Both already import the shared repository package, so this helper could live there (exported as LessSameDomainTiebreak) and be used by both adapters. Raised in PR #45 review.
