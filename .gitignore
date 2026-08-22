@@ -1,5 +1,5 @@
 # >>> agent-layer
-# Template hash: 8eb52be5a6dc589d6b71d995e79d26d3bd4dde0007612b004cb68ac489565002
+# Template hash: b4df258527153a85c15cca6b934e0647876b26afc6588feda76d2823aa98ab8d
 # Managed by Agent Layer. To customize, edit .agent-layer/gitignore.block
 # and re-run `al sync` to apply changes.
 
@@ -22,6 +22,8 @@
 /.codex/
 /.copilot/
 /.gemini/
+/.grok/
+/.grok-config/
 
 # Antigravity workspace marker (auto-created by agy; symlinks store per-user paths)
 /.antigravitycli/

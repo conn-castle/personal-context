@@ -1,55 +1,52 @@
-# Everyday setup:
-# - Use `al wizard` for most changes.
-# - Usually you only need to toggle agent/server `enabled` values.
-# - Leave advanced fields as-is unless you have a specific need.
-
-[approvals]
-mode = "yolo"
-
+[agents]
 [agents.antigravity]
 enabled = true
-
-[agents.antigravity.agent_specific]
-model = "Gemini 3.5 Flash (High)"
+model = 'Gemini 3.5 Flash (High)'
 
 [agents.claude]
-enabled = true
-agent_specific.env.ENABLE_CLAUDEAI_MCP_SERVERS = "false"
-agent_specific.env.CLAUDE_CODE_AUTO_CONNECT_IDE = "false"
-model = "opus"
-local_config_dir = true
 disable_question_tool = true
-reasoning_effort = "xhigh" # low | medium | high | xhigh | max (custom values pass through with a warning)
+enabled = true
+local_config_dir = true
+model = 'opus'
+reasoning_effort = 'xhigh'
 statusline = true
+
+[agents.claude.agent_specific]
+[agents.claude.agent_specific.env]
+CLAUDE_CODE_AUTO_CONNECT_IDE = 'false'
+ENABLE_CLAUDEAI_MCP_SERVERS = 'false'
 
 [agents.claude_vscode]
 enabled = true
 
 [agents.codex]
 enabled = true
-# model = "gpt-5.3-codex"
-reasoning_effort = "high" # codex only
+local_config_dir = true
+reasoning_effort = 'high'
 statusline = true
 
 [agents.codex.agent_specific]
-
 [agents.codex.agent_specific.features]
+apps = false
+browser_use = false
 computer_use = false
 in_app_browser = false
-browser_use = false
-apps = false
 multi_agent = true
 prevent_idle_sleep = true
+
+[agents.copilot_cli]
+enabled = true
+
+[agents.grok]
+enabled = true
 
 [agents.vscode]
 enabled = true
 
-[agents.copilot_cli]
-enabled = true
-# model = "..."
+[approvals]
+mode = 'yolo'
 
 [mcp]
-
 [[mcp.servers]]
 args = ['-y', '@upstash/context7-mcp@2.1.1']
 command = 'npx'
@@ -94,6 +91,12 @@ enabled = false
 id = 'filesystem'
 transport = 'stdio'
 
+[mcp.servers.env]
+CONTEXT7_API_KEY = '${AL_CONTEXT7_API_KEY}'
+
+[notifications]
+chime = true
+
 [warnings]
 instruction_token_threshold = 10000
 mcp_schema_tokens_server_threshold = 20000
@@ -103,8 +106,3 @@ mcp_server_tools_threshold = 25
 mcp_tools_total_threshold = 60
 noise_mode = 'default'
 version_update_on_sync = true
-
-[agents]
-
-[mcp.servers.env]
-CONTEXT7_API_KEY = '${AL_CONTEXT7_API_KEY}'
