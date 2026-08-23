@@ -1,13 +1,13 @@
 [agents]
 [agents.antigravity]
 enabled = true
-model = 'Gemini 3.5 Flash (High)'
+model = 'Gemini 3.7 Flash (High)'
 
 [agents.claude]
 disable_question_tool = true
 enabled = true
 local_config_dir = true
-model = 'opus'
+model = 'opus[1m]'
 reasoning_effort = 'xhigh'
 statusline = true
 
