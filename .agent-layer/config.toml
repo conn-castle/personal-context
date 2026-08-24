@@ -22,6 +22,7 @@ enabled = true
 [agents.codex]
 enabled = true
 local_config_dir = true
+model = 'gpt-5.6-terra'
 reasoning_effort = 'high'
 statusline = true
 
