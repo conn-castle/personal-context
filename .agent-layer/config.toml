@@ -1,7 +1,7 @@
 [agents]
 [agents.antigravity]
 enabled = true
-model = 'Gemini 3.7 Flash (High)'
+model = 'Gemini 3.8 Flash (High)'
 
 [agents.claude]
 disable_question_tool = true
@@ -12,6 +12,7 @@ reasoning_effort = 'xhigh'
 statusline = true
 
 [agents.claude.agent_specific]
+outputStyle = 'Concise'
 [agents.claude.agent_specific.env]
 CLAUDE_CODE_AUTO_CONNECT_IDE = 'false'
 ENABLE_CLAUDEAI_MCP_SERVERS = 'false'
@@ -107,3 +108,6 @@ mcp_server_tools_threshold = 25
 mcp_tools_total_threshold = 60
 noise_mode = 'default'
 version_update_on_sync = true
+
+[agents.codex.agent_specific.tui.effects]
+starfield = false
