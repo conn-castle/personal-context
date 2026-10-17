@@ -1,14 +1,14 @@
 [agents]
 [agents.antigravity]
 enabled = true
-model = 'Gemini 3.8 Flash (High)'
+model = 'gemini-4-argon-medium'
 
 [agents.claude]
 disable_question_tool = true
 enabled = true
 local_config_dir = true
-model = 'opus[1m]'
-reasoning_effort = 'xhigh'
+model = 'claude-opus-5-5'
+reasoning_effort = 'high'
 statusline = true
 
 [agents.claude.agent_specific]
@@ -24,7 +24,7 @@ enabled = true
 [agents.codex]
 enabled = true
 local_config_dir = true
-model = 'gpt-5.6-terra'
+model = 'gpt-6.1-sol'
 reasoning_effort = 'high'
 statusline = true
 
@@ -46,9 +46,13 @@ enabled = true
 
 [agents.grok]
 enabled = true
+model = 'grok-4.7'
+reasoning_effort = 'xhigh'
 
 [agents.muse]
 enabled = false
+model = 'muse-wonder-1.0'
+reasoning_effort = 'high'
 
 [agents.vscode]
 enabled = true
