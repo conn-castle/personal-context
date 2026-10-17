@@ -13,6 +13,7 @@ statusline = true
 
 [agents.claude.agent_specific]
 outputStyle = 'Concise'
+
 [agents.claude.agent_specific.env]
 CLAUDE_CODE_AUTO_CONNECT_IDE = 'false'
 ENABLE_CLAUDEAI_MCP_SERVERS = 'false'
@@ -36,11 +37,18 @@ in_app_browser = false
 multi_agent = true
 prevent_idle_sleep = true
 
+[agents.codex.agent_specific.tui]
+[agents.codex.agent_specific.tui.effects]
+starfield = false
+
 [agents.copilot_cli]
 enabled = true
 
 [agents.grok]
 enabled = true
+
+[agents.muse]
+enabled = false
 
 [agents.vscode]
 enabled = true
@@ -109,5 +117,14 @@ mcp_tools_total_threshold = 60
 noise_mode = 'default'
 version_update_on_sync = true
 
-[agents.codex.agent_specific.tui.effects]
-starfield = false
+[[instructions.local]]
+selectors = ['00_rules.md']
+order = 0
+
+[[instructions.local]]
+selectors = ['01_memory.md']
+order = 10
+
+[[instructions.local]]
+selectors = ['04_conventions.md']
+order = 20
