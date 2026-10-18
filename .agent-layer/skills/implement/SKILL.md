@@ -3,9 +3,12 @@ name: implement
 description: >-
   Implement a large, substantive code change directly or through a planned
   cross-agent workflow, adding plan or code review only when warranted.
+compatibility: Requires named implementer, plan_reviewers, and code_reviewer targets. Delegated planning/review paths require dispatch-agent and the Agent Dispatch MCP dispatch_start/inspect/wait/output/continue/cancel contract; direct implementation does not dispatch. Project scratch uses .agent-layer/tmp as a convention.
 ---
 
 # implement
+
+Prerequisites: Requires named implementer, plan_reviewers, and code_reviewer targets. Delegated planning/review paths require dispatch-agent and the Agent Dispatch MCP dispatch_start/inspect/wait/output/continue/cancel contract; direct implementation does not dispatch. Project scratch uses .agent-layer/tmp as a convention. Missing dispatch capabilities must be reported; tracked skill content can advance independently of the installed CLI.
 
 ## Inputs
 
@@ -48,8 +51,8 @@ If a plan is required, write the following self-contained artifacts. Set
 If independent plan review is required, write each reviewer a self-contained
 prompt instructing it to review the plan artifacts against `<input>` without
 editing files or implementing. Dispatch all `plan_reviewers` concurrently. Then
-update the artifacts to address any findings you agree with. Do not repeat plan
-review.
+update the artifacts to address any findings you agree with that are within
+`<input>`'s scope. Do not repeat plan review.
 
 Finally, dispatch `implementer` with a prompt instructing it to implement the
 plan from the artifacts, run only targeted checks as needed, and return only
@@ -74,9 +77,10 @@ different approach in that prompt.
 
 2. If independent code review is required, dispatch `code_reviewer` to review
    the implementation against `<input>` and any plan artifacts without editing
-   files. Evaluate each finding and fix those that are valid. Check findings
-   related to explicit requirements against `<input>` before rejecting them. If
-   the fixes are substantial, perform one fresh final review. Do not
+   files. Evaluate each finding and fix those that are valid within `<input>`'s
+   scope. Check findings related to explicit requirements against `<input>`
+   before rejecting them. If the fixes are substantial, perform one fresh final
+   review. Do not
    automatically repeat it.
 
 3. Repeat the completion check against `<input>` and any plan artifacts. Resolve
