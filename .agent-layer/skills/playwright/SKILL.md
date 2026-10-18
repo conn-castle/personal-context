@@ -2,11 +2,13 @@
 name: playwright
 description: Use globally installed `playwright-cli` for browser automation, UI inspection, screenshots, Playwright test debugging, or test generation. Trigger when a task needs browser interaction or test repair. Do not use for generic tests, web search, non-browser docs, or API-only work.
 license: Apache-2.0
-compatibility: Requires globally installed `playwright-cli` from the maintained `@playwright/cli` npm package and any browser, app, or Playwright test environment needed by the task. The unscoped `playwright-cli` npm package is deprecated; its replacement keeps the same binary name.
+compatibility: Requires globally installed `playwright-cli` from the maintained `@playwright/cli` npm package and any browser, app, or Playwright test environment needed by the task. The unscoped `playwright-cli` npm package is deprecated; its replacement keeps the same binary name. Agent Layer wording describes project conventions, not an al runtime dependency.
 allowed-tools: Bash(playwright-cli:*) Bash(npx:*) Bash(npm:*)
 ---
 
 # Browser Automation with playwright-cli
+
+Prerequisites: Requires globally installed playwright-cli from @playwright/cli and the browser/app/test environment needed by the task. Agent Layer wording describes project conventions, not an al runtime dependency.
 
 > Modified by Conn Castle Studios on 2026-05-26 from the Apache-2.0
 > playwright-cli skill: reduced duplicated command reference material and
@@ -27,7 +29,8 @@ syntax.
 
 - No artifact is required for ordinary inspection.
 - Put agent-only scripts, state files, traces, videos, screenshots, and saved
-  snapshots under `.agent-layer/tmp/`.
+  snapshots in the temporary or scratch directory defined by repo instructions
+  or conventions.
 - Report every artifact path created.
 
 ## Global constraints
@@ -54,7 +57,8 @@ syntax.
 - Ask before installing CLI packages, installing browsers, changing browser
   configuration, or using a persistent profile outside an explicit user
   request.
-- Ask before saving or reusing authentication state outside `.agent-layer/tmp/`.
+- Ask before saving or reusing authentication state outside the repo's
+  documented temporary or scratch directory.
 - Ask before leaving a browser session running when the user did not request an
   interactive handoff.
 
@@ -124,8 +128,8 @@ documentation:
 - The installed CLI help was checked for each command shape used.
 - Browser sessions were closed, detached, or intentionally left running with
   that state reported.
-- Generated artifacts were saved only where appropriate and secrets were not
-  committed or exposed.
+- Generated artifacts were saved in the repo's documented temporary or scratch
+  directory and secrets were not committed or exposed.
 - For Playwright test work, the relevant reference file was followed and the
   smallest meaningful test was rerun.
 
