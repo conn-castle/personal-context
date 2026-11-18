@@ -122,13 +122,19 @@ noise_mode = 'default'
 version_update_on_sync = true
 
 [[instructions.local]]
-selectors = ['00_rules.md']
-order = 0
-
-[[instructions.local]]
-selectors = ['01_memory.md']
-order = 10
-
-[[instructions.local]]
 selectors = ['04_conventions.md']
 order = 20
+
+[[instructions.imports]]
+repository = 'https://github.com/nicholasjconn/skills.git'
+selectors = [
+  'instructions/rules.md',
+]
+order = 0
+
+[[instructions.imports]]
+repository = 'https://github.com/nicholasjconn/skills.git'
+selectors = [
+  'instructions/memory.md',
+]
+order = 10
